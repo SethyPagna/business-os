@@ -1,0 +1,54 @@
+{
+  "name": "business-os",
+  "version": "1.0.0",
+  "description": "Local Business Database OS - Offline Business Management",
+  "main": "main.js",
+  "scripts": {
+    "start": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview",
+    "rebuild": "electron-rebuild -f -w better-sqlite3"
+  },
+  "build": {
+    "appId": "com.businessos.app",
+    "productName": "Business OS",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.18",
+    "concurrently": "^8.2.2",
+    "electron": "^29.1.4",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.35",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.4",
+    "wait-on": "^7.2.0",
+    "lucide-react": "^0.344.0",
+    "electron-rebuild": "*"
+  }
+}
