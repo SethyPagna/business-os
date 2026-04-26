@@ -191,22 +191,14 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
 
   const fetchServerLog = useCallback(async () => {
     if (!syncUrl) return
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 4000)
     try {
-      const res = await fetch(`${syncUrl}/api/system/debug/log`, {
-        signal: ctrl.signal,
-        headers: { 'bypass-tunnel-reminder': 'true' },
-      })
-      clearTimeout(timer)
-      if (!res.ok) return
-      const data = await res.json()
+      const data = await window.api.getSystemDebugLog()
       if (mounted.current) {
         setServerLog(data.entries || [])
         setServerInfo({ clients: data.clients, uptime: data.uptime })
       }
     } catch {
-      clearTimeout(timer)
+      // keep previous diagnostics visible if the authenticated fetch fails once
     }
   }, [syncUrl])
 

@@ -29,6 +29,7 @@ const {
   updateAuthPassword,
   setAuthUserActive,
   getAuthUserById,
+  findAuthUserByEmail,
   sendSupabaseVerificationEmail,
   verifyPasswordWithSupabase,
   unlinkAuthIdentity,
@@ -47,7 +48,7 @@ const CONTACT_CODE_REQUEST_LIMIT_MAX = Math.max(1, Number(
 ))
 const CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS = Math.max(1000, Number(
   process.env.CONTACT_VERIFICATION_REQUEST_WINDOW_MS
-  || (2 * 60 * 1000),
+  || (60 * 1000),
 ))
 const CONTACT_CODE_VERIFY_LIMIT_MAX = Math.max(1, Number(
   process.env.CONTACT_VERIFICATION_VERIFY_MAX_ATTEMPTS
@@ -177,17 +178,59 @@ function getUserWithRole(id) {
 
 function syncLocalEmailVerification(userId, authUser) {
   if (!authUser?.emailConfirmed) return
+  const existing = db.prepare('SELECT id, email, email_verified, supabase_user_id FROM users WHERE id = ?').get(userId)
+  if (!existing) return
+  const localEmail = normalizeEmail(existing.email || '')
+  const authEmail = normalizeEmail(authUser.email || '')
+  const shouldReplaceEmail = !localEmail || (authEmail && localEmail === authEmail)
   db.prepare(`
     UPDATE users
-    SET email = COALESCE(?, email),
-        email_verified = 1,
+    SET email = CASE
+          WHEN ? = 1 THEN COALESCE(?, email)
+          ELSE email
+        END,
+        email_verified = CASE
+          WHEN ? = 1 THEN 1
+          ELSE email_verified
+        END,
         supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
     WHERE id = ?
   `).run(
-    normalizeEmail(authUser.email || '') || null,
+    shouldReplaceEmail ? 1 : 0,
+    shouldReplaceEmail ? (authEmail || null) : null,
+    shouldReplaceEmail ? 1 : 0,
     String(authUser.id || '').trim() || null,
     userId,
   )
+}
+
+async function repairSupabaseIdentityForUser(user) {
+  if (!user || !isSupabaseAuthConfigured()) return { user, authUser: null }
+
+  const currentId = String(user.supabase_user_id || '').trim()
+  if (currentId) {
+    const byId = await getAuthUserById(currentId)
+    if (byId?.success && byId.user) {
+      if (byId.user.emailConfirmed && Number(user.email_verified || 0) !== 1) {
+        syncLocalEmailVerification(user.id, byId.user)
+        const refreshed = getUserWithRole(user.id) || user
+        return { user: refreshed, authUser: byId.user }
+      }
+      return { user, authUser: byId.user }
+    }
+  }
+
+  const email = normalizeEmail(user.email || '')
+  if (!email) return { user, authUser: null }
+  const byEmail = await findAuthUserByEmail(email)
+  if (!byEmail?.success || !byEmail.user?.id) return { user, authUser: null }
+
+  db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(String(byEmail.user.id).trim(), user.id)
+  if (byEmail.user.emailConfirmed && Number(user.email_verified || 0) !== 1) {
+    syncLocalEmailVerification(user.id, byEmail.user)
+  }
+  const refreshed = getUserWithRole(user.id) || getUserSecurityContext(user.id) || user
+  return { user: refreshed, authUser: byEmail.user }
 }
 
 function sanitizeUserRow(row) {
@@ -228,8 +271,8 @@ function buildAuthMethodsPayload(user, authUser, providerConfig) {
     supabase_connected: !!String(user.supabase_user_id || '').trim(),
     supabase_user_id: String(user.supabase_user_id || '').trim(),
     email_login_enabled: !!String(user.email || '').trim(),
-    google_ready: providerConfig.googleEnabled && !!String(user.email || '').trim(),
-    facebook_ready: providerConfig.facebookEnabled && !!String(user.email || '').trim(),
+    google_ready: providerConfig.googleEnabled,
+    facebook_ready: providerConfig.facebookEnabled,
     google_linked: !!authUser?.hasGoogle,
     facebook_linked: !!authUser?.hasFacebook,
     linked_providers: providerList,
@@ -282,19 +325,9 @@ router.get('/users/:id/profile', authToken, (req, res) => {
   let row = getUserWithRole(req.params.id)
   if (!row) return err(res, 'User not found', 404)
 
-  if (String(row.supabase_user_id || '').trim() && Number(row.email_verified || 0) !== 1) {
-    getAuthUserById(row.supabase_user_id)
-      .then((result) => {
-        if (result?.success && result.user?.emailConfirmed) {
-          syncLocalEmailVerification(row.id, result.user)
-          row = getUserWithRole(req.params.id) || row
-        }
-      })
-      .finally(() => ok(res, sanitizeUserRow(row)))
-    return
-  }
-
-  ok(res, sanitizeUserRow(row))
+  repairSupabaseIdentityForUser(row)
+    .then((result) => ok(res, sanitizeUserRow(result?.user || row)))
+    .catch(() => ok(res, sanitizeUserRow(row)))
 })
 
 router.get('/users/:id/auth-methods', authToken, async (req, res) => {
@@ -317,19 +350,14 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
 
   const providerConfig = getSupabaseAuthPublicConfig()
   let authUser = null
-  if (providerConfig.enabled && String(user.supabase_user_id || '').trim()) {
-    const result = await getAuthUserById(user.supabase_user_id)
-    if (result?.success) {
-      authUser = result.user
-      if (authUser?.emailConfirmed && Number(user.email_verified || 0) !== 1) {
-        syncLocalEmailVerification(user.id, authUser)
-        user.email_verified = 1
-        user.email = normalizeEmail(authUser.email || '') || user.email
-      }
-    }
+  let resolvedUser = user
+  if (providerConfig.enabled) {
+    const repaired = await repairSupabaseIdentityForUser(user)
+    resolvedUser = repaired?.user || user
+    authUser = repaired?.authUser || null
   }
 
-  ok(res, buildAuthMethodsPayload(user, authUser, providerConfig))
+  ok(res, buildAuthMethodsPayload(resolvedUser, authUser, providerConfig))
 })
 
 router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
@@ -363,7 +391,9 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   if (!isSupabaseAuthConfigured()) {
     return err(res, 'Supabase auth is not configured.', 400)
   }
-  if (!String(user.supabase_user_id || '').trim() || !String(user.email || '').trim()) {
+  const repaired = await repairSupabaseIdentityForUser(user)
+  const resolvedUser = repaired?.user || user
+  if (!String(resolvedUser.supabase_user_id || '').trim()) {
     return err(res, 'This account is not ready for provider disconnect yet.', 400)
   }
 
@@ -371,17 +401,17 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   if (provider === 'google' && !providerConfig.googleEnabled) return err(res, 'Google sign-in is not enabled in Supabase yet.', 400)
   if (provider === 'facebook' && !providerConfig.facebookEnabled) return err(res, 'Facebook sign-in is not enabled in Supabase yet.', 400)
 
-  const provisionResult = await createOrUpdateAuthUser(user, currentPassword)
+  const provisionResult = await createOrUpdateAuthUser(resolvedUser, currentPassword)
   if (!provisionResult.success && !provisionResult.skipped) {
     return err(res, provisionResult.error || 'Failed to prepare the Supabase account for provider changes.')
   }
 
-  const signInResult = await verifyPasswordWithSupabase(user, currentPassword)
+  const signInResult = await verifyPasswordWithSupabase(resolvedUser, currentPassword)
   if (!signInResult.success || !signInResult.accessToken) {
     return err(res, signInResult.error || 'Unable to verify the Supabase account password for provider disconnect.', 400)
   }
 
-  let authResult = await getAuthUserById(user.supabase_user_id)
+  let authResult = await getAuthUserById(resolvedUser.supabase_user_id)
   if (!authResult?.success || !authResult.user) {
     return err(res, authResult?.error || 'Unable to load linked sign-in providers from Supabase.', 400)
   }
@@ -400,21 +430,21 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
     return err(res, unlinkResult.error || 'Failed to disconnect the selected sign-in provider.', 400)
   }
 
-  authResult = await getAuthUserById(user.supabase_user_id)
+  authResult = await getAuthUserById(resolvedUser.supabase_user_id)
   if (!authResult?.success || !authResult.user) {
     return err(res, authResult?.error || 'Provider was disconnected, but the refreshed auth state could not be loaded.', 502)
   }
 
   audit(actor.id, actor.name, 'identity_unlinked', 'user', targetId, {
     provider,
-    email: String(user.email || '').trim().toLowerCase() || null,
-    supabase_user_id: String(user.supabase_user_id || '').trim() || null,
+    email: String(resolvedUser.email || '').trim().toLowerCase() || null,
+    supabase_user_id: String(resolvedUser.supabase_user_id || '').trim() || null,
   })
   broadcast('users')
 
   ok(res, {
     provider,
-    methods: buildAuthMethodsPayload(user, authResult.user, providerConfig),
+    methods: buildAuthMethodsPayload(resolvedUser, authResult.user, providerConfig),
   })
 })
 
@@ -467,7 +497,9 @@ router.post('/users/:id/contact-verification/request', authToken, async (req, re
     `).get(targetUserId)
 
     if (!targetWithAuth) return err(res, 'User not found', 404)
-    if (!String(targetWithAuth.supabase_user_id || '').trim()) {
+    const repaired = await repairSupabaseIdentityForUser(targetWithAuth)
+    const resolvedUser = repaired?.user || targetWithAuth
+    if (!String(resolvedUser.supabase_user_id || '').trim()) {
       return err(res, 'Save your profile first so the account can be linked to Supabase before sending a verification email.', 400)
     }
 

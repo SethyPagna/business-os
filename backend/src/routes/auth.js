@@ -229,16 +229,22 @@ function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
   const supabaseUserId = String(authUser?.id || '').trim() || null
   const email = normalizeEmail(authUser?.email || '') || null
   const emailVerified = authUser?.emailConfirmed ? 1 : 0
+  const existing = getUserById(userId)
+  const localEmail = normalizeEmail(existing?.email || '')
+  const shouldReplaceEmail = !localEmail || (email && localEmail === email)
   db.prepare(`
     UPDATE users
     SET supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id),
-        email = COALESCE(?, email),
+        email = CASE
+          WHEN ? = 1 THEN COALESCE(?, email)
+          ELSE email
+        END,
         email_verified = CASE
-          WHEN ? = 1 THEN 1
+          WHEN ? = 1 AND ? = 1 THEN 1
           ELSE email_verified
         END
     WHERE id = ?
-  `).run(supabaseUserId, email, emailVerified, userId)
+  `).run(supabaseUserId, shouldReplaceEmail ? 1 : 0, shouldReplaceEmail ? email : null, shouldReplaceEmail ? emailVerified : 0, shouldReplaceEmail ? 1 : 0, userId)
   return getUserById(userId)
 }
 
@@ -497,10 +503,6 @@ router.post('/oauth/complete', async (req, res) => {
       `).run(authEmail, localUser.id)
       localUser = getUserById(localUser.id)
       localEmail = authEmail
-    }
-
-    if (!localEmail || localEmail !== authEmail) {
-      return err(res, 'The provider email must match your account email before it can be linked.', 400)
     }
 
     if (String(localUser.supabase_user_id || '').trim() && String(localUser.supabase_user_id).trim() !== authUser.id) {

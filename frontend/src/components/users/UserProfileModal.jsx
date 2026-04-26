@@ -354,10 +354,6 @@ export default function UserProfileModal({ onClose }) {
       notify(tr('supabase_auth_not_ready', 'Supabase auth is not ready yet.'), 'error')
       return
     }
-    if (!String(profile?.email || '').trim()) {
-      notify(tr('add_email_for_social_link', 'Add and save your account email first, then connect this sign-in method.'), 'error')
-      return
-    }
 
     setOauthConnecting(normalizedProvider)
     try {
@@ -515,7 +511,7 @@ export default function UserProfileModal({ onClose }) {
                         onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
                       />
                       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        {tr('profile_email_note', 'Used for email login, password reset, and matching Google or Facebook sign-in to this account.')}
+                        {tr('profile_email_note', 'Used for email login, password reset, and direct account notices. Google and Facebook can still be linked independently.')}
                       </p>
                     </div>
                     <div>
@@ -623,7 +619,7 @@ export default function UserProfileModal({ onClose }) {
                   <span>{tr('sign_in_methods', 'Sign-in methods')}</span>
                 </h3>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {tr('sign_in_methods_desc', 'Keep your local admin-created account and add matching email, Google, or Facebook sign-in when ready.')}
+                  {tr('sign_in_methods_desc', 'Keep your local admin-created account and add email, Google, or Facebook sign-in methods whenever you want them.' )}
                 </p>
               </div>
 
@@ -640,8 +636,8 @@ export default function UserProfileModal({ onClose }) {
                     {!profile.email?.trim()
                       ? tr('add_email_for_login_note', 'Add your account email first to use email sign-in on the login screen.')
                       : profile.email_verified
-                        ? tr('email_login_ready_note', 'Email sign-in is ready. Verified email also helps recovery and provider matching.')
-                        : tr('verify_email_first_note', 'Email sign-in works with your saved email. Verify it to make recovery and provider matching more reliable.')}
+                        ? tr('email_login_ready_note', 'Email sign-in is ready. Verified email also helps recovery and change tracking.')
+                        : tr('verify_email_first_note', 'Email sign-in works with your saved email. Verify it to make recovery and email changes more reliable.')}
                   </p>
                 </div>
 
@@ -655,13 +651,13 @@ export default function UserProfileModal({ onClose }) {
                       ? tr('connected', 'Connected')
                       : authMethods?.google_ready
                         ? tr('ready_on_login', 'Ready on login')
-                        : tr('email_needed', 'Email needed')}
+                        : tr('setup_needed', 'setup needed')}
                   </div>
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {verificationCaps.googleOauth
                       ? (authMethods?.google_ready
-                        ? tr('google_login_ready_note', 'Save your email, then connect Google once so this account keeps the provider linked and easier to recognize later.')
-                        : tr('google_email_required_note', 'Save an email on this profile first. Google sign-in matches accounts by email.'))
+                        ? tr('google_login_ready_note', 'Connect Google once here, then you can keep signing in with that Google account.')
+                        : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.'))
                       : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
                   </p>
                   {verificationCaps.googleOauth && authMethods?.google_ready ? (
@@ -687,13 +683,13 @@ export default function UserProfileModal({ onClose }) {
                       ? tr('connected', 'Connected')
                       : authMethods?.facebook_ready
                         ? tr('ready_on_login', 'Ready on login')
-                        : tr('email_needed', 'Email needed')}
+                        : tr('setup_needed', 'setup needed')}
                   </div>
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {verificationCaps.facebookOauth
                       ? (authMethods?.facebook_ready
-                        ? tr('facebook_login_ready_note', 'Save your email, then connect Facebook once so this account keeps the provider linked and easier to recognize later.')
-                        : tr('facebook_email_required_note', 'Save an email on this profile first. Facebook sign-in matches accounts by email.'))
+                        ? tr('facebook_login_ready_note', 'Connect Facebook once here, then you can keep signing in with that Facebook account.')
+                        : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.'))
                       : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.')}
                   </p>
                   {verificationCaps.facebookOauth && authMethods?.facebook_ready ? (
@@ -711,8 +707,8 @@ export default function UserProfileModal({ onClose }) {
               </div>
 
               <div className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500 dark:bg-zinc-800/70 dark:text-gray-400">
-                <div>{tr('provider_email_match_note', 'Google and Facebook connect to the local account when the provider email matches your account email. Disabled or deleted local users still cannot access the app.')}</div>
-                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google or Facebook account, disconnect this one first, update your account email if needed, then connect the new provider.')}</div>
+                <div>{tr('provider_email_match_note', 'Google and Facebook stay linked to this local account once connected here. Disabled or deleted local users still cannot access the app.')}</div>
+                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google or Facebook account, disconnect the current one first and then connect the new provider.')}</div>
               </div>
             </section>
 

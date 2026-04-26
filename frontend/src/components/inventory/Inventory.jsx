@@ -388,7 +388,6 @@ export default function Inventory() {
             <Boxes className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('inventory')}
           </h1>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{filteredSummary.length} {t('products') || 'products'} - {groupedMovements.length} {t('movements') || 'movements'}</p>
         </div>
         <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:justify-end sm:pb-0">
           {/* Export inventory summary CSV */}

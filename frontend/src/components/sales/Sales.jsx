@@ -122,14 +122,8 @@ export default function Sales() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('sales')}</h1>
-          {!loading && filtered.length > 0 ? (
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {filtered.length} {t('sales')} - {fmtUSD(revenue)} {t('revenue')}
-            </p>
-          ) : null}
         </div>
         <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0">
-          <span className="flex-shrink-0 text-xs text-gray-400">{filtered.length} {t('entries') || 'entries'}</span>
           <button onClick={() => setShowExport(true)} className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs">
             <Download className="h-4 w-4" />
             <span>{t('export_csv') || 'Export'}</span>

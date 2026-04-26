@@ -101,6 +101,9 @@ export async function getVerificationCapabilities() {
 export async function getSystemConfig() {
   return apiFetch('GET', '/api/system/config')
 }
+export async function getSystemDebugLog() {
+  return apiFetch('GET', '/api/system/debug/log')
+}
 export async function startSupabaseOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/start', payload || {})
 }

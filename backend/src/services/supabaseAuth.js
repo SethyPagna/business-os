@@ -271,6 +271,45 @@ async function getAuthUserFromAccessToken(accessToken) {
   return { success: true, user: summarizeAuthUser(result.data) }
 }
 
+async function listAuthUsersPage(page = 1, perPage = 200) {
+  if (!hasSupabaseAdminCredentials()) {
+    return { success: false, error: 'Supabase admin auth is not configured. Set SUPABASE_SERVICE_ROLE_KEY.' }
+  }
+  const safePage = Math.max(1, Number(page || 1))
+  const safePerPage = Math.max(1, Math.min(1000, Number(perPage || 200)))
+  const result = await callSupabaseAdmin('GET', `/admin/users?page=${safePage}&per_page=${safePerPage}`)
+  if (!result.ok) return { success: false, error: result.error, providerCode: result.providerCode || '' }
+  const items = Array.isArray(result.data?.users)
+    ? result.data.users
+    : Array.isArray(result.data)
+      ? result.data
+      : []
+  return {
+    success: true,
+    users: items.map((item) => summarizeAuthUser(item)).filter(Boolean),
+  }
+}
+
+async function findAuthUserByEmail(email) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return { success: false, skipped: true, reason: 'missing_email' }
+  if (!hasSupabaseAdminCredentials()) {
+    return { success: false, error: 'Supabase admin auth is not configured. Set SUPABASE_SERVICE_ROLE_KEY.' }
+  }
+
+  let page = 1
+  while (page <= 10) {
+    const pageResult = await listAuthUsersPage(page, 200)
+    if (!pageResult.success) return pageResult
+    const match = (pageResult.users || []).find((user) => normalizeEmail(user?.email || '') === normalizedEmail)
+    if (match) return { success: true, user: match }
+    if ((pageResult.users || []).length < 200) break
+    page += 1
+  }
+
+  return { success: true, user: null }
+}
+
 async function createOrUpdateAuthUser(localUser, password = '') {
   if (!isSupabaseAuthConfigured()) return { success: false, skipped: true, reason: 'not_configured' }
   if (!hasSupabaseAdminCredentials()) {
@@ -301,6 +340,16 @@ async function createOrUpdateAuthUser(localUser, password = '') {
     const result = await callSupabaseAdmin('PUT', `/admin/users/${encodeURIComponent(supabaseUserId)}`, payload)
     if (!result.ok) return { success: false, error: result.error, providerCode: result.providerCode || '' }
     return { success: true, userId: supabaseUserId, created: false }
+  }
+
+  const existingByEmail = await findAuthUserByEmail(email)
+  if (!existingByEmail.success && !existingByEmail.skipped) {
+    return { success: false, error: existingByEmail.error || 'Failed to look up existing Supabase users.' }
+  }
+  if (existingByEmail?.user?.id) {
+    const result = await callSupabaseAdmin('PUT', `/admin/users/${encodeURIComponent(existingByEmail.user.id)}`, payload)
+    if (!result.ok) return { success: false, error: result.error, providerCode: result.providerCode || '' }
+    return { success: true, userId: existingByEmail.user.id, created: false, matchedByEmail: true }
   }
 
   if (!candidatePassword) return { success: false, skipped: true, reason: 'missing_password' }
@@ -401,6 +450,11 @@ async function sendSupabaseVerificationEmail(email, options = {}) {
     payload.options = { emailRedirectTo: redirectTo }
   }
 
+  const existing = await findAuthUserByEmail(normalizedEmail)
+  if (existing?.success && existing.user?.emailConfirmed) {
+    return { success: true, alreadyConfirmed: true, provider: 'supabase' }
+  }
+
   const result = await callSupabasePublic('POST', '/resend', payload)
   if (!result.ok) {
     const providerCode = String(result.providerCode || '').trim().toUpperCase()
@@ -465,6 +519,7 @@ module.exports = {
   sendSupabaseVerificationEmail,
   getAuthUserById,
   getAuthUserFromAccessToken,
+  findAuthUserByEmail,
   buildOauthStartUrl,
   normalizeEmail,
   getIdentityProviders,
