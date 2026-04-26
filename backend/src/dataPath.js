@@ -194,4 +194,5 @@ module.exports = {
   isSubPath,
   relocateDataRoot,
   summarizeDataRoot,
+  walkFiles,
 }

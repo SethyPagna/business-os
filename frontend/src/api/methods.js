@@ -675,6 +675,21 @@ export async function importBackup() {
 // After any reset or factory-reset, wipe the entire in-memory cache so that
 // Dashboard, Inventory, Sales, Returns, Contacts, Branches, etc. all reload
 // fresh data immediately instead of showing stale results for up to 45 s.
+export const getGoogleDriveSyncStatus = () =>
+  route('system:driveSyncStatus', () => apiFetch('GET', '/api/system/drive-sync/status'), () => ({ item: null }))
+
+export const saveGoogleDriveSyncPreferences = (payload) =>
+  route('system:driveSyncPreferences', () => apiFetch('POST', '/api/system/drive-sync/preferences', payload), null, true)
+
+export const startGoogleDriveSyncOauth = (payload) =>
+  route('system:driveSyncOauthStart', () => apiFetch('POST', '/api/system/drive-sync/oauth/start', payload), null, true)
+
+export const disconnectGoogleDriveSync = () =>
+  route('system:driveSyncDisconnect', () => apiFetch('POST', '/api/system/drive-sync/disconnect', {}), null, true)
+
+export const syncGoogleDriveNow = () =>
+  route('system:driveSyncNow', () => apiFetch('POST', '/api/system/drive-sync/sync-now', {}), null, true)
+
 export async function resetData(mode = 'sales') {
   const result = await route('data:reset', () => apiFetch('POST', '/api/system/reset-data', { mode }), null, true)
   cacheClearAll()

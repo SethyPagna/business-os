@@ -110,6 +110,10 @@ function broadcast(channel, data = {}) {
   for (const ws of wss_clients) {
     if (ws.readyState === 1) ws.send(msg)
   }
+  try {
+    const { scheduleDriveSync } = require('./services/googleDriveSync')
+    scheduleDriveSync(`broadcast:${channel}`, 4000)
+  } catch (_) {}
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────────

@@ -42,6 +42,16 @@ const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataInte
 const { authToken } = require('../middleware')
 const { checkRateLimit } = require('../security')
 const { classifyRequestAccess } = require('../accessControl')
+const {
+  GOOGLE_DRIVE_SCOPE,
+  beginGoogleDriveOAuth,
+  disconnectDriveSync,
+  finalizeGoogleDriveOAuth,
+  getDriveSyncConfig,
+  getDriveSyncStatus,
+  runDriveSync,
+  saveDriveSyncPreferences,
+} = require('../services/googleDriveSync')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../systemFsWorker.js')
@@ -130,6 +140,13 @@ function getHostUiAvailability(req) {
     access,
     hostUiAvailable: !!access.localRequest,
   }
+}
+
+function buildRequestBaseUrl(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http'
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim()
+  if (!host) return ''
+  return `${proto}://${host}`
 }
 
 function getTableColumns(table) {
@@ -549,6 +566,117 @@ router.get('/config', (req, res) => {
 })
 
 // ── Backup export ─────────────────────────────────────────────────────────────
+router.get('/drive-sync/status', authToken, (req, res) => {
+  const baseUrl = buildRequestBaseUrl(req)
+  ok(res, {
+    item: getDriveSyncStatus(`${baseUrl}/api/system/drive-sync/oauth/callback`),
+  })
+})
+
+router.post('/drive-sync/preferences', authToken, (req, res) => {
+  try {
+    saveDriveSyncPreferences(req.body || {})
+    const baseUrl = buildRequestBaseUrl(req)
+    ok(res, {
+      item: getDriveSyncStatus(`${baseUrl}/api/system/drive-sync/oauth/callback`),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to save Google Drive sync settings')
+  }
+})
+
+router.post('/drive-sync/oauth/start', authToken, (req, res) => {
+  try {
+    const existing = getDriveSyncConfig()
+    const clientId = String(req.body?.clientId || existing.clientId || '').trim()
+    const clientSecret = String(req.body?.clientSecret || existing.clientSecret || '').trim()
+    if (!clientId || !clientSecret) return err(res, 'Google OAuth client ID and client secret are required.')
+
+    const baseUrl = buildRequestBaseUrl(req)
+    if (!baseUrl) return err(res, 'Could not determine the current server URL for Google Drive setup.')
+    const redirectUri = `${baseUrl}/api/system/drive-sync/oauth/callback`
+    const state = beginGoogleDriveOAuth({
+      clientId,
+      clientSecret,
+      folderName: req.body?.folderName,
+      deleteMissing: req.body?.deleteMissing,
+      syncIntervalSeconds: req.body?.syncIntervalSeconds,
+      enabled: req.body?.enabled !== false,
+      redirectUri,
+      returnOrigin: String(req.body?.returnOrigin || baseUrl).trim(),
+      returnPath: String(req.body?.returnPath || '/').trim() || '/',
+      userId: req.user?.id,
+      userName: req.user?.name || req.user?.username,
+    })
+
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+    authUrl.searchParams.set('client_id', clientId)
+    authUrl.searchParams.set('redirect_uri', redirectUri)
+    authUrl.searchParams.set('response_type', 'code')
+    authUrl.searchParams.set('access_type', 'offline')
+    authUrl.searchParams.set('prompt', 'consent')
+    authUrl.searchParams.set('scope', GOOGLE_DRIVE_SCOPE)
+    authUrl.searchParams.set('state', state)
+
+    ok(res, {
+      authUrl: authUrl.toString(),
+      redirectUri,
+      scope: GOOGLE_DRIVE_SCOPE,
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to start Google Drive connection')
+  }
+})
+
+router.get('/drive-sync/oauth/callback', async (req, res) => {
+  const failure = String(req.query?.error || '').trim()
+  if (failure) {
+    res.status(400).send(`<!doctype html><html><body style="font-family:system-ui;padding:24px"><h2>Google Drive connection failed</h2><p>${failure}</p><script>try{if(window.opener){window.opener.postMessage({type:'business-os-drive-sync',status:'error',message:${JSON.stringify(failure)}},'*');}}catch(e){};</script></body></html>`)
+    return
+  }
+
+  try {
+    const result = await finalizeGoogleDriveOAuth({
+      state: req.query?.state,
+      code: req.query?.code,
+    })
+    const targetOrigin = String(result.returnOrigin || buildRequestBaseUrl(req) || '').replace(/\/$/, '')
+    const targetPath = String(result.returnPath || '/')
+    const targetUrl = `${targetOrigin}${targetPath.startsWith('/') ? targetPath : `/${targetPath}`}` || '/'
+    const payload = JSON.stringify({
+      type: 'business-os-drive-sync',
+      status: 'connected',
+      email: result.email || '',
+      name: result.name || '',
+    })
+    res.send(`<!doctype html><html><body style="font-family:system-ui;padding:24px"><h2>Google Drive connected</h2><p>You can return to Business OS now.</p><script>const payload=${payload};try{if(window.opener&&!window.opener.closed){window.opener.postMessage(payload,'*');window.close();}else{window.location.replace(${JSON.stringify(targetUrl)});}}catch(e){window.location.replace(${JSON.stringify(targetUrl)});}</script></body></html>`)
+  } catch (error) {
+    const message = String(error?.message || 'Unknown error')
+    res.status(400).send(`<!doctype html><html><body style="font-family:system-ui;padding:24px"><h2>Google Drive connection failed</h2><p>${message}</p><script>try{if(window.opener){window.opener.postMessage({type:'business-os-drive-sync',status:'error',message:${JSON.stringify(message)}},'*');}}catch(e){};</script></body></html>`)
+  }
+})
+
+router.post('/drive-sync/disconnect', authToken, (req, res) => {
+  try {
+    disconnectDriveSync()
+    ok(res, { success: true })
+  } catch (error) {
+    err(res, error?.message || 'Failed to disconnect Google Drive sync')
+  }
+})
+
+router.post('/drive-sync/sync-now', authToken, async (req, res) => {
+  try {
+    const summary = await runDriveSync('manual')
+    ok(res, {
+      summary,
+      item: getDriveSyncStatus(`${buildRequestBaseUrl(req)}/api/system/drive-sync/oauth/callback`),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Google Drive sync failed')
+  }
+})
+
 router.get('/backup/export', authToken, (req, res) => {
   const customTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
   const tables = Object.fromEntries(

@@ -485,6 +485,18 @@ CREATE TABLE IF NOT EXISTS ai_response_logs (
   answer_text          TEXT,
   created_at           TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS google_drive_sync_entries (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  relative_path    TEXT NOT NULL UNIQUE,
+  item_type        TEXT DEFAULT 'file',
+  remote_file_id   TEXT NOT NULL,
+  mime_type        TEXT,
+  md5_checksum     TEXT,
+  byte_size        INTEGER DEFAULT 0,
+  local_modified_at TEXT,
+  last_synced_at   TEXT DEFAULT (datetime('now'))
+);
 `)
 
 

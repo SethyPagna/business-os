@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Upload } from 'lucide-react'
+import { ArchiveRestore, Cloud, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
@@ -531,6 +531,264 @@ function DataFolderLocation({ t, notify }) {
   )
 }
 
+function GoogleDriveSyncSection({ t, notify }) {
+  const copy = useCopy(t)
+  const [busy, setBusy] = useState('')
+  const [status, setStatus] = useState(null)
+  const [form, setForm] = useState({
+    clientId: '',
+    clientSecret: '',
+    folderName: 'Business OS Sync',
+    deleteMissing: false,
+    enabled: true,
+    syncIntervalSeconds: 120,
+  })
+
+  const load = async () => {
+    try {
+      const result = await window.api.getGoogleDriveSyncStatus?.()
+      const item = result?.item || result || null
+      setStatus(item)
+      setForm((current) => ({
+        clientId: current.clientId || item?.clientId || '',
+        clientSecret: current.clientSecret || '',
+        folderName: item?.folderName || current.folderName || 'Business OS Sync',
+        deleteMissing: !!item?.deleteMissing,
+        enabled: item?.enabled !== false,
+        syncIntervalSeconds: Number(item?.syncIntervalSeconds || current.syncIntervalSeconds || 120),
+      }))
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }
+
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (event?.data?.type !== 'business-os-drive-sync') return
+      if (event.data.status === 'connected') {
+        notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
+        setForm((current) => ({ ...current, clientSecret: '' }))
+        load()
+        return
+      }
+      if (event.data.status === 'error') {
+        notify(event.data.message || copy('drive_sync_connect_failed', 'Google Drive connection failed'), 'error')
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const savePreferences = async () => {
+    setBusy('save')
+    try {
+      const result = await window.api.saveGoogleDriveSyncPreferences?.({
+        folderName: form.folderName,
+        deleteMissing: form.deleteMissing,
+        enabled: form.enabled,
+        syncIntervalSeconds: form.syncIntervalSeconds,
+      })
+      setStatus(result?.item || status)
+      notify(copy('saved', 'Saved'), 'success')
+      await load()
+    } catch (error) {
+      notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const connectGoogleDrive = async () => {
+    if (!String(form.clientId || '').trim() && !status?.clientId) {
+      notify(copy('drive_sync_client_required', 'Google OAuth client ID is required'), 'error')
+      return
+    }
+    if (!String(form.clientSecret || '').trim() && !status?.hasClientSecret) {
+      notify(copy('drive_sync_secret_required', 'Google OAuth client secret is required'), 'error')
+      return
+    }
+
+    setBusy('connect')
+    try {
+      const result = await window.api.startGoogleDriveSyncOauth?.({
+        clientId: form.clientId,
+        clientSecret: form.clientSecret,
+        folderName: form.folderName,
+        deleteMissing: form.deleteMissing,
+        enabled: form.enabled,
+        syncIntervalSeconds: form.syncIntervalSeconds,
+        returnOrigin: window.location.origin,
+        returnPath: window.location.pathname + window.location.search,
+      })
+      const authUrl = result?.authUrl
+      if (!authUrl) throw new Error(copy('drive_sync_connect_failed', 'Google Drive connection failed'))
+      const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
+      if (!popup) window.location.assign(authUrl)
+      notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
+    } catch (error) {
+      notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const syncNow = async () => {
+    setBusy('sync')
+    try {
+      const result = await window.api.syncGoogleDriveNow?.()
+      const summary = result?.summary || {}
+      await load()
+      notify(
+        `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
+        'success',
+      )
+    } catch (error) {
+      notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const disconnect = async () => {
+    if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
+    setBusy('disconnect')
+    try {
+      await window.api.disconnectGoogleDriveSync?.()
+      setForm((current) => ({ ...current, clientSecret: '' }))
+      await load()
+      notify(copy('drive_sync_disconnected', 'Google Drive disconnected'), 'success')
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div className="card p-5 sm:p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <Cloud className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            {copy('drive_sync_title', 'Google Drive Sync')}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_desc', 'Mirror the live Business OS data folder into Google Drive on an ongoing background schedule.')}
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <SectionChip label={copy('status', 'Status')} value={status?.connected ? copy('connected', 'Connected') : copy('not_connected', 'Not connected')} tone={status?.connected ? 'blue' : 'amber'} />
+          <SectionChip label={copy('last_sync', 'Last sync')} value={status?.lastSyncedAt ? formatDateTime(status.lastSyncedAt) : '--'} />
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+          <span>{copy('drive_sync_client_id', 'OAuth client ID')}</span>
+          <input
+            className="input"
+            value={form.clientId}
+            onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
+            placeholder="xxxxxxxx.apps.googleusercontent.com"
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+          <span>{copy('drive_sync_client_secret', 'OAuth client secret')}</span>
+          <input
+            type="password"
+            className="input"
+            value={form.clientSecret}
+            onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
+            placeholder={status?.hasClientSecret ? copy('drive_sync_secret_saved', 'Leave blank to keep the saved secret') : 'GOCSPX-...'}
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+          <span>{copy('drive_sync_folder_name', 'Drive folder name')}</span>
+          <input
+            className="input"
+            value={form.folderName}
+            onChange={(event) => setForm((current) => ({ ...current, folderName: event.target.value }))}
+            placeholder="Business OS Sync"
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+          <span>{copy('drive_sync_interval', 'Sync every (seconds)')}</span>
+          <input
+            type="number"
+            min="30"
+            max="3600"
+            className="input"
+            value={form.syncIntervalSeconds}
+            onChange={(event) => setForm((current) => ({ ...current, syncIntervalSeconds: event.target.value }))}
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-zinc-700 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={!!form.enabled}
+            onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
+          />
+          <span>{copy('drive_sync_enabled', 'Enable background sync')}</span>
+        </label>
+        <label className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-zinc-700 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={!!form.deleteMissing}
+            onChange={(event) => setForm((current) => ({ ...current, deleteMissing: event.target.checked }))}
+          />
+          <span>{copy('drive_sync_delete_missing', 'Delete Drive files removed locally')}</span>
+        </label>
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/10 dark:text-blue-100">
+        <div className="font-medium">{copy('drive_sync_redirect_uri', 'Redirect URI')}</div>
+        <div className="mt-1 break-all font-mono text-xs">{status?.redirectUri || '--'}</div>
+        <div className="mt-2 text-xs text-blue-700 dark:text-blue-200">
+          {copy('drive_sync_setup_note', 'Add this exact redirect URI to your Google OAuth client, then connect the Drive account that should store the mirrored Business OS data folder.')}
+        </div>
+      </div>
+
+      {status?.connectedEmail || status?.connectedName ? (
+        <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+          {copy('drive_sync_connected_as', 'Connected as')} {status.connectedName || status.connectedEmail}
+          {status.connectedName && status.connectedEmail ? ` (${status.connectedEmail})` : ''}
+        </div>
+      ) : null}
+
+      {status?.lastError ? (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+          {status.lastError}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <PrimaryActionButton onClick={savePreferences} disabled={busy === 'save'}>
+          {busy === 'save' ? copy('saving', 'Saving...') : copy('save', 'Save')}
+        </PrimaryActionButton>
+        <PathActionButton onClick={connectGoogleDrive} disabled={busy === 'connect'}>
+          <Link2 className="h-4 w-4" />
+          {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
+        </PathActionButton>
+        <PathActionButton onClick={syncNow} disabled={busy === 'sync' || !status?.connected}>
+          <RefreshCw className="h-4 w-4" />
+          {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
+        </PathActionButton>
+        {status?.connected ? (
+          <PathActionButton onClick={disconnect} disabled={busy === 'disconnect'}>
+            <Link2Off className="h-4 w-4" />
+            {busy === 'disconnect' ? copy('disconnecting', 'Disconnecting...') : copy('disconnect', 'Disconnect')}
+          </PathActionButton>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
@@ -877,6 +1135,7 @@ export default function Backup() {
           ) : null}
         </div>
 
+        <GoogleDriveSyncSection t={t} notify={notify} />
         <DataFolderLocation t={t} notify={notify} />
         <ResetData />
         <FactoryReset />
