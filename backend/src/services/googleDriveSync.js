@@ -345,21 +345,20 @@ async function ensureRootFolder(config) {
 }
 
 function ensureSnapshotLayout(snapshotRoot) {
-  fs.mkdirSync(path.join(snapshotRoot, 'db'), { recursive: true })
-  fs.mkdirSync(path.join(snapshotRoot, 'uploads'), { recursive: true })
+  const managedRoot = path.join(snapshotRoot, DATA_FOLDER_NAME)
+  fs.mkdirSync(path.join(managedRoot, 'db'), { recursive: true })
+  fs.mkdirSync(path.join(managedRoot, 'uploads'), { recursive: true })
 }
 
 function shouldSkipSnapshotFile(relativePath) {
   const normalized = String(relativePath || '').replace(/\\/g, '/').toLowerCase()
   return normalized === 'db/business.db'
-    || normalized === 'db/business.db-wal'
-    || normalized === 'db/business.db-shm'
-    || normalized === 'db/business.db-journal'
 }
 
 function createDataRootSnapshot() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-drive-sync-'))
-  const snapshotRoot = path.join(tempDir, DATA_FOLDER_NAME)
+  const snapshotRoot = tempDir
+  const managedRoot = path.join(snapshotRoot, DATA_FOLDER_NAME)
   ensureSnapshotLayout(snapshotRoot)
 
   try {
@@ -368,13 +367,13 @@ function createDataRootSnapshot() {
     walkFiles(DATA_ROOT, (absolutePath) => {
       const relativePath = path.relative(DATA_ROOT, absolutePath)
       if (!relativePath || shouldSkipSnapshotFile(relativePath)) return
-      const targetPath = path.join(snapshotRoot, relativePath)
+      const targetPath = path.join(managedRoot, relativePath)
       fs.mkdirSync(path.dirname(targetPath), { recursive: true })
       fs.copyFileSync(absolutePath, targetPath)
     })
 
     if (fs.existsSync(DB_PATH)) {
-      const snapshotDbPath = path.join(snapshotRoot, 'db', 'business.db')
+      const snapshotDbPath = path.join(managedRoot, 'db', 'business.db')
       fs.mkdirSync(path.dirname(snapshotDbPath), { recursive: true })
       fs.copyFileSync(DB_PATH, snapshotDbPath)
     }
@@ -493,9 +492,20 @@ async function runDriveSync(reason = 'manual') {
 
   const snapshot = createDataRootSnapshot()
   try {
-    const mappings = getDriveSyncEntriesMap()
+    let mappings = getDriveSyncEntriesMap()
     const rootFolderId = await ensureRootFolder(config)
     const items = collectSnapshotItems(snapshot.snapshotRoot)
+    const managedRootRelative = DATA_FOLDER_NAME
+    const legacyFlatLayout = !mappings[managedRootRelative] && Object.keys(mappings).some((relativePath) => (
+      relativePath === 'db'
+      || relativePath === 'uploads'
+      || relativePath.startsWith('db/')
+      || relativePath.startsWith('uploads/')
+    ))
+    if (legacyFlatLayout) {
+      clearDriveSyncMappings()
+      mappings = {}
+    }
     const remoteDirs = await ensureRemoteDirectories(config, mappings, rootFolderId, items.directories)
 
     let uploaded = 0

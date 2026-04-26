@@ -23,6 +23,7 @@ import { getClientDeviceInfo } from './utils/deviceInfo.js'
 const langs = { en, km }
 const AppContext = createContext(null)
 const SyncContext = createContext(null)
+const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
 
 function normalizeDateInput(value) {
   if (!value) return null
@@ -549,16 +550,35 @@ export function AppProvider({ children }) {
       const cleanUrl = `${url.origin}${url.pathname}`
       window.history.replaceState({}, document.title, cleanUrl)
     }
+    const clearPendingLink = () => {
+      try { localStorage.removeItem(OAUTH_LINK_PENDING_KEY) } catch (_) {}
+    }
 
     const run = async () => {
       if (errorDescription) {
         clearCallbackUrl()
+        clearPendingLink()
         if (!cancelled) notify(errorDescription, 'error')
         return
       }
-      if (!user?.id) {
-        clearCallbackUrl()
-        if (!cancelled) notify(t('identity_link_failed') || 'Failed to connect sign-in method.', 'error')
+
+      let pendingLink = null
+      try {
+        pendingLink = JSON.parse(localStorage.getItem(OAUTH_LINK_PENDING_KEY) || 'null')
+      } catch (_) {
+        pendingLink = null
+      }
+
+      let actorId = Number(user?.id || 0)
+      if (!actorId && pendingLink?.userId) actorId = Number(pendingLink.userId || 0)
+      if (!actorId) {
+        try {
+          const storedUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null')
+          if (storedUser?.id) actorId = Number(storedUser.id || 0)
+        } catch (_) {}
+      }
+
+      if (!actorId) {
         return
       }
 
@@ -568,12 +588,13 @@ export function AppProvider({ children }) {
           accessToken,
           provider,
           mode: 'link',
-          currentUserId: user.id,
+          currentUserId: actorId,
           clientTime: new Date().toISOString(),
           deviceTz: device.deviceTz,
           deviceName: device.deviceName,
         })
         clearCallbackUrl()
+        clearPendingLink()
         if (cancelled) return
         if (result?.success && result?.user) {
           window.dispatchEvent(new CustomEvent('user:updated', { detail: result.user }))
@@ -583,6 +604,7 @@ export function AppProvider({ children }) {
         notify(result?.error || (t('identity_link_failed') || 'Failed to connect sign-in method.'), 'error')
       } catch (error) {
         clearCallbackUrl()
+        clearPendingLink()
         if (!cancelled) {
           notify(error?.message || (t('identity_link_failed') || 'Failed to connect sign-in method.'), 'error')
         }

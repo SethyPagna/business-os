@@ -6,6 +6,8 @@ import FilePickerModal from '../files/FilePickerModal'
 import { STORAGE_KEYS } from '../../constants'
 import { useApp } from '../../AppContext'
 
+const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
+
 /**
  * 1. User Profile Modal
  * 1.1 Purpose
@@ -359,6 +361,14 @@ export default function UserProfileModal({ onClose }) {
 
     setOauthConnecting(normalizedProvider)
     try {
+      try {
+        localStorage.setItem(OAUTH_LINK_PENDING_KEY, JSON.stringify({
+          userId: user?.id || null,
+          provider: normalizedProvider,
+          email: String(profile?.email || '').trim().toLowerCase(),
+          startedAt: Date.now(),
+        }))
+      } catch (_) {}
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(normalizedProvider)}`
       const result = await window.api.startSupabaseOauth({
         provider: normalizedProvider,

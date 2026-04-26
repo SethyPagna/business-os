@@ -136,9 +136,10 @@ function runFsWorker(action, payload, timeoutMs = 10 * 60 * 1000) {
 
 function getHostUiAvailability(req) {
   const access = classifyRequestAccess(req)
+  const authenticatedSession = !!req?.user?.id
   return {
     access,
-    hostUiAvailable: !!access.localRequest,
+    hostUiAvailable: process.platform === 'win32' && (authenticatedSession || !!access.localRequest),
   }
 }
 
@@ -541,6 +542,7 @@ const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 
 router.get('/config', (req, res) => {
   const access = classifyRequestAccess(req)
+  const hostUiAvailable = process.platform === 'win32'
   res.json({
     syncServerUrl: TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,
@@ -548,7 +550,7 @@ router.get('/config', (req, res) => {
     accessMode: access.mode,
     trustedTailscale: access.trustedTailscale,
     tokenAccepted: access.tokenValid,
-    hostUiAvailable: access.localRequest,
+    hostUiAvailable,
     serverStartTime: SERVER_START_TIME,
     security: {
       configuredTailscaleHost: access.configuredTailscaleHost || null,
@@ -560,7 +562,7 @@ router.get('/config', (req, res) => {
       hasConfiguredToken: access.hasConfiguredToken,
       tokenProvided: access.tokenProvided,
       trustedTailscale: access.trustedTailscale,
-      hostUiAvailable: access.localRequest,
+      hostUiAvailable,
     },
   })
 })

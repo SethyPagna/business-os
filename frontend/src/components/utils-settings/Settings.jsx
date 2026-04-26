@@ -240,6 +240,8 @@ export default function Settings() {
   const previewBaseSize = Math.max(14, Math.round((parseFloat(form.ui_font_size || 14) / 14) * 16))
   const previewTitleSize = form.ui_title_font_size || Math.max(20, Math.round((parseFloat(form.ui_font_size || 14) || 14) * 1.75))
   const previewSidebarSize = form.ui_sidebar_font_size || Math.max(13, Math.round(previewBaseSize * 0.95))
+  const previewSectionSize = form.ui_section_font_size || Math.max(15, Math.round(previewBaseSize * 1.08))
+  const previewChipSize = form.ui_chip_font_size || Math.max(11, Math.round(previewBaseSize * 0.78))
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
   const selectedDisplayTimezone = form.display_timezone || settings.display_timezone || deviceTimezone
   const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'

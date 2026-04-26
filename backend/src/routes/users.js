@@ -40,10 +40,25 @@ const {
 } = require('../services/verification')
 
 const router = express.Router()
-const CONTACT_CODE_REQUEST_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_CODE_REQUEST_MAX_ATTEMPTS || 5))
-const CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_CODE_REQUEST_WINDOW_MS || 15 * 60 * 1000))
-const CONTACT_CODE_VERIFY_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_CODE_VERIFY_MAX_ATTEMPTS || 10))
-const CONTACT_CODE_VERIFY_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_CODE_VERIFY_WINDOW_MS || 15 * 60 * 1000))
+const CONTACT_CODE_REQUEST_LIMIT_MAX = Math.max(1, Number(
+  process.env.CONTACT_VERIFICATION_REQUEST_MAX_ATTEMPTS
+  || process.env.AUTH_CODE_REQUEST_MAX_ATTEMPTS
+  || 4,
+))
+const CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS = Math.max(1000, Number(
+  process.env.CONTACT_VERIFICATION_REQUEST_WINDOW_MS
+  || (2 * 60 * 1000),
+))
+const CONTACT_CODE_VERIFY_LIMIT_MAX = Math.max(1, Number(
+  process.env.CONTACT_VERIFICATION_VERIFY_MAX_ATTEMPTS
+  || process.env.AUTH_CODE_VERIFY_MAX_ATTEMPTS
+  || 10,
+))
+const CONTACT_CODE_VERIFY_LIMIT_WINDOW_MS = Math.max(1000, Number(
+  process.env.CONTACT_VERIFICATION_VERIFY_WINDOW_MS
+  || process.env.AUTH_CODE_VERIFY_WINDOW_MS
+  || (10 * 60 * 1000),
+))
 
 /**
  * 1. Shared Utilities
@@ -434,7 +449,7 @@ router.post('/users/:id/contact-verification/request', authToken, async (req, re
     CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS
   )
   if (!limit.allowed) {
-    return err(res, `Too many verification code requests. Try again in ${limit.retryAfterSeconds} seconds.`, 429)
+    return err(res, `Too many verification email requests. Try again in ${limit.retryAfterSeconds} seconds.`, 429)
   }
 
   const destination = normalizeEmail(req.body?.value || target.email)
