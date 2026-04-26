@@ -3,8 +3,10 @@ node_modules/
 
 # Build output
 frontend/dist/
+backend/frontend-dist/
 release/
 runtime/
+_release_preserve/
 
 # Local app data
 business-os-data/

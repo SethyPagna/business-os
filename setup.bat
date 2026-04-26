@@ -182,23 +182,35 @@ REM ---- Backend dependencies -----------------------------------------------
 echo.
 echo [INFO] Installing backend dependencies...
 cd /d "%ROOT%\backend"
-call npm install --loglevel=warn
-if errorlevel 1 (
-    echo [ERROR] Backend npm install failed. Check internet connection.
-    pause
-    exit /b 1
+set "BACKEND_INSTALL_MODE=install"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\backend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "BACKEND_INSTALL_MODE=%%s"
+if /i "!BACKEND_INSTALL_MODE!"=="skip" (
+    echo [OK] Backend dependencies already up to date
+) else (
+    call npm install --prefer-offline --no-audit --loglevel=warn
+    if errorlevel 1 (
+        echo [ERROR] Backend npm install failed. Check internet connection.
+        pause
+        exit /b 1
+    )
+    echo [OK] Backend dependencies installed
 )
-echo [OK] Backend dependencies installed
 
 REM ---- Frontend install + build ------------------------------------------
 echo.
 echo [INFO] Installing frontend dependencies...
 cd /d "%ROOT%\frontend"
-call npm install --loglevel=warn
-if errorlevel 1 (
-    echo [ERROR] Frontend npm install failed.
-    pause
-    exit /b 1
+set "FRONTEND_INSTALL_MODE=install"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%ROOT%\frontend'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "FRONTEND_INSTALL_MODE=%%s"
+if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
+    echo [OK] Frontend dependencies already up to date
+) else (
+    call npm install --prefer-offline --no-audit --loglevel=warn
+    if errorlevel 1 (
+        echo [ERROR] Frontend npm install failed.
+        pause
+        exit /b 1
+    )
 )
 echo.
 echo [INFO] Building frontend ^(~30 seconds^)...

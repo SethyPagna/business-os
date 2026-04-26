@@ -110,17 +110,23 @@ REM  STEP 1 - Backend dependencies
 REM ============================================================
 echo [STEP 1] Installing backend dependencies...
 cd /d "%BACKEND_SRC%"
-echo [INFO] Running: npm install (backend) >> "%LOG%" 2>&1
-call npm install --loglevel=warn >> "%LOG%" 2>&1
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Backend npm install failed.
-    echo         Check %LOG% for details.
-    echo.
-    pause
-    exit /b 1
+set "BACKEND_INSTALL_MODE=install"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%BACKEND_SRC%'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "BACKEND_INSTALL_MODE=%%s"
+if /i "!BACKEND_INSTALL_MODE!"=="skip" (
+    echo [OK] Backend dependencies already up to date
+) else (
+    echo [INFO] Running: npm install (backend) >> "%LOG%" 2>&1
+    call npm install --prefer-offline --no-audit --loglevel=warn >> "%LOG%" 2>&1
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Backend npm install failed.
+        echo         Check %LOG% for details.
+        echo.
+        pause
+        exit /b 1
+    )
+    echo [OK] Backend dependencies ready
 )
-echo [OK] Backend dependencies ready
 echo.
 
 REM ============================================================
@@ -128,16 +134,22 @@ REM  STEP 2 - Frontend dependencies
 REM ============================================================
 echo [STEP 2] Installing frontend dependencies...
 cd /d "%FRONTEND_SRC%"
-echo [INFO] Running: npm install (frontend) >> "%LOG%" 2>&1
-call npm install --loglevel=warn >> "%LOG%" 2>&1
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Frontend npm install failed.
-    echo.
-    pause
-    exit /b 1
+set "FRONTEND_INSTALL_MODE=install"
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$path='%FRONTEND_SRC%'; $stamp=Join-Path $path 'node_modules/.package-lock.json'; $lock=Join-Path $path 'package-lock.json'; $pkg=Join-Path $path 'package.json'; if ((Test-Path $stamp) -and (Test-Path $lock) -and (Test-Path $pkg)) { $latest = @((Get-Item $pkg).LastWriteTimeUtc, (Get-Item $lock).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1; $installed = (Get-Item $stamp).LastWriteTimeUtc; if ($installed -ge $latest) { 'skip' } else { 'install' } } else { 'install' }"`) do set "FRONTEND_INSTALL_MODE=%%s"
+if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
+    echo [OK] Frontend dependencies already up to date
+) else (
+    echo [INFO] Running: npm install (frontend) >> "%LOG%" 2>&1
+    call npm install --prefer-offline --no-audit --loglevel=warn >> "%LOG%" 2>&1
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Frontend npm install failed.
+        echo.
+        pause
+        exit /b 1
+    )
+    echo [OK] Frontend dependencies ready
 )
-echo [OK] Frontend dependencies ready
 echo.
 
 REM ============================================================
