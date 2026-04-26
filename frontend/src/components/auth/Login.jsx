@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Building2,
-  CheckCircle2,
   Chrome,
   Facebook,
   KeyRound,
@@ -66,28 +65,18 @@ export default function Login() {
     }
   })
 
-  const [showReset, setShowReset] = useState(false)
-  const [showCodeLogin, setShowCodeLogin] = useState(false)
+  const [showOtpReset, setShowOtpReset] = useState(false)
   const [resetIdentifier, setResetIdentifier] = useState('')
-  const [resetMethod, setResetMethod] = useState('auto')
-  const [resetSent, setResetSent] = useState(false)
-  const [resetCode, setResetCode] = useState('')
+  const [resetOtp, setResetOtp] = useState('')
   const [resetNewPassword, setResetNewPassword] = useState('')
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [resetInfo, setResetInfo] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
-    email: false,
-    sms: false,
-    supabaseAuth: false,
-    supabaseEmailAuth: false,
     googleOauth: false,
     facebookOauth: false,
+    supabaseAuth: false,
+    supabaseEmailAuth: false,
   })
-  const [codeLoginIdentifier, setCodeLoginIdentifier] = useState('')
-  const [codeLoginMethod, setCodeLoginMethod] = useState('auto')
-  const [codeLoginSent, setCodeLoginSent] = useState(false)
-  const [codeLoginValue, setCodeLoginValue] = useState('')
-  const [codeLoginInfo, setCodeLoginInfo] = useState('')
 
   const usernameRef = useRef()
   const otpRef = useRef()
@@ -98,7 +87,7 @@ export default function Login() {
       else usernameRef.current?.focus()
     }, 150)
     return () => clearTimeout(timer)
-  }, [otpRequired, showReset, showCodeLogin])
+  }, [otpRequired, showOtpReset])
 
   useEffect(() => {
     try {
@@ -113,12 +102,10 @@ export default function Login() {
         const result = await window.api.getVerificationCapabilities?.()
         if (!active || !result || result.success === false) return
         setVerificationCaps({
-          email: result.email !== false,
-          sms: result.sms === true,
-          supabaseAuth: result.supabase_auth === true,
-          supabaseEmailAuth: result.supabase_email_auth === true,
           googleOauth: result.google_oauth === true,
           facebookOauth: result.facebook_oauth === true,
+          supabaseAuth: result.supabase_auth === true,
+          supabaseEmailAuth: result.supabase_email_auth === true,
         })
       } catch (_) {}
     }
@@ -191,26 +178,7 @@ export default function Login() {
     return () => { cancelled = true }
   }, [persistAuthenticatedUser, sessionDuration, t])
 
-  const resetMethods = useMemo(() => ([
-    { value: 'auto', label: tr('verification_method_auto', 'Auto (verified email)'), enabled: true },
-    { value: 'email', label: tr('verification_method_email', 'Verified Email'), enabled: verificationCaps.email },
-  ]), [t, verificationCaps.email])
-
   const getDeviceContext = () => getClientDeviceInfo()
-
-  const resetResetForm = () => {
-    setResetSent(false)
-    setResetCode('')
-    setResetNewPassword('')
-    setResetConfirmPassword('')
-    setResetInfo('')
-  }
-
-  const resetCodeLoginForm = () => {
-    setCodeLoginSent(false)
-    setCodeLoginValue('')
-    setCodeLoginInfo('')
-  }
 
   const handleLogin = async (event) => {
     event.preventDefault()
@@ -262,134 +230,32 @@ export default function Login() {
     setOtp(clean)
   }
 
-  const handleSendResetCode = async () => {
-    if (!resetIdentifier.trim()) {
-      setError(tr('enter_username_email_first', 'Enter your username or email first.'))
-      return
-    }
-    if (resetMethod === 'email' && !verificationCaps.email) {
-      setError(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'))
-      return
-    }
-    if (resetMethod === 'auto' && !verificationCaps.email) {
-      setError(tr('email_sender_missing', 'No email code sender is configured yet. Please ask admin to configure email sending for verification codes.'))
-      return
-    }
-    setError('')
-    setLoading(true)
-    try {
-      const result = await window.api.requestPasswordResetCode({
-        identifier: resetIdentifier.trim(),
-        method: resetMethod,
-      })
-      if (result?.success === false) {
-        setError(result.error || 'Failed to send verification code')
-        return
-      }
-      setResetSent(true)
-      setResetInfo(
-        result?.destination
-          ? tr('verification_code_sent_to', 'Verification code sent to {destination}').replace('{destination}', result.destination)
-          : tr('verification_code_sent_if_exists', 'If the account exists, a verification code has been sent.')
-      )
-    } catch (requestError) {
-      setError(requestError?.message || 'Failed to send verification code')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleCompleteReset = async () => {
-    if (!resetCode.trim()) return setError(tr('enter_verification_code', 'Enter the verification code.'))
+  const handleResetWithOtp = async () => {
+    if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
+    if (!resetOtp.trim()) return setError(tr('enter_otp_first', 'Enter the OTP code from your authenticator app.'))
     if (resetNewPassword.length < 4) return setError(tr('password_min_4', 'Use at least 4 characters for the new password.'))
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
 
     setError('')
     setLoading(true)
     try {
-      const result = await window.api.completePasswordReset({
+      const result = await window.api.resetPasswordWithOtp({
         identifier: resetIdentifier.trim(),
-        method: resetMethod,
-        code: resetCode.trim(),
+        otp: resetOtp.trim(),
         newPassword: resetNewPassword,
       })
       if (result?.success === false) {
-        setError(result.error || 'Failed to reset password')
+        setError(result.error || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
         return
       }
-      setShowReset(false)
-      resetResetForm()
+      setResetInfo(tr('otp_password_reset_done', 'Password reset complete. You can now sign in with the new password.'))
       setPassword('')
       setOtp('')
-      setOtpRequired(false)
-      setPendingUserId(null)
-      setError(tr('password_reset_done', 'Password reset complete. You can now sign in with the new password.'))
-    } catch (completeError) {
-      setError(completeError?.message || 'Failed to reset password')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleSendLoginCode = async () => {
-    if (!codeLoginIdentifier.trim()) {
-      setError(tr('enter_username_email_first', 'Enter your username or email first.'))
-      return
-    }
-    if (codeLoginMethod === 'email' && !verificationCaps.email) {
-      setError(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'))
-      return
-    }
-    if (codeLoginMethod === 'auto' && !verificationCaps.email) {
-      setError(tr('email_sender_missing', 'No email code sender is configured yet. Please ask admin to configure email sending for verification codes.'))
-      return
-    }
-
-    setError('')
-    setLoading(true)
-    try {
-      const result = await window.api.requestLoginCode({
-        identifier: codeLoginIdentifier.trim(),
-        method: codeLoginMethod,
-      })
-      if (result?.success === false) {
-        setError(result.error || 'Failed to send verification code')
-        return
-      }
-      setCodeLoginSent(true)
-      setCodeLoginInfo(
-        result?.destination
-          ? tr('verification_code_sent_to', 'Verification code sent to {destination}').replace('{destination}', result.destination)
-          : tr('verification_code_sent_if_exists', 'If the account exists, a verification code has been sent.')
-      )
-    } catch (requestError) {
-      setError(requestError?.message || 'Failed to send verification code')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleVerifyLoginCode = async () => {
-    if (!codeLoginIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
-    if (!codeLoginValue.trim()) return setError(tr('enter_verification_code', 'Enter the verification code.'))
-
-    setError('')
-    setLoading(true)
-    try {
-      const result = await window.api.verifyLoginCode({
-        identifier: codeLoginIdentifier.trim(),
-        method: codeLoginMethod,
-        code: codeLoginValue.trim(),
-        sessionDuration,
-        ...getDeviceContext(),
-      })
-      if (result?.success && result?.user) {
-        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
-        return
-      }
-      setError(result?.error || 'Invalid verification code')
-    } catch (verifyError) {
-      setError(verifyError?.message || 'Verification failed')
+      setResetOtp('')
+      setResetNewPassword('')
+      setResetConfirmPassword('')
+    } catch (resetError) {
+      setError(resetError?.message || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
     } finally {
       setLoading(false)
     }
@@ -418,11 +284,12 @@ export default function Login() {
   }
 
   const closeAuxMode = () => {
-    setShowReset(false)
-    setShowCodeLogin(false)
+    setShowOtpReset(false)
     setError('')
-    resetResetForm()
-    resetCodeLoginForm()
+    setResetInfo('')
+    setResetOtp('')
+    setResetNewPassword('')
+    setResetConfirmPassword('')
   }
 
   return (
@@ -439,7 +306,8 @@ export default function Login() {
               : tr('secure_signin_workspace', 'Secure sign-in for your business workspace')}
           </p>
         </div>
-        {!otpRequired && !showReset && !showCodeLogin ? (
+
+        {!otpRequired && !showOtpReset ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label htmlFor="login-username" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -531,7 +399,7 @@ export default function Login() {
                   />
                 </div>
                 <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">
-                  {tr('oauth_matching_email_hint', 'Social sign-in works after admin creates your local account and the provider email matches your account email.')}
+                  {tr('oauth_local_account_hint', 'An admin still needs to create your local Business OS account first. Once linked, Google and Facebook keep working on later sign-ins.')}
                 </p>
               </div>
             ) : null}
@@ -540,28 +408,13 @@ export default function Login() {
               type="button"
               className="w-full text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
               onClick={() => {
-                setShowReset(true)
-                setShowCodeLogin(false)
+                setShowOtpReset(true)
                 setError('')
-                resetResetForm()
+                setResetInfo('')
                 setResetIdentifier(username || '')
               }}
             >
-              {tr('forgot_password', 'Forgot password?')}
-            </button>
-
-            <button
-              type="button"
-              className="w-full text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-              onClick={() => {
-                setShowCodeLogin(true)
-                setShowReset(false)
-                setError('')
-                resetCodeLoginForm()
-                setCodeLoginIdentifier(username || '')
-              }}
-            >
-              {tr('sign_in_with_code', 'Sign in with verification code')}
+              {tr('reset_password_with_otp', 'Reset password with OTP')}
             </button>
 
             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-gray-300">
@@ -571,7 +424,6 @@ export default function Login() {
               </div>
               <div>{tr('signin_method_password', 'Password login')}</div>
               <div>{tr('signin_method_otp', 'OTP (required for users who enabled 2FA)')}</div>
-              {verificationCaps.email ? <div>{tr('signin_method_code', 'Verification code sign-in')}</div> : null}
               {verificationCaps.googleOauth ? <div>{tr('signin_method_google', 'Google sign-in')}</div> : null}
               {verificationCaps.facebookOauth ? <div>{tr('signin_method_facebook', 'Facebook sign-in')}</div> : null}
               <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
@@ -581,151 +433,99 @@ export default function Login() {
                 <span className={`rounded-full px-2 py-0.5 ${verificationCaps.supabaseAuth ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300'}`}>
                   {tr('supabase_auth', 'Supabase Auth')}: {verificationCaps.supabaseAuth ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {tr('email_code_sender', 'Email codes')}: {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'off')}
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                  {tr('otp_recovery', 'OTP recovery')}
                 </span>
               </div>
             </div>
           </form>
         ) : null}
 
-        {!otpRequired && showReset ? (
+        {!otpRequired && showOtpReset ? (
           <div className="space-y-4">
             <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-              {tr('use_verified_email_notice', 'Use a verified email address to receive a one-time verification code.')}
+              {tr('otp_reset_notice', 'Use the OTP code from your authenticator app to set a new password. If OTP is not enabled on your account, use Google/Facebook sign-in or ask an admin to reset the password.')}
             </div>
             <div>
               <label htmlFor="reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('username_or_verified_email', 'Username or verified email')}
+                {tr('username_or_email', 'Username or email')}
               </label>
               <input id="reset-identifier" name="reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / email" />
             </div>
             <div>
-              <label htmlFor="reset-method" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('verification_method', 'Verification method')}
+              <label htmlFor="reset-otp" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('otp_code', 'OTP code')}
               </label>
-              <select id="reset-method" name="reset_method" className="input" value={resetMethod} onChange={(event) => setResetMethod(event.target.value)}>
-                {resetMethods.map((item) => (
-                  <option key={item.value} value={item.value} disabled={!item.enabled}>{item.label}</option>
-                ))}
-              </select>
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {tr('email_code_sender', 'Email codes')} {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'off')}
-                </span>
-              </div>
-            </div>
-
-            {!resetSent ? (
-              <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleSendResetCode}>
-                {loading ? tr('sending_code', 'Sending code...') : tr('send_verification_code', 'Send verification code')}
-              </button>
-            ) : (
-              <>
-                {resetInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
-                <div>
-                  <label htmlFor="reset-code" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('verification_code', 'Verification code')}
-                  </label>
-                  <input id="reset-code" name="reset_code" autoComplete="one-time-code" className="input" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit code" />
-                </div>
-                <div>
-                  <label htmlFor="reset-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('new_password', 'New password')}
-                  </label>
-                  <input id="reset-password-new" name="reset_password_new" type="password" className="input" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
-                </div>
-                <div>
-                  <label htmlFor="reset-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('confirm_new_password', 'Confirm new password')}
-                  </label>
-                  <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
-                </div>
-                <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleCompleteReset}>
-                  {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
-                </button>
-              </>
-            )}
-
-            {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
-            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
-          </div>
-        ) : null}
-
-        {!otpRequired && showCodeLogin ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-              {tr('code_signin_notice', 'Sign in securely using a one-time code sent to your verified email.')}
+              <input
+                id="reset-otp"
+                name="reset_otp"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                className="input"
+                value={resetOtp}
+                onChange={(event) => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="6-digit code"
+              />
             </div>
             <div>
-              <label htmlFor="code-login-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('username_or_verified_email', 'Username or verified email')}
+              <label htmlFor="reset-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('new_password', 'New password')}
               </label>
-              <input id="code-login-identifier" name="code_login_identifier" autoComplete="username" className="input" value={codeLoginIdentifier} onChange={(event) => setCodeLoginIdentifier(event.target.value)} placeholder="username / email" />
+              <input id="reset-password-new" name="reset_password_new" type="password" className="input" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
             </div>
             <div>
-              <label htmlFor="code-login-method" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('verification_method', 'Verification method')}
+              <label htmlFor="reset-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('confirm_new_password', 'Confirm new password')}
               </label>
-              <select id="code-login-method" name="code_login_method" className="input" value={codeLoginMethod} onChange={(event) => setCodeLoginMethod(event.target.value)}>
-                {resetMethods.map((item) => (
-                  <option key={item.value} value={item.value} disabled={!item.enabled}>{item.label}</option>
-                ))}
-              </select>
+              <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
             </div>
-            {!codeLoginSent ? (
-              <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleSendLoginCode}>
-                {loading ? tr('sending_code', 'Sending code...') : tr('send_verification_code', 'Send verification code')}
-              </button>
-            ) : (
-              <>
-                {codeLoginInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{codeLoginInfo}</div> : null}
-                <div>
-                  <label htmlFor="code-login-value" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('verification_code', 'Verification code')}
-                  </label>
-                  <input id="code-login-value" name="code_login_value" autoComplete="one-time-code" className="input" value={codeLoginValue} onChange={(event) => setCodeLoginValue(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit code" />
-                </div>
-                <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleVerifyLoginCode}>
-                  {loading ? tr('verifying', 'Verifying...') : tr('sign_in', 'Sign in')}
-                </button>
-              </>
-            )}
+
+            {resetInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
+
+            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithOtp}>
+              {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
+            </button>
+
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
           </div>
         ) : null}
 
         {otpRequired ? (
-          <form onSubmit={handleOtp} className="space-y-4">
-            <div className="rounded-2xl bg-blue-50 p-4 text-center dark:bg-blue-900/20">
-              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white">
-                <CheckCircle2 className="h-6 w-6" />
+          <form onSubmit={handleOtp} className="space-y-5">
+            <div className="text-center">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                <ShieldCheck className="h-7 w-7" />
               </div>
-              <p className="text-sm font-medium text-blue-700 dark:text-blue-300">{tr('open_authenticator_app', 'Open your authenticator app')}</p>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('enter_authenticator_code', 'Enter the 6-digit code shown in your app.')}</p>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{tr('enter_authenticator_code', 'Enter authenticator code')}</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {tr('otp_login_hint', 'Open your authenticator app and enter the current 6-digit OTP code.')}
+              </p>
             </div>
+
             <div>
-              <label htmlFor="otp-code" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('authentication_code', 'Authentication code')}
+              <label htmlFor="otp-code" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <ShieldCheck className="h-4 w-4 text-gray-400" />
+                <span>{tr('otp_code', 'OTP code')}</span>
               </label>
               <input
                 id="otp-code"
-                name="otp"
+                name="otp_code"
                 ref={otpRef}
-                className="input text-center text-2xl tracking-widest font-mono"
+                className="input text-center text-lg tracking-[0.35em]"
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={6}
                 value={otp}
                 onChange={(event) => handleOtpInput(event.target.value)}
                 placeholder="000000"
-                required
-                autoComplete="one-time-code"
               />
             </div>
+
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
-            <button className="btn-primary w-full py-3 text-base" type="submit" disabled={loading || otp.length !== 6}>
+
+            <button className="btn-primary w-full py-3 text-base" type="submit" disabled={loading}>
               {loading ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -734,26 +534,24 @@ export default function Login() {
               ) : (
                 <span className="inline-flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4" />
-                  <span>{tr('verify_code', 'Verify code')}</span>
+                  <span>{tr('verify_and_continue', 'Verify & continue')}</span>
                 </span>
               )}
             </button>
-            <ModeBackButton
-              label={tr('back_to_login', 'Back to login')}
+
+            <button
+              type="button"
+              className="w-full text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
               onClick={() => {
                 setOtpRequired(false)
                 setPendingUserId(null)
                 setOtp('')
                 setError('')
               }}
-            />
+            >
+              {tr('back', 'Back')}
+            </button>
           </form>
-        ) : null}
-
-        {!otpRequired && !showReset && !showCodeLogin ? (
-          <p className="mt-6 text-center text-xs text-gray-400">
-            {tr('default_login_hint', 'Default: admin / admin')}
-          </p>
         ) : null}
       </div>
     </div>

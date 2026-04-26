@@ -12,7 +12,7 @@ function buildRowData(user, role, t) {
     [translateLabel(t, 'phone', 'Phone'), user.phone || '-'],
     [translateLabel(t, 'email', 'Email'), user.email || '-'],
     [translateLabel(t, 'status', 'Status'), user.is_active ? translateLabel(t, 'active', 'Active') : translateLabel(t, 'inactive', 'Inactive')],
-    [translateLabel(t, 'email_verification', 'Email verification'), Number(user.email_verified || 0) === 1 ? translateLabel(t, 'verified', 'Verified') : translateLabel(t, 'not_verified', 'Not verified')],
+    [translateLabel(t, 'email_login', 'Email login'), user.email ? translateLabel(t, 'enabled', 'Enabled') : translateLabel(t, 'setup_needed', 'Setup needed')],
     ['2FA', user.otp_enabled ? translateLabel(t, 'enabled', 'Enabled') : translateLabel(t, 'off', 'Off')],
     [translateLabel(t, 'added_on', 'Added'), fmtDate(user.created_at)],
   ]

@@ -29,7 +29,7 @@ function isEmailProviderConfigured() {
 
 function getVerificationCapabilities() {
   return {
-    email: isEmailProviderConfigured(),
+    email: false,
     sms: false,
   }
 }
@@ -254,57 +254,9 @@ async function requestVerificationCode({
   destination,
   meta = {},
 }) {
-  if (channel !== 'email') {
-    return {
-      success: false,
-      error: 'Only email verification is supported in this build.',
-    }
-  }
-
-  const { code, expiresAt } = createVerificationRecord({
-    userId,
-    purpose,
-    channel,
-    destination,
-    meta,
-  })
-
-  const message = messageForPurpose(purpose, code)
-  let delivery = { sent: false, provider: 'none', error: '' }
-
-  try {
-    delivery = await sendEmail({ to: destination, subject: message.subject, text: message.text })
-  } catch (error) {
-    delivery = { sent: false, provider: 'error', error: error?.message || 'Delivery failed' }
-  }
-
-  if (!delivery.sent && !DEV_EXPOSE_CODES) {
-    db.prepare(`
-      UPDATE verification_codes
-      SET consumed_at = datetime('now')
-      WHERE user_id = ? AND purpose = ? AND channel = ? AND destination = ? AND consumed_at IS NULL
-    `).run(userId, purpose, channel, destination)
-    const providerConfigured = isEmailProviderConfigured()
-    const providerHint = providerConfigured
-      ? 'Email provider is configured but delivery failed. Check provider credentials, sender identity, and outbound network access.'
-      : 'Email provider is not configured. Configure an email provider before using email verification.'
-    const deliveryMessage = delivery.error ? ` (${delivery.error})` : ''
-    return {
-      success: false,
-      error: `${providerHint}${deliveryMessage}`,
-    }
-  }
-
   return {
-    success: true,
-    channel,
-    destination,
-    destinationMasked: maskDestination(channel, destination),
-    expiresAt,
-    provider: delivery.provider,
-    delivered: delivery.sent,
-    deliveryError: delivery.error || '',
-    userName: userName || '',
+    success: false,
+    error: 'Email verification codes are disabled in this build.',
   }
 }
 

@@ -6,7 +6,6 @@
  * Responsibilities:
  * - Admin-managed user/role lifecycle.
  * - Self-service profile/password updates.
- * - Email contact verification handshake endpoints.
  * - Supabase-linked identity synchronization for provider parity.
  *
  * Access model:
@@ -21,7 +20,6 @@ const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
-const { checkRateLimit, resetRateLimit } = require('../security')
 const {
   isSupabaseAuthConfigured,
   getSupabaseAuthPublicConfig,
@@ -30,36 +28,12 @@ const {
   setAuthUserActive,
   getAuthUserById,
   findAuthUserByEmail,
-  sendSupabaseVerificationEmail,
   verifyPasswordWithSupabase,
   unlinkAuthIdentity,
 } = require('../services/supabaseAuth')
-const {
-  normalizeEmail,
-  requestVerificationCode,
-  verifyCode,
-} = require('../services/verification')
+const { normalizeEmail } = require('../services/verification')
 
 const router = express.Router()
-const CONTACT_CODE_REQUEST_LIMIT_MAX = Math.max(1, Number(
-  process.env.CONTACT_VERIFICATION_REQUEST_MAX_ATTEMPTS
-  || process.env.AUTH_CODE_REQUEST_MAX_ATTEMPTS
-  || 4,
-))
-const CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS = Math.max(1000, Number(
-  process.env.CONTACT_VERIFICATION_REQUEST_WINDOW_MS
-  || (60 * 1000),
-))
-const CONTACT_CODE_VERIFY_LIMIT_MAX = Math.max(1, Number(
-  process.env.CONTACT_VERIFICATION_VERIFY_MAX_ATTEMPTS
-  || process.env.AUTH_CODE_VERIFY_MAX_ATTEMPTS
-  || 10,
-))
-const CONTACT_CODE_VERIFY_LIMIT_WINDOW_MS = Math.max(1000, Number(
-  process.env.CONTACT_VERIFICATION_VERIFY_WINDOW_MS
-  || process.env.AUTH_CODE_VERIFY_WINDOW_MS
-  || (10 * 60 * 1000),
-))
 
 /**
  * 1. Shared Utilities
@@ -152,17 +126,6 @@ function getUserSecurityContext(id) {
     LEFT JOIN roles r ON r.id = u.role_id
     WHERE u.id = ? AND u.deleted_at IS NULL
   `).get(id)
-}
-
-/**
- * 1.4.2 Shared context loader for contact verification endpoints.
- */
-function resolveVerificationContext(req) {
-  const targetUserId = Number(req.params.id)
-  const actor = getActorFromRequest(req)
-  const target = db.prepare('SELECT id, username, phone, phone_verified, email, email_verified FROM users WHERE id = ? AND deleted_at IS NULL').get(targetUserId)
-  const targetSecurity = getUserSecurityContext(targetUserId)
-  return { targetUserId, actor, target, targetSecurity }
 }
 
 function getUserWithRole(id) {
@@ -456,157 +419,16 @@ router.post('/users/avatar-upload', authToken, upload.single('image'), validateU
 })
 
 /**
- * 3. Contact Verification Routes
- * 3.1 Email code request/confirm.
+ * 3. Retired Contact Verification Routes
+ * Email-code verification is intentionally retired in favor of OTP and
+ * provider sign-in. Keep the endpoints predictable for stale clients.
  */
-router.post('/users/:id/contact-verification/request', authToken, async (req, res) => {
-  const { targetUserId, actor, target, targetSecurity } = resolveVerificationContext(req)
-
-  if (!target) return err(res, 'User not found', 404)
-  if (!actor) return err(res, 'Actor not found', 403)
-  if (!targetSecurity || !canManageTarget(actor, targetSecurity)) return err(res, 'No permission', 403)
-
-  const channel = String(req.body?.channel || '').trim().toLowerCase()
-  if (channel !== 'email') {
-    return err(res, 'Only email verification is supported')
-  }
-
-  const limitKey = getClientKey(req, `${targetUserId}:${channel}`)
-  const limit = checkRateLimit(
-    'users:contact_verification_request',
-    limitKey,
-    CONTACT_CODE_REQUEST_LIMIT_MAX,
-    CONTACT_CODE_REQUEST_LIMIT_WINDOW_MS
-  )
-  if (!limit.allowed) {
-    return err(res, `Too many verification email requests. Try again in ${limit.retryAfterSeconds} seconds.`, 429)
-  }
-
-  const destination = normalizeEmail(req.body?.value || target.email)
-
-  if (!destination) {
-    return err(res, 'Valid email is required')
-  }
-
-  const providerConfig = getSupabaseAuthPublicConfig()
-  if (providerConfig.emailAuthEnabled) {
-    const targetWithAuth = db.prepare(`
-      SELECT id, username, email, email_verified, supabase_user_id, is_active, deleted_at
-      FROM users
-      WHERE id = ? AND deleted_at IS NULL
-    `).get(targetUserId)
-
-    if (!targetWithAuth) return err(res, 'User not found', 404)
-    const repaired = await repairSupabaseIdentityForUser(targetWithAuth)
-    const resolvedUser = repaired?.user || targetWithAuth
-    if (!String(resolvedUser.supabase_user_id || '').trim()) {
-      return err(res, 'Save your profile first so the account can be linked to Supabase before sending a verification email.', 400)
-    }
-
-    const redirectTo = String(req.body?.redirectTo || '').trim()
-    const verificationResult = await sendSupabaseVerificationEmail(destination, { redirectTo })
-    if (!verificationResult.success && !verificationResult.skipped) {
-      return err(res, verificationResult.error || 'Failed to send verification email')
-    }
-
-    audit(actor.id, actor.name, 'contact_verification_request', 'user', targetUserId, {
-      channel,
-      destination: destination,
-      delivered: verificationResult.success,
-      provider: verificationResult.provider || 'supabase',
-      mode: 'supabase_email_link',
-      alreadyConfirmed: !!verificationResult.alreadyConfirmed,
-    })
-
-    return ok(res, {
-      channel,
-      destination,
-      destinationMasked: destination,
-      delivered: !!verificationResult.success,
-      provider: verificationResult.provider || 'supabase',
-      alreadyConfirmed: !!verificationResult.alreadyConfirmed,
-      mode: 'supabase_email_link',
-      message: verificationResult.alreadyConfirmed
-        ? 'Email is already confirmed.'
-        : 'Verification email sent.',
-    })
-  }
-
-  const purpose = 'verify_email'
-  const requestResult = await requestVerificationCode({
-    userId: targetUserId,
-    userName: target.username,
-    purpose,
-    channel,
-    destination,
-    meta: { requestedBy: actor.id, valueOverride: req.body?.value || '' },
-  })
-
-  if (!requestResult.success) {
-    return err(res, requestResult.error || 'Failed to send verification code')
-  }
-
-  audit(actor.id, actor.name, 'contact_verification_request', 'user', targetUserId, {
-    channel,
-    destination: requestResult.destinationMasked,
-    delivered: requestResult.delivered,
-    provider: requestResult.provider,
-  })
-
-  ok(res, {
-    channel,
-    destination: requestResult.destinationMasked,
-    expiresAt: requestResult.expiresAt,
-    delivered: requestResult.delivered,
-    provider: requestResult.provider,
-    mode: 'local_code',
-  })
+router.post('/users/:id/contact-verification/request', authToken, (_req, res) => {
+  err(res, 'Email verification is disabled in this build. Use OTP, Google, or Facebook sign-in instead.', 410)
 })
 
-router.post('/users/:id/contact-verification/confirm', authToken, (req, res) => {
-  const { targetUserId, actor, target, targetSecurity } = resolveVerificationContext(req)
-
-  if (!target) return err(res, 'User not found', 404)
-  if (!actor) return err(res, 'Actor not found', 403)
-  if (!targetSecurity || !canManageTarget(actor, targetSecurity)) return err(res, 'No permission', 403)
-
-  const channel = String(req.body?.channel || '').trim().toLowerCase()
-  const code = String(req.body?.code || '').trim()
-  if (channel !== 'email' || !code) {
-    return err(res, 'Valid channel and verification code are required')
-  }
-
-  const limitKey = getClientKey(req, `${targetUserId}:${channel}`)
-  const limit = checkRateLimit(
-    'users:contact_verification_confirm',
-    limitKey,
-    CONTACT_CODE_VERIFY_LIMIT_MAX,
-    CONTACT_CODE_VERIFY_LIMIT_WINDOW_MS
-  )
-  if (!limit.allowed) {
-    return err(res, `Too many verification attempts. Try again in ${limit.retryAfterSeconds} seconds.`, 429)
-  }
-
-  const destination = normalizeEmail(req.body?.value || target.email)
-  if (!destination) return err(res, 'Verification destination is invalid')
-
-  const purpose = 'verify_email'
-  const verifyResult = verifyCode({
-    userId: targetUserId,
-    purpose,
-    channel,
-    destination,
-    code,
-    consume: true,
-  })
-  if (!verifyResult.valid) return err(res, 'Invalid or expired verification code', 401)
-  resetRateLimit('users:contact_verification_confirm', limitKey)
-
-  db.prepare('UPDATE users SET email = ?, email_verified = 1 WHERE id = ?').run(destination, targetUserId)
-
-  audit(actor.id, actor.name, 'contact_verification_confirm', 'user', targetUserId, { channel })
-  broadcast('users')
-  ok(res, sanitizeUserRow(getUserWithRole(targetUserId)))
+router.post('/users/:id/contact-verification/confirm', authToken, (_req, res) => {
+  err(res, 'Email verification is disabled in this build. Use OTP, Google, or Facebook sign-in instead.', 410)
 })
 
 /**

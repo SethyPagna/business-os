@@ -6,7 +6,7 @@
  * Responsibilities:
  * - Password login (username/email identifier).
  * - OTP 2FA verification and setup lifecycle.
- * - One-time-code login and password reset flows.
+ * - OTP-based reset flow and provider-aware account recovery.
  * - Provider-aware auth behavior (local bootstrap password + Supabase sync).
  *
  * Data interconnections:
@@ -43,10 +43,6 @@ const {
 const {
   getVerificationCapabilities,
   normalizeEmail,
-  resolveChannel,
-  getDestinationForChannel,
-  requestVerificationCode,
-  verifyCode,
 } = require('../services/verification')
 const { createAuthSession, getPresentedSessionToken, revokeAuthSession } = require('../sessionAuth')
 
@@ -56,10 +52,6 @@ const LOGIN_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_LOGIN_MAX_ATTEMPTS |
 const LOGIN_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_WINDOW_MS || 10 * 60 * 1000))
 const OTP_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_OTP_MAX_ATTEMPTS || 10))
 const OTP_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_OTP_WINDOW_MS || 10 * 60 * 1000))
-const CODE_REQUEST_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_CODE_REQUEST_MAX_ATTEMPTS || 5))
-const CODE_REQUEST_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_CODE_REQUEST_WINDOW_MS || 15 * 60 * 1000))
-const CODE_VERIFY_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_CODE_VERIFY_MAX_ATTEMPTS || 10))
-const CODE_VERIFY_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_CODE_VERIFY_WINDOW_MS || 15 * 60 * 1000))
 const LOGIN_LOCK_THRESHOLD = Math.max(1, Number(process.env.AUTH_LOGIN_LOCK_THRESHOLD || 12))
 const LOGIN_LOCK_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_WINDOW_MS || 15 * 60 * 1000))
 const LOGIN_LOCK_DURATION_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_DURATION_MS || 15 * 60 * 1000))
@@ -191,16 +183,6 @@ function findUserByIdentifier(identifier, options = {}) {
   return null
 }
 
-/**
- * 1.9 Only supported verification method in this build:
- * - `auto` or `email`
- */
-function normalizeVerificationMethod(method) {
-  const value = String(method || 'auto').trim().toLowerCase()
-  if (value === 'auto' || value === 'email') return value
-  return ''
-}
-
 function normalizeOauthMode(mode) {
   const value = String(mode || 'login').trim().toLowerCase()
   return value === 'link' ? 'link' : 'login'
@@ -249,10 +231,11 @@ function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
 }
 
 router.get('/verification-capabilities', (_req, res) => {
-  const capabilities = getVerificationCapabilities()
   const supabase = getSupabaseAuthPublicConfig()
   ok(res, {
-    ...capabilities,
+    ...getVerificationCapabilities(),
+    email: false,
+    sms: false,
     supabase_auth: supabase.enabled,
     google_oauth: supabase.googleEnabled,
     facebook_oauth: supabase.facebookEnabled,
@@ -289,13 +272,10 @@ router.post('/login', async (req, res) => {
     return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username))
   }
 
-  const hasVerifiedSupabaseIdentity = Number(user.email_verified || 0) === 1
   const useSupabasePassword = !!(
     isSupabaseAuthConfigured()
     && isEmailIdentifier(username)
-    && user.supabase_user_id
     && user.email
-    && hasVerifiedSupabaseIdentity
   )
   if (useSupabasePassword) {
     const supabaseAuth = await verifyPasswordWithSupabase(user, password)
@@ -330,107 +310,6 @@ router.post('/login', async (req, res) => {
 
   const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
   ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
-})
-
-// POST /api/auth/login/request-code
-router.post('/login/request-code', async (req, res) => {
-  const { identifier, method } = req.body || {}
-  if (!identifier) return err(res, 'Username or email is required')
-  const normalizedMethod = normalizeVerificationMethod(method)
-  if (!normalizedMethod) return err(res, 'Only email verification is supported')
-
-  const limitKey = getClientKey(req, identifier)
-  if (!applyRateLimit(req, res, {
-    bucket: 'auth:login_code_request',
-    key: limitKey,
-    max: CODE_REQUEST_LIMIT_MAX,
-    windowMs: CODE_REQUEST_LIMIT_WINDOW_MS,
-    message: 'Too many verification code requests.',
-  })) return
-
-  const user = findUserByIdentifier(identifier, { requireVerifiedContact: true })
-  if (!user) {
-    return ok(res, { message: 'If the account exists, a verification code has been sent.' })
-  }
-
-  const channel = resolveChannel(user, normalizedMethod, { verifiedOnly: true })
-  const destination = channel ? getDestinationForChannel(user, channel) : ''
-  if (!channel || !destination) {
-    return err(res, 'No verified email is available for this account.')
-  }
-
-  const result = await requestVerificationCode({
-    userId: user.id,
-    userName: user.username,
-    purpose: 'login_code',
-    channel,
-    destination,
-    meta: { identifier: String(identifier || ''), method: normalizedMethod },
-  })
-  if (!result.success) return err(res, result.error || 'Failed to send verification code')
-
-  audit(user.id, user.username, 'login_code_request', 'user', user.id, {
-    channel,
-    destinationMasked: result.destinationMasked,
-    delivered: result.delivered,
-    provider: result.provider,
-  })
-
-  return ok(res, {
-    message: 'Verification code sent.',
-    channel,
-    destination: result.destinationMasked,
-    expiresAt: result.expiresAt,
-    delivered: result.delivered,
-    provider: result.provider,
-  })
-})
-
-// POST /api/auth/login/verify-code
-router.post('/login/verify-code', (req, res) => {
-  const { identifier, method, code, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
-  if (!identifier) return err(res, 'Username or email is required')
-  if (!code) return err(res, 'Verification code is required')
-  const normalizedMethod = normalizeVerificationMethod(method)
-  if (!normalizedMethod) return err(res, 'Only email verification is supported')
-
-  const limitKey = getClientKey(req, identifier)
-  if (!applyRateLimit(req, res, {
-    bucket: 'auth:login_code_verify',
-    key: limitKey,
-    max: CODE_VERIFY_LIMIT_MAX,
-    windowMs: CODE_VERIFY_LIMIT_WINDOW_MS,
-    message: 'Too many verification attempts.',
-  })) return
-
-  const user = findUserByIdentifier(identifier, { requireVerifiedContact: true })
-  if (!user) return err(res, 'Invalid verification request', 400)
-
-  const channel = resolveChannel(user, normalizedMethod, { verifiedOnly: true })
-  const destination = channel ? getDestinationForChannel(user, channel) : ''
-  if (!channel || !destination) return err(res, 'No verified email is available for this account', 400)
-
-  const verifyResult = verifyCode({
-    userId: user.id,
-    purpose: 'login_code',
-    channel,
-    destination,
-    code,
-    consume: true,
-  })
-  if (!verifyResult.valid) return err(res, 'Invalid or expired verification code', 401)
-  resetRateLimit('auth:login_code_verify', limitKey)
-
-  audit(user.id, user.username, 'login', 'user', user.id, { username: user.username, method: `${channel}_code` }, {
-    tableName: 'users',
-    recordId: user.id,
-    deviceName: deviceName || null,
-    deviceTz: deviceTz || null,
-    clientTime: clientTime || null,
-  })
-
-  const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
-  return ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
 })
 
 // POST /api/auth/oauth/start
@@ -712,120 +591,60 @@ router.get('/otp/status/:userId', authToken, (req, res) => {
   ok(res, { otpEnabled: !!user.otp_enabled })
 })
 
-// POST /api/auth/password-reset/request
-router.post('/password-reset/request', async (req, res) => {
-  const { identifier, method } = req.body || {}
+// POST /api/auth/password-reset/otp
+router.post('/password-reset/otp', async (req, res) => {
+  const { identifier, otp, newPassword } = req.body || {}
   if (!identifier) return err(res, 'Username or email is required')
-  const normalizedMethod = normalizeVerificationMethod(method)
-  if (!normalizedMethod) return err(res, 'Only email verification is supported')
-
-  const limitKey = getClientKey(req, identifier)
-  if (!applyRateLimit(req, res, {
-    bucket: 'auth:password_reset_request',
-    key: limitKey,
-    max: CODE_REQUEST_LIMIT_MAX,
-    windowMs: CODE_REQUEST_LIMIT_WINDOW_MS,
-    message: 'Too many verification code requests.',
-  })) return
-
-  const user = findUserByIdentifier(identifier, { requireVerifiedContact: true })
-  if (!user) {
-    return ok(res, { message: 'If the account exists, a verification code has been sent.' })
-  }
-
-  const channel = resolveChannel(user, normalizedMethod, { verifiedOnly: true })
-  const destination = channel ? getDestinationForChannel(user, channel) : ''
-  if (!channel) {
-    return err(res, 'No email is available for this account. Add one from My Profile first.')
-  }
-  if (!destination) {
-    return err(res, 'No valid verified email destination is available for this account')
-  }
-
-  const result = await requestVerificationCode({
-    userId: user.id,
-    userName: user.username,
-    purpose: 'password_reset',
-    channel,
-    destination,
-    meta: { identifier: String(identifier || ''), method: normalizedMethod },
-  })
-  if (!result.success) return err(res, result.error || 'Failed to send verification code')
-
-  audit(user.id, user.username, 'password_reset_request', 'user', user.id, {
-    channel,
-    destinationMasked: result.destinationMasked,
-    delivered: result.delivered,
-    provider: result.provider,
-  })
-
-  return ok(res, {
-    message: 'Verification code sent.',
-    channel,
-    destination: result.destinationMasked,
-    expiresAt: result.expiresAt,
-    delivered: result.delivered,
-    provider: result.provider,
-  })
-})
-
-// POST /api/auth/password-reset/complete
-router.post('/password-reset/complete', async (req, res) => {
-  const { identifier, method, code, newPassword } = req.body || {}
-  if (!identifier) return err(res, 'Username or email is required')
-  if (!code) return err(res, 'Verification code is required')
+  if (!otp) return err(res, 'OTP code is required')
   if (!newPassword || String(newPassword).length < 4) return err(res, 'New password must be at least 4 characters')
-  const normalizedMethod = normalizeVerificationMethod(method)
-  if (!normalizedMethod) return err(res, 'Only email verification is supported')
 
   const limitKey = getClientKey(req, identifier)
   if (!applyRateLimit(req, res, {
-    bucket: 'auth:password_reset_verify',
+    bucket: 'auth:password_reset_otp',
     key: limitKey,
-    max: CODE_VERIFY_LIMIT_MAX,
-    windowMs: CODE_VERIFY_LIMIT_WINDOW_MS,
-    message: 'Too many verification attempts.',
+    max: OTP_LIMIT_MAX,
+    windowMs: OTP_LIMIT_WINDOW_MS,
+    message: 'Too many OTP reset attempts.',
   })) return
 
-  const user = findUserByIdentifier(identifier, { requireVerifiedContact: true })
-  if (!user) return err(res, 'Invalid verification request', 400)
-  const useSupabaseProvider = !!(isSupabaseAuthConfigured() && (user.supabase_user_id || user.email))
+  const user = findUserByIdentifier(identifier, { requireVerifiedContact: false })
+  if (!user) return err(res, 'Invalid reset request', 400)
+  if (!Number(user.otp_enabled || 0)) return err(res, 'OTP is not enabled for this account. Use Google, Facebook, or ask an admin to reset the password.', 400)
+
+  const otpSecret = getOtpSecret(user)
+  if (!otpSecret) return err(res, 'OTP is unavailable for this account. Please contact admin.', 503)
+
+  const verified = speakeasy.totp.verify({
+    secret: otpSecret,
+    encoding: 'base32',
+    token: String(otp).replace(/\s/g, ''),
+    window: 1,
+  })
+  if (!verified) return err(res, 'Invalid OTP code', 401)
+  resetRateLimit('auth:password_reset_otp', limitKey)
+
+  let supabaseUserId = String(user.supabase_user_id || '').trim()
+  const useSupabaseProvider = !!(isSupabaseAuthConfigured() && (supabaseUserId || user.email))
   if (useSupabaseProvider && String(newPassword).length < 6) {
     return err(res, 'New password must be at least 6 characters when Supabase auth is enabled.')
   }
 
-  const channel = resolveChannel(user, normalizedMethod, { verifiedOnly: true })
-  const destination = channel ? getDestinationForChannel(user, channel) : ''
-  if (!channel || !destination) return err(res, 'No verified email is available for this account', 400)
-  const verifyResult = verifyCode({
-    userId: user.id,
-    purpose: 'password_reset',
-    channel,
-    destination,
-    code,
-    consume: true,
-  })
-  if (!verifyResult.valid) return err(res, 'Invalid or expired verification code', 401)
-  resetRateLimit('auth:password_reset_verify', limitKey)
-
-  let supabaseUserId = String(user.supabase_user_id || '').trim()
   if (isSupabaseAuthConfigured() && !supabaseUserId && user.email) {
     const provision = await createOrUpdateAuthUser(user, newPassword)
     if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Supabase authentication.')
     if (provision.success && provision.userId) supabaseUserId = String(provision.userId)
   }
-
   if (isSupabaseAuthConfigured() && supabaseUserId) {
     const sync = await updateAuthPassword(supabaseUserId, newPassword)
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
+
   const hash = bcrypt.hashSync(String(newPassword), 10)
   db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
     .run(hash, supabaseUserId, user.id)
 
   audit(user.id, user.username, 'password_reset_complete', 'user', user.id, {
-    channel,
-    destination: destination ? `${channel}:verified` : channel,
+    method: 'otp',
   })
 
   return ok(res, { message: 'Password reset successfully.' })

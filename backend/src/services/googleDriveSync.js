@@ -117,7 +117,7 @@ function getDriveSyncConfig() {
     refreshToken: decryptSecret(settings[SETTINGS_KEYS.refreshTokenEncrypted] || ''),
     folderName,
     rootFolderId: trim(settings[SETTINGS_KEYS.rootFolderId]),
-    deleteMissing: toBool(settings[SETTINGS_KEYS.deleteMissing], false),
+    deleteMissing: toBool(settings[SETTINGS_KEYS.deleteMissing], true),
     syncIntervalSeconds: clamp(settings[SETTINGS_KEYS.syncIntervalSeconds], 30, 3600, 120),
     connectedEmail: trim(settings[SETTINGS_KEYS.connectedEmail]),
     connectedName: trim(settings[SETTINGS_KEYS.connectedName]),
@@ -305,6 +305,11 @@ async function fetchDriveUserProfile(config, accessToken = '') {
 }
 
 async function findDriveItem(config, parentId, name, mimeType) {
+  const items = await findDriveItems(config, parentId, name, mimeType)
+  return items.length ? items[0] : null
+}
+
+async function findDriveItems(config, parentId, name, mimeType) {
   const queryParts = [
     `name = '${escapeDriveQueryValue(name)}'`,
     `'${escapeDriveQueryValue(parentId)}' in parents`,
@@ -314,9 +319,30 @@ async function findDriveItem(config, parentId, name, mimeType) {
   const query = queryParts.join(' and ')
   const json = await driveApiRequest(
     config,
-    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,md5Checksum,size,modifiedTime)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,md5Checksum,size,modifiedTime)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`,
   )
-  return Array.isArray(json?.files) && json.files.length ? json.files[0] : null
+  return Array.isArray(json?.files) ? json.files : []
+}
+
+async function listDriveChildren(config, parentId) {
+  const query = `'${escapeDriveQueryValue(parentId)}' in parents and trashed = false`
+  const json = await driveApiRequest(
+    config,
+    `${GOOGLE_DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,md5Checksum,size,modifiedTime)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+  )
+  return Array.isArray(json?.files) ? json.files : []
+}
+
+async function removeDuplicateDriveItems(config, items, keepId = '') {
+  const keep = trim(keepId)
+  let removed = 0
+  for (const item of items || []) {
+    const currentId = trim(item?.id || '')
+    if (!currentId || currentId === keep) continue
+    await removeDriveFile(config, currentId)
+    removed += 1
+  }
+  return removed
 }
 
 async function createDriveFolder(config, parentId, name) {
@@ -333,8 +359,10 @@ async function createDriveFolder(config, parentId, name) {
 
 async function ensureRootFolder(config) {
   if (config.rootFolderId) return config.rootFolderId
-  const existing = await findDriveItem(config, 'root', config.folderName, 'application/vnd.google-apps.folder')
+  const existingItems = await findDriveItems(config, 'root', config.folderName, 'application/vnd.google-apps.folder')
+  const existing = existingItems[0] || null
   if (existing?.id) {
+    await removeDuplicateDriveItems(config, existingItems, existing.id)
     writeSettingsMap({ [SETTINGS_KEYS.rootFolderId]: existing.id })
     return existing.id
   }
@@ -427,8 +455,12 @@ async function ensureRemoteDirectories(config, mappings, rootFolderId, relativeD
     const parentRelative = path.posix.dirname(relativeDir) === '.' ? '' : path.posix.dirname(relativeDir)
     const parentRemoteId = remoteDirs[parentRelative] || rootFolderId
     const folderName = path.posix.basename(relativeDir)
-    const found = await findDriveItem(config, parentRemoteId, folderName, 'application/vnd.google-apps.folder')
+    const foundItems = await findDriveItems(config, parentRemoteId, folderName, 'application/vnd.google-apps.folder')
+    const found = foundItems[0] || null
     const folder = found?.id ? found : await createDriveFolder(config, parentRemoteId, folderName)
+    if (found?.id) {
+      await removeDuplicateDriveItems(config, foundItems, found.id)
+    }
     remoteDirs[relativeDir] = folder.id
     upsertDriveSyncEntry({
       relativePath: relativeDir,
@@ -508,6 +540,17 @@ async function runDriveSync(reason = 'manual') {
     }
     const remoteDirs = await ensureRemoteDirectories(config, mappings, rootFolderId, items.directories)
 
+    let removed = 0
+    if (legacyFlatLayout && config.deleteMissing) {
+      const rootChildren = await listDriveChildren(config, rootFolderId)
+      for (const child of rootChildren) {
+        if (trim(child?.name) === DATA_FOLDER_NAME) continue
+        if (!trim(child?.id)) continue
+        await removeDriveFile(config, child.id)
+        removed += 1
+      }
+    }
+
     let uploaded = 0
     let updated = 0
     let skipped = 0
@@ -526,13 +569,36 @@ async function runDriveSync(reason = 'manual') {
       }
 
       let remote = null
+      const siblingMatches = await findDriveItems(config, parentRemoteId, path.posix.basename(file.relativePath), null)
+      const reusable = siblingMatches.find((item) => trim(item?.mimeType) !== 'application/vnd.google-apps.folder')
       if (existing?.remote_file_id) {
-        remote = await updateDriveFile(config, existing.remote_file_id, file)
+        try {
+          remote = await updateDriveFile(config, existing.remote_file_id, file)
+          updated += 1
+        } catch (error) {
+          const message = String(error?.message || '')
+          if (!/not found|file not found|404/i.test(message)) throw error
+          if (reusable?.id) {
+            remote = await updateDriveFile(config, reusable.id, file)
+            updated += 1
+          } else {
+            remote = await uploadDriveFile(config, parentRemoteId, file)
+            uploaded += 1
+          }
+        }
+      } else if (reusable?.id) {
+        remote = await updateDriveFile(config, reusable.id, file)
         updated += 1
       } else {
         remote = await uploadDriveFile(config, parentRemoteId, file)
         uploaded += 1
       }
+
+      await removeDuplicateDriveItems(
+        config,
+        siblingMatches.filter((item) => trim(item?.mimeType) !== 'application/vnd.google-apps.folder'),
+        trim(remote?.id) || existing?.remote_file_id || reusable?.id || '',
+      )
 
       upsertDriveSyncEntry({
         relativePath: file.relativePath,
@@ -552,7 +618,6 @@ async function runDriveSync(reason = 'manual') {
       }
     }
 
-    let removed = 0
     if (config.deleteMissing) {
       const livePaths = new Set(['', ...items.directories, ...items.files.map((file) => file.relativePath)])
       const staleEntries = Object.entries(mappings)
@@ -659,7 +724,7 @@ function beginGoogleDriveOAuth(payload = {}) {
     clientId: trim(payload.clientId),
     clientSecret: trim(payload.clientSecret),
     folderName: trim(payload.folderName) || 'Business OS Sync',
-    deleteMissing: !!payload.deleteMissing,
+    deleteMissing: payload.deleteMissing == null ? true : !!payload.deleteMissing,
     syncIntervalSeconds: clamp(payload.syncIntervalSeconds, 30, 3600, 120),
     enabled: payload.enabled !== false,
     redirectUri: trim(payload.redirectUri),

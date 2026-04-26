@@ -83,17 +83,8 @@ export async function login({ username, password, sessionDuration, clientTime, d
 export async function logout() {
   return apiFetch('POST', '/api/auth/logout', {})
 }
-export async function requestLoginCode(payload) {
-  return apiFetch('POST', '/api/auth/login/request-code', payload || {})
-}
-export async function verifyLoginCode(payload) {
-  return apiFetch('POST', '/api/auth/login/verify-code', payload || {})
-}
-export async function requestPasswordResetCode(payload) {
-  return apiFetch('POST', '/api/auth/password-reset/request', payload || {})
-}
-export async function completePasswordReset(payload) {
-  return apiFetch('POST', '/api/auth/password-reset/complete', payload || {})
+export async function resetPasswordWithOtp(payload) {
+  return apiFetch('POST', '/api/auth/password-reset/otp', payload || {})
 }
 export async function getVerificationCapabilities() {
   return apiFetch('GET', '/api/auth/verification-capabilities')
@@ -591,10 +582,6 @@ export const disconnectUserAuthProvider = (id, d) =>
   route('users:disconnectProvider', () => apiFetch('POST', `/api/users/${id}/provider-disconnect`, d), null, true)
 export const changeUserPassword = (id, d) =>
   route('users:changePassword', () => apiFetch('POST', `/api/users/${id}/change-password`, d), null, true)
-export const requestUserContactVerification = (id, d) =>
-  route('users:contactVerification:request', () => apiFetch('POST', `/api/users/${id}/contact-verification/request`, d), null, true)
-export const confirmUserContactVerification = (id, d) =>
-  route('users:contactVerification:confirm', () => apiFetch('POST', `/api/users/${id}/contact-verification/confirm`, d), null, true)
 export const resetPassword = (id, d)  => route('users:resetPassword', () => apiFetch('POST', `/api/users/${id}/reset-password`, d), null, true)
 
 // ─── Roles ────────────────────────────────────────────────────────────────────

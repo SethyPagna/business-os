@@ -539,7 +539,7 @@ function GoogleDriveSyncSection({ t, notify }) {
     clientId: '',
     clientSecret: '',
     folderName: 'Business OS Sync',
-    deleteMissing: false,
+    deleteMissing: true,
     enabled: true,
     syncIntervalSeconds: 120,
   })
