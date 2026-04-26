@@ -227,7 +227,13 @@ function FolderBrowserPanel({
               </button>
               <div className="mt-1 truncate text-[11px] font-mono text-gray-400">{dir.fullPath}</div>
               <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-gray-400">{browseState.isRootList ? copy('drive', 'Drive') : copy('folder', 'Folder')}</span>
+                <span className="text-[11px] text-gray-400">
+                  {dir.kind === 'drive'
+                    ? copy('drive', 'Drive')
+                    : browseState.isRootList
+                      ? copy('shortcut', 'Shortcut')
+                      : copy('folder', 'Folder')}
+                </span>
                 <button
                   className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50"
                   onClick={() => onSelect(dir.fullPath)}
@@ -454,7 +460,7 @@ function DataFolderLocation({ t, notify }) {
       {showAdvancedBrowser ? (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.dataRootParent || info?.dataRoot)} disabled={busy}>
-            {copy('browse', 'Current folder')}
+            {copy('open_typed_path', 'Open typed path')}
           </button>
           <button className="btn-secondary w-full text-xs sm:w-auto" onClick={openDriveBrowser} disabled={busy}>
             {copy('browse_drives', 'Browse drives')}

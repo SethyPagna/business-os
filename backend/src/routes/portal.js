@@ -11,6 +11,7 @@ const { tryParse, broadcast } = require('../helpers')
 const { authToken } = require('../middleware')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils')
 const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')
+const { checkRateLimit } = require('../security')
 
 const router = express.Router()
 
@@ -187,6 +188,7 @@ function buildPortalConfig() {
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
     showMembership: normalizeBoolean(settings.customer_portal_show_membership, true),
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
+    showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     priceDisplay: settings.customer_portal_price_display || settings.display_currency || 'USD',
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(settings.customer_portal_refresh_seconds, 20)))),
     stockThresholdMode: settings.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
@@ -334,7 +336,12 @@ function sanitizeScreenshots(value) {
   return screenshots
     .map((entry) => String(entry || '').trim())
     .filter((entry) => entry && entry.length <= 2_000_000)
-    .filter((entry) => entry.startsWith('data:image/') || /^https?:\/\//i.test(entry))
+    .filter((entry) => {
+      if (entry.startsWith('data:image/')) return true
+      if (entry.startsWith('/uploads/')) return true
+      if (!/^https?:\/\//i.test(entry)) return false
+      return /\.(png|jpe?g|webp|gif|bmp)(\?.*)?$/i.test(entry)
+    })
     .slice(0, 8)
 }
 
@@ -355,6 +362,19 @@ function getVisitorFingerprint(req) {
   const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().slice(0, 120)
   const ua = String(req.get('user-agent') || '').trim().slice(0, 240)
   return `${ip}|${ua || 'unknown-agent'}`
+}
+
+function getClientKey(req, suffix = '') {
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown-ip'
+  return `${ip}|${String(suffix || '').trim().toLowerCase()}`
+}
+
+function applyPortalRateLimit(req, res, { name, max, windowMs, key = '' }) {
+  const result = checkRateLimit(name, getClientKey(req, key || name), max, windowMs)
+  if (result.allowed) return true
+  res.setHeader('Retry-After', String(result.retryAfterSeconds))
+  res.status(429).json({ error: `Too many requests. Try again in ${result.retryAfterSeconds} seconds.` })
+  return false
 }
 
 router.get('/config', (_req, res) => {
@@ -424,6 +444,7 @@ router.get('/ai/status', (_req, res) => {
 
 router.post('/ai/chat', async (req, res) => {
   try {
+    if (!applyPortalRateLimit(req, res, { name: 'portal:ai_chat', max: 20, windowMs: 60 * 1000 })) return
     const config = buildPortalConfig()
     if (!config.aiEnabled) {
       return res.status(403).json({ error: 'Portal AI is currently disabled' })
@@ -498,6 +519,7 @@ router.post('/ai/chat', async (req, res) => {
 })
 
 router.get('/membership/:membershipNumber', (req, res) => {
+  if (!applyPortalRateLimit(req, res, { name: 'portal:membership_lookup', max: 45, windowMs: 60 * 1000 })) return
   const membershipNumber = String(req.params.membershipNumber || '').trim()
   if (!membershipNumber) return res.status(400).json({ error: 'Membership number is required' })
 
@@ -640,6 +662,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
 })
 
 router.post('/submissions', (req, res) => {
+  if (!applyPortalRateLimit(req, res, { name: 'portal:submissions', max: 12, windowMs: 15 * 60 * 1000 })) return
   const config = buildPortalConfig()
   if (!config.submissionEnabled) {
     return res.status(403).json({ error: 'Customer submissions are currently disabled' })

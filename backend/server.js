@@ -29,6 +29,7 @@ const {
   setHtmlNoCacheHeaders,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
+  setUploadStaticHeaders,
   mapServerError,
 } = require('./src/serverUtils')
 const { PORT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN } = require('./src/config')
@@ -79,7 +80,7 @@ function mountStaticAssets(target) {
   // Uploads stay on disk outside the bundled frontend and are served directly.
   // The compiled SPA is only mounted when a frontend build exists.
   fs.mkdirSync(UPLOADS_PATH, { recursive: true })
-  target.use('/uploads', express.static(UPLOADS_PATH, { maxAge: '7d' }))
+  target.use('/uploads', express.static(UPLOADS_PATH, { maxAge: '7d', setHeaders: setUploadStaticHeaders }))
   if (!FRONTEND_DIST_EXISTS) return
 
   target.use(express.static(FRONTEND_DIST, {
@@ -182,7 +183,7 @@ function getStartupBanner() {
   Node:     ${process.version}
   DB:       ${DB_PATH}
   Uploads:  ${UPLOADS_PATH}
-  Token:    ${SYNC_TOKEN ? '(set)' : '(none - open access)'}
+  Token:    ${SYNC_TOKEN ? '(legacy token set)' : '(signed browser sessions)'}
   Frontend: ${frontendLine}
 ==========================================
   Default login: admin / admin

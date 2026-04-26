@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { authToken, assetUpload, compressUpload } = require('../middleware')
+const { authToken, assetUpload, compressUpload, validateUploadedFile } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
 const {
   deleteFileAsset,
@@ -44,7 +44,7 @@ router.get('/', authToken, async (req, res) => {
   }
 })
 
-router.post('/upload', authToken, assetUpload.single('file'), compressUpload, async (req, res) => {
+router.post('/upload', authToken, assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
   try {
     if (!req.file) return err(res, 'No file uploaded')
     const actor = getActor(req)

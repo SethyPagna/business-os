@@ -19,7 +19,7 @@ const express = require('express')
 const bcrypt = require('bcryptjs')
 const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
-const { authToken, upload, compressUpload } = require('../middleware')
+const { authToken, upload, compressUpload, validateUploadedFile } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
 const { checkRateLimit, resetRateLimit } = require('../security')
 const {
@@ -103,23 +103,11 @@ function canManageTarget(actor, target) {
 
 /**
  * 1.3 Actor Resolution
- * 1.3.1 Resolve actor identity from payload or query metadata.
- * Used because legacy clients pass actor in body/query instead of auth session.
+ * 1.3.1 Resolve actor identity from the signed auth session.
+ * User-management routes no longer trust body/query actor metadata.
  */
-function getActorFromPayload(payload = {}, query = {}) {
-  const actorId = Number(payload?.userId || query?.userId || 0)
-  if (!actorId) return null
-  return db.prepare(`
-    SELECT u.id, u.name, u.username, u.permissions, u.role_id, r.permissions AS role_permissions, r.code AS role_code
-    FROM users u
-    LEFT JOIN roles r ON r.id = u.role_id
-    WHERE u.id = ? AND u.is_active = 1 AND u.deleted_at IS NULL
-  `).get(actorId)
-}
-
 function getActorFromRequest(req) {
-  if (req?.user?.id) return req.user
-  return getActorFromPayload(req.body || {}, req.query || {})
+  return req?.user?.id ? req.user : null
 }
 
 /**
@@ -276,7 +264,7 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
   })
 })
 
-router.post('/users/avatar-upload', authToken, upload.single('image'), compressUpload, (req, res) => {
+router.post('/users/avatar-upload', authToken, upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   registerUploadFromRequest(req.file, req.body || {})
     .then((asset) => ok(res, { path: asset.public_path, asset }))

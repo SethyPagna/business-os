@@ -51,57 +51,27 @@ const FALLBACK_COPY = {
 }
 
 const SIDEBAR_COLORS = [
-  ['', 'Default (auto)', '#e5e7eb'],
-  ['#ffffff', 'White', '#e5e7eb'],
-  ['#f8fafc', 'Off White', '#e2e8f0'],
-  ['#f1f5f9', 'Light Gray', '#cbd5e1'],
-  ['#1e293b', 'Dark Slate', '#334155'],
-  ['#0f172a', 'Midnight', '#1e293b'],
-  ['#18181b', 'Zinc Dark', '#27272a'],
-  ['#1c1917', 'Stone Dark', '#292524'],
-  ['#1e1b4b', 'Indigo Dark', '#312e81'],
-  ['#14532d', 'Forest Dark', '#166534'],
-  ['#7f1d1d', 'Crimson Dark', '#991b1b'],
-  ['#0c4a6e', 'Ocean Dark', '#075985'],
-  ['#3730a3', 'Indigo Mid', '#4338ca'],
-  ['#1d4ed8', 'Blue Mid', '#2563eb'],
-  ['#166534', 'Green Mid', '#15803d'],
-  ['#0e7490', 'Cyan Mid', '#0891b2'],
+  ['', 'Auto', '#e5e7eb'],
+  ['#f8fafc', 'Light', '#dbe4ef'],
+  ['#dbeafe', 'Mid light', '#93c5fd'],
+  ['#1e293b', 'Mid dark', '#334155'],
+  ['#0f172a', 'Dark', '#1e293b'],
 ]
 
 const PAGE_BG_COLORS = [
-  ['', 'Default (auto)', '#e5e7eb'],
-  ['#ffffff', 'White', '#e5e7eb'],
-  ['#f9fafb', 'Gray 50', '#e5e7eb'],
-  ['#f1f5f9', 'Slate 100', '#cbd5e1'],
-  ['#faf5ff', 'Lavender', '#e9d5ff'],
-  ['#fdf2f8', 'Rose Tint', '#fbcfe8'],
-  ['#f0fdf4', 'Mint', '#bbf7d0'],
-  ['#eff6ff', 'Sky Tint', '#bfdbfe'],
-  ['#fff7ed', 'Warm Sand', '#fed7aa'],
-  ['#fefce8', 'Butter', '#fef08a'],
-  ['#1a1a2e', 'Dark Navy', '#16213e'],
-  ['#0f172a', 'Slate Dark', '#1e293b'],
-  ['#18181b', 'Zinc Dark', '#27272a'],
-  ['#1c1917', 'Stone Dark', '#292524'],
-  ['#0a0a0a', 'Almost Black', '#171717'],
-  ['#111827', 'Gray Dark', '#1f2937'],
+  ['', 'Auto', '#e5e7eb'],
+  ['#ffffff', 'Light', '#e5e7eb'],
+  ['#f1f5f9', 'Mid light', '#cbd5e1'],
+  ['#1f2937', 'Mid dark', '#374151'],
+  ['#0f172a', 'Dark', '#1e293b'],
 ]
 
 const SIDEBAR_TEXT_COLORS = [
-  ['', 'Default (auto)', '#d1d5db'],
-  ['#ffffff', 'White', '#e5e7eb'],
-  ['#f8fafc', 'Off White', '#e2e8f0'],
-  ['#e2e8f0', 'Slate 200', '#cbd5e1'],
-  ['#cbd5e1', 'Slate 300', '#94a3b8'],
-  ['#111827', 'Gray 900', '#374151'],
-  ['#1f2937', 'Gray 800', '#4b5563'],
-  ['#0f766e', 'Teal 700', '#115e59'],
-  ['#14532d', 'Forest 900', '#166534'],
-  ['#7c2d12', 'Orange 900', '#9a3412'],
-  ['#7f1d1d', 'Red 900', '#991b1b'],
-  ['#1d4ed8', 'Blue 700', '#2563eb'],
-  ['#4338ca', 'Indigo 700', '#4f46e5'],
+  ['', 'Auto', '#d1d5db'],
+  ['#ffffff', 'Light', '#e5e7eb'],
+  ['#cbd5e1', 'Mid light', '#94a3b8'],
+  ['#334155', 'Mid dark', '#475569'],
+  ['#111827', 'Dark', '#374151'],
 ]
 
 const DEFAULT_PAYMENT_METHODS = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
@@ -112,24 +82,10 @@ const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pi
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
 
 const ACCENT_COLORS = [
-  ['#2563eb', 'Blue'],
-  ['#1d4ed8', 'Navy'],
-  ['#7c3aed', 'Purple'],
-  ['#9333ea', 'Violet'],
-  ['#db2777', 'Pink'],
-  ['#e11d48', 'Rose'],
-  ['#dc2626', 'Red'],
-  ['#ea580c', 'Orange'],
-  ['#d97706', 'Amber'],
-  ['#ca8a04', 'Yellow'],
-  ['#16a34a', 'Green'],
-  ['#15803d', 'Forest'],
-  ['#0891b2', 'Cyan'],
-  ['#0f766e', 'Teal'],
-  ['#0284c7', 'Sky'],
-  ['#475569', 'Slate'],
-  ['#57534e', 'Stone'],
-  ['#374151', 'Gray'],
+  ['#2563eb', 'Light'],
+  ['#7c3aed', 'Mid light'],
+  ['#0f766e', 'Mid dark'],
+  ['#1f2937', 'Dark'],
 ]
 
 const TIMEZONE_OPTIONS = [
@@ -354,7 +310,10 @@ export default function Settings() {
     }
   }, [user])
 
-  const navItems = useMemo(() => orderNavItems(NAV_ITEMS, parseNavSetting(form.ui_nav_order, [])), [form.ui_nav_order])
+  const navItems = useMemo(
+    () => orderNavItems(NAV_ITEMS, parseNavSetting(form.ui_nav_order, [])).filter((item) => item.id !== 'catalog'),
+    [form.ui_nav_order],
+  )
   const mobilePinned = useMemo(() => parseNavSetting(form.ui_mobile_pinned, DEFAULT_MOBILE_PINNED).slice(0, 4), [form.ui_mobile_pinned])
   const mobilePinnedItems = useMemo(() => {
     const byId = new Map(navItems.map((item) => [item.id, item]))
@@ -573,16 +532,16 @@ export default function Settings() {
 
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('appearance')}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
-              <div className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('theme')}</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('theme')}</div>
+              <div className="grid grid-cols-2 gap-2 sm:max-w-sm">
                 {THEME_OPTION_KEYS.map(([themeValue, copyKey, defaultLabel]) => (
                   <button
                     key={themeValue}
                     type="button"
                     onClick={() => setValue('theme', themeValue)}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors ${form.theme === themeValue ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${form.theme === themeValue ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>
@@ -591,14 +550,14 @@ export default function Settings() {
             </div>
 
             <div>
-              <div className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('language')}</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('language')}</div>
+              <div className="grid grid-cols-2 gap-2 sm:max-w-sm">
                 {LANGUAGE_OPTION_KEYS.map(([langCode, copyKey, defaultLabel]) => (
                   <button
                     key={langCode}
                     type="button"
                     onClick={() => setValue('language', langCode)}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors ${form.language === langCode ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${form.language === langCode ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>
@@ -752,21 +711,27 @@ export default function Settings() {
             <div className="sm:col-span-2 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-zinc-900/40">
               <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Typography preview</div>
               <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-zinc-800" style={{ fontFamily: previewFontFamily, fontSize: `${previewBaseSize}px` }}>
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">{typographyPreview.eyebrow}</div>
-                <div className="mt-2 font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>
-                  {typographyPreview.title}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs uppercase tracking-[0.16em] text-gray-400">{typographyPreview.eyebrow}</div>
+                    <div className="mt-1 truncate font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>
+                      {typographyPreview.title}
+                    </div>
+                  </div>
+                  <div className="rounded-full bg-blue-100 px-3 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" style={{ fontSize: `${previewChipSize}px` }}>
+                    {typographyPreview.chip}
+                  </div>
                 </div>
-                <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-slate-600 dark:bg-zinc-700 dark:text-zinc-200" style={{ fontSize: `${previewSidebarSize}px` }}>
-                  {typographyPreview.sidebar}
-                </div>
-                <div className="mt-3 font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewSectionSize}px` }}>
-                  {typographyPreview.section}
-                </div>
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                  {typographyPreview.body}
-                </p>
-                <div className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" style={{ fontSize: `${previewChipSize}px` }}>
-                  {typographyPreview.chip}
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900/60">
+                  <div className="truncate text-slate-600 dark:text-zinc-200" style={{ fontSize: `${previewSidebarSize}px` }}>
+                    {typographyPreview.sidebar}
+                  </div>
+                  <div className="mt-2 truncate font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewSectionSize}px` }}>
+                    {typographyPreview.section}
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    {typographyPreview.body}
+                  </p>
                 </div>
               </div>
             </div>
@@ -875,7 +840,12 @@ export default function Settings() {
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}</p>
 
           <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
-            <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">{copy('mobilePinned', 'Pinned on mobile')}</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">{copy('mobilePinned', 'Pinned on mobile')}</div>
+              <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={resetNavigationLayout}>
+                {copy('navReset', 'Reset navigation')}
+              </button>
+            </div>
             <div className="mt-2 grid gap-2">
               {mobilePinnedItems.length ? mobilePinnedItems.map((item, index) => (
                 <div
@@ -888,7 +858,7 @@ export default function Settings() {
                     setDragPinnedId(null)
                   }}
                   onDragEnd={() => setDragPinnedId(null)}
-                  className={`flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/40 ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
+                  className={`flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-2.5 py-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/40 ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
                 >
                   <span className="cursor-grab text-gray-400" title={copy('dragToReorder', 'Drag to reorder')}>
                     <GripVertical className="h-4 w-4" />
@@ -902,7 +872,7 @@ export default function Settings() {
                   </span>
                   <button
                     type="button"
-                    className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
+                    className="btn-secondary flex h-7 w-7 items-center justify-center px-0 py-0"
                     onClick={() => movePinnedItem(item.id, 'up')}
                     disabled={index === 0}
                     aria-label={copy('moveUp', 'Up')}
@@ -912,7 +882,7 @@ export default function Settings() {
                   </button>
                   <button
                     type="button"
-                    className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
+                    className="btn-secondary flex h-7 w-7 items-center justify-center px-0 py-0"
                     onClick={() => movePinnedItem(item.id, 'down')}
                     disabled={index === mobilePinnedItems.length - 1}
                     aria-label={copy('moveDown', 'Down')}
@@ -929,67 +899,69 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="grid gap-2 lg:grid-cols-2">
+          <div className="grid gap-2">
             {navItems.map((item, index) => {
               const isPinned = mobilePinned.includes(item.id)
               const Icon = SETTINGS_NAV_ICONS[item.id] || SettingsIcon
               return (
-                <div key={item.id} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/70">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 rounded-lg bg-white p-2 text-blue-600 shadow-sm dark:bg-gray-900 dark:text-blue-400">
+                <div key={item.id} className="rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/70">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg bg-white p-2 text-blue-600 shadow-sm dark:bg-gray-900 dark:text-blue-400">
                       <Icon className="h-4 w-4" />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{getSettingsNavLabel(item, t)}</div>
-                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {copy('desktopOrder', 'Sidebar order')}: {index + 1} • {isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'In menu')}
-                      </div>
+                    <div className="min-w-0 flex flex-1 items-center gap-2">
+                      <div className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-100">{getSettingsNavLabel(item, t)}</div>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-500 shadow-sm dark:bg-gray-900 dark:text-gray-300">
+                        {index + 1}
+                      </span>
                     </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
-                      onClick={() => moveNavItem(item.id, 'up')}
-                      disabled={index === 0}
-                      aria-label={copy('moveUp', 'Up')}
-                      title={copy('moveUp', 'Up')}
-                    >
-                      <ArrowUp className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
-                      onClick={() => moveNavItem(item.id, 'down')}
-                      disabled={index === navItems.length - 1}
-                      aria-label={copy('moveDown', 'Down')}
-                      title={copy('moveDown', 'Down')}
-                    >
-                      <ArrowDown className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className={`flex h-8 min-w-[2.25rem] items-center justify-center rounded-md border px-2 py-0 transition-colors ${isPinned ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
-                      onClick={() => toggleMobilePinned(item.id)}
-                      aria-label={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
-                      title={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
-                    >
-                      {isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
-                    </button>
+                    <div className="ml-auto flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="btn-secondary flex h-7 w-7 items-center justify-center px-0 py-0"
+                        onClick={() => moveNavItem(item.id, 'up')}
+                        disabled={index === 0}
+                        aria-label={copy('moveUp', 'Up')}
+                        title={copy('moveUp', 'Up')}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary flex h-7 w-7 items-center justify-center px-0 py-0"
+                        onClick={() => moveNavItem(item.id, 'down')}
+                        disabled={index === navItems.length - 1}
+                        aria-label={copy('moveDown', 'Down')}
+                        title={copy('moveDown', 'Down')}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className={`flex h-7 w-7 items-center justify-center rounded-md border px-0 py-0 transition-colors ${isPinned ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                        onClick={() => toggleMobilePinned(item.id)}
+                        aria-label={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
+                        title={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
+                      >
+                        {isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
             })}
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              {copy('mobilePinned', 'Pinned on mobile')}: {mobilePinnedItems.map((item) => getSettingsNavLabel(item, t)).join(', ')}
-            </div>
-            <button type="button" className="btn-secondary text-sm" onClick={resetNavigationLayout}>
-              {copy('navReset', 'Reset navigation')}
-            </button>
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+            {mobilePinnedItems.map((item) => (
+              <span key={`pin-summary-${item.id}`} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 dark:border-gray-700 dark:bg-gray-900">
+                {(() => {
+                  const Icon = SETTINGS_NAV_ICONS[item.id] || SettingsIcon
+                  return <Icon className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                })()}
+                <span>{getSettingsNavLabel(item, t)}</span>
+              </span>
+            ))}
           </div>
         </div>
 

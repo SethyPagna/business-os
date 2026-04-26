@@ -79,6 +79,7 @@ export default function Login() {
     email: false,
     sms: false,
     supabaseAuth: false,
+    supabaseEmailAuth: false,
     googleOauth: false,
     facebookOauth: false,
   })
@@ -115,6 +116,7 @@ export default function Login() {
           email: result.email !== false,
           sms: result.sms === true,
           supabaseAuth: result.supabase_auth === true,
+          supabaseEmailAuth: result.supabase_email_auth === true,
           googleOauth: result.google_oauth === true,
           facebookOauth: result.facebook_oauth === true,
         })
@@ -569,15 +571,18 @@ export default function Login() {
               </div>
               <div>{tr('signin_method_password', 'Password login')}</div>
               <div>{tr('signin_method_otp', 'OTP (required for users who enabled 2FA)')}</div>
-              <div>{tr('signin_method_code', 'Verification code sign-in')}</div>
+              {verificationCaps.email ? <div>{tr('signin_method_code', 'Verification code sign-in')}</div> : null}
               {verificationCaps.googleOauth ? <div>{tr('signin_method_google', 'Google sign-in')}</div> : null}
               {verificationCaps.facebookOauth ? <div>{tr('signin_method_facebook', 'Facebook sign-in')}</div> : null}
               <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {tr('email', 'Email')}: {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
+                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.supabaseEmailAuth ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300'}`}>
+                  {tr('email_login', 'Email login')}: {verificationCaps.supabaseEmailAuth ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
                 </span>
                 <span className={`rounded-full px-2 py-0.5 ${verificationCaps.supabaseAuth ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300'}`}>
                   {tr('supabase_auth', 'Supabase Auth')}: {verificationCaps.supabaseAuth ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                  {tr('email_code_sender', 'Email codes')}: {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'off')}
                 </span>
               </div>
             </div>
@@ -606,7 +611,7 @@ export default function Login() {
               </select>
               <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
                 <span className={`rounded-full px-2 py-0.5 ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {tr('email', 'Email')} {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
+                  {tr('email_code_sender', 'Email codes')} {verificationCaps.email ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'off')}
                 </span>
               </div>
             </div>

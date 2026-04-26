@@ -942,7 +942,7 @@ router.post('/browse-dir', authToken, (req, res) => {
 
     return Array.from(roots)
       .sort((a, b) => a.localeCompare(b))
-      .map((fullPath) => ({ name: fullPath, fullPath }))
+      .map((fullPath) => ({ name: fullPath, fullPath, kind: 'drive' }))
   }
 
   const listDriveRoots = () => {
@@ -951,9 +951,22 @@ router.post('/browse-dir', authToken, (req, res) => {
       return Array.from(new Set(roots)).map((fullPath) => ({
         name: fullPath === '/' ? 'Root' : fullPath,
         fullPath,
+        kind: 'folder',
       }))
     }
-    return listWindowsFsRoots()
+    const favorites = [
+      { name: 'Desktop', fullPath: path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'Desktop') },
+      { name: 'Documents', fullPath: path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'Documents') },
+      { name: 'Downloads', fullPath: path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'Downloads') },
+      { name: 'Business OS data', fullPath: DATA_ROOT },
+      { name: 'Business OS folder', fullPath: path.resolve(RUNTIME_DIR, '..') },
+    ]
+      .filter((entry) => {
+        try { return entry.fullPath && fs.existsSync(entry.fullPath) } catch (_) { return false }
+      })
+      .map((entry) => ({ ...entry, kind: 'folder' }))
+
+    return [...favorites, ...listWindowsFsRoots()]
   }
 
   if (!requested || requested === '__ROOTS__') {
@@ -970,7 +983,7 @@ router.post('/browse-dir', authToken, (req, res) => {
     const entries = fs.readdirSync(base, { withFileTypes: true })
     const dirs = entries
       .filter(e => e.isDirectory() && !e.name.startsWith('.'))
-      .map(e => ({ name: e.name, fullPath: path.join(base, e.name) }))
+      .map(e => ({ name: e.name, fullPath: path.join(base, e.name), kind: 'folder' }))
     const parent = path.dirname(base)
     const isDriveRoot = process.platform === 'win32' && /^[A-Za-z]:\\?$/.test(base)
     res.json({ base, parent: isDriveRoot ? '__ROOTS__' : (parent !== base ? parent : null), dirs, isRootList: false })

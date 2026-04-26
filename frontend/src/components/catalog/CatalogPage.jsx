@@ -10,10 +10,12 @@ import {
   Facebook,
   Globe,
   HelpCircle,
+  Images,
   Instagram,
   Mail,
   MapPin,
   Phone,
+  Plus,
   RotateCcw,
   Save,
   Search,
@@ -74,6 +76,7 @@ const PORTAL_TEXT = {
     addressLink: 'Address link',
     addressLinkHint: 'Optional external map or directions link opened when customers tap the address.',
     media: 'Images',
+    mediaSection: 'Media',
     logoImage: 'Logo image',
     coverImage: 'Cover image',
     uploadImage: 'Upload image',
@@ -96,6 +99,7 @@ const PORTAL_TEXT = {
     showCatalog: 'Show product catalog',
     showMembership: 'Show membership lookup',
     showPrices: 'Show selling prices',
+    showOutOfStockProducts: 'Show out-of-stock products',
     priceDisplay: 'Price display',
     points: 'Points settings',
     pointsPerUsd: 'Points per USD',
@@ -358,6 +362,7 @@ const PORTAL_TEXT_EXTRA = {
     assistantPrompt: 'Extra prompt instructions',
     assistantPromptHint: 'Optional store-specific rules, such as tone or what categories to prioritize.',
     faq: 'FAQ',
+    faqSection: 'FAQ editor',
     faqTitle: 'FAQ title',
     faqSettings: 'FAQ settings',
     faqHint: 'Add your most common customer questions here. Customers can open each answer one by one.',
@@ -389,6 +394,8 @@ const PORTAL_TEXT_EXTRA = {
     assistantReviews: 'Online review summary',
     assistantReset: 'Clear',
     assistantOpen: 'Open assistant',
+    addStarterSet: 'Starter set',
+    addAiStarterSet: 'AI starter',
   },
   km: {
     customerUrlHint: 'កំណត់ path សាធារណៈផ្ទាល់ខ្លួននៅទីនេះ ហើយបង្ហោះ path នេះតាម Funnel សម្រាប់អតិថិជន ដើម្បីឲ្យតំណអតិថិជនពិបាកទាយពីផ្នែកគ្រប់គ្រង។',
@@ -487,6 +494,7 @@ const DEFAULT_CONFIG = {
   showCatalog: true,
   showMembership: true,
   showPrices: true,
+  showOutOfStockProducts: true,
   priceDisplay: 'USD',
   refreshSeconds: 20,
   stockThresholdMode: 'product',
@@ -582,6 +590,26 @@ function buildFaqStarterItems() {
       id: `faq-${Date.now()}-5`,
       question: 'How can I contact Leang Cosmetics for more accurate advice?',
       answer: 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.',
+    },
+  ]
+}
+
+function buildAiFaqStarterItems() {
+  return [
+    {
+      id: `faq-ai-${Date.now()}-1`,
+      question: 'What details help the AI recommend better products?',
+      answer: 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.',
+    },
+    {
+      id: `faq-ai-${Date.now()}-2`,
+      question: 'Does the AI only recommend products available at Leang Cosmetics?',
+      answer: 'Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.',
+    },
+    {
+      id: `faq-ai-${Date.now()}-3`,
+      question: 'Should I trust the AI as medical or skin-treatment advice?',
+      answer: 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.',
     },
   ]
 }
@@ -707,6 +735,7 @@ function buildDraft(config) {
     customer_portal_show_catalog: !!config.showCatalog,
     customer_portal_show_membership: !!config.showMembership,
     customer_portal_show_prices: !!config.showPrices,
+    customer_portal_show_out_of_stock_products: !!config.showOutOfStockProducts,
     customer_portal_price_display: config.priceDisplay || 'USD',
     customer_portal_refresh_seconds: String(config.refreshSeconds ?? 20),
     customer_portal_stock_threshold_mode: config.stockThresholdMode || 'product',
@@ -819,6 +848,7 @@ function applyDraft(config, draft) {
     showCatalog: toBoolean(draft.customer_portal_show_catalog, config.showCatalog),
     showMembership: toBoolean(draft.customer_portal_show_membership, config.showMembership),
     showPrices: toBoolean(draft.customer_portal_show_prices, config.showPrices),
+    showOutOfStockProducts: toBoolean(draft.customer_portal_show_out_of_stock_products, config.showOutOfStockProducts ?? true),
     priceDisplay: normalizePriceDisplay(draft.customer_portal_price_display || config.priceDisplay),
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(draft.customer_portal_refresh_seconds, config.refreshSeconds)))),
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
@@ -1596,6 +1626,7 @@ export default function CatalogPage({ publicView = false }) {
       const qty = getBranchQty(product, statusBranch)
       const status = getStockStatus(product, qty, previewConfig)
       if (stockFilter.length && !stockFilter.includes(status)) return false
+      if (!previewConfig.showOutOfStockProducts && status === 'out_of_stock') return false
 
       return true
     })
@@ -1677,8 +1708,7 @@ export default function CatalogPage({ publicView = false }) {
     ])
   }
 
-  function addFaqStarterSet() {
-    const starterItems = buildFaqStarterItems()
+  function mergeFaqStarterItems(starterItems) {
     if (!faqItems.length) {
       setFaqDraft(starterItems)
       return
@@ -1689,6 +1719,14 @@ export default function CatalogPage({ publicView = false }) {
       ...starterItems.filter((item) => !existingQuestions.has(String(item.question || '').trim().toLowerCase())),
     ].slice(0, 24)
     setFaqDraft(merged)
+  }
+
+  function addFaqStarterSet() {
+    mergeFaqStarterItems(buildFaqStarterItems())
+  }
+
+  function addAiFaqStarterSet() {
+    mergeFaqStarterItems(buildAiFaqStarterItems())
   }
 
   function updateFaqItem(itemId, key, value) {
@@ -2863,8 +2901,10 @@ export default function CatalogPage({ publicView = false }) {
 
   const editorSections = [
     ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
+    ['portal-section-media', 'media', copy('mediaSection', 'Media')],
     ['portal-section-display', 'display', copy('display', 'Display settings')],
     ['portal-section-theme', 'about', copy('about', 'About')],
+    ['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')],
     ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
     ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
     ['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')],
@@ -2929,6 +2969,10 @@ export default function CatalogPage({ publicView = false }) {
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showPrices', 'Show selling prices')}</span>
                 <input id="portal-show-prices" name="customer_portal_show_prices" type="checkbox" checked={!!editorDraft.customer_portal_show_prices} onChange={(event) => setDraft('customer_portal_show_prices', event.target.checked)} />
+              </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('showOutOfStockProducts', 'Show out-of-stock products')}</span>
+                <input id="portal-show-out-of-stock-products" name="customer_portal_show_out_of_stock_products" type="checkbox" checked={editorDraft.customer_portal_show_out_of_stock_products !== false} onChange={(event) => setDraft('customer_portal_show_out_of_stock_products', event.target.checked)} />
               </label>
             </div>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -3126,6 +3170,65 @@ export default function CatalogPage({ publicView = false }) {
             </div>
           </div>
 
+          <div id="portal-section-faq" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'faq' ? '' : 'hidden'}`}>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
+                  <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addFaqStarterSet}>
+                    <Sparkles className="h-4 w-4" />
+                    {copy('addStarterSet', 'Starter set')}
+                  </button>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addAiFaqStarterSet}>
+                    <Bot className="h-4 w-4" />
+                    {copy('addAiStarterSet', 'AI starter')}
+                  </button>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addFaqItem}>
+                    <Plus className="h-4 w-4" />
+                    {copy('addFaq', 'Add FAQ')}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-4">
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-700">{copy('faqEnabled', 'Show FAQ section')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
+                </label>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
+                  <input className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
+                </div>
+                <div className="space-y-3">
+                  {faqItems.length ? faqItems.map((item, index) => (
+                    <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-900">{copy('faq', 'FAQ')} #{index + 1}</div>
+                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>Remove</button>
+                      </div>
+                      <div className="mt-3 grid gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
+                          <input className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
+                          <textarea className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
+                        </div>
+                      </div>
+                    </article>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                      {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div id="portal-section-assistant" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'assistant' ? '' : 'hidden'}`}>
             <div className="space-y-5">
               <div>
@@ -3172,54 +3275,6 @@ export default function CatalogPage({ publicView = false }) {
                 <p className="mt-2 text-xs text-slate-500">{copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')}</p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
-                    <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn-secondary text-sm" onClick={addFaqStarterSet}>
-                      {copy('addFaqStarterSet', 'Add FAQ starter set')}
-                    </button>
-                    <button type="button" className="btn-secondary text-sm" onClick={addFaqItem}>{copy('addFaq', 'Add FAQ')}</button>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4">
-                  <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span className="text-sm font-medium text-slate-700">{copy('faqEnabled', 'Show FAQ section')}</span>
-                    <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
-                  </label>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
-                    <input className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
-                  </div>
-                  <div className="space-y-3">
-                    {faqItems.length ? faqItems.map((item, index) => (
-                      <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-slate-900">{copy('faq', 'FAQ')} #{index + 1}</div>
-                          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>Remove</button>
-                        </div>
-                        <div className="mt-3 grid gap-3">
-                          <div>
-                            <label className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
-                            <input className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
-                            <textarea className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
-                          </div>
-                        </div>
-                      </article>
-                    )) : (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                        {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -3256,7 +3311,6 @@ export default function CatalogPage({ publicView = false }) {
             <label className="mt-3 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div>
                 <div className="text-sm font-medium text-slate-700">{copy('translateWidget', 'Enable public translate widget')}</div>
-                <div className="mt-1 text-xs text-slate-500">{copy('translateWidgetHint', 'Public customers can switch languages with Google Translate. Internal Business OS translation stays separate.')}</div>
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
@@ -3266,8 +3320,7 @@ export default function CatalogPage({ publicView = false }) {
             </a>
           </div>
 
-          <div id="portal-section-branding" className={`grid gap-4 ${activeEditorSection === 'branding' || activeEditorSection === 'submissions' ? '' : 'hidden'}`}>
-            <div className={activeEditorSection === 'branding' ? 'grid gap-4' : 'hidden'}>
+          <div id="portal-section-branding" className={activeEditorSection === 'branding' ? 'grid gap-4' : 'hidden'}>
             <div>
               <label htmlFor="portal-business-name" className="block text-sm font-medium text-slate-700">{copy('businessName', 'Business name')}</label>
               <input id="portal-business-name" name="business_name" autoComplete="organization" className="input" value={editorDraft.business_name || ''} onChange={(event) => setDraft('business_name', event.target.value)} />
@@ -3347,7 +3400,6 @@ export default function CatalogPage({ publicView = false }) {
                   <label htmlFor="portal-intro" className="block text-sm font-medium text-slate-700">{copy('portalIntro', 'Portal intro')}</label>
                   <textarea id="portal-intro" name="customer_portal_intro" autoComplete="off" className="input resize-none" rows={3} value={editorDraft.customer_portal_intro || ''} onChange={(event) => setDraft('customer_portal_intro', event.target.value)} />
                 </div>
-
                 <div>
                   <label htmlFor="portal-language" className="block text-sm font-medium text-slate-700">{copy('language', 'Portal language')}</label>
                   <select id="portal-language" name="customer_portal_language" className="input" value={editorDraft.customer_portal_language || 'auto'} onChange={(event) => setDraft('customer_portal_language', event.target.value)}>
@@ -3428,7 +3480,9 @@ export default function CatalogPage({ publicView = false }) {
                 ) : null}
               </div>
             </div>
+          </div>
 
+          <div id="portal-section-media" className={activeEditorSection === 'media' ? 'grid gap-4' : 'hidden'}>
             <ImageField
               label={copy('logoImage', 'Logo image')}
               value={editorDraft.customer_portal_logo_image}
@@ -3463,9 +3517,9 @@ export default function CatalogPage({ publicView = false }) {
               <span className="text-sm font-medium text-slate-700">{copy('showLogo', 'Show logo')}</span>
               <input id="portal-show-logo" name="customer_portal_show_logo" type="checkbox" checked={!!editorDraft.customer_portal_show_logo} onChange={(event) => setDraft('customer_portal_show_logo', event.target.checked)} />
             </label>
-              <div className="mt-3 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">{copy('logoSize', 'Logo size')}</span>
+            <div className="mt-3 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">{copy('logoSize', 'Logo size')}</span>
                 <input
                   id="portal-logo-size"
                   name="customer_portal_logo_size"
@@ -3481,99 +3535,99 @@ export default function CatalogPage({ publicView = false }) {
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">{copy('logoFit', 'Logo fit')}</span>
-                  <select
-                    id="portal-logo-fit"
-                    name="customer_portal_logo_fit"
-                    className="input mt-2"
-                    value={editorDraft.customer_portal_logo_fit || 'cover'}
-                    onChange={(event) => setDraft('customer_portal_logo_fit', event.target.value)}
-                  >
-                    <option value="contain">{copy('fitContain', 'Fit inside')}</option>
-                    <option value="cover">{copy('fitCover', 'Fill frame')}</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Logo zoom</span>
-                  <input
-                    id="portal-logo-zoom"
-                    name="customer_portal_logo_zoom"
-                    className="mt-2 w-full accent-slate-950"
-                    type="range"
-                    min="80"
-                    max="180"
-                    step="5"
-                    value={editorDraft.customer_portal_logo_zoom || '100'}
-                    onChange={(event) => setDraft('customer_portal_logo_zoom', event.target.value)}
-                  />
-                  <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_zoom || '100'}%</span>
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Horizontal position</span>
-                  <input
-                    id="portal-logo-position-x"
-                    name="customer_portal_logo_position_x"
-                    className="mt-2 w-full accent-slate-950"
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={editorDraft.customer_portal_logo_position_x || '50'}
-                    onChange={(event) => setDraft('customer_portal_logo_position_x', event.target.value)}
-                  />
-                  <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_x || '50'}%</span>
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">Vertical position</span>
-                  <input
-                    id="portal-logo-position-y"
-                    name="customer_portal_logo_position_y"
-                    className="mt-2 w-full accent-slate-950"
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={editorDraft.customer_portal_logo_position_y || '50'}
-                    onChange={(event) => setDraft('customer_portal_logo_position_y', event.target.value)}
-                  />
-                  <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_y || '50'}%</span>
-                </label>
-              </div>
-              {editorDraft.customer_portal_logo_image ? (
-                <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Header logo preview</div>
+                <select
+                  id="portal-logo-fit"
+                  name="customer_portal_logo_fit"
+                  className="input mt-2"
+                  value={editorDraft.customer_portal_logo_fit || 'cover'}
+                  onChange={(event) => setDraft('customer_portal_logo_fit', event.target.value)}
+                >
+                  <option value="contain">{copy('fitContain', 'Fit inside')}</option>
+                  <option value="cover">{copy('fitCover', 'Fill frame')}</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Logo zoom</span>
+                <input
+                  id="portal-logo-zoom"
+                  name="customer_portal_logo_zoom"
+                  className="mt-2 w-full accent-slate-950"
+                  type="range"
+                  min="80"
+                  max="180"
+                  step="5"
+                  value={editorDraft.customer_portal_logo_zoom || '100'}
+                  onChange={(event) => setDraft('customer_portal_logo_zoom', event.target.value)}
+                />
+                <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_zoom || '100'}%</span>
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Horizontal position</span>
+                <input
+                  id="portal-logo-position-x"
+                  name="customer_portal_logo_position_x"
+                  className="mt-2 w-full accent-slate-950"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={editorDraft.customer_portal_logo_position_x || '50'}
+                  onChange={(event) => setDraft('customer_portal_logo_position_x', event.target.value)}
+                />
+                <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_x || '50'}%</span>
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Vertical position</span>
+                <input
+                  id="portal-logo-position-y"
+                  name="customer_portal_logo_position_y"
+                  className="mt-2 w-full accent-slate-950"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={editorDraft.customer_portal_logo_position_y || '50'}
+                  onChange={(event) => setDraft('customer_portal_logo_position_y', event.target.value)}
+                />
+                <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_y || '50'}%</span>
+              </label>
+            </div>
+            {editorDraft.customer_portal_logo_image ? (
+              <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Header logo preview</div>
                 <div
                   className="mt-3 rounded-[28px] p-4 text-white"
                   style={{
                     backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')} 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')} 50%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')} 100%)`,
                   }}
                 >
-                    <div className="flex items-center gap-4">
-                      <div
-                        className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
+                      style={{
+                        height: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
+                        width: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
+                      }}
+                    >
+                      <img
+                        src={editorDraft.customer_portal_logo_image}
+                        alt={copy('logoImage', 'Logo image')}
+                        className="h-full w-full"
                         style={{
-                          height: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
-                          width: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
+                          objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
+                          objectPosition: `${editorDraft.customer_portal_logo_position_x || '50'}% ${editorDraft.customer_portal_logo_position_y || '50'}%`,
+                          transform: `scale(${Math.max(0.8, Math.min(1.8, (toNumber(editorDraft.customer_portal_logo_zoom, 100) || 100) / 100))})`,
+                          transformOrigin: 'center',
                         }}
-                      >
-                        <img
-                          src={editorDraft.customer_portal_logo_image}
-                          alt={copy('logoImage', 'Logo image')}
-                          className="h-full w-full"
-                          style={{
-                            objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
-                            objectPosition: `${editorDraft.customer_portal_logo_position_x || '50'}% ${editorDraft.customer_portal_logo_position_y || '50'}%`,
-                            transform: `scale(${Math.max(0.8, Math.min(1.8, (toNumber(editorDraft.customer_portal_logo_zoom, 100) || 100) / 100))})`,
-                            transformOrigin: 'center',
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
-                        <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the circular logo frame on the live header.'}</div>
-                      </div>
+                      />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
+                      <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the circular logo frame on the live header.'}</div>
                     </div>
                   </div>
                 </div>
+              </div>
             ) : null}
 
             <ImageField
@@ -3595,9 +3649,10 @@ export default function CatalogPage({ publicView = false }) {
               <span className="text-sm font-medium text-slate-700">{copy('showCover', 'Show cover image')}</span>
               <input id="portal-show-cover" name="customer_portal_show_cover" type="checkbox" checked={!!editorDraft.customer_portal_show_cover} onChange={(event) => setDraft('customer_portal_show_cover', event.target.checked)} />
             </label>
-            </div>
+          </div>
 
-            <div id="portal-section-submissions" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'display' ? '' : 'hidden'}`}>
+          <div id="portal-section-submissions" className={activeEditorSection === 'submissions' ? 'grid gap-4' : 'hidden'}>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-sm font-semibold text-slate-900">{copy('portalCatalogSettings', 'Catalog settings')}</div>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
@@ -3619,7 +3674,7 @@ export default function CatalogPage({ publicView = false }) {
               <p className="mt-3 text-xs text-slate-500">{copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the customer portal only.')}</p>
             </div>
 
-            <div className={`rounded-2xl border border-sky-200 bg-sky-50 p-4 ${activeEditorSection === 'submissions' ? '' : 'hidden'}`}>
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
               <div className="text-sm font-semibold text-sky-900">{copy('portalMembershipSettings', 'Membership settings')}</div>
               <p className="mt-2 text-sm text-sky-800">
                 {copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so this portal page can stay focused on customer-facing content.')}
@@ -3629,7 +3684,7 @@ export default function CatalogPage({ publicView = false }) {
               </button>
             </div>
 
-            <div className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'submissions' ? '' : 'hidden'}`}>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-sm font-semibold text-slate-900">{copy('portalSubmissionSettings', 'Submission settings')}</div>
               <div className="mt-4 grid gap-4">
                 <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
@@ -3778,10 +3833,12 @@ export default function CatalogPage({ publicView = false }) {
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%)]" />
                 <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                   <div className="max-w-3xl">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      {publicView ? copy('publicBadge', 'Customer Portal') : copy('previewBadge', 'Portal Studio')}
-                    </div>
+                    {!publicView ? (
+                      <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {copy('previewBadge', 'Portal Studio')}
+                      </div>
+                    ) : null}
 
                     <div className="mt-4 flex items-center gap-4">
                       <div

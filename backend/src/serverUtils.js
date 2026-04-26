@@ -13,6 +13,7 @@ const CORS_OPTIONS = {
     'Content-Type',
     'Authorization',
     'x-sync-token',
+    'x-auth-session',
     'bypass-tunnel-reminder',
     'x-client-time',
     'x-device-tz',
@@ -96,6 +97,13 @@ function setFrontendStaticHeaders(res, filePath) {
   }
 }
 
+function setUploadStaticHeaders(res, filePath) {
+  const safeName = String(filePath || '').split(/[\\/]/).pop() || 'file'
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  res.setHeader('Content-Disposition', `inline; filename="${safeName.replace(/"/g, '')}"`)
+}
+
 function mapServerError(error) {
   if (!error) return null
 
@@ -105,12 +113,16 @@ function mapServerError(error) {
 
   if (error.name === 'MulterError') {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return { status: 413, body: { success: false, error: 'Uploaded file is too large. Maximum size is 10MB.' } }
+      return { status: 413, body: { success: false, error: 'Uploaded file is too large.' } }
     }
     return { status: 400, body: { success: false, error: 'Upload failed. Please verify the file and try again.' } }
   }
 
   if (String(error.message || '').toLowerCase().includes('unsupported file type')) {
+    return { status: 400, body: { success: false, error: String(error.message) } }
+  }
+
+  if (String(error.message || '').toLowerCase().includes('file contents do not match')) {
     return { status: 400, body: { success: false, error: String(error.message) } }
   }
 
@@ -127,5 +139,6 @@ module.exports = {
   setHtmlNoCacheHeaders,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
+  setUploadStaticHeaders,
   mapServerError,
 }

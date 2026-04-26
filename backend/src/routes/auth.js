@@ -472,13 +472,33 @@ router.post('/oauth/complete', async (req, res) => {
     const actorId = Number(currentUserId || 0)
     if (!actorId) return err(res, 'A local user session is required to link an identity.', 401)
 
-    const localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
+    let localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
     if (!localUser) return err(res, 'Local account is not available.', 404)
-    if (!String(localUser.email || '').trim()) {
-      return err(res, 'Add your account email before linking social sign-in.', 400)
+
+    let localEmail = normalizeEmail(localUser.email)
+    if (!localEmail) {
+      const conflictUser = db.prepare(`
+        SELECT id
+        FROM users
+        WHERE id != ?
+          AND is_active = 1
+          AND deleted_at IS NULL
+          AND lower(trim(email)) = ?
+        LIMIT 1
+      `).get(localUser.id, authEmail)
+      if (conflictUser) {
+        return err(res, 'This provider email already belongs to another active local account.', 409)
+      }
+      db.prepare(`
+        UPDATE users
+        SET email = ?,
+            email_verified = 1
+        WHERE id = ?
+      `).run(authEmail, localUser.id)
+      localUser = getUserById(localUser.id)
+      localEmail = authEmail
     }
 
-    const localEmail = normalizeEmail(localUser.email)
     if (!localEmail || localEmail !== authEmail) {
       return err(res, 'The provider email must match your account email before it can be linked.', 400)
     }

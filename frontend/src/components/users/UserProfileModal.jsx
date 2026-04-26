@@ -50,7 +50,13 @@ export default function UserProfileModal({ onClose }) {
   const [sendingEmailCode, setSendingEmailCode] = useState(false)
   const [verifyingEmailCode, setVerifyingEmailCode] = useState(false)
   const [oauthConnecting, setOauthConnecting] = useState('')
-  const [verificationCaps, setVerificationCaps] = useState({ email: true, googleOauth: false, facebookOauth: false, supabaseAuth: false })
+  const [verificationCaps, setVerificationCaps] = useState({
+    email: true,
+    googleOauth: false,
+    facebookOauth: false,
+    supabaseAuth: false,
+    supabaseEmailAuth: false,
+  })
   const [authMethods, setAuthMethods] = useState(null)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -95,6 +101,7 @@ export default function UserProfileModal({ onClose }) {
           googleOauth: capsResult.google_oauth === true,
           facebookOauth: capsResult.facebook_oauth === true,
           supabaseAuth: capsResult.supabase_auth === true,
+          supabaseEmailAuth: capsResult.supabase_email_auth === true,
         })
       }
       if (authMethodsResult && authMethodsResult.success !== false) {
@@ -418,35 +425,43 @@ export default function UserProfileModal({ onClose }) {
                       />
                     </div>
                     <div>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', '6-digit email code sender')}</div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
-                          {verificationCaps.email ? tr('email_sender_ready', 'Sender ready') : tr('email_sender_not_configured', 'Sender not configured')}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={requestContactCode} disabled={sendingEmailCode || !verificationCaps.email}>
-                          {sendingEmailCode ? tr('sending', 'Sending...') : tr('send_code', 'Send code')}
-                        </button>
-                        <input
-                          id="profile-email-code"
-                          name="email_code"
-                          className="input min-w-[120px] flex-1 text-sm"
-                          inputMode="numeric"
-                          maxLength={6}
-                          placeholder={tr('six_digit_code', '6-digit code')}
-                          value={emailCode}
-                          onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                        />
-                        <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={confirmContactCode} disabled={verifyingEmailCode || !verificationCaps.email}>
-                          {verifyingEmailCode ? tr('verifying', 'Verifying...') : tr('verify', 'Verify')}
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        {verificationCaps.supabaseAuth
-                          ? tr('email_sender_vs_auth_note', 'Supabase is ready for sign-in methods. This separate 6-digit code tool still needs its own mail sender such as Resend, SendGrid, or an email webhook.')
-                          : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
-                      </p>
+                      {verificationCaps.email ? (
+                        <>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', '6-digit email code sender')}</div>
+                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                              {tr('email_sender_ready', 'Sender ready')}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={requestContactCode} disabled={sendingEmailCode}>
+                              {sendingEmailCode ? tr('sending', 'Sending...') : tr('send_code', 'Send code')}
+                            </button>
+                            <input
+                              id="profile-email-code"
+                              name="email_code"
+                              className="input min-w-[120px] flex-1 text-sm"
+                              inputMode="numeric"
+                              maxLength={6}
+                              placeholder={tr('six_digit_code', '6-digit code')}
+                              value={emailCode}
+                              onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                            />
+                            <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={confirmContactCode} disabled={verifyingEmailCode}>
+                              {verifyingEmailCode ? tr('verifying', 'Verifying...') : tr('verify', 'Verify')}
+                            </button>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            {tr('email_sender_ready_note', 'Use this only if you want local 6-digit verification codes in addition to Supabase sign-in.')}
+                          </p>
+                        </>
+                      ) : (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
+                          {verificationCaps.supabaseEmailAuth
+                            ? tr('supabase_email_handles_signin_note', 'Supabase email sign-in is enabled. Use your saved email on the login page, and keep Google or Facebook linked there too. The separate 6-digit mail sender is turned off in this setup.')
+                            : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

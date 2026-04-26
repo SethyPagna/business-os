@@ -39,6 +39,8 @@ const PAGE_IMPORTERS = {
 const WARMUP_PAGE_IDS = [
   'catalog',
   'pos',
+  'branches',
+  'contacts',
   'users',
   'audit_log',
   'receipt_settings',
@@ -276,6 +278,7 @@ function useChunkWarmup(user) {
     let cancelled = false
     let idleId = null
     let timeoutId = null
+    let followupId = null
     const importers = getWarmupImporters()
 
     const runWarmup = () => {
@@ -283,10 +286,12 @@ function useChunkWarmup(user) {
       Promise.allSettled(importers.map((load) => load())).catch(() => {})
     }
 
+    timeoutId = window.setTimeout(runWarmup, 120)
+
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 1800 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: 1500 })
     } else {
-      timeoutId = window.setTimeout(runWarmup, 450)
+      followupId = window.setTimeout(runWarmup, 900)
     }
 
     return () => {
@@ -296,6 +301,9 @@ function useChunkWarmup(user) {
       }
       if (timeoutId != null) {
         window.clearTimeout(timeoutId)
+      }
+      if (followupId != null) {
+        window.clearTimeout(followupId)
       }
     }
   }, [user])

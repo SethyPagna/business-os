@@ -5,7 +5,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { UPLOADS_PATH } = require('../config')
 const { ok, err, audit, broadcast, logOp, tryParse } = require('../helpers')
-const { authToken, upload, compressUpload } = require('../middleware')
+const { authToken, upload, compressUpload, validateUploadedFile } = require('../middleware')
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
 
 const router = express.Router()
@@ -414,7 +414,7 @@ router.delete('/:id', authToken, (req, res) => {
 })
 
 // ── POST /api/products/upload-image ──────────────────────────────────────────
-router.post('/upload-image', authToken, upload.single('image'), compressUpload, (req, res) => {
+router.post('/upload-image', authToken, upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   registerUploadFromRequest(req.file, req.body || {})
     .then((asset) => ok(res, { path: asset.public_path, asset }))
