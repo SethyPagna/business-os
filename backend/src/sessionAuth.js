@@ -80,6 +80,8 @@ function getSessionUser(req) {
       u.id,
       u.username,
       u.name,
+      u.organization_id,
+      u.organization_group_id,
       u.phone,
       u.phone_verified,
       u.email,
@@ -93,10 +95,17 @@ function getSessionUser(req) {
       r.permissions AS role_permissions,
       r.code AS role_code,
       r.name AS role_name,
-      r.is_system AS role_is_system
+      r.is_system AS role_is_system,
+      o.name AS organization_name,
+      o.slug AS organization_slug,
+      o.public_id AS organization_public_id,
+      g.name AS organization_group_name,
+      g.slug AS organization_group_slug
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN organizations o ON o.id = u.organization_id
+    LEFT JOIN organization_groups g ON g.id = u.organization_group_id
     WHERE s.token_hash = ?
       AND s.revoked_at IS NULL
       AND s.expires_at > ?

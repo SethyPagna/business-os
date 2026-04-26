@@ -20,6 +20,7 @@ const { requestContextMiddleware } = require('./src/requestContext')
 const { authToken, networkAccessGuard } = require('./src/middleware')
 const { db } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
+const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
   sanitizeRequestPayload,
@@ -110,6 +111,7 @@ function mountApiRoutes(target) {
   target.use('/api', networkAccessGuard)
 
   target.use('/api/auth', require('./src/routes/auth'))
+  target.use('/api/organizations', require('./src/routes/organizations'))
   target.use('/api/settings', require('./src/routes/settings'))
   target.use('/api/categories', require('./src/routes/categories'))
   target.use('/api/units', unitsRouter)
@@ -224,6 +226,11 @@ function bootstrapServer() {
   mountTransfersAlias(app)
   mountSpaFallback(app)
   mountErrorHandler(app)
+
+  try {
+    const defaultOrganization = getDefaultOrganization()
+    if (defaultOrganization) ensureOrganizationFilesystemLayout(defaultOrganization)
+  } catch (_) {}
 
   const server = http.createServer(app)
   require('./src/websocket').attachWss(server)

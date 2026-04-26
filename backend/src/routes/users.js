@@ -32,6 +32,11 @@ const {
   unlinkAuthIdentity,
 } = require('../services/supabaseAuth')
 const { normalizeEmail, normalizePhone } = require('../services/verification')
+const {
+  getDefaultOrganization,
+  getDefaultOrganizationGroup,
+  getOrganizationContextForUser,
+} = require('../organizationContext')
 
 const router = express.Router()
 
@@ -193,7 +198,8 @@ function requireAdminControl(req, res) {
  */
 function getUserSecurityContext(id) {
   return db.prepare(`
-    SELECT u.id, u.username, u.permissions, u.role_id, r.permissions AS role_permissions, r.code AS role_code
+    SELECT u.id, u.username, u.permissions, u.role_id, u.organization_id, u.organization_group_id,
+           r.permissions AS role_permissions, r.code AS role_code
     FROM users u
     LEFT JOIN roles r ON r.id = u.role_id
     WHERE u.id = ? AND u.deleted_at IS NULL
@@ -202,11 +208,15 @@ function getUserSecurityContext(id) {
 
 function getUserWithRole(id) {
   return db.prepare(`
-    SELECT u.id, u.username, u.name, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
+    SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
            u.otp_enabled, u.is_active, u.supabase_user_id, u.deleted_at, u.created_at, r.name AS role_name,
-           r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system
+           r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system,
+           o.name AS organization_name, o.slug AS organization_slug, o.public_id AS organization_public_id,
+           g.name AS organization_group_name, g.slug AS organization_group_slug
     FROM users u
     LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN organizations o ON o.id = u.organization_id
+    LEFT JOIN organization_groups g ON g.id = u.organization_group_id
     WHERE u.id = ?
   `).get(id)
 }
@@ -337,11 +347,15 @@ router.get('/users', authToken, (req, res) => {
   if (!actor) return
 
   const rows = db.prepare(`
-    SELECT u.id, u.username, u.name, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
+    SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
            u.otp_enabled, u.is_active, u.created_at, r.name AS role_name,
-           r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system
+           r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system,
+           o.name AS organization_name, o.slug AS organization_slug, o.public_id AS organization_public_id,
+           g.name AS organization_group_name, g.slug AS organization_group_slug
     FROM users u
     LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN organizations o ON o.id = u.organization_id
+    LEFT JOIN organization_groups g ON g.id = u.organization_group_id
     WHERE u.deleted_at IS NULL
     ORDER BY u.name, u.username
   `).all()
@@ -417,7 +431,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   }
 
   const user = db.prepare(`
-    SELECT id, username, name, email, email_verified, otp_enabled, is_active, deleted_at, supabase_user_id, password
+    SELECT id, username, name, organization_id, organization_group_id, email, email_verified, otp_enabled, is_active, deleted_at, supabase_user_id, password
     FROM users
     WHERE id = ? AND deleted_at IS NULL
   `).get(targetId)
@@ -546,14 +560,21 @@ router.post('/users', authToken, async (req, res) => {
       phoneLookup: normalizedPhoneLookup,
     })
     if (conflict) return err(res, conflict.message, 409)
+    const actorOrg = getOrganizationContextForUser(actor.id)
+    const defaultOrg = getDefaultOrganization()
+    const resolvedOrgId = Number(actorOrg?.organization_id || defaultOrg?.id || 0) || null
+    const defaultGroup = resolvedOrgId ? getDefaultOrganizationGroup(resolvedOrgId) : null
+    const resolvedGroupId = Number(actorOrg?.organization_group_id || defaultGroup?.id || 0) || null
     const result = db.prepare(`
       INSERT INTO users (
-        username, name, phone, phone_lookup, phone_verified, email, email_verified,
+        username, name, organization_id, organization_group_id, phone, phone_lookup, phone_verified, email, email_verified,
         avatar_path, password, permissions, role_id, is_active
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       normalizedUsername,
       normalizedName,
+      resolvedOrgId,
+      resolvedGroupId,
       normalizedPhone,
       normalizedPhoneLookup || null,
       0,
@@ -568,7 +589,7 @@ router.post('/users', authToken, async (req, res) => {
 
     const createdId = Number(result.lastInsertRowid)
     const createdUser = db.prepare(`
-      SELECT id, username, name, email, email_verified, phone, phone_verified, supabase_user_id, is_active
+      SELECT id, username, name, organization_id, organization_group_id, email, email_verified, phone, phone_verified, supabase_user_id, is_active
       FROM users WHERE id = ?
     `).get(createdId)
 

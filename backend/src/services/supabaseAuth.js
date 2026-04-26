@@ -200,6 +200,8 @@ function buildUserMetadata(localUser) {
     local_user_id: Number(localUser?.id || 0) || null,
     username: trim(localUser?.username || ''),
     display_name: trim(localUser?.name || localUser?.username || ''),
+    organization_id: Number(localUser?.organization_id || 0) || null,
+    organization_slug: trim(localUser?.organization_slug || ''),
   }
 }
 
@@ -208,6 +210,7 @@ function buildAppMetadata(localUser) {
     source: 'business-os',
     local_user_id: Number(localUser?.id || 0) || null,
     username: trim(localUser?.username || ''),
+    organization_id: Number(localUser?.organization_id || 0) || null,
   }
 }
 

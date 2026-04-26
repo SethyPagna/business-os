@@ -77,8 +77,8 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export async function login({ username, password, sessionDuration, clientTime, deviceTz, deviceName }) {
-  return apiFetch('POST', '/api/auth/login', { username, password, sessionDuration, clientTime, deviceTz, deviceName })
+export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
+  return apiFetch('POST', '/api/auth/login', { username, password, organization, sessionDuration, clientTime, deviceTz, deviceName })
 }
 export async function logout() {
   return apiFetch('POST', '/api/auth/logout', {})
@@ -100,6 +100,16 @@ export async function startSupabaseOauth(payload) {
 }
 export async function completeSupabaseOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/complete', payload || {})
+}
+export async function getOrganizationBootstrap() {
+  return apiFetch('GET', '/api/organizations/bootstrap')
+}
+export async function searchOrganizations(query) {
+  const q = encodeURIComponent(String(query || '').trim())
+  return apiFetch('GET', `/api/organizations/search${q ? `?q=${q}` : ''}`)
+}
+export async function getCurrentOrganization() {
+  return apiFetch('GET', '/api/organizations/current')
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

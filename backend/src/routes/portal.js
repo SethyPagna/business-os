@@ -12,6 +12,7 @@ const { authToken } = require('../middleware')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils')
 const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')
 const { checkRateLimit } = require('../security')
+const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 
 const router = express.Router()
 
@@ -106,6 +107,8 @@ function loadSettingsMap() {
 /** Build full portal configuration object from persisted settings. */
 function buildPortalConfig() {
   const settings = loadSettingsMap()
+  const organization = getDefaultOrganization()
+  const defaultPublicPath = getPortalPublicPath(organization || { slug: 'leangcosmetics' })
   const exchangeRate = toNumber(settings.exchange_rate, 4100)
   const pointsBasis = ['usd', 'khr'].includes(String(settings.customer_portal_points_basis || '').toLowerCase())
     ? String(settings.customer_portal_points_basis).toLowerCase()
@@ -209,7 +212,13 @@ function buildPortalConfig() {
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
-    publicPath: normalizePublicPath(settings.customer_portal_path),
+    publicPath: normalizePublicPath(settings.customer_portal_path || defaultPublicPath),
+    organization: organization ? {
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      public_id: organization.public_id,
+    } : null,
   }
 }
 

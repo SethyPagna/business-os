@@ -77,6 +77,11 @@ export default function Login() {
     supabaseAuth: false,
     supabaseEmailAuth: false,
   })
+  const [organizationSearch, setOrganizationSearch] = useState('')
+  const [organizationId, setOrganizationId] = useState('')
+  const [organizationMatches, setOrganizationMatches] = useState([])
+  const [organizationLoading, setOrganizationLoading] = useState(false)
+  const [organizationLocked, setOrganizationLocked] = useState(false)
 
   const usernameRef = useRef()
   const otpRef = useRef()
@@ -114,6 +119,53 @@ export default function Login() {
   }, [])
 
   useEffect(() => {
+    let active = true
+    const bootstrap = async () => {
+      try {
+        const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+        const boot = await window.api.getOrganizationBootstrap?.()
+        if (!active) return
+        const fallbackOrg = remembered || boot?.organization || null
+        if (fallbackOrg) {
+          setOrganizationSearch(fallbackOrg.name || fallbackOrg.slug || '')
+          setOrganizationId(fallbackOrg.public_id || '')
+          setOrganizationMatches(fallbackOrg ? [fallbackOrg] : [])
+          if (boot?.organization && !boot.organizationCreationEnabled) {
+            setOrganizationLocked(true)
+          }
+        }
+      } catch (_) {}
+    }
+    bootstrap()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const query = String(organizationSearch || '').trim()
+    if (!query) {
+      setOrganizationMatches([])
+      return () => { active = false }
+    }
+    const timer = setTimeout(async () => {
+      setOrganizationLoading(true)
+      try {
+        const result = await window.api.searchOrganizations?.(query)
+        if (!active) return
+        setOrganizationMatches(Array.isArray(result?.items) ? result.items : [])
+      } catch (_) {
+        if (active) setOrganizationMatches([])
+      } finally {
+        if (active) setOrganizationLoading(false)
+      }
+    }, 180)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [organizationSearch])
+
+  useEffect(() => {
     if (typeof window === 'undefined') return undefined
     const url = new URL(window.location.href)
     const mode = String(url.searchParams.get('auth_mode') || '').trim().toLowerCase()
@@ -142,10 +194,19 @@ export default function Login() {
       setError('')
       try {
         const device = getClientDeviceInfo()
+        const rememberedOrg = (() => {
+          try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+            return stored?.public_id || stored?.slug || ''
+          } catch (_) {
+            return ''
+          }
+        })()
         const result = await window.api.completeSupabaseOauth({
           accessToken,
           provider,
           mode: 'login',
+          organization: rememberedOrg,
           sessionDuration,
           clientTime: new Date().toISOString(),
           deviceTz: device.deviceTz,
@@ -182,9 +243,14 @@ export default function Login() {
 
   const handleLogin = async (event) => {
     event.preventDefault()
+    const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
+    if (!resolvedOrganization) {
+      setError(tr('enter_organization_first', 'Please choose your organization first.'))
+      return
+    }
     setError('')
     setLoading(true)
-    const result = await login(username, password, sessionDuration)
+    const result = await login(username, password, sessionDuration, resolvedOrganization)
     if (result?.otpRequired) {
       setOtpRequired(true)
       setPendingUserId(result.userId)
@@ -231,6 +297,8 @@ export default function Login() {
   }
 
   const handleResetWithOtp = async () => {
+    const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
+    if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
     if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
     if (!resetOtp.trim()) return setError(tr('enter_otp_first', 'Enter the OTP code from your authenticator app.'))
     if (resetNewPassword.length < 4) return setError(tr('password_min_4', 'Use at least 4 characters for the new password.'))
@@ -241,6 +309,7 @@ export default function Login() {
     try {
       const result = await window.api.resetPasswordWithOtp({
         identifier: resetIdentifier.trim(),
+        organization: resolvedOrganization,
         otp: resetOtp.trim(),
         newPassword: resetNewPassword,
       })
@@ -262,13 +331,26 @@ export default function Login() {
   }
 
   const handleStartOauth = async (provider) => {
+    const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
+    if (!resolvedOrganization) {
+      setError(tr('enter_organization_first', 'Please choose your organization first.'))
+      return
+    }
     setError('')
     setOauthLoading(provider)
     try {
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=login&auth_provider=${encodeURIComponent(provider)}`
+      try {
+        localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+          name: organizationSearch,
+          public_id: organizationId,
+          slug: organizationSearch,
+        }))
+      } catch (_) {}
       const result = await window.api.startSupabaseOauth({
         provider,
         mode: 'login',
+        organization: resolvedOrganization,
         redirectTo,
       })
       if (result?.success === false || !result?.url) {
@@ -309,6 +391,58 @@ export default function Login() {
 
         {!otpRequired && !showOtpReset ? (
           <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                <Building2 className="h-4 w-4 text-gray-400" />
+                <span>{tr('organization', 'Organization')}</span>
+              </div>
+              <input
+                id="organization-search"
+                name="organization_search"
+                className="input"
+                type="text"
+                value={organizationSearch}
+                onChange={(event) => setOrganizationSearch(event.target.value)}
+                placeholder="LeangCosmetics"
+                autoComplete="organization"
+              />
+              <input
+                id="organization-id"
+                name="organization_id"
+                className="input"
+                type="text"
+                value={organizationId}
+                onChange={(event) => setOrganizationId(event.target.value)}
+                placeholder="org_xxxxxxxxxxxxxxxx"
+                autoComplete="off"
+              />
+              {organizationLoading ? (
+                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('finding_organization', 'Finding organization...')}</div>
+              ) : null}
+              {!organizationLocked && organizationMatches.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {organizationMatches.map((item) => (
+                    <button
+                      key={item.public_id || item.slug || item.id}
+                      type="button"
+                      className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200"
+                      onClick={() => {
+                        setOrganizationSearch(item.name || item.slug || '')
+                        setOrganizationId(item.public_id || '')
+                      }}
+                    >
+                      {item.name} · {item.public_id}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {organizationLocked
+                  ? tr('organization_join_locked', 'Organization creation is currently disabled. This server is prepared for LeangCosmetics and future organization-ready expansion.')
+                  : tr('organization_join_hint', 'Search the organization name, then use the organization ID to sign in.')}
+              </p>
+            </div>
+
             <div>
               <label htmlFor="login-username" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <Mail className="h-4 w-4 text-gray-400" />
@@ -422,6 +556,7 @@ export default function Login() {
                 <ScanLine className="h-4 w-4 text-gray-400" />
                 <span>{tr('signin_methods', 'Sign-in methods')}</span>
               </div>
+              <div>{tr('signin_method_org', 'Organization remembered on this device')}</div>
               <div>{tr('signin_method_password', 'Password login')}</div>
               <div>{tr('signin_method_otp', 'OTP (required for users who enabled 2FA)')}</div>
               {verificationCaps.googleOauth ? <div>{tr('signin_method_google', 'Google sign-in')}</div> : null}

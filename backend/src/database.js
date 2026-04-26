@@ -17,6 +17,7 @@
  */
 const path     = require('path')
 const fs       = require('fs')
+const crypto   = require('crypto')
 const Database = require('better-sqlite3')
 const bcrypt   = require('bcryptjs')
 const { DB_PATH } = require('./config')
@@ -36,10 +37,34 @@ db.pragma('wal_autocheckpoint = 1000')
 
 // ── Schema ─────────────────────────────────────────────────────────────────────
 db.exec(`
+CREATE TABLE IF NOT EXISTS organizations (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  slug          TEXT NOT NULL UNIQUE,
+  public_id     TEXT NOT NULL UNIQUE,
+  is_active     INTEGER DEFAULT 1,
+  setup_enabled INTEGER DEFAULT 0,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS organization_groups (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL,
+  name            TEXT NOT NULL,
+  slug            TEXT NOT NULL,
+  is_default      INTEGER DEFAULT 0,
+  is_active       INTEGER DEFAULT 1,
+  created_at      TEXT DEFAULT (datetime('now')),
+  UNIQUE(organization_id, slug),
+  FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   username    TEXT NOT NULL UNIQUE,
   name        TEXT NOT NULL,
+  organization_id INTEGER,
+  organization_group_id INTEGER,
   phone       TEXT,
   phone_lookup TEXT,
   phone_verified INTEGER DEFAULT 0,
@@ -57,7 +82,9 @@ CREATE TABLE IF NOT EXISTS users (
   otp_pending_secret TEXT,
   otp_pending_created_at TEXT,
   is_active   INTEGER DEFAULT 1,
-  created_at  TEXT DEFAULT (datetime('now'))
+  created_at  TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+  FOREIGN KEY(organization_group_id) REFERENCES organization_groups(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -508,6 +535,8 @@ const migrations = [
   // users
   `ALTER TABLE users ADD COLUMN phone TEXT`,
   `ALTER TABLE users ADD COLUMN phone_lookup TEXT`,
+  `ALTER TABLE users ADD COLUMN organization_id INTEGER`,
+  `ALTER TABLE users ADD COLUMN organization_group_id INTEGER`,
   `ALTER TABLE users ADD COLUMN email TEXT`,
   `ALTER TABLE users ADD COLUMN phone_verified INTEGER DEFAULT 0`,
   `ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0`,
@@ -650,6 +679,19 @@ function normalizeUserPhoneLookup(value) {
   return digits.length >= 6 && digits.length <= 20 ? digits : ''
 }
 
+function slugifyOrgName(value, fallback = 'organization') {
+  const slug = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug || fallback
+}
+
+function generateOrgPublicId() {
+  return `org_${crypto.randomBytes(8).toString('hex')}`
+}
+
 if (ensureColumn('customers', 'membership_number', 'TEXT')) {
   try {
     db.exec(`
@@ -751,6 +793,77 @@ seedIfEmpty('users', [
   db.prepare(`INSERT OR IGNORE INTO users (username, name, password, permissions) VALUES (?,?,?,?)`).run(u.username, u.name, u.password, u.permissions)
 })
 
+function ensureDefaultOrganizationAndGroup() {
+  const defaultName = 'LeangCosmetics'
+  const defaultSlug = 'leangcosmetics'
+
+  let organization = db.prepare(`
+    SELECT id, name, slug, public_id
+    FROM organizations
+    ORDER BY id ASC
+    LIMIT 1
+  `).get()
+
+  if (!organization) {
+    const inserted = db.prepare(`
+      INSERT INTO organizations (name, slug, public_id, is_active, setup_enabled)
+      VALUES (?, ?, ?, 1, 0)
+    `).run(defaultName, defaultSlug, generateOrgPublicId())
+    organization = {
+      id: Number(inserted.lastInsertRowid),
+      name: defaultName,
+      slug: defaultSlug,
+      public_id: '',
+    }
+  } else {
+    const nextName = String(organization.name || '').trim() || defaultName
+    const nextSlug = slugifyOrgName(organization.slug || organization.name || defaultSlug, defaultSlug)
+    const nextPublicId = String(organization.public_id || '').trim() || generateOrgPublicId()
+    db.prepare(`
+      UPDATE organizations
+      SET name = ?, slug = ?, public_id = ?, is_active = 1, setup_enabled = 0
+      WHERE id = ?
+    `).run(nextName, nextSlug, nextPublicId, organization.id)
+    organization = {
+      id: organization.id,
+      name: nextName,
+      slug: nextSlug,
+      public_id: nextPublicId,
+    }
+  }
+
+  let group = db.prepare(`
+    SELECT id
+    FROM organization_groups
+    WHERE organization_id = ?
+    ORDER BY is_default DESC, id ASC
+    LIMIT 1
+  `).get(organization.id)
+
+  if (!group) {
+    const insertedGroup = db.prepare(`
+      INSERT INTO organization_groups (organization_id, name, slug, is_default, is_active)
+      VALUES (?, 'Main Group', 'main', 1, 1)
+    `).run(organization.id)
+    group = { id: Number(insertedGroup.lastInsertRowid) }
+  } else {
+    db.prepare(`
+      UPDATE organization_groups
+      SET is_default = 1, is_active = 1
+      WHERE id = ?
+    `).run(group.id)
+  }
+
+  db.prepare(`
+    UPDATE users
+    SET organization_id = COALESCE(organization_id, ?),
+        organization_group_id = COALESCE(organization_group_id, ?)
+    WHERE organization_id IS NULL OR organization_group_id IS NULL
+  `).run(organization.id, group.id)
+
+  return { organization, group }
+}
+
 function ensurePrimaryAdminRoleAndUser() {
   // Guarantees:
   // 1) A system Admin role exists and keeps full permissions.
@@ -803,6 +916,8 @@ function ensurePrimaryAdminRoleAndUser() {
 }
 
 try { ensurePrimaryAdminRoleAndUser() } catch (_) {}
+let defaultOrganizationContext = null
+try { defaultOrganizationContext = ensureDefaultOrganizationAndGroup() } catch (_) {}
 
 seedIfEmpty('settings', [
   { key: 'business_name',    value: 'My Business' },
@@ -823,7 +938,7 @@ seedIfEmpty('settings', [
   { key: 'customer_portal_hero_gradient_start', value: '#0f172a' },
   { key: 'customer_portal_hero_gradient_mid', value: '#14532d' },
   { key: 'customer_portal_hero_gradient_end', value: '#ea580c' },
-  { key: 'customer_portal_path', value: '/customer-portal' },
+  { key: 'customer_portal_path', value: defaultOrganizationContext?.organization?.slug ? `/${defaultOrganizationContext.organization.slug}/public` : '/leangcosmetics/public' },
   { key: 'customer_portal_public_url', value: '' },
   { key: 'customer_portal_language', value: 'auto' },
   { key: 'customer_portal_translate_widget_enabled', value: 'false' },

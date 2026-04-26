@@ -252,6 +252,17 @@ export function AppProvider({ children }) {
 
       try {
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(safeUser))
+        if (safeUser?.organization_slug || safeUser?.organization_public_id || safeUser?.organization_name) {
+          localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+            id: safeUser.organization_id || null,
+            name: safeUser.organization_name || '',
+            slug: safeUser.organization_slug || '',
+            public_id: safeUser.organization_public_id || '',
+            group_id: safeUser.organization_group_id || null,
+            group_name: safeUser.organization_group_name || '',
+            group_slug: safeUser.organization_group_slug || '',
+          }))
+        }
         if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
         if (expiryTime) localStorage.setItem(STORAGE_KEYS.USER_EXPIRY, expiryTime.toString())
         else localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
@@ -467,6 +478,17 @@ export function AppProvider({ children }) {
 
     try {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(nextUser))
+      if (nextUser?.organization_slug || nextUser?.organization_public_id || nextUser?.organization_name) {
+        localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+          id: nextUser.organization_id || null,
+          name: nextUser.organization_name || '',
+          slug: nextUser.organization_slug || '',
+          public_id: nextUser.organization_public_id || '',
+          group_id: nextUser.organization_group_id || null,
+          group_name: nextUser.organization_group_name || '',
+          group_slug: nextUser.organization_group_slug || '',
+        }))
+      }
       if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
       else localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
       if (expiryTime) {
@@ -485,11 +507,11 @@ export function AppProvider({ children }) {
     setPage('dashboard')
   }, [loadSettings])
 
-  const login = useCallback(async (username, password, sessionDuration = 'session') => {
+  const login = useCallback(async (username, password, sessionDuration = 'session', organization = '') => {
     try {
       const device = getClientDeviceInfo()
       const result = await window.api.login({
-        username, password,
+        username, password, organization,
         sessionDuration,
         clientTime: new Date().toISOString(),
         deviceTz: device.deviceTz,
@@ -584,11 +606,17 @@ export function AppProvider({ children }) {
 
       try {
         const device = getClientDeviceInfo()
+        let rememberedOrg = ''
+        try {
+          const storedOrg = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+          rememberedOrg = storedOrg?.public_id || storedOrg?.slug || ''
+        } catch (_) {}
         const result = await window.api.completeSupabaseOauth({
           accessToken,
           provider,
           mode: 'link',
           currentUserId: actorId,
+          organization: rememberedOrg,
           clientTime: new Date().toISOString(),
           deviceTz: device.deviceTz,
           deviceName: device.deviceName,

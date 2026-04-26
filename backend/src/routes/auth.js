@@ -46,6 +46,11 @@ const {
   normalizePhone,
 } = require('../services/verification')
 const { createAuthSession, getPresentedSessionToken, revokeAuthSession } = require('../sessionAuth')
+const {
+  findOrganizationByLookup,
+  getDefaultOrganization,
+  getOrganizationContextForUser,
+} = require('../organizationContext')
 
 const router = express.Router()
 
@@ -161,7 +166,12 @@ function buildUserPayload(user) {
       safeUser.role_name = role.name
     }
   }
-  return { ...safeUser, permissions: JSON.stringify(mergedPerms) }
+  const organizationContext = getOrganizationContextForUser(safeUser.id)
+  return {
+    ...safeUser,
+    ...(organizationContext || {}),
+    permissions: JSON.stringify(mergedPerms),
+  }
 }
 
 /**
@@ -169,17 +179,38 @@ function buildUserPayload(user) {
  * @param {string} identifier
  * @param {{requireVerifiedContact?: boolean}} options
  */
+function resolveOrganizationLookup(value) {
+  const input = String(value || '').trim()
+  if (!input) return getDefaultOrganization() || null
+  return findOrganizationByLookup(input) || null
+}
+
 function findUserByIdentifier(identifier, options = {}) {
   const requireVerifiedContact = !!options.requireVerifiedContact
+  const organizationId = Number(options.organizationId || 0) || 0
   const value = String(identifier || '').trim()
   if (!value) return null
 
-  const byUsername = db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1 AND deleted_at IS NULL').get(value)
+  const byUsername = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE username = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
+  `).get(value, organizationId, organizationId)
   if (byUsername) return byUsername
 
   const email = normalizeEmail(value)
   if (email) {
-    const byEmail = db.prepare('SELECT * FROM users WHERE lower(trim(email)) = ? AND is_active = 1 AND deleted_at IS NULL').get(email)
+    const byEmail = db.prepare(`
+      SELECT *
+      FROM users
+      WHERE lower(trim(email)) = ?
+        AND is_active = 1
+        AND deleted_at IS NULL
+        AND (? = 0 OR organization_id = ?)
+    `).get(email, organizationId, organizationId)
     if (byEmail) {
       if (requireVerifiedContact && Number(byEmail.email_verified || 0) !== 1) return null
       return byEmail
@@ -188,15 +219,36 @@ function findUserByIdentifier(identifier, options = {}) {
 
   const phoneLookup = normalizePhone(value)
   if (phoneLookup) {
-    const byPhone = db.prepare('SELECT * FROM users WHERE phone_lookup = ? AND is_active = 1 AND deleted_at IS NULL').get(phoneLookup)
+    const byPhone = db.prepare(`
+      SELECT *
+      FROM users
+      WHERE phone_lookup = ?
+        AND is_active = 1
+        AND deleted_at IS NULL
+        AND (? = 0 OR organization_id = ?)
+    `).get(phoneLookup, organizationId, organizationId)
     if (byPhone) return byPhone
   }
 
   const lookup = normalizeLookupText(value)
-  const byUsernameLookup = db.prepare('SELECT * FROM users WHERE lower(trim(username)) = ? AND is_active = 1 AND deleted_at IS NULL').get(lookup)
+  const byUsernameLookup = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE lower(trim(username)) = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
+  `).get(lookup, organizationId, organizationId)
   if (byUsernameLookup) return byUsernameLookup
 
-  const byName = db.prepare('SELECT * FROM users WHERE lower(trim(name)) = ? AND is_active = 1 AND deleted_at IS NULL').get(lookup)
+  const byName = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE lower(trim(name)) = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
+  `).get(lookup, organizationId, organizationId)
   if (byName) return byName
 
   return null
@@ -271,8 +323,10 @@ router.get('/verification-capabilities', (_req, res) => {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const t0 = Date.now()
-  const { username, password, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
+  const { username, password, organization, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!username || !password) return err(res, 'Username, name, email, or phone number and password are required')
+  const organizationRecord = resolveOrganizationLookup(organization)
+  if (!organizationRecord || !organizationRecord.is_active) return err(res, 'Organization not found', 404)
   const lockKey = getLoginLockKey(username)
   const lockState = checkAbuseLock('auth:login_lock', lockKey, LOGIN_LOCK_WINDOW_MS)
   if (lockState.locked) {
@@ -289,7 +343,10 @@ router.post('/login', async (req, res) => {
     message: 'Too many login attempts.',
   })) return
 
-  const user = findUserByIdentifier(username, { requireVerifiedContact: false })
+  const user = findUserByIdentifier(username, {
+    requireVerifiedContact: false,
+    organizationId: organizationRecord.id,
+  })
   if (!user) {
     return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username))
   }
@@ -356,6 +413,7 @@ router.post('/oauth/complete', async (req, res) => {
     provider,
     mode,
     currentUserId,
+    organization,
     clientTime,
     deviceTz,
     deviceName,
@@ -364,6 +422,10 @@ router.post('/oauth/complete', async (req, res) => {
 
   const oauthMode = normalizeOauthMode(mode)
   const normalizedProvider = String(provider || '').trim().toLowerCase()
+  const organizationRecord = resolveOrganizationLookup(organization)
+  if (String(organization || '').trim() && !organizationRecord) {
+    return err(res, 'Organization not found', 404)
+  }
   const authResult = await getAuthUserFromAccessToken(accessToken)
   if (!authResult.success || !authResult.user) {
     return err(res, authResult.error || 'Failed to verify OAuth session with Supabase', 401)
@@ -446,13 +508,14 @@ router.post('/oauth/complete', async (req, res) => {
     FROM users
     WHERE is_active = 1
       AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
       AND (
         supabase_user_id = ?
         OR (? != '' AND lower(trim(email)) = ?)
       )
     ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
     LIMIT 1
-  `).get(authUser.id, authEmail, authEmail, authUser.id)
+  `).get(Number(organizationRecord?.id || 0), Number(organizationRecord?.id || 0), authUser.id, authEmail, authEmail, authUser.id)
 
   if (!localUser) {
     if (!authEmail) {
@@ -632,7 +695,7 @@ router.get('/otp/status/:userId', authToken, (req, res) => {
 
 // POST /api/auth/password-reset/otp
 router.post('/password-reset/otp', async (req, res) => {
-  const { identifier, otp, newPassword } = req.body || {}
+  const { identifier, organization, otp, newPassword } = req.body || {}
   if (!identifier) return err(res, 'Username or email is required')
   if (!otp) return err(res, 'OTP code is required')
   if (!newPassword || String(newPassword).length < 4) return err(res, 'New password must be at least 4 characters')
@@ -646,7 +709,11 @@ router.post('/password-reset/otp', async (req, res) => {
     message: 'Too many OTP reset attempts.',
   })) return
 
-  const user = findUserByIdentifier(identifier, { requireVerifiedContact: false })
+  const organizationRecord = resolveOrganizationLookup(organization)
+  const user = findUserByIdentifier(identifier, {
+    requireVerifiedContact: false,
+    organizationId: Number(organizationRecord?.id || 0),
+  })
   if (!user) return err(res, 'Invalid reset request', 400)
   if (!Number(user.otp_enabled || 0)) return err(res, 'OTP is not enabled for this account. Use Google, Facebook, or ask an admin to reset the password.', 400)
 

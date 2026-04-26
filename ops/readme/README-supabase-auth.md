@@ -22,6 +22,23 @@ Supabase now handles:
 4. Google and Facebook sign-in are allowed only when the provider email matches the local account email.
 5. If a local user is disabled or deleted, Business OS blocks access locally and also bans the linked Supabase auth user.
 
+## Organization-aware login
+
+The current app now has an organization/group foundation.
+
+Right now this server still runs one default organization:
+- `LeangCosmetics`
+
+Users sign in against that organization context, and the public portal path is now shaped for future scale-up:
+- `/<organization>/public`
+
+For a future centralized rollout, keep Supabase redirect URLs broad enough to include:
+- the root host
+- the organization admin path you actively use
+- localhost development
+
+See [README-organization-versions.md](C:/Users/mrkl6/Downloads/business-os/ops/readme/README-organization-versions.md) for the v1/v2/v3 deployment profiles.
+
 ## Important design decision
 
 Supabase does not provide native username-first auth the same way Business OS does.
