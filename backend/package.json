@@ -1,0 +1,52 @@
+{
+  "name": "business-os-backend",
+  "version": "6.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "main": "server.js",
+  "bin": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test:utils": "node test/serverUtils.test.js && node test/accessControl.test.js && node test/portalUtils.test.js && node test/backupSchema.test.js && node test/dataPath.test.js && node test/backupRoundtrip.test.js",
+    "verify:integrity": "node ../ops/scripts/backend/verify-data-integrity.js",
+    "verify:integrity:fix": "node ../ops/scripts/backend/verify-data-integrity.js --fix",
+    "build:win":   "npx @yao-pkg/pkg . --target node24-win-x64   --output ../business-os-server.exe",
+    "build:linux": "npx @yao-pkg/pkg . --target node24-linux-x64 --output ../dist-bin/business-os-server-linux",
+    "build:mac":   "npx @yao-pkg/pkg . --target node24-macos-x64 --output ../dist-bin/business-os-server-mac",
+    "build:all":   "npm run build:win && npm run build:linux && npm run build:mac"
+  },
+  "dependencies": {
+    "bcryptjs":       "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "compression":    "^1.8.0",
+    "cors":           "^2.8.5",
+    "dotenv":         "^16.4.5",
+    "express":        "^4.21.2",
+    "multer":         "^2.0.1",
+    "qrcode":         "^1.5.4",
+    "speakeasy":      "^2.0.0",
+    "ws":             "^8.18.0"
+  },
+  "pkg": {
+    "assets": [
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "node_modules/@img/**/*.node",
+      "node_modules/@img/**/*.dll",
+      "frontend-dist/**/*"
+    ],
+    "scripts": [
+      "src/**/*.js"
+    ],
+    "targets": [
+      "node24-win-x64"
+    ]
+  },
+  
+  "optionalDependencies": {
+    "sharp": "^0.34.0"
+  }
+}

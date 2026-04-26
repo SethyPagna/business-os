@@ -1,0 +1,692 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArchiveRestore, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Upload } from 'lucide-react'
+import { useApp } from '../../AppContext'
+import { ResetData, FactoryReset } from './ResetData'
+import { cacheClearAll } from '../../api/http'
+import { refreshAppData } from '../../utils/appRefresh'
+
+const BACKUP_SECTION_CONFIG = [
+  { key: 'products', label: 'Products' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'returns', label: 'Returns' },
+  { key: 'customers', label: 'Customers' },
+  { key: 'suppliers', label: 'Suppliers' },
+  { key: 'delivery_contacts', label: 'Delivery' },
+  { key: 'users', label: 'Users' },
+  { key: 'roles', label: 'Roles' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'customer_share_submissions', label: 'Portal submissions' },
+  { key: 'audit_logs', label: 'Audit log' },
+  { key: 'file_assets', label: 'Files library' },
+]
+
+function useCopy(t) {
+  return (key, fallback) => {
+    const value = t?.(key)
+    return value && value !== key ? value : fallback
+  }
+}
+
+function buildPathCrumbs(basePath) {
+  const raw = String(basePath || '')
+  if (!raw) return []
+  const normalized = raw.replace(/\//g, '\\')
+  const parts = normalized.split('\\').filter(Boolean)
+  if (!parts.length) return []
+  const crumbs = []
+  let cursor = normalized.startsWith('\\\\') ? '\\\\' : ''
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    if (/^[A-Za-z]:$/.test(part)) cursor = `${part}\\`
+    else if (cursor.endsWith('\\') || cursor === '\\\\') cursor = `${cursor}${part}`
+    else cursor = `${cursor}\\${part}`
+    crumbs.push({ label: part, path: cursor })
+  }
+  return crumbs
+}
+
+function buildFinalDataFolderPath(basePath, folderName = 'business-os-data') {
+  const raw = String(basePath || '').trim().replace(/\//g, '\\')
+  if (!raw) return ''
+  const normalized = /^[A-Za-z]:\\?$/.test(raw)
+    ? raw.replace(/\\?$/, '\\')
+    : raw.replace(/[\\]+$/, '')
+  const parts = normalized.split('\\').filter(Boolean)
+  const lastSegment = parts[parts.length - 1] || ''
+  if (lastSegment.toLowerCase() === folderName.toLowerCase()) return normalized
+  if (normalized.endsWith('\\')) return `${normalized}${folderName}`
+  return `${normalized}\\${folderName}`
+}
+
+function formatDateTime(raw) {
+  if (!raw) return '--'
+  const value = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return raw
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function formatBytes(value) {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount) || amount <= 0) return '0 B'
+  if (amount < 1024) return `${amount} B`
+  if (amount < 1024 * 1024) return `${(amount / 1024).toFixed(1)} KB`
+  if (amount < 1024 * 1024 * 1024) return `${(amount / (1024 * 1024)).toFixed(1)} MB`
+  return `${(amount / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function countBackupRows(backup, tableName) {
+  if (backup?.summary?.tables && Number.isFinite(Number(backup.summary.tables[tableName]))) {
+    return Number(backup.summary.tables[tableName]) || 0
+  }
+  if (backup?.tables && typeof backup.tables === 'object') {
+    return Array.isArray(backup.tables[tableName]) ? backup.tables[tableName].length : 0
+  }
+  return Array.isArray(backup?.[tableName]) ? backup[tableName].length : 0
+}
+
+function buildBackupPreview(backup, fileName) {
+  const counts = Object.fromEntries(
+    BACKUP_SECTION_CONFIG.map((section) => [section.key, countBackupRows(backup, section.key)]),
+  )
+  const uploadsCount = Number(backup?.summary?.totals?.uploadCount)
+    || (Array.isArray(backup?.uploads) ? backup.uploads.length : 0)
+  const totalRows = Number(backup?.summary?.totals?.tableRowCount)
+    || Object.values(counts).reduce((sum, value) => sum + value, 0)
+  const customTableCount = Number(backup?.summary?.totals?.customTableCount)
+    || (backup?.custom_table_rows && typeof backup.custom_table_rows === 'object' ? Object.keys(backup.custom_table_rows).length : 0)
+  const customTableRowCount = Number(backup?.summary?.totals?.customTableRowCount)
+    || Object.values(backup?.custom_table_rows || {}).reduce((sum, value) => sum + (Array.isArray(value) ? value.length : 0), 0)
+  const populatedSections = BACKUP_SECTION_CONFIG
+    .filter((section) => counts[section.key] > 0)
+    .map((section) => ({ ...section, count: counts[section.key] }))
+
+  const warnings = []
+  if (!countBackupRows(backup, 'file_assets') && uploadsCount > 0) {
+    warnings.push('This backup has uploads but no file-library metadata. Restore still works, but Files entries may need to be rebuilt.')
+  }
+  if (Number(backup?.version || 0) > 0 && Number(backup.version) < 10) {
+    warnings.push('This is an older backup format. Business data should restore, but newer file coverage is more limited.')
+  }
+
+  return {
+    fileName,
+    version: Number(backup?.version || 0) || null,
+    exportedAt: backup?.exported_at || '',
+    uploadsCount,
+    totalRows,
+    customTableCount,
+    customTableRowCount,
+    populatedSections,
+    warnings,
+    counts,
+  }
+}
+
+function SectionChip({ label, value, tone = 'slate' }) {
+  const toneClass = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+    blue: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-200',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-200',
+  }[tone] || 'border-slate-200 bg-slate-50 text-slate-700'
+
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-sm ${toneClass}`}>
+      <div className="text-[11px] uppercase tracking-wide opacity-70">{label}</div>
+      <div className="mt-1 font-semibold">{value}</div>
+    </div>
+  )
+}
+
+function DataFolderLocation({ t, notify }) {
+  const copy = useCopy(t)
+  const [info, setInfo] = useState(null)
+  const [inputPath, setInputPath] = useState('')
+  const [browseState, setBrowseState] = useState(null)
+  const [showAdvancedBrowser, setShowAdvancedBrowser] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef(null)
+
+  const load = async () => {
+    try {
+      const result = await window.api.getDataPath()
+      setInfo(result)
+      setInputPath(result?.dataRootParent || result?.dataRoot || '')
+    } catch (error) {
+      notify(`${copy('data_folder_load_failed', 'Failed to load data folder information')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }
+
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const folderName = info?.dataFolderName || 'business-os-data'
+  const currentSummary = info?.summary || {}
+  const previewPath = useMemo(
+    () => buildFinalDataFolderPath(inputPath, folderName),
+    [folderName, inputPath],
+  )
+
+  const openBrowser = async (dir) => {
+    try {
+      setBusy(true)
+      const result = await window.api.browseDir(dir || inputPath || info?.dataRootParent || info?.dataRoot || '')
+      if (result) setBrowseState(result)
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openDriveBrowser = async () => {
+    await openBrowser('__ROOTS__')
+  }
+
+  const pickFolderNatively = async () => {
+    try {
+      setBusy(true)
+      const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.dataRootParent || info?.dataRoot || '')
+      if (selectedFolder && typeof selectedFolder === 'string') {
+        setInputPath(selectedFolder)
+        setBrowseState(null)
+        inputRef.current?.focus()
+        notify(copy('folder_selected', 'Folder selected'), 'success')
+        return
+      }
+    } catch (error) {
+      console.warn('[Backup] Native folder picker unavailable:', error?.message || error)
+    } finally {
+      setBusy(false)
+    }
+    notify(copy('folder_picker_fallback', 'Native folder picker is unavailable in this runtime. Use Browse folders below.'), 'info')
+    setShowAdvancedBrowser(true)
+    await openDriveBrowser()
+  }
+
+  const openInlinePicker = async () => {
+    const next = !showAdvancedBrowser
+    setShowAdvancedBrowser(next)
+    if (next && !browseState) {
+      await openBrowser(inputPath || info?.dataRootParent || info?.dataRoot || '')
+    }
+  }
+
+  const openInExplorer = async () => {
+    const target = String(info?.dataRoot || previewPath || '').trim()
+    if (!target) return
+    try {
+      const result = await window.api.openPath?.(target)
+      if (result?.success === false) notify(result.error || copy('unknown_error', 'Unknown error'), 'error')
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }
+
+  const selectDir = (fullPath) => {
+    setInputPath(fullPath)
+    setBrowseState(null)
+    inputRef.current?.focus()
+  }
+
+  const handleApply = async () => {
+    const target = String(previewPath || '').trim()
+    if (!target) return notify(copy('data_folder_path_required', 'Please enter a folder path'), 'error')
+    if (!confirm(`${copy('data_folder_change_prompt', 'Copy current live Business OS data to')}:\n\n${target}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}\n\n${copy('proceed', 'Proceed?')}`)) return
+
+    try {
+      setBusy(true)
+      const result = await window.api.setDataPath(target)
+      if (result?.success) {
+        notify(copy('data_folder_updated', 'Data folder updated. Restart the server to apply.'), 'success')
+        load()
+        return
+      }
+      notify(`${copy('failed', 'Failed')}: ${result?.error || copy('unknown_error', 'Unknown error')}`, 'error')
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleReset = async () => {
+    if (!confirm(`${copy('data_folder_reset_prompt', 'Copy current live data back to the default business-os-data folder?')}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}`)) return
+    try {
+      setBusy(true)
+      const result = await window.api.resetDataPath()
+      if (result?.success === false) {
+        notify(result.error || copy('unknown_error', 'Unknown error'), 'error')
+        return
+      }
+      notify(copy('data_folder_reset_done', 'Reverted to default folder. Restart the server to apply.'))
+      load()
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const browseCrumbs = buildPathCrumbs(browseState?.base || '')
+  const selectedFolderLabel = String(browseState?.base || '').split(/[/\\]/).pop() || String(browseState?.base || '')
+
+  return (
+    <div className="card p-5 sm:p-6">
+      <h2 className="mb-1 text-base font-semibold text-gray-900 dark:text-white">
+        {copy('data_folder_location', 'Live Data Location')}
+      </h2>
+      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+        {copy('data_folder_desc', 'Choose where the live database, uploads, and generated files should live. Pick a drive or parent folder and Business OS will copy the current live data into')} <code className="rounded bg-gray-100 px-1 text-xs dark:bg-zinc-800">{folderName}</code> {copy('data_folder_desc_suffix', 'there, then switch over after a restart.')}
+      </p>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SectionChip label={copy('active_path', 'Active live folder')} value={info?.dataRoot || '--'} tone="blue" />
+        <SectionChip label={copy('new_location_preview', 'Next live folder')} value={previewPath || '--'} tone="amber" />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SectionChip label={copy('location_mode', 'Location mode')} value={info?.hasOverride ? copy('custom_path', 'Custom path') : copy('portable_default', 'Portable default')} />
+        <SectionChip label={copy('database_size', 'Database size')} value={formatBytes(currentSummary.dbSizeBytes)} />
+        <SectionChip label={copy('uploads', 'Uploads')} value={currentSummary.uploadCount ?? 0} />
+        <SectionChip label={copy('files_total', 'Files on disk')} value={currentSummary.totalFileCount ?? 0} />
+      </div>
+
+      <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+        {copy('data_folder_safe_copy', 'When you apply a new location, Business OS copies the current database, uploads, and generated files into the new folder first. The old folder is left alone so you have a rollback copy.')}
+      </p>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <input
+          id="backup-data-folder-path"
+          name="backup_data_folder_path"
+          aria-label={copy('choose_data_folder_path', 'Choose parent folder for live data')}
+          ref={inputRef}
+          className="input min-w-0 w-full flex-1 font-mono text-sm"
+          placeholder={copy('data_folder_placeholder', 'e.g. D:\\Business Data')}
+          value={inputPath}
+          onChange={(event) => setInputPath(event.target.value)}
+          spellCheck={false}
+        />
+        <button className="btn-primary w-full text-sm sm:w-auto" onClick={openInlinePicker} disabled={busy}>
+          {showAdvancedBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
+        </button>
+        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={pickFolderNatively} disabled={busy}>
+          {copy('system_folder_picker', 'Choose Folder')}
+        </button>
+        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={openInExplorer} disabled={!String(info?.dataRoot || previewPath || '').trim()}>
+          {copy('open_in_explorer', 'Open active folder')}
+        </button>
+      </div>
+
+      {showAdvancedBrowser ? (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.dataRootParent || info?.dataRoot)} disabled={busy}>
+            {copy('browse', 'Browse current path')}
+          </button>
+          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={openDriveBrowser} disabled={busy}>
+            {copy('browse_drives', 'Browse drives')}
+          </button>
+        </div>
+      ) : null}
+
+      {showAdvancedBrowser && browseState ? (
+        <div className="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-zinc-600">
+          <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800">
+            <div className="mb-2 flex items-center gap-2">
+              <button
+                onClick={() => browseState.parent && openBrowser(browseState.parent)}
+                disabled={!browseState.parent}
+                className={`rounded px-2 py-1 text-xs ${browseState.parent ? 'text-gray-700 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-700' : 'cursor-not-allowed text-gray-300 dark:text-gray-600'}`}
+              >
+                {browseState.parent === '__ROOTS__' ? copy('browse_drives', 'Browse drives') : copy('up', 'Up')}
+              </button>
+              <button onClick={() => setBrowseState(null)} className="ml-auto rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-zinc-700">Close</button>
+            </div>
+            {!browseState.isRootList && browseCrumbs.length ? (
+              <div className="flex flex-wrap items-center gap-1 text-xs">
+                {browseCrumbs.map((crumb, index) => (
+                  <button
+                    key={`${crumb.path}-${index}`}
+                    className="rounded bg-white px-2 py-1 font-mono text-gray-600 hover:bg-blue-50 hover:text-blue-700 dark:bg-zinc-700 dark:text-gray-300 dark:hover:bg-blue-900/30"
+                    onClick={() => openBrowser(crumb.path)}
+                  >
+                    {crumb.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{browseState.base}</span>
+            )}
+          </div>
+
+          <div className="max-h-72 overflow-y-auto p-3">
+            {browseState.error ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-500">{browseState.error}</div>
+            ) : null}
+            {!browseState.error && browseState.dirs.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-200 px-4 py-4 text-sm text-gray-400 dark:border-zinc-700">{copy('no_subfolders_found', 'No subfolders found')}</div>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {browseState.dirs.map((dir) => (
+                <div key={dir.fullPath} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                  <button
+                    className="w-full text-left text-sm font-medium text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
+                    onClick={() => openBrowser(dir.fullPath)}
+                  >
+                    {browseState.isRootList ? copy('drive', 'Drive') : 'Folder'}: {dir.name}
+                  </button>
+                  <div className="mt-1 truncate text-[11px] font-mono text-gray-400">{dir.fullPath}</div>
+                  <button className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300" onClick={() => selectDir(dir.fullPath)}>
+                    {copy('select', 'Select')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {!browseState.isRootList ? (
+            <div className="flex flex-col items-start gap-2 border-t border-gray-200 bg-gray-50 px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-xs text-gray-500">{copy('use_this_folder_directly', 'Use this folder as the parent location')}</span>
+              <button className="btn-primary w-full px-3 py-1 text-xs sm:w-auto" onClick={() => selectDir(browseState.base)}>
+                {copy('use_folder', 'Use')} "{selectedFolderLabel}"
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <button className="btn-primary w-full text-sm sm:w-auto" onClick={handleApply} disabled={busy || !previewPath || previewPath === info?.dataRoot}>
+          {busy ? copy('applying', 'Applying...') : copy('apply_new_location', 'Copy Data and Switch')}
+        </button>
+        {info?.hasOverride ? (
+          <button className="btn-secondary w-full text-sm text-gray-500 sm:w-auto" onClick={handleReset} disabled={busy}>
+            {copy('reset_to_default', 'Reset to Default')}
+          </button>
+        ) : null}
+      </div>
+
+      <p className="mt-3 text-xs text-gray-400">
+        {copy('data_folder_tip_prefix', 'Tip: choose the parent folder only. Business OS keeps everything grouped inside')} <code className="rounded bg-gray-100 px-1 dark:bg-zinc-800">{folderName}</code> {copy('data_folder_tip_suffix', 'so backups, uploads, and the database stay together.')}
+      </p>
+    </div>
+  )
+}
+
+export default function Backup() {
+  const { t, notify, hasPermission } = useApp()
+  const copy = useCopy(t)
+  const [loading, setLoading] = useState('')
+  const [pendingImport, setPendingImport] = useState(null)
+  const [folderExportPath, setFolderExportPath] = useState('')
+  const [folderImportPath, setFolderImportPath] = useState('')
+
+  const exportSections = [
+    'Products and inventory',
+    'Sales and returns',
+    'Contacts and users',
+    'Portal settings and submissions',
+    'Files, uploads, and audit log',
+  ]
+
+  const handleExport = async () => {
+    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    setLoading('export')
+    try {
+      const result = await window.api.exportBackup()
+      if (result?.success) notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
+      else notify(copy('export_failed', 'Export failed'), 'error')
+    } catch (error) {
+      notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+    }
+    setLoading('')
+  }
+
+  const pickFolder = async (setter, hintPath = '') => {
+    try {
+      const folder = await window.api.openFolderDialog?.(hintPath)
+      if (folder && typeof folder === 'string') setter(folder)
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }
+
+  const handleFolderExport = async () => {
+    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!folderExportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
+    setLoading('folder-export')
+    try {
+      const result = await window.api.exportBackupFolder(folderExportPath)
+      if (result?.success) {
+        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
+        if (result.backupRoot) setFolderImportPath(result.backupRoot)
+      } else {
+        notify(result?.error || copy('export_failed', 'Export failed'), 'error')
+      }
+    } catch (error) {
+      notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+    }
+    setLoading('')
+  }
+
+  const handleFolderImport = async () => {
+    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
+    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+
+    setLoading('folder-import')
+    try {
+      const result = await window.api.importBackupFolder(folderImportPath)
+      if (result?.success) {
+        cacheClearAll()
+        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
+        setTimeout(() => refreshAppData(), 200)
+      } else {
+        notify(result?.error || copy('import_failed', 'Import failed'), 'error')
+      }
+    } catch (error) {
+      notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+    }
+    setLoading('')
+  }
+
+  const handleChooseImportFile = async () => {
+    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    try {
+      const file = await window.api.pickBackupFile?.()
+      if (!file) return
+      const parsed = JSON.parse(await file.text())
+      setPendingImport({
+        data: parsed,
+        preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json'),
+      })
+      notify(copy('backup_file_ready', 'Backup file loaded. Review it, then confirm restore.'), 'success')
+    } catch (error) {
+      notify(`${copy('import_failed', 'Import failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }
+
+  const handleConfirmImport = async () => {
+    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!pendingImport?.data) return
+    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+
+    setLoading('import')
+    try {
+      const result = await window.api.importBackupData(pendingImport.data)
+      if (result?.success) {
+        cacheClearAll()
+        setPendingImport(null)
+        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
+        setTimeout(() => refreshAppData(), 200)
+      } else {
+        notify(`${copy('import_failed', 'Import failed')}: ${result?.error || copy('unknown_error', 'Unknown error')}`, 'error')
+      }
+    } catch (error) {
+      notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+    }
+    setLoading('')
+  }
+
+  return (
+    <div className="page-scroll p-4 sm:p-6">
+      <h1 className="mb-6 flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+        <HardDriveDownload className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+        {copy('backup', 'Backup')}
+      </h1>
+      <div className="max-w-4xl space-y-4">
+        <div className="card p-5 sm:p-6">
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            {copy('export_backup_title', 'Create Folder Backup')}
+          </h2>
+          <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+            {copy('export_backup_desc', 'Choose a destination folder and Business OS will duplicate the full live data folder there, including database, uploads, and generated files.')}
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {exportSections.map((section) => (
+              <span key={section} className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300">
+                {section}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                className="input flex-1 font-mono text-sm"
+                value={folderExportPath}
+                onChange={(event) => setFolderExportPath(event.target.value)}
+                placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
+              />
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
+                <FolderOutput className="h-4 w-4" />
+                {copy('browse_folder', 'Choose Folder')}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderExport} disabled={loading === 'folder-export'}>
+                <ArchiveRestore className="h-4 w-4" />
+                {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('folder_backup_btn', 'Create Folder Backup')}
+              </button>
+              <button className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={handleExport} disabled={loading === 'export'}>
+                <Download className="h-4 w-4" />
+                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Download JSON Backup')}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-5 sm:p-6">
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <FolderInput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            {copy('import_backup_title', 'Restore From Folder')}
+          </h2>
+          <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+            {copy('import_backup_desc', 'Choose a Business OS backup folder or a business-os-data folder, then restore it into the current system.')}
+          </p>
+
+          <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                className="input flex-1 font-mono text-sm"
+                value={folderImportPath}
+                onChange={(event) => setFolderImportPath(event.target.value)}
+                placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
+              />
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
+                <FolderInput className="h-4 w-4" />
+                {copy('browse_folder', 'Choose Folder')}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderImport} disabled={loading === 'folder-import'}>
+                <Upload className="h-4 w-4" />
+                {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('folder_restore_btn', 'Restore Folder Backup')}
+              </button>
+            </div>
+
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {copy('folder_restore_note', 'Folder restore replaces current data with the selected backup contents. JSON restore remains available below for older backup files.')}
+            </p>
+          </div>
+
+          <div className="mt-5 border-t border-gray-200 pt-5 dark:border-zinc-700">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
+              <FileArchive className="h-4 w-4 text-gray-500" />
+              {copy('legacy_json_backup', 'Legacy JSON Backup')}
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <button className="btn-secondary w-full text-sm sm:w-auto" onClick={handleChooseImportFile} disabled={loading === 'import'}>
+                {copy('choose_backup_file', 'Choose Backup File')}
+              </button>
+              {pendingImport ? (
+                <button className="btn-primary w-full text-sm sm:w-auto" onClick={handleConfirmImport} disabled={loading === 'import'}>
+                  {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Restore This Backup')}
+                </button>
+              ) : null}
+              {pendingImport ? (
+                <button className="btn-secondary w-full text-sm sm:w-auto" onClick={() => setPendingImport(null)} disabled={loading === 'import'}>
+                  {copy('clear', 'Clear')}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {pendingImport ? (
+            <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{pendingImport.preview.fileName}</div>
+                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Exported {formatDateTime(pendingImport.preview.exportedAt)}{pendingImport.preview.version ? ` | v${pendingImport.preview.version}` : ''}
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
+                  <SectionChip label="Rows" value={pendingImport.preview.totalRows} />
+                  <SectionChip label="Uploads" value={pendingImport.preview.uploadsCount} />
+                  <SectionChip label="Custom tables" value={`${pendingImport.preview.customTableCount} (${pendingImport.preview.customTableRowCount} rows)`} />
+                </div>
+              </div>
+
+              {pendingImport.preview.populatedSections.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {pendingImport.preview.populatedSections.map((section) => (
+                    <span key={section.key} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-200">
+                      {section.label}: {section.count}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {pendingImport.preview.warnings.length ? (
+                <div className="mt-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  {pendingImport.preview.warnings.map((warning, index) => (
+                    <div key={`${warning}-${index}`}>{warning}</div>
+                  ))}
+                </div>
+              ) : null}
+
+              <p className="mt-4 text-xs text-amber-600 dark:text-amber-400">
+                {copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <DataFolderLocation t={t} notify={notify} />
+        <ResetData />
+        <FactoryReset />
+      </div>
+    </div>
+  )
+}

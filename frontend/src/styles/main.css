@@ -1,0 +1,356 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html {
+    font-size: 16px;
+  }
+  body {
+    margin: 0;
+    font-family: var(--ui-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+    font-size: var(--ui-text-size, 14px);
+    font-weight: var(--ui-font-weight, normal);
+    line-height: 1.5;
+    background-color: #f9fafb;
+    color: #111827;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  button,
+  input,
+  textarea,
+  select,
+  table,
+  th,
+  td {
+    font: inherit;
+    font-family: inherit;
+  }
+html[data-public-portal='true'],
+body[data-public-portal='true'] {
+  height: auto;
+  min-height: 100%;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
+}
+  :root {
+    --sidebar-width: 240px;
+    --ui-font-size: 14px;
+    --ui-text-size: 14px;
+    --ui-sidebar-size: 14px;
+    --ui-page-title-size: 28px;
+    --ui-section-size: 16px;
+    --ui-table-size: 14px;
+    --ui-chip-size: 12px;
+    --ui-font-weight: normal;
+    --ui-accent: #2563eb;
+    --ui-radius: 8px;
+    --ui-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --ui-sidebar-bg: ;
+    --ui-page-bg: ;
+  }
+}
+
+body[data-public-portal='true'] .skiptranslate iframe,
+body[data-public-portal='true'] .goog-te-banner-frame,
+body[data-public-portal='true'] .goog-te-gadget-icon,
+body[data-public-portal='true'] .goog-te-gadget-simple,
+body[data-public-portal='true'] .goog-te-gadget,
+body[data-public-portal='true'] #google_translate_element {
+  display: none !important;
+}
+
+body[data-public-portal='true'] {
+  top: 0 !important;
+  position: static !important;
+}
+
+html[data-public-portal='true'] body.translated-ltr,
+html[data-public-portal='true'] body.translated-rtl {
+  top: 0 !important;
+  position: static !important;
+}
+
+body[data-public-portal='true'] #business-os-portal-translate {
+  position: absolute !important;
+  left: -9999px !important;
+  top: auto !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+}
+
+/* ── Page background override ──────────────────────────────── */
+body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; }
+/* Applied directly via JS below when variable is set */
+
+/* ══════════════════════════════════════════════════════════════
+   DARK MODE — Claude-inspired dark grey palette
+   Page: #1e1e22  |  Cards: #28282f  |  Sidebar: #17171c
+   Inputs: #313138  |  Borders: #3a3a44  |  Text: #e8e8ed
+   ══════════════════════════════════════════════════════════════ */
+.dark body                   { background-color: #1e1e22; color: #e8e8ed; }
+.dark .card                  { background-color: #28282f !important; border-color: #3a3a44 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.35) !important; }
+.dark .input                 { background-color: #313138 !important; border-color: #3a3a44 !important; color: #e8e8ed !important; }
+.dark .input::placeholder    { color: #6b6b7a !important; }
+.dark .input:focus           { border-color: var(--ui-accent,#3b82f6) !important; }
+.dark .btn-secondary         { background-color: #313138 !important; color: #d0d0da !important; border: 1px solid #3a3a44 !important; }
+.dark .btn-secondary:hover   { background-color: #3c3c44 !important; }
+.dark .table-row             { border-color: #3a3a44 !important; }
+.dark .table-row:hover       { background-color: rgba(58,58,68,0.6) !important; }
+.dark .table-bordered th,
+.dark .table-bordered td     { border-color: #3a3a44 !important; }
+.dark .table-bordered thead th { background-color: #1c1c20 !important; border-bottom-color: #44444f !important; }
+.dark thead tr               { background-color: #1c1c20 !important; }
+.dark aside,
+.dark header.md\:hidden,
+.dark nav.md\:hidden {
+  background-color: #17171c !important;  /* sidebar: slightly darker than page, easy on eyes */
+  border-color: #2a2a32 !important;
+}
+/* Sidebar brand header */
+.dark aside > div:first-child { border-color: #2a2a32 !important; }
+/* Sidebar bottom user strip */
+.dark aside > div:last-child  { border-color: #2a2a32 !important; }
+.dark .sidebar-item          { color: #9090a0; }
+.dark .sidebar-item:hover    { background-color: #222228 !important; color: #e8e8ed !important; }
+.dark .sidebar-item.active   {
+  background-color: rgba(59,130,246,0.15) !important;
+  color: #93c5fd !important;
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+.dark select                 { background-color: #313138 !important; color: #e8e8ed !important; border-color: #3a3a44 !important; }
+.dark select option          { background-color: #28282f; color: #e8e8ed; }
+.dark .col-highlight-green   { background: rgba(16,185,129,0.07) !important; }
+.dark .col-highlight-red     { background: rgba(239,68,68,0.07) !important; }
+.dark .col-highlight-blue    { background: rgba(59,130,246,0.07) !important; }
+.dark ::-webkit-scrollbar-thumb { background: #44444f; }
+.dark ::-webkit-scrollbar-track { background: #28282f; }
+/* Normalize common gray shades in dark */
+.dark .bg-gray-50, .dark .bg-gray-100:not(.badge-green):not(.badge-red):not(.badge-yellow):not(.badge-blue) { background-color: #28282f !important; }
+.dark [class~="divide-gray-100"] > * { border-color: #3a3a44 !important; }
+.dark [class~="border-gray-100"], .dark [class~="border-gray-200"] { border-color: #3a3a44 !important; }
+.dark .text-gray-900 { color: #e8e8ed !important; }
+.dark .text-gray-800 { color: #dcdce4 !important; }
+.dark .text-gray-700 { color: #c0c0cc !important; }
+.dark .text-gray-600 { color: #9898a8 !important; }
+
+/* ══════════════════════════════════════════════════════════════
+   COMPONENT LIBRARY
+   ══════════════════════════════════════════════════════════════ */
+@layer components {
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    min-height: 2.5rem;
+  }
+  .btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 active:bg-gray-300 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg font-medium transition-colors;
+    min-height: 2.5rem;
+  }
+  .btn-danger  { @apply bg-red-600   hover:bg-red-700   text-white px-4 py-2 rounded-lg font-medium transition-colors; min-height:2.5rem; }
+  .btn-success { @apply bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors; min-height:2.5rem; }
+
+  .input {
+    @apply w-full border border-gray-300 dark:border-zinc-600 rounded-lg px-3 py-2
+           bg-white dark:bg-zinc-700 text-gray-900 dark:text-zinc-100
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+    font-size: max(16px, var(--ui-font-size, 14px));
+    transition: border-color 0.15s, box-shadow 0.15s;
+    min-height: 2.5rem;
+  }
+  .card { @apply bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700; }
+
+  .table-row {
+    @apply border-b border-gray-100 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-700/50 transition-colors;
+  }
+  .badge-green  { @apply bg-green-100  text-green-700  dark:bg-green-900/30  dark:text-green-400  text-xs px-2 py-0.5 rounded-full font-medium; }
+  .badge-red    { @apply bg-red-100    text-red-700    dark:bg-red-900/30    dark:text-red-400    text-xs px-2 py-0.5 rounded-full font-medium; }
+  .badge-yellow { @apply bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 text-xs px-2 py-0.5 rounded-full font-medium; }
+  .badge-blue   { @apply bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-400   text-xs px-2 py-0.5 rounded-full font-medium; }
+  .badge-green, .badge-red, .badge-yellow, .badge-blue { font-size: var(--ui-chip-size, 12px); }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 dark:text-zinc-400
+           hover:bg-gray-100 dark:hover:bg-zinc-700 hover:text-gray-900 dark:hover:text-zinc-100
+           transition-colors cursor-pointer text-sm font-medium;
+    font-size: var(--ui-sidebar-size, 14px);
+  }
+  .sidebar-item.active { @apply bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400; }
+  .card h2,
+  .card h3 {
+    font-size: var(--ui-section-size, 16px);
+  }
+  table,
+  th,
+  td {
+    font-size: var(--ui-table-size, 14px);
+  }
+  .page-scroll > h1 {
+    font-size: var(--ui-page-title-size, 28px);
+    line-height: 1.1;
+  }
+
+  /* page-scroll: the unified scrollable page container used by every page component.
+     Works as a flex child (flex-1 stretches to fill the parent) OR in a block context
+     (height:100% fills the parent). The parent wrapper in App.jsx now uses
+     display:flex + flex-direction:column so flex-1 always activates correctly.
+     min-height:0 is required so flex children can shrink below their content size. */
+  .page-scroll {
+    @apply overflow-y-auto overflow-x-hidden;
+    flex: 1 1 0%;
+    min-height: 0;
+    height: 100%;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y pinch-zoom;
+    padding-bottom: 1.5rem;
+  }
+  @media (max-width: 767px) {
+    .page-scroll {
+      /* On mobile, add extra bottom padding inside the scroll area so the last row
+         is always comfortably above the bottom nav bar */
+      padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)) !important;
+    }
+  }
+  @media (min-width: 768px) {
+    .page-scroll { padding-bottom: 1.5rem !important; }
+  }
+
+  .modal-scroll {
+    @apply flex-1 overflow-y-auto overflow-x-hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y pinch-zoom;
+    min-height: 0;
+  }
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  .three-dot-btn {
+    @apply w-8 h-8 flex items-center justify-center rounded-lg
+           text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-700
+           hover:text-gray-600 dark:hover:text-zinc-200
+           transition-colors flex-shrink-0 text-lg select-none;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar         { width: 5px; height: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: #d1d5db; border-radius: 4px; }
+
+/* Safe-area for bottom nav */
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: calc(4rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* POS product grid */
+.pos-product-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px; }
+@media (min-width:480px) { .pos-product-grid { grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; } }
+@media (min-width:768px) { .pos-product-grid { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px; } }
+
+/* Receipt print */
+@media print {
+  body * { visibility: hidden; }
+  #receipt-print, #receipt-print * { visibility: visible; }
+  #receipt-print { position: absolute; left:0; top:0; width:80mm; }
+}
+
+/* Animations */
+.fade-in { animation: fadeIn 0.15s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
+/* Mobile card-table */
+@media (max-width:767px) {
+  .mobile-card-table thead { display:none; }
+  .mobile-card-table tbody tr { display:block; margin-bottom:.75rem; border-radius:.75rem; border:1px solid #e5e7eb; padding:.75rem; background:#fff; }
+  .dark .mobile-card-table tbody tr { background:#27272a; border-color:#3f3f46; }
+  .mobile-card-table td { display:flex; justify-content:space-between; align-items:center; padding:.25rem 0; border:none; font-size:.8125rem; }
+  .mobile-card-table td::before { content:attr(data-label); font-weight:600; color:#6b7280; margin-right:.5rem; flex-shrink:0; }
+  
+  /* Mobile table overflow fixes */
+  /* NOTE: Do NOT set display:block on thead/tbody — it detaches header column widths
+     from data cells and causes the misalignment visible on tablets. Instead each
+     page wraps its table in an overflow-x:auto container. */
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  
+  /* Dashboard mobile fixes */
+  .page-scroll { max-width: 100vw; }
+  .grid { gap: 0.75rem !important; }
+  .space-y-4 > * + * { margin-top: 0.75rem; }
+}
+
+/* Bordered tables */
+.table-bordered { border-collapse:collapse; }
+.table-bordered th, .table-bordered td { border:1px solid #e5e7eb; }
+.dark .table-bordered th, .dark .table-bordered td { border-color:#3f3f46; }
+.table-bordered thead th { background:#f9fafb; border-bottom:2px solid #d1d5db; }
+.dark .table-bordered thead th { background:#1f1f23; border-bottom-color:#52525b; }
+
+/* Column highlights */
+.col-highlight-green { background:rgba(16,185,129,.05); }
+.col-highlight-red   { background:rgba(239,68,68,.05); }
+.col-highlight-blue  { background:rgba(59,130,246,.05); }
+
+/* Accent color overrides */
+.btn-primary { background-color: var(--ui-accent,#2563eb) !important; }
+.btn-primary:hover { filter: brightness(0.9); }
+.sidebar-item.active { color: var(--ui-accent,#2563eb) !important; }
+
+input:focus, select:focus, textarea:focus {
+  outline-color: var(--ui-accent,#2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent,#2563eb) 20%, transparent) !important;
+}
+input[type="checkbox"]:checked, input[type="radio"]:checked { accent-color: var(--ui-accent,#2563eb); }
+
+/* Border radius via CSS var */
+.card, .badge-green, .badge-red, .badge-yellow, .badge-blue { border-radius: var(--ui-radius,8px) !important; }
+.btn-primary, .btn-secondary, .btn-danger, .btn-success, .input { border-radius: var(--ui-radius,8px) !important; }
+
+/* Font/size inheritance */
+th, td, label, p, span, div, button, select, input, textarea { font-size:inherit; font-family:inherit; }
+
+/* Scale text classes without resizing the whole layout/root rem size. */
+.text-xs { font-size: calc(0.75rem * var(--ui-text-scale, 1)) !important; }
+.text-sm { font-size: calc(0.875rem * var(--ui-text-scale, 1)) !important; }
+.text-base { font-size: calc(1rem * var(--ui-text-scale, 1)) !important; }
+.text-lg { font-size: calc(1.125rem * var(--ui-text-scale, 1)) !important; }
+.text-xl { font-size: calc(1.25rem * var(--ui-text-scale, 1)) !important; }
+.text-2xl { font-size: calc(1.5rem * var(--ui-text-scale, 1)) !important; }
+.text-3xl { font-size: calc(1.875rem * var(--ui-text-scale, 1)) !important; }
+.text-4xl { font-size: calc(2.25rem * var(--ui-text-scale, 1)) !important; }
+
+.page-scroll > h1 {
+  font-size: calc(1.25rem * var(--ui-title-scale, 1)) !important;
+}
+@media (min-width: 640px) {
+  .page-scroll > h1 {
+    font-size: calc(1.5rem * var(--ui-title-scale, 1)) !important;
+  }
+}
+.sidebar-item {
+  font-size: calc(0.875rem * var(--ui-sidebar-scale, 1)) !important;
+}
+.badge-green, .badge-red, .badge-yellow, .badge-blue {
+  font-size: calc(0.75rem * var(--ui-chip-scale, 1)) !important;
+}
+
+/* Density modes */
+body[data-density='compact'] .card { padding:.5rem !important; }
+body[data-density='compact'] .input { padding-top:.25rem !important; padding-bottom:.25rem !important; }
+body[data-density='compact'] .sidebar-item { padding-top:.375rem !important; padding-bottom:.375rem !important; }
+body[data-density='compact'] th, body[data-density='compact'] td { padding-top:.2rem !important; padding-bottom:.2rem !important; }
+body[data-density='compact'] .btn-primary, body[data-density='compact'] .btn-secondary, body[data-density='compact'] .btn-danger { min-height:2rem !important; padding-top:.25rem !important; padding-bottom:.25rem !important; }
+body[data-density='spacious'] .card { padding:1.5rem !important; }
+body[data-density='spacious'] .sidebar-item { padding-top:.875rem !important; padding-bottom:.875rem !important; }
+body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top:.75rem !important; padding-bottom:.75rem !important; }
+
+/* Branch stock collapse button */
+.branch-stock-expand {
+  @apply text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-zinc-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer font-medium whitespace-nowrap;
+}

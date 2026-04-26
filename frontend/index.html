@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="description" content="Business OS — Offline-first POS, inventory and analytics" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+    <title>Business OS</title>
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Poppins:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Hanuman:wght@400;700&family=Battambang:wght@400;700&family=Noto+Sans+Khmer:wght@400;500;700&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Poppins:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Hanuman:wght@400;700&family=Battambang:wght@400;700&family=Noto+Sans+Khmer:wght@400;500;700&display=swap" rel="stylesheet" />
+
+    <!--
+      CRITICAL: This inline script runs synchronously BEFORE any module script
+      (vendor.js, index.js, etc.) is parsed or executed by the browser.
+
+      1. Capacitor bridge suppression — vendor.js bundles the Capacitor JS bridge,
+         which immediately fires "No Listener: tabs:outgoing.message.ready" as an
+         unhandled promise rejection when running in a plain browser with no native
+         shell. Without suppression this error is caught by React 18's internal
+         scheduler, which calls an error handler that no longer exists in the
+         minified bundle, producing "TypeError: r/s is not a function".
+         Registering in the CAPTURE phase (3rd arg = true) intercepts the event
+         before React's own listener.
+
+      2. Dark mode flash prevention — apply the saved theme class synchronously
+         before the body renders to avoid a white→dark flash on page load.
+    -->
+    <script>
+      // ── Capacitor bridge suppressor (must run before vendor.js) ────────────
+      window.addEventListener('unhandledrejection', function(e) {
+        var msg = (e && e.reason && e.reason.message) ? e.reason.message : String(e && e.reason || '')
+        if (
+          msg.indexOf('No Listener:') !== -1 ||
+          msg.indexOf('tabs:outgoing') !== -1 ||
+          msg.indexOf('capacitor') !== -1 ||
+          msg.indexOf('plugin_not_implemented') !== -1 ||
+          msg.indexOf('Capacitor') !== -1
+        ) {
+          e.preventDefault()
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation()
+        }
+      }, true /* capture phase — runs before all bubbling listeners */)
+
+      // ── Dark mode flash prevention ─────────────────────────────────────────
+      try {
+        var settings = localStorage.getItem('businessos_settings')
+        if (settings) {
+          var parsed = JSON.parse(settings)
+          if (parsed && parsed.theme === 'dark') {
+            document.documentElement.classList.add('dark')
+          }
+        }
+        // Also check direct theme key
+        if (localStorage.getItem('businessos_theme') === 'dark') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch(_) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.jsx"></script>
+  </body>
+</html>
