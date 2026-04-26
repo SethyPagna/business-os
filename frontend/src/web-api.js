@@ -69,6 +69,7 @@ window.api = {
       dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
       cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       connectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
       startHealthCheck()
     } else {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
@@ -94,6 +95,12 @@ window.api = {
   ...methods,
   getCallLog,
   clearCallLog,
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('sync:reconnected', () => {
+    methods.flushPendingSyncQueue?.().catch(() => {})
+  })
 }
 
 // ── Bootstrap: read stored token, auto-detect server URL from page origin ─────
@@ -134,6 +141,7 @@ window.api = {
     if (url) {
       setSyncServerUrl(url)
       connectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
       startHealthCheck()  // ping every 12 s so offline→online recovery works
     }
   } catch (e) {

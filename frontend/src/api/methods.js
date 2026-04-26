@@ -11,7 +11,7 @@ function getDeviceInfo() {
  * where available, a local Dexie fallback for offline-first reads.
  */
 
-import { apiFetch, route, getSyncServerUrl, getSyncToken, cacheInvalidate, cacheClearAll } from './http.js'
+import { apiFetch, route, getSyncServerUrl, getSyncToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, buildCSVTemplate } from './localDb.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
@@ -34,6 +34,15 @@ function getCurrentUserContext() {
   } catch (_) {
     return { userId: null, userName: '' }
   }
+}
+
+function queueOfflineWrite(channel, payload) {
+  return dexieDb.sync_queue.add({
+    channel,
+    payload: JSON.stringify(payload || {}),
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  }).catch(() => {})
 }
 
 function appendActorQuery(path, extra = {}) {
@@ -242,12 +251,7 @@ export async function createProduct(d) {
     })
     cacheInvalidate('products')
     // Queue for sync when back online
-    await dexieDb.sync_queue.add({
-      channel: 'products:create',
-      payload: JSON.stringify({ ...getDeviceInfo(), ...d }),
-      status: 'pending',
-      created_at: new Date().toISOString(),
-    }).catch(() => {})
+    await queueOfflineWrite('products:create', { ...getDeviceInfo(), ...d })
     return { success: true, id: localId, _offline: true }
   }
 }
@@ -445,16 +449,70 @@ export async function createSale(d) {
       created_at: d.client_time || new Date().toISOString(),
       _local_pending: 1,
     })
-    await dexieDb.sync_queue.add({
-      channel: 'sales:create',
-      payload: JSON.stringify(d),
-      status: 'pending',
-      created_at: new Date().toISOString(),
-    }).catch(() => {})
+    await queueOfflineWrite('sales:create', { ...d, receipt_number: receiptNum })
     cacheInvalidate('sales')
     return { success: true, id: localId, receipt_number: receiptNum, receiptNumber: receiptNum, _offline: true }
   }
 }
+
+export async function flushPendingSyncQueue() {
+  const syncServerUrl = getSyncServerUrl()
+  if (!syncServerUrl) return { processed: 0, failed: 0 }
+
+  const pending = await dexieDb.sync_queue
+    .where('status')
+    .equals('pending')
+    .sortBy('created_at')
+
+  let processed = 0
+  let failed = 0
+
+  for (const item of pending) {
+    let payload = {}
+    try {
+      payload = item?.payload ? JSON.parse(item.payload) : {}
+    } catch (_) {
+      payload = {}
+    }
+
+    try {
+      if (item.channel === 'products:create') {
+        await apiFetch('POST', '/api/products', payload)
+      } else if (item.channel === 'sales:create') {
+        await apiFetch('POST', '/api/sales', payload)
+      } else {
+        await dexieDb.sync_queue.delete(item._seq)
+        continue
+      }
+
+      await dexieDb.sync_queue.delete(item._seq)
+      processed += 1
+    } catch (error) {
+      if (isNetErr(error)) {
+        failed += 1
+        break
+      }
+      failed += 1
+      await dexieDb.sync_queue.update(item._seq, {
+        status: 'failed',
+        error: error?.message || 'Sync failed',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    }
+  }
+
+  if (processed > 0) {
+    cacheInvalidate('products')
+    cacheInvalidate('sales')
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products', ts: Date.now() } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales', ts: Date.now() } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory', ts: Date.now() } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'dashboard', ts: Date.now() } }))
+  }
+
+  return { processed, failed }
+}
+
 export const getSales   = (params) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
   return route('sales:get', () => apiFetch('GET', `/api/sales${q ? '?' + q : ''}`), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray())

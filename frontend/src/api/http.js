@@ -17,6 +17,22 @@ import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/dev
 // ─── Mutable connection state (module-level, intentionally not React state) ───
 let syncServerUrl = ''
 let syncToken     = ''
+const RECONNECT_REFRESH_CHANNELS = [
+  'settings',
+  'products',
+  'inventory',
+  'sales',
+  'returns',
+  'customers',
+  'suppliers',
+  'delivery_contacts',
+  'branches',
+  'dashboard',
+  'catalog',
+  'files',
+  'audit_log',
+  'users',
+]
 
 export function getSyncServerUrl() { return syncServerUrl }
 export function getSyncToken()     { return syncToken }
@@ -63,6 +79,15 @@ function getClientMetaHeaders() {
   return sharedGetClientMetaHeaders()
 }
 
+function dispatchGlobalDataRefresh(channels = RECONNECT_REFRESH_CHANNELS) {
+  if (typeof window === 'undefined') return
+  ;(Array.isArray(channels) ? channels : RECONNECT_REFRESH_CHANNELS).forEach((channel) => {
+    window.dispatchEvent(new CustomEvent('sync:update', {
+      detail: { channel, ts: Date.now() },
+    }))
+  })
+}
+
 // HTTP helpers ─────────────────────────────────────────────────────────────
 export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS) {
   const base    = syncServerUrl.replace(/\/$/, '')
@@ -70,7 +95,11 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   if (syncToken) headers['x-sync-token'] = syncToken
 
   const ctrl  = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    ctrl.abort()
+  }, timeoutMs)
 
   try {
     const res = await fetch(`${base}${path}`, {
@@ -88,14 +117,32 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     return res.json()
   } catch (e) {
     clearTimeout(timer)
+    if (timedOut || e?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+    }
     throw e
   }
 }
 
 export function isNetErr(e) {
   const m = e?.message || ''
-  return ['Failed to fetch', 'Load failed', 'NetworkError', 'ECONNREFUSED', 'abort', 'network']
+  return ['Failed to fetch', 'Load failed', 'NetworkError', 'ECONNREFUSED', 'abort', 'network', 'timed out']
     .some(s => m.toLowerCase().includes(s.toLowerCase()))
+}
+
+function isConnectivityError(error) {
+  if (!error) return false
+  if (isNetErr(error)) return true
+  const name = String(error?.name || '').toLowerCase()
+  if (name.includes('abort')) return true
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    message.includes('timed out')
+    || message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('load failed')
+    || message.includes('econnrefused')
+  )
 }
 
 // ─── Server health state ─────────────────────────────────────────────────────
@@ -111,6 +158,7 @@ function setServerHealth(online) {
   if (online) {
     // Server just came back — clear all caches so fresh data is fetched
     cacheClearAll()
+    dispatchGlobalDataRefresh()
     window.dispatchEvent(new CustomEvent('sync:reconnected'))
   }
 }
@@ -218,7 +266,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         try {
           return await promise
         } catch (e) {
-          setServerHealth(false)
+          if (isConnectivityError(e)) setServerHealth(false)
           logCall(channel, 'local-fallback', Date.now() - t0, false)
         }
       }
@@ -253,7 +301,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     return result
   } catch (e) {
     const ms = Date.now() - t0
-    setServerHealth(false)
+    if (isConnectivityError(e)) setServerHealth(false)
     logCall(channel, 'server', ms, false)
     window.dispatchEvent(new CustomEvent('sync:error', {
       detail: { channel, error: e.message, ts: new Date().toISOString() },

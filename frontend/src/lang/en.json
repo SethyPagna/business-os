@@ -1517,5 +1517,7 @@
   "provider_email_match_note": "Google and Facebook connect to the local account when the provider email matches your account email. Disabled or deleted local users still cannot access the app.",
   "identity_linked_success": "Sign-in method connected.",
   "identity_link_failed": "Failed to connect sign-in method.",
+  "server_folder_note": "Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.",
+  "server_restore_note": "Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.",
   "unknown_error": "unknown error"
 }

@@ -561,6 +561,8 @@ export default function Backup() {
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
+                id="backup-folder-export-path"
+                name="backup_folder_export_path"
                 className="input flex-1 font-mono text-sm"
                 value={folderExportPath}
                 onChange={(event) => setFolderExportPath(event.target.value)}
@@ -571,6 +573,9 @@ export default function Backup() {
                 {copy('browse_folder', 'Choose Folder')}
               </button>
             </div>
+            <p className="text-xs text-blue-700 dark:text-blue-300">
+              {copy('server_folder_note', 'Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.')}
+            </p>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderExport} disabled={loading === 'folder-export'}>
@@ -597,6 +602,8 @@ export default function Backup() {
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
+                id="backup-folder-import-path"
+                name="backup_folder_import_path"
                 className="input flex-1 font-mono text-sm"
                 value={folderImportPath}
                 onChange={(event) => setFolderImportPath(event.target.value)}
@@ -607,6 +614,9 @@ export default function Backup() {
                 {copy('browse_folder', 'Choose Folder')}
               </button>
             </div>
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {copy('server_restore_note', 'Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.')}
+            </p>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderImport} disabled={loading === 'folder-import'}>

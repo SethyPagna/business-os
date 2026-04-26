@@ -172,6 +172,85 @@ function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidt
   return joinPdfChunks(chunks)
 }
 
+function escapePdfText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+}
+
+function wrapTextLine(text, maxChars = 54) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return ['']
+  const words = clean.split(' ')
+  const lines = []
+  let current = ''
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word
+    if (next.length <= maxChars) {
+      current = next
+      return
+    }
+    if (current) lines.push(current)
+    current = word.length > maxChars ? word.slice(0, maxChars) : word
+  })
+  if (current) lines.push(current)
+  return lines.length ? lines : ['']
+}
+
+function buildTextOnlyPdf({ lines, pageWidthPt, title = 'Receipt' }) {
+  const encoder = new TextEncoder()
+  const safeTitle = String(title || 'Receipt').replace(/[()\\]/g, '')
+  const margin = 18
+  const fontSize = 9
+  const lineHeight = 12
+  const preparedLines = (Array.isArray(lines) ? lines : [''])
+    .flatMap((line) => wrapTextLine(line, 54))
+    .slice(0, 260)
+
+  const pageHeightPt = Math.max(72, margin * 2 + preparedLines.length * lineHeight + 12)
+  const startY = pageHeightPt - margin - fontSize
+  const contentLines = ['BT', `/F1 ${fontSize} Tf`, `${margin} ${startY.toFixed(2)} Td`]
+
+  preparedLines.forEach((line, index) => {
+    const escaped = escapePdfText(line)
+    contentLines.push(`(${escaped}) Tj`)
+    if (index < preparedLines.length - 1) contentLines.push(`0 -${lineHeight} Td`)
+  })
+  contentLines.push('ET')
+
+  const content = encoder.encode(contentLines.join('\n'))
+  const objects = [
+    encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
+    encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
+    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 5 0 R >>`),
+    encoder.encode(`<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>`),
+    buildPdfStream(`<< /Length ${content.length} >>`, content),
+    encoder.encode(`<< /Title (${safeTitle}) >>`),
+  ]
+
+  const chunks = [encoder.encode('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
+  const offsets = [0]
+  let position = chunks[0].length
+
+  objects.forEach((objectBytes, index) => {
+    offsets.push(position)
+    const objectHeader = encoder.encode(`${index + 1} 0 obj\n`)
+    const objectFooter = encoder.encode('\nendobj\n')
+    chunks.push(objectHeader, objectBytes, objectFooter)
+    position += objectHeader.length + objectBytes.length + objectFooter.length
+  })
+
+  const xrefOffset = position
+  const xrefLines = ['xref', `0 ${objects.length + 1}`, '0000000000 65535 f ']
+  for (let index = 1; index < offsets.length; index += 1) {
+    xrefLines.push(`${String(offsets[index]).padStart(10, '0')} 00000 n `)
+  }
+  chunks.push(encoder.encode(`${xrefLines.join('\n')}\n`))
+  chunks.push(encoder.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`))
+  return joinPdfChunks(chunks)
+}
+
 function buildReceiptFileName(title = 'receipt') {
   const safeBase = String(title || 'receipt')
     .trim()
@@ -324,18 +403,32 @@ export async function createReceiptPdfBlob(content, options = {}) {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const title = options.title || 'Receipt'
+  const pageWidthPt = mmToPt(widthMm)
 
-  const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas)
-  const jpegUrl = canvas.toDataURL('image/jpeg', 0.96)
-  const jpegBytes = dataUrlToBytes(jpegUrl)
-  const pdfBytes = buildSingleImagePdf({
-    imageBytes: jpegBytes,
-    imageWidthPx: canvas.width,
-    imageHeightPx: canvas.height,
-    pageWidthPt: mmToPt(widthMm),
-    title,
-  })
-  return new Blob([pdfBytes], { type: 'application/pdf' })
+  try {
+    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas)
+    const jpegUrl = canvas.toDataURL('image/jpeg', 0.96)
+    const jpegBytes = dataUrlToBytes(jpegUrl)
+    const pdfBytes = buildSingleImagePdf({
+      imageBytes: jpegBytes,
+      imageWidthPx: canvas.width,
+      imageHeightPx: canvas.height,
+      pageWidthPt,
+      title,
+    })
+    return new Blob([pdfBytes], { type: 'application/pdf' })
+  } catch (_) {
+    const textSource = await withReceiptElement(content, widthMm, async (element) => {
+      await waitForElementAssets(element)
+      return element.innerText || element.textContent || title
+    })
+    const lines = String(textSource || title)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line, index, all) => line || (index > 0 && all[index - 1]))
+    const pdfBytes = buildTextOnlyPdf({ lines, pageWidthPt, title })
+    return new Blob([pdfBytes], { type: 'application/pdf' })
+  }
 }
 
 export async function downloadReceiptPdf(content, options = {}) {
