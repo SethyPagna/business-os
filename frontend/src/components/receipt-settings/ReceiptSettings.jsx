@@ -151,13 +151,17 @@ export default function ReceiptSettings() {
             <Printer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('receipt_template')}
           </h1>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap lg:justify-end">
-            <button onClick={handleReset} className="btn-secondary inline-flex items-center gap-2 text-xs sm:text-sm">
+          <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0 lg:justify-end">
+            <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs sm:hidden sm:text-sm">
+              <Eye className="h-4 w-4" />
+              {t('live_preview') || 'Preview'}
+            </button>
+            <button onClick={handleReset} className="btn-secondary inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs sm:text-sm">
               <RotateCcw className="h-4 w-4" />
               {t('reset_template')}
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="btn-primary inline-flex items-center gap-2 text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">
+              className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">
               <Save className="h-4 w-4" />
               {saving ? 'Saving...' : 'Save'} {t('save_template')}
             </button>
@@ -338,15 +342,8 @@ export default function ReceiptSettings() {
         </div>
       </div>
 
-      {/* ?? Mobile preview toggle ?? */}
-      <div className="fixed bottom-4 right-4 z-50 lg:hidden">
-        <button onClick={() => setPreviewOpen(o => !o)}
-          className="btn-primary flex h-12 w-12 items-center justify-center rounded-full shadow-xl sm:h-14 sm:w-14 sm:text-xl">
-          <Eye className="h-5 w-5" />
-        </button>
-      </div>
       {previewOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setPreviewOpen(false)}>
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 lg:hidden sm:items-center" onClick={() => setPreviewOpen(false)}>
           <div className="bg-gray-100 dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl w-full sm:w-96 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white">

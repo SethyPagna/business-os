@@ -209,10 +209,17 @@ function CustomersTab({ t, notify }) {
   const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
 
   const load = useCallback(async () => {
-    const data = await window.api.getCustomers()
-    setCustomers(Array.isArray(data) ? data : [])
-    setLoading(false)
-  }, [])
+    setLoading(true)
+    try {
+      const data = await window.api.getCustomers()
+      setCustomers(Array.isArray(data) ? data : [])
+    } catch (error) {
+      setCustomers([])
+      notify(error?.message || 'Failed to load customers', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [notify])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {

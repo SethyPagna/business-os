@@ -156,10 +156,17 @@ function DeliveryTab({ t, notify }) {
   const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
 
   const load = useCallback(async () => {
-    const data = await window.api.getDeliveryContacts()
-    setContacts(Array.isArray(data) ? data : [])
-    setLoading(false)
-  }, [])
+    setLoading(true)
+    try {
+      const data = await window.api.getDeliveryContacts()
+      setContacts(Array.isArray(data) ? data : [])
+    } catch (error) {
+      setContacts([])
+      notify(error?.message || 'Failed to load delivery contacts', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [notify])
   useEffect(() => { load() }, [load])
   useEffect(() => { if (syncChannel?.channel === 'deliveryContacts') load() }, [syncChannel]) // eslint-disable-line
 

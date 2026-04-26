@@ -264,17 +264,17 @@ export default function Dashboard() {
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">{t('dashboard')}</h1>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:justify-end sm:pb-0">
           {silentRefresh && <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>}
-          <button onClick={() => { window.api.getDashboard().then(d => setSummary(d)); loadAnalytics() }} className="btn-secondary inline-flex flex-1 items-center justify-center gap-1.5 text-sm sm:flex-none">
+          <button onClick={() => { window.api.getDashboard().then(d => setSummary(d)); loadAnalytics() }} className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap text-sm">
             <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
             {t('refresh')||'Refresh'}
           </button>
           <PortalMenu
             align="right"
-            trigger={<button className="btn-secondary inline-flex flex-1 items-center justify-center gap-1.5 text-sm sm:flex-none"><Download className="h-4 w-4" />{t('export_csv') || 'Export'}</button>}
+            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap text-sm"><Download className="h-4 w-4" />{t('export_csv') || 'Export'}</button>}
             items={[
               { label: t('export_all_report'), onClick: buildExportAll },
               'divider',

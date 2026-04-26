@@ -184,9 +184,11 @@ export default function Branches() {
 
   return (
     <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('branches') || 'Branches'}</h1>
-        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
+      <div className="mb-4 flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('branches') || 'Branches'}</h1>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-2 overflow-x-auto pb-1">
           {selectedCount > 0 ? (
             <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete}>
               <Trash2 className="h-4 w-4" />
@@ -278,7 +280,7 @@ export default function Branches() {
                       onChange={() => toggleSelect(branch.id)}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
                             <span className="text-base font-bold text-gray-900 dark:text-white">{branch.name}</span>
@@ -294,7 +296,7 @@ export default function Branches() {
                           </div>
                           {branch.notes ? <p className="mt-0.5 truncate text-xs text-gray-400">{branch.notes}</p> : null}
                         </div>
-                        <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-shrink-0 sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
+                        <div className="flex max-w-full flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1">
                           <button onClick={() => loadBranchStock(branch.id)} className="btn-secondary flex-shrink-0 px-2.5 py-1 text-xs">
                             <Warehouse className="h-3.5 w-3.5" />
                             <span>{isExpanded ? (t('hide_stock') || 'Hide Stock') : (t('stock') || 'Stock')}</span>

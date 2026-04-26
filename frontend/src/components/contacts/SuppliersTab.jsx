@@ -80,10 +80,17 @@ function SuppliersTab({ t, notify }) {
   const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
 
   const load = useCallback(async () => {
-    const data = await window.api.getSuppliers()
-    setSuppliers(Array.isArray(data) ? data : [])
-    setLoading(false)
-  }, [])
+    setLoading(true)
+    try {
+      const data = await window.api.getSuppliers()
+      setSuppliers(Array.isArray(data) ? data : [])
+    } catch (error) {
+      setSuppliers([])
+      notify(error?.message || 'Failed to load suppliers', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [notify])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -153,7 +160,7 @@ function SuppliersTab({ t, notify }) {
             </button>
           ) : null}
           <button className="btn-secondary whitespace-nowrap text-sm" onClick={() => setModal('import')}>
-            📥 <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
+            <span>{t('import_contacts') || 'Import'}</span>
           </button>
           <button
             className="btn-secondary whitespace-nowrap text-sm"
@@ -171,10 +178,10 @@ function SuppliersTab({ t, notify }) {
               downloadCSV(`suppliers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
           >
-            📤 <span className="hidden sm:inline">CSV</span>
+            <span>CSV</span>
           </button>
           <button className="btn-primary whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }}>
-            ➕ <span className="hidden sm:inline">{t('add_supplier') || 'Add Supplier'}</span>
+            <span>{t('add_supplier') || 'Add Supplier'}</span>
           </button>
         </div>
       </div>
