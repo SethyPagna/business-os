@@ -1526,5 +1526,8 @@
   "email_sender_missing": "No email code sender is configured yet. Please ask admin to configure email sending for verification codes.",
   "server_folder_note": "Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.",
   "server_restore_note": "Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.",
+  "host_ui_local_only": "This action only works on the server machine. Type or paste a server path manually when connected remotely.",
+  "open_folder_local_only": "Opening the folder is only available on the server machine.",
+  "host_ui_remote_note": "Remote sessions cannot open the server machine folder dialog or Explorer window. Use Browse folders below or type a server path manually.",
   "unknown_error": "unknown error"
 }

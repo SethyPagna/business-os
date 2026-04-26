@@ -12,7 +12,7 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { spawn, spawnSync } = require('child_process')
+const { spawn } = require('child_process')
 const Database = require('better-sqlite3')
 const bcrypt = require('bcryptjs')
 const express = require('express')
@@ -28,8 +28,6 @@ const {
   normalizeSelectedDataDir,
 } = require('../config')
 const {
-  copyDirectoryContents,
-  relocateDataRoot,
   summarizeDataRoot,
   isSamePath,
   isSubPath,
@@ -46,6 +44,7 @@ const { checkRateLimit } = require('../security')
 const { classifyRequestAccess } = require('../accessControl')
 
 const router = express.Router()
+const SYSTEM_FS_WORKER = path.join(__dirname, '../systemFsWorker.js')
 
 function q(name) {
   return `"${String(name).replace(/"/g, '""')}"`
@@ -67,6 +66,70 @@ function applyRouteRateLimit(req, res, options = {}) {
   res.setHeader('Retry-After', String(result.retryAfterSeconds))
   err(res, `Too many requests. Try again in ${result.retryAfterSeconds} seconds.`, 429)
   return false
+}
+
+function runFsWorker(action, payload, timeoutMs = 10 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [SYSTEM_FS_WORKER, action, JSON.stringify(payload || {})], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timer = null
+
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(value)
+    }
+
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        try { child.kill() } catch (_) {}
+        finish(new Error('The filesystem job took too long and was cancelled.'))
+      }, timeoutMs)
+    }
+
+    child.stdout.on('data', (chunk) => { stdout += String(chunk || '') })
+    child.stderr.on('data', (chunk) => { stderr += String(chunk || '') })
+    child.on('error', (error) => finish(error))
+    child.on('close', (code) => {
+      const raw = stdout.trim()
+      if (code !== 0) {
+        let message = stderr.trim() || raw || `Worker exited with code ${code}`
+        try {
+          const parsed = raw ? JSON.parse(raw) : null
+          if (parsed?.error) message = parsed.error
+        } catch (_) {}
+        finish(new Error(message))
+        return
+      }
+
+      try {
+        const parsed = JSON.parse(raw || '{}')
+        if (!parsed?.ok) {
+          finish(new Error(parsed?.error || 'Worker failed'))
+          return
+        }
+        finish(null, parsed.result)
+      } catch (error) {
+        finish(new Error(`Worker returned invalid output: ${error.message}`))
+      }
+    })
+  })
+}
+
+function getHostUiAvailability(req) {
+  const access = classifyRequestAccess(req)
+  return {
+    access,
+    hostUiAvailable: !!access.localRequest,
+  }
 }
 
 function getTableColumns(table) {
@@ -133,12 +196,6 @@ function deleteAllUploads() {
       try { fs.unlinkSync(path.join(UPLOADS_PATH, f)) } catch (_) {}
     }
   } catch (_) {}
-}
-
-function formatBackupStamp() {
-  const now = new Date()
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
 
 function getBackupDataRootCandidate(root) {
@@ -474,6 +531,7 @@ router.get('/config', (req, res) => {
     accessMode: access.mode,
     trustedTailscale: access.trustedTailscale,
     tokenAccepted: access.tokenValid,
+    hostUiAvailable: access.localRequest,
     serverStartTime: SERVER_START_TIME,
     security: {
       configuredTailscaleHost: access.configuredTailscaleHost || null,
@@ -485,6 +543,7 @@ router.get('/config', (req, res) => {
       hasConfiguredToken: access.hasConfiguredToken,
       tokenProvided: access.tokenProvided,
       trustedTailscale: access.trustedTailscale,
+      hostUiAvailable: access.localRequest,
     },
   })
 })
@@ -518,7 +577,7 @@ router.get('/backup/export', authToken, (req, res) => {
   res.send(JSON.stringify(backup, null, 2))
 })
 
-router.post('/backup/export-folder', authToken, (req, res) => {
+router.post('/backup/export-folder', authToken, async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_export_folder', max: 12, windowMs: 10 * 60 * 1000 })) return
   const destinationDir = String(req.body?.destinationDir || '').trim()
   if (!destinationDir) return err(res, 'destinationDir is required')
@@ -528,38 +587,26 @@ router.post('/backup/export-folder', authToken, (req, res) => {
     if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
       return err(res, 'Choose a backup destination outside the current live data folder.')
     }
-    fs.mkdirSync(resolvedDestination, { recursive: true })
-
-    const stamp = formatBackupStamp()
-    const backupRoot = path.join(resolvedDestination, `business-os-backup-${stamp}`)
-    const backupDataRoot = path.join(backupRoot, DATA_FOLDER_NAME)
-
     try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-    fs.mkdirSync(backupRoot, { recursive: true })
-    const copyStats = copyDirectoryContents(DATA_ROOT, backupDataRoot)
-    const summary = summarizeDataRoot(backupDataRoot)
-    const infoPath = path.join(backupRoot, 'business-os-backup-info.json')
-    fs.writeFileSync(infoPath, JSON.stringify({
-      createdAt: new Date().toISOString(),
+    const workerResult = await runFsWorker('export-folder', {
       sourceRoot: DATA_ROOT,
-      dataRoot: backupDataRoot,
-      summary,
-      copyStats,
-      version: BACKUP_VERSION,
-    }, null, 2))
+      destinationDir: resolvedDestination,
+      dataFolderName: DATA_FOLDER_NAME,
+      backupVersion: BACKUP_VERSION,
+    })
 
     audit(req.user?.id, req.user?.name, 'backup_export', 'system', null, {
       destinationDir: resolvedDestination,
-      backupRoot,
-      files: copyStats.copiedFileCount,
+      backupRoot: workerResult.backupRoot,
+      files: workerResult.copyStats?.copiedFileCount || 0,
     })
 
     return ok(res, {
-      backupRoot,
-      dataRoot: backupDataRoot,
-      infoPath,
-      summary,
-      copyStats,
+      backupRoot: workerResult.backupRoot,
+      dataRoot: workerResult.dataRoot,
+      infoPath: workerResult.infoPath,
+      summary: workerResult.summary,
+      copyStats: workerResult.copyStats,
       message: 'Folder backup created successfully.',
     })
   } catch (e) {
@@ -782,7 +829,7 @@ router.get('/data-path', authToken, (req, res) => {
  * Validates the path is accessible then writes data-location.json.
  * The server must be restarted for the new path to take effect.
  */
-router.post('/data-path', authToken, (req, res) => {
+router.post('/data-path', authToken, async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_update', max: 20, windowMs: 10 * 60 * 1000 })) return
   const { dataDir } = req.body || {}
   if (!dataDir || typeof dataDir !== 'string' || !dataDir.trim()) {
@@ -799,13 +846,13 @@ router.post('/data-path', authToken, (req, res) => {
             copyStats: { copiedFileCount: 0, copiedBytes: 0 },
             skipped: true,
           }
-        : relocateDataRoot({
-            sourceRoot: DATA_ROOT,
-            targetRoot: DEFAULT_DATA_ROOT,
-            checkpointDatabase: () => {
-              try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-            },
-          })
+        : await (async () => {
+            try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+            return runFsWorker('relocate-data-root', {
+              sourceRoot: DATA_ROOT,
+              targetRoot: DEFAULT_DATA_ROOT,
+            })
+          })()
       if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)
       return ok(res, {
         dataDir: DEFAULT_DATA_ROOT,
@@ -823,12 +870,10 @@ router.post('/data-path', authToken, (req, res) => {
   if (!target) return err(res, 'dataDir is required')
 
   try {
-    const migration = relocateDataRoot({
+    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+    const migration = await runFsWorker('relocate-data-root', {
       sourceRoot: DATA_ROOT,
       targetRoot: target,
-      checkpointDatabase: () => {
-        try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-      },
     })
     writeDataLocation(target)
     ok(res, {
@@ -847,7 +892,7 @@ router.post('/data-path', authToken, (req, res) => {
  * DELETE /api/system/data-path
  * Removes data-location.json — reverts to the default business-os-data folder.
  */
-router.delete('/data-path', authToken, (req, res) => {
+router.delete('/data-path', authToken, async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_delete', max: 20, windowMs: 10 * 60 * 1000 })) return
   try {
     const migration = isSamePath(DATA_ROOT, DEFAULT_DATA_ROOT)
@@ -858,13 +903,13 @@ router.delete('/data-path', authToken, (req, res) => {
           copyStats: { copiedFileCount: 0, copiedBytes: 0 },
           skipped: true,
         }
-      : relocateDataRoot({
-          sourceRoot: DATA_ROOT,
-          targetRoot: DEFAULT_DATA_ROOT,
-          checkpointDatabase: () => {
-            try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-          },
-        })
+      : await (async () => {
+          try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+          return runFsWorker('relocate-data-root', {
+            sourceRoot: DATA_ROOT,
+            targetRoot: DEFAULT_DATA_ROOT,
+          })
+        })()
     if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)
     ok(res, {
       migration,
@@ -885,39 +930,6 @@ router.post('/browse-dir', authToken, (req, res) => {
   const requested = dir && dir.trim() ? dir.trim() : ''
   const listWindowsFsRoots = () => {
     const roots = new Set()
-
-    try {
-      const probe = spawnSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        "Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root",
-      ], { encoding: 'utf8', windowsHide: true })
-      if (probe.status === 0) {
-        String(probe.stdout || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .forEach((root) => {
-            const normalized = root.endsWith('\\') ? root : `${root}\\`
-            roots.add(normalized)
-          })
-      }
-    } catch (_) {}
-
-    try {
-      const probeDisks = spawnSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        "(Get-CimInstance Win32_LogicalDisk | Select-Object -ExpandProperty DeviceID) -join \"`n\"",
-      ], { encoding: 'utf8', windowsHide: true })
-      if (probeDisks.status === 0) {
-        String(probeDisks.stdout || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .forEach((deviceId) => roots.add(deviceId.endsWith('\\') ? deviceId : `${deviceId}\\`))
-      }
-    } catch (_) {}
 
     for (let code = 65; code <= 90; code += 1) {
       const drive = `${String.fromCharCode(code)}:\\`
@@ -969,6 +981,15 @@ router.post('/browse-dir', authToken, (req, res) => {
 
 router.post('/open-path', authToken, (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:open_path', max: 30, windowMs: 60 * 1000 })) return
+  const { hostUiAvailable } = getHostUiAvailability(req)
+  if (!hostUiAvailable) {
+    return ok(res, {
+      opened: false,
+      unavailable: true,
+      reason: 'remote_session',
+      message: 'Open folder is only available on the server machine. Remote sessions should paste or browse server paths manually instead.',
+    })
+  }
   const target = String(req.body?.path || '').trim()
   if (!target) return err(res, 'path is required')
 
@@ -989,6 +1010,16 @@ router.post('/open-path', authToken, (req, res) => {
 
 router.post('/pick-folder', authToken, (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:pick_folder', max: 20, windowMs: 10 * 60 * 1000 })) return
+  const { hostUiAvailable } = getHostUiAvailability(req)
+  if (!hostUiAvailable) {
+    return ok(res, {
+      selectedPath: null,
+      cancelled: true,
+      unavailable: true,
+      reason: 'remote_session',
+      message: 'The native folder picker only works on the server machine. Use Browse folders or type a server path manually when connected remotely.',
+    })
+  }
   if (process.platform !== 'win32') {
     return ok(res, { selectedPath: null, cancelled: true, unavailable: true })
   }
@@ -1007,21 +1038,42 @@ router.post('/pick-folder', authToken, (req, res) => {
     "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
   ].filter(Boolean).join('; ')
 
-  const picker = spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {
-    encoding: 'utf8',
+  const picker = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {
     windowsHide: true,
-    timeout: 300000,
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  const selectedPath = String(picker.stdout || '').trim()
-  if (!selectedPath) {
-    if (picker.status !== 0 && String(picker.stderr || '').trim()) {
-      return err(res, `Folder picker failed: ${String(picker.stderr || '').trim()}`)
-    }
-    return ok(res, { selectedPath: null, cancelled: true })
-  }
+  let stdout = ''
+  let stderr = ''
+  let responded = false
+  const timer = setTimeout(() => {
+    try { picker.kill() } catch (_) {}
+    if (responded) return
+    responded = true
+    err(res, 'Folder picker timed out. Close any picker window on the server device and try again.')
+  }, 300000)
 
-  ok(res, { selectedPath, cancelled: false })
+  picker.stdout.on('data', (chunk) => { stdout += String(chunk || '') })
+  picker.stderr.on('data', (chunk) => { stderr += String(chunk || '') })
+  picker.on('error', (error) => {
+    if (responded) return
+    responded = true
+    clearTimeout(timer)
+    err(res, `Folder picker failed: ${error.message}`)
+  })
+  picker.on('close', (code) => {
+    if (responded) return
+    responded = true
+    clearTimeout(timer)
+    const selectedPath = String(stdout || '').trim()
+    if (!selectedPath) {
+      if (code !== 0 && String(stderr || '').trim()) {
+        return err(res, `Folder picker failed: ${String(stderr || '').trim()}`)
+      }
+      return ok(res, { selectedPath: null, cancelled: true })
+    }
+    return ok(res, { selectedPath, cancelled: false })
+  })
 })
 
 module.exports = router

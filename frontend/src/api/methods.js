@@ -77,6 +77,9 @@ export async function completePasswordReset(payload) {
 export async function getVerificationCapabilities() {
   return apiFetch('GET', '/api/auth/verification-capabilities')
 }
+export async function getSystemConfig() {
+  return apiFetch('GET', '/api/system/config')
+}
 export async function startSupabaseOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/start', payload || {})
 }

@@ -148,6 +148,7 @@ function SectionChip({ label, value, tone = 'slate' }) {
 function DataFolderLocation({ t, notify }) {
   const copy = useCopy(t)
   const [info, setInfo] = useState(null)
+  const [systemConfig, setSystemConfig] = useState(null)
   const [inputPath, setInputPath] = useState('')
   const [browseState, setBrowseState] = useState(null)
   const [showAdvancedBrowser, setShowAdvancedBrowser] = useState(false)
@@ -156,8 +157,12 @@ function DataFolderLocation({ t, notify }) {
 
   const load = async () => {
     try {
-      const result = await window.api.getDataPath()
+      const [result, config] = await Promise.all([
+        window.api.getDataPath(),
+        window.api.getSystemConfig?.().catch(() => null),
+      ])
       setInfo(result)
+      setSystemConfig(config)
       setInputPath(result?.dataRootParent || result?.dataRoot || '')
     } catch (error) {
       notify(`${copy('data_folder_load_failed', 'Failed to load data folder information')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -168,6 +173,7 @@ function DataFolderLocation({ t, notify }) {
 
   const folderName = info?.dataFolderName || 'business-os-data'
   const currentSummary = info?.summary || {}
+  const hostUiAvailable = !!systemConfig?.hostUiAvailable
   const previewPath = useMemo(
     () => buildFinalDataFolderPath(inputPath, folderName),
     [folderName, inputPath],
@@ -190,6 +196,12 @@ function DataFolderLocation({ t, notify }) {
   }
 
   const pickFolderNatively = async () => {
+    if (!hostUiAvailable) {
+      notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
+      setShowAdvancedBrowser(true)
+      await openDriveBrowser()
+      return
+    }
     try {
       setBusy(true)
       const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.dataRootParent || info?.dataRoot || '')
@@ -221,9 +233,13 @@ function DataFolderLocation({ t, notify }) {
   const openInExplorer = async () => {
     const target = String(info?.dataRoot || previewPath || '').trim()
     if (!target) return
+    if (!hostUiAvailable) {
+      notify(copy('open_folder_local_only', 'Opening the folder is only available on the server machine.'), 'info')
+      return
+    }
     try {
       const result = await window.api.openPath?.(target)
-      if (result?.success === false) notify(result.error || copy('unknown_error', 'Unknown error'), 'error')
+      if (result?.success === false) notify(result.error || result.message || copy('unknown_error', 'Unknown error'), 'error')
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     }
@@ -320,10 +336,16 @@ function DataFolderLocation({ t, notify }) {
         <button className="btn-secondary w-full text-sm sm:w-auto" onClick={pickFolderNatively} disabled={busy}>
           {copy('system_folder_picker', 'Choose Folder')}
         </button>
-        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={openInExplorer} disabled={!String(info?.dataRoot || previewPath || '').trim()}>
+        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={openInExplorer} disabled={!hostUiAvailable || !String(info?.dataRoot || previewPath || '').trim()}>
           {copy('open_in_explorer', 'Open active folder')}
         </button>
       </div>
+
+      {!hostUiAvailable ? (
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">
+          {copy('host_ui_remote_note', 'Remote sessions cannot open the server machine folder dialog or Explorer window. Use Browse folders below or type a server path manually.')}
+        </p>
+      ) : null}
 
       {showAdvancedBrowser ? (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -427,6 +449,19 @@ export default function Backup() {
   const [pendingImport, setPendingImport] = useState(null)
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
+  const [hostUiAvailable, setHostUiAvailable] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.getSystemConfig?.()
+      .then((config) => {
+        if (!cancelled) setHostUiAvailable(!!config?.hostUiAvailable)
+      })
+      .catch(() => {
+        if (!cancelled) setHostUiAvailable(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   const exportSections = [
     'Products and inventory',
@@ -450,6 +485,10 @@ export default function Backup() {
   }
 
   const pickFolder = async (setter, hintPath = '') => {
+    if (!hostUiAvailable) {
+      notify(copy('host_ui_local_only', 'This action only works on the server machine. Type or paste a server path manually when connected remotely.'), 'info')
+      return
+    }
     try {
       const folder = await window.api.openFolderDialog?.(hintPath)
       if (folder && typeof folder === 'string') setter(folder)
@@ -568,7 +607,7 @@ export default function Backup() {
                 onChange={(event) => setFolderExportPath(event.target.value)}
                 placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
               />
-              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)} disabled={!hostUiAvailable}>
                 <FolderOutput className="h-4 w-4" />
                 {copy('browse_folder', 'Choose Folder')}
               </button>
@@ -609,7 +648,7 @@ export default function Backup() {
                 onChange={(event) => setFolderImportPath(event.target.value)}
                 placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
               />
-              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)} disabled={!hostUiAvailable}>
                 <FolderInput className="h-4 w-4" />
                 {copy('browse_folder', 'Choose Folder')}
               </button>
