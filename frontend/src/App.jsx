@@ -39,6 +39,13 @@ const PAGE_IMPORTERS = {
 const WARMUP_PAGE_IDS = [
   'catalog',
   'pos',
+  'users',
+  'audit_log',
+  'receipt_settings',
+  'backup',
+  'settings',
+  'files',
+  'server',
 ]
 
 function getChunkErrorMessage(error) {

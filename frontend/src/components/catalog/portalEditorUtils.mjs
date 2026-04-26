@@ -45,7 +45,7 @@ export function normalizeAboutBlocks(value, options = {}) {
 }
 
 export function serializeAboutBlocks(value) {
-  return JSON.stringify(normalizeAboutBlocks(value))
+  return JSON.stringify(normalizeAboutBlocks(value, { keepEmpty: true }))
 }
 
 export function moveListItem(list, startIndex, endIndex) {

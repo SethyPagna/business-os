@@ -354,6 +354,7 @@ const PORTAL_TEXT_EXTRA = {
     assistantIntro: 'Assistant intro',
     assistantDisclaimer: 'Assistant disclaimer',
     assistantProvider: 'AI provider entry',
+    assistantProviderAuto: 'Automatic (best available)',
     assistantPrompt: 'Extra prompt instructions',
     assistantPromptHint: 'Optional store-specific rules, such as tone or what categories to prioritize.',
     faq: 'FAQ',
@@ -1758,6 +1759,7 @@ export default function CatalogPage({ publicView = false }) {
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
         business_address: editorDraft.business_address || '',
+        customer_portal_address_link: normalizeExternalUrl(editorDraft.customer_portal_address_link || ''),
         customer_portal_business_tagline: editorDraft.customer_portal_business_tagline || '',
         customer_portal_google_maps_embed: sanitizedGoogleMapEmbed,
         customer_portal_show_google_map: editorDraft.customer_portal_show_google_map ? 'true' : 'false',
@@ -1838,7 +1840,7 @@ export default function CatalogPage({ publicView = false }) {
       notify(copy('assistantEnabled', 'Enable AI assistant'), 'error')
       return
     }
-    if (!previewConfig.aiProviderId) {
+    if (!aiProviders.length && canEdit) {
       notify(copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the portal assistant.'), 'error')
       return
     }
@@ -1965,7 +1967,7 @@ export default function CatalogPage({ publicView = false }) {
       notify(copy('reviewSaved', 'Review saved.'), 'success')
       await loadPortal()
       if (membershipData?.customer?.membership_number) {
-        const refreshed = await window.api.lookupPortalMembership(membershipData.customer.membership_number)
+        const refreshed = await window.api.lookupPortalMembership(membershipData?.customer?.membership_number)
         if (refreshed) setMembershipData(refreshed)
       }
     } catch (error) {
@@ -2504,7 +2506,7 @@ export default function CatalogPage({ publicView = false }) {
               </div>
 
               <div className="space-y-3">
-                {(membershipData.submissions?.length || 0) ? membershipData.submissions.map((submission) => (
+                {(membershipData?.submissions?.length || 0) ? membershipData.submissions.map((submission) => (
                   <article key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -3090,7 +3092,7 @@ export default function CatalogPage({ publicView = false }) {
                 <div>
                   <label className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry')}</label>
                   <select className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
-                    <option value="">{copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the portal assistant.')}</option>
+                    <option value="">{copy('assistantProviderAuto', 'Automatic (best available)')}</option>
                     {aiProviders.map((provider) => (
                       <option key={provider.id} value={String(provider.id)}>
                         {provider.name} | {provider.provider_label || provider.provider} | {provider.default_model || 'No model'}
@@ -3829,7 +3831,7 @@ export default function CatalogPage({ publicView = false }) {
                           {publicView && previewConfig.translateWidgetEnabled ? (
                             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/90">
                               <label className="block">
-                                <span className="mb-1 block text-xs text-white/80">{copy('language', 'Portal language')}</span>
+                                <span className="sr-only">{copy('language', 'Portal language')}</span>
                                 <select
                                   id="portal-language-tools"
                                   name="portal_language_tools"
@@ -3844,11 +3846,7 @@ export default function CatalogPage({ publicView = false }) {
                                   ))}
                                 </select>
                               </label>
-                              <div className="mt-2 text-xs text-white/70">
-                                {translateReady
-                                  ? copy('translateWidgetHint', 'Public customers can switch languages with Google Translate. Internal Business OS translation stays separate.')
-                                  : copy('preparingTranslations', 'Preparing translation tools...')}
-                              </div>
+                              {!translateReady ? <div className="mt-2 text-xs text-white/70">{copy('preparingTranslations', 'Preparing translation tools...')}</div> : null}
                               <div className="mt-2">
                                 <div id="business-os-portal-translate" />
                               </div>
@@ -3889,7 +3887,7 @@ export default function CatalogPage({ publicView = false }) {
               ) : null}
 
               <div className="border-t border-slate-200 bg-white px-6 py-4 sm:px-8">
-                <div className="flex gap-2 overflow-x-auto pb-1">
+                <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
                   {previewConfig.showCatalog ? (
                     <button
                       className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}

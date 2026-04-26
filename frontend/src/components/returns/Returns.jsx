@@ -137,17 +137,17 @@ export default function Returns() {
           <h1 className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">{tr('returns_scope_hint', 'Customer refunds and supplier returns are tracked separately.')}</p>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+        <div className="flex w-full flex-row flex-nowrap gap-2 sm:w-auto sm:items-center">
           <button
             onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
-            className="btn-secondary w-full text-xs sm:w-auto sm:text-sm"
+            className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
           >
             {tr('export_csv', 'Export CSV')}
           </button>
           {scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="btn-primary w-full text-sm sm:w-auto">+ {tr('return_to_supplier', 'Return to Supplier')}</button>
+            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-sm sm:w-auto sm:flex-none">+ {tr('return_to_supplier', 'Return to Supplier')}</button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="btn-primary w-full text-sm sm:w-auto">+ {tr('new_return', 'New Return')}</button>
+            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-sm sm:w-auto sm:flex-none">+ {tr('new_return', 'New Return')}</button>
           )}
         </div>
       </div>

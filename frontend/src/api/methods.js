@@ -58,6 +58,24 @@ function appendActorQuery(path, extra = {}) {
   return `${path}${path.includes('?') ? '&' : '?'}${query.toString()}`
 }
 
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, sessionDuration, clientTime, deviceTz, deviceName }) {
   return apiFetch('POST', '/api/auth/login', { username, password, sessionDuration, clientTime, deviceTz, deviceName })
@@ -129,7 +147,7 @@ export const transferStock  = d        => route('branches:transfer', () => apiFe
 export const getProducts        = ()       => route('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray())
 export async function getCatalogMeta() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/catalog/meta`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/catalog/meta`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Catalog meta failed: ${res.status}`)
@@ -137,7 +155,7 @@ export async function getCatalogMeta() {
 }
 export async function getCatalogProducts() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/catalog/products`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/catalog/products`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Catalog products failed: ${res.status}`)
@@ -145,7 +163,7 @@ export async function getCatalogProducts() {
 }
 export async function getPortalConfig() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/config`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/config`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Portal config failed: ${res.status}`)
@@ -153,7 +171,7 @@ export async function getPortalConfig() {
 }
 export async function getPortalCatalogMeta() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/catalog/meta`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/meta`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Portal catalog meta failed: ${res.status}`)
@@ -161,7 +179,7 @@ export async function getPortalCatalogMeta() {
 }
 export async function getPortalCatalogProducts() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/catalog/products`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/products`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Portal catalog products failed: ${res.status}`)
@@ -170,7 +188,7 @@ export async function getPortalCatalogProducts() {
 export async function lookupPortalMembership(membershipNumber) {
   const base = getPortalBaseUrl()
   const value = encodeURIComponent(String(membershipNumber || '').trim())
-  const res = await fetch(`${base}/api/portal/membership/${value}`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/membership/${value}`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (res.status === 404) return null
@@ -179,7 +197,7 @@ export async function lookupPortalMembership(membershipNumber) {
 }
 export async function createPortalSubmission(payload) {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/submissions`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/submissions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -193,7 +211,7 @@ export async function createPortalSubmission(payload) {
 }
 export async function getPortalAiStatus() {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/ai/status`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/ai/status`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
   if (!res.ok) throw new Error(`Portal AI status failed: ${res.status}`)
@@ -201,7 +219,7 @@ export async function getPortalAiStatus() {
 }
 export async function askPortalAi(payload) {
   const base = getPortalBaseUrl()
-  const res = await fetch(`${base}/api/portal/ai/chat`, {
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/ai/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
