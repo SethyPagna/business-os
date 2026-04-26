@@ -361,7 +361,27 @@ async function verifyPasswordWithSupabase(localUser, password) {
     return { success: false, error: 'Authentication account mismatch. Please contact admin.' }
   }
 
-  return { success: true, userId: returnedUserId || trim(localUser?.supabase_user_id || '') }
+  return {
+    success: true,
+    userId: returnedUserId || trim(localUser?.supabase_user_id || ''),
+    accessToken: trim(result?.data?.access_token || ''),
+    refreshToken: trim(result?.data?.refresh_token || ''),
+    user: summarizeAuthUser(result?.data?.user || null),
+  }
+}
+
+async function unlinkAuthIdentity(accessToken, identityId) {
+  const token = trim(accessToken || '')
+  const targetIdentityId = trim(identityId || '')
+  if (!isSupabaseAuthConfigured()) return { success: false, skipped: true, reason: 'not_configured' }
+  if (!token) return { success: false, skipped: true, reason: 'missing_access_token' }
+  if (!targetIdentityId) return { success: false, skipped: true, reason: 'missing_identity_id' }
+
+  const result = await callSupabasePublic('DELETE', `/user/identities/${encodeURIComponent(targetIdentityId)}`, null, {
+    Authorization: `Bearer ${token}`,
+  })
+  if (!result.ok) return { success: false, error: result.error, providerCode: result.providerCode || '' }
+  return { success: true, data: result.data || null }
 }
 
 async function sendSupabaseVerificationEmail(email, options = {}) {
@@ -448,4 +468,5 @@ module.exports = {
   buildOauthStartUrl,
   normalizeEmail,
   getIdentityProviders,
+  unlinkAuthIdentity,
 }

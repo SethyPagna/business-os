@@ -584,6 +584,8 @@ export const getUserAuthMethods = (id) =>
   route(`users:authMethods:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/auth-methods`)), () => null)
 export const updateUserProfile = (id, d) =>
   route('users:updateProfile', () => apiFetch('PUT', `/api/users/${id}/profile`, d), null, true)
+export const disconnectUserAuthProvider = (id, d) =>
+  route('users:disconnectProvider', () => apiFetch('POST', `/api/users/${id}/provider-disconnect`, d), null, true)
 export const changeUserPassword = (id, d) =>
   route('users:changePassword', () => apiFetch('POST', `/api/users/${id}/change-password`, d), null, true)
 export const requestUserContactVerification = (id, d) =>

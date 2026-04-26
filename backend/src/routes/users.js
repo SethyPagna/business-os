@@ -30,6 +30,8 @@ const {
   setAuthUserActive,
   getAuthUserById,
   sendSupabaseVerificationEmail,
+  verifyPasswordWithSupabase,
+  unlinkAuthIdentity,
 } = require('../services/supabaseAuth')
 const {
   normalizeEmail,
@@ -194,6 +196,43 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())
 }
 
+function getAuthIdentityList(authUser) {
+  return Array.isArray(authUser?.raw?.identities) ? authUser.raw.identities : []
+}
+
+function buildAuthMethodsPayload(user, authUser, providerConfig) {
+  const identities = getAuthIdentityList(authUser)
+  const providerList = Array.isArray(authUser?.providers) ? authUser.providers : []
+  const hasEmailIdentity = providerList.includes('email')
+  return {
+    local_password: true,
+    email: user.email || '',
+    email_verified: Number(user.email_verified || 0) === 1,
+    otp_enabled: Number(user.otp_enabled || 0) === 1,
+    is_active: Number(user.is_active || 0) === 1 && !user.deleted_at,
+    supabase_connected: !!String(user.supabase_user_id || '').trim(),
+    supabase_user_id: String(user.supabase_user_id || '').trim(),
+    email_login_enabled: !!String(user.email || '').trim(),
+    google_ready: providerConfig.googleEnabled && !!String(user.email || '').trim(),
+    facebook_ready: providerConfig.facebookEnabled && !!String(user.email || '').trim(),
+    google_linked: !!authUser?.hasGoogle,
+    facebook_linked: !!authUser?.hasFacebook,
+    linked_providers: providerList,
+    linked_identity_count: identities.length,
+    email_identity_ready: hasEmailIdentity,
+    can_disconnect_google: !!authUser?.hasGoogle && identities.length > 1,
+    can_disconnect_facebook: !!authUser?.hasFacebook && identities.length > 1,
+    last_sign_in_at: authUser?.lastSignInAt || '',
+    capabilities: {
+      supabase_auth: providerConfig.enabled,
+      google_oauth: providerConfig.googleEnabled,
+      facebook_oauth: providerConfig.facebookEnabled,
+      supabase_email_auth: providerConfig.emailAuthEnabled,
+      supabase_mfa_totp: providerConfig.mfaTotpEnabled,
+    },
+  }
+}
+
 /**
  * 2. User List + Profile Routes
  */
@@ -275,28 +314,92 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
     }
   }
 
+  ok(res, buildAuthMethodsPayload(user, authUser, providerConfig))
+})
+
+router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
+  const actor = getActorFromRequest(req)
+  if (!actor) return err(res, 'No permission', 403)
+  const targetId = Number(req.params.id || 0)
+  if (!targetId) return err(res, 'Invalid user id', 400)
+  if (Number(actor.id || 0) !== targetId) {
+    return err(res, 'You can only disconnect sign-in providers from your own account.', 403)
+  }
+
+  const provider = String(req.body?.provider || '').trim().toLowerCase()
+  const currentPassword = String(req.body?.currentPassword || '')
+  if (provider !== 'google' && provider !== 'facebook') {
+    return err(res, 'Unsupported provider', 400)
+  }
+  if (!currentPassword) {
+    return err(res, 'Current password required', 400)
+  }
+
+  const user = db.prepare(`
+    SELECT id, username, name, email, email_verified, otp_enabled, is_active, deleted_at, supabase_user_id, password
+    FROM users
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(targetId)
+  if (!user) return err(res, 'User not found', 404)
+  if (!user.is_active) return err(res, 'User account is inactive', 400)
+  if (!bcrypt.compareSync(currentPassword, user.password)) {
+    return err(res, 'Current password is incorrect', 401)
+  }
+  if (!isSupabaseAuthConfigured()) {
+    return err(res, 'Supabase auth is not configured.', 400)
+  }
+  if (!String(user.supabase_user_id || '').trim() || !String(user.email || '').trim()) {
+    return err(res, 'This account is not ready for provider disconnect yet.', 400)
+  }
+
+  const providerConfig = getSupabaseAuthPublicConfig()
+  if (provider === 'google' && !providerConfig.googleEnabled) return err(res, 'Google sign-in is not enabled in Supabase yet.', 400)
+  if (provider === 'facebook' && !providerConfig.facebookEnabled) return err(res, 'Facebook sign-in is not enabled in Supabase yet.', 400)
+
+  const provisionResult = await createOrUpdateAuthUser(user, currentPassword)
+  if (!provisionResult.success && !provisionResult.skipped) {
+    return err(res, provisionResult.error || 'Failed to prepare the Supabase account for provider changes.')
+  }
+
+  const signInResult = await verifyPasswordWithSupabase(user, currentPassword)
+  if (!signInResult.success || !signInResult.accessToken) {
+    return err(res, signInResult.error || 'Unable to verify the Supabase account password for provider disconnect.', 400)
+  }
+
+  let authResult = await getAuthUserById(user.supabase_user_id)
+  if (!authResult?.success || !authResult.user) {
+    return err(res, authResult?.error || 'Unable to load linked sign-in providers from Supabase.', 400)
+  }
+
+  const identitiesBefore = getAuthIdentityList(authResult.user)
+  const providerIdentity = identitiesBefore.find((identity) => String(identity?.provider || identity?.identity_data?.provider || '').trim().toLowerCase() === provider)
+  if (!providerIdentity?.id) {
+    return err(res, 'That provider is not currently linked to this account.', 400)
+  }
+  if (identitiesBefore.length < 2) {
+    return err(res, 'Add another sign-in method before disconnecting this provider.', 400)
+  }
+
+  const unlinkResult = await unlinkAuthIdentity(signInResult.accessToken, providerIdentity.id)
+  if (!unlinkResult.success) {
+    return err(res, unlinkResult.error || 'Failed to disconnect the selected sign-in provider.', 400)
+  }
+
+  authResult = await getAuthUserById(user.supabase_user_id)
+  if (!authResult?.success || !authResult.user) {
+    return err(res, authResult?.error || 'Provider was disconnected, but the refreshed auth state could not be loaded.', 502)
+  }
+
+  audit(actor.id, actor.name, 'identity_unlinked', 'user', targetId, {
+    provider,
+    email: String(user.email || '').trim().toLowerCase() || null,
+    supabase_user_id: String(user.supabase_user_id || '').trim() || null,
+  })
+  broadcast('users')
+
   ok(res, {
-    local_password: true,
-    email: user.email || '',
-    email_verified: Number(user.email_verified || 0) === 1,
-    otp_enabled: Number(user.otp_enabled || 0) === 1,
-    is_active: Number(user.is_active || 0) === 1 && !user.deleted_at,
-    supabase_connected: !!String(user.supabase_user_id || '').trim(),
-    supabase_user_id: String(user.supabase_user_id || '').trim(),
-    email_login_enabled: !!String(user.email || '').trim(),
-    google_ready: providerConfig.googleEnabled && !!String(user.email || '').trim(),
-    facebook_ready: providerConfig.facebookEnabled && !!String(user.email || '').trim(),
-    google_linked: !!authUser?.hasGoogle,
-    facebook_linked: !!authUser?.hasFacebook,
-    linked_providers: Array.isArray(authUser?.providers) ? authUser.providers : [],
-    last_sign_in_at: authUser?.lastSignInAt || '',
-    capabilities: {
-      supabase_auth: providerConfig.enabled,
-      google_oauth: providerConfig.googleEnabled,
-      facebook_oauth: providerConfig.facebookEnabled,
-      supabase_email_auth: providerConfig.emailAuthEnabled,
-      supabase_mfa_totp: providerConfig.mfaTotpEnabled,
-    },
+    provider,
+    methods: buildAuthMethodsPayload(user, authResult.user, providerConfig),
   })
 })
 

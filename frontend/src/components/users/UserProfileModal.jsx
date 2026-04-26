@@ -50,6 +50,7 @@ export default function UserProfileModal({ onClose }) {
   const [sendingEmailCode, setSendingEmailCode] = useState(false)
   const [verifyingEmailCode, setVerifyingEmailCode] = useState(false)
   const [oauthConnecting, setOauthConnecting] = useState('')
+  const [disconnectingProvider, setDisconnectingProvider] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     email: true,
     googleOauth: false,
@@ -376,6 +377,41 @@ export default function UserProfileModal({ onClose }) {
     }
   }
 
+  const handleDisconnectOauthProvider = async (provider) => {
+    const normalizedProvider = String(provider || '').trim().toLowerCase()
+    if (!normalizedProvider) return
+    if (!currentPassword.trim()) {
+      notify(tr('current_password_required_disconnect', 'Current password is required to disconnect a sign-in provider.'), 'error')
+      return
+    }
+
+    setDisconnectingProvider(normalizedProvider)
+    try {
+      const result = await window.api.disconnectUserAuthProvider(user.id, {
+        provider: normalizedProvider,
+        currentPassword,
+      })
+      if (result?.success === false) {
+        notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+        return
+      }
+      if (result?.methods) {
+        setAuthMethods(result.methods)
+      } else {
+        const authResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
+        if (authResult && authResult.success !== false) {
+          const { success: _authSuccess, ...authData } = authResult || {}
+          setAuthMethods(authData)
+        }
+      }
+      notify(tr('identity_unlinked_success', 'Sign-in method disconnected.'), 'success')
+    } catch (error) {
+      notify(error?.message || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+    } finally {
+      setDisconnectingProvider('')
+    }
+  }
+
   /**
    * 6. Avatar Upload
    * 6.1 Read image as data URL.
@@ -618,10 +654,16 @@ export default function UserProfileModal({ onClose }) {
                         : tr('google_email_required_note', 'Save an email on this profile first. Google sign-in matches accounts by email.'))
                       : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
                   </p>
-                  {verificationCaps.googleOauth && authMethods?.google_ready && !authMethods?.google_linked ? (
-                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
-                      {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
-                    </button>
+                  {verificationCaps.googleOauth && authMethods?.google_ready ? (
+                    authMethods?.google_linked ? (
+                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'google'} onClick={() => handleDisconnectOauthProvider('google')}>
+                        {disconnectingProvider === 'google' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_google', 'Disconnect Google')}
+                      </button>
+                    ) : (
+                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
+                        {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
+                      </button>
+                    )
                   ) : null}
                 </div>
 
@@ -644,16 +686,23 @@ export default function UserProfileModal({ onClose }) {
                         : tr('facebook_email_required_note', 'Save an email on this profile first. Facebook sign-in matches accounts by email.'))
                       : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.')}
                   </p>
-                  {verificationCaps.facebookOauth && authMethods?.facebook_ready && !authMethods?.facebook_linked ? (
-                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'facebook'} onClick={() => handleStartOauthLink('facebook')}>
-                      {oauthConnecting === 'facebook' ? tr('connecting', 'Connecting...') : tr('connect_facebook', 'Connect Facebook')}
-                    </button>
+                  {verificationCaps.facebookOauth && authMethods?.facebook_ready ? (
+                    authMethods?.facebook_linked ? (
+                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'facebook'} onClick={() => handleDisconnectOauthProvider('facebook')}>
+                        {disconnectingProvider === 'facebook' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_facebook', 'Disconnect Facebook')}
+                      </button>
+                    ) : (
+                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'facebook'} onClick={() => handleStartOauthLink('facebook')}>
+                        {oauthConnecting === 'facebook' ? tr('connecting', 'Connecting...') : tr('connect_facebook', 'Connect Facebook')}
+                      </button>
+                    )
                   ) : null}
                 </div>
               </div>
 
               <div className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500 dark:bg-zinc-800/70 dark:text-gray-400">
-                {tr('provider_email_match_note', 'Google and Facebook connect to the local account when the provider email matches your account email. Disabled or deleted local users still cannot access the app.')}
+                <div>{tr('provider_email_match_note', 'Google and Facebook connect to the local account when the provider email matches your account email. Disabled or deleted local users still cannot access the app.')}</div>
+                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google or Facebook account, disconnect this one first, update your account email if needed, then connect the new provider.')}</div>
               </div>
             </section>
 
