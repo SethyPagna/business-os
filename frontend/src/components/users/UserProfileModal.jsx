@@ -239,7 +239,7 @@ export default function UserProfileModal({ onClose }) {
 
   const requestContactCode = async () => {
     if (!verificationCaps.email) {
-      notify(tr('email_provider_setup_needed', 'Email verification is not configured yet. Ask admin to configure an email provider.'), 'error')
+      notify(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'), 'error')
       return
     }
     const value = profile?.email
@@ -412,9 +412,9 @@ export default function UserProfileModal({ onClose }) {
                     </div>
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_verification', 'Email verification')}</div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', 'Email code sender')}</div>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
-                          {verificationCaps.email ? tr('provider_ready', 'Provider ready') : tr('provider_not_configured', 'Provider not configured')}
+                          {verificationCaps.email ? tr('email_sender_ready', 'Sender ready') : tr('email_sender_not_configured', 'Sender not configured')}
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -435,6 +435,11 @@ export default function UserProfileModal({ onClose }) {
                           {verifyingEmailCode ? tr('verifying', 'Verifying...') : tr('verify', 'Verify')}
                         </button>
                       </div>
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        {verificationCaps.supabaseAuth
+                          ? tr('email_sender_vs_auth_note', 'Supabase auth is ready for sign-in methods. Email code sending needs a separate mail provider for verification and reset codes.')
+                          : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
+                      </p>
                     </div>
                   </div>
                 </div>

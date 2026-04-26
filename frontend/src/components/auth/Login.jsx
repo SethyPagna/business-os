@@ -326,11 +326,11 @@ export default function Login() {
       return
     }
     if (resetMethod === 'email' && !verificationCaps.email) {
-      setError(tr('email_provider_setup_needed', 'Email verification is not configured yet. Ask admin to configure an email provider.'))
+      setError(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'))
       return
     }
     if (resetMethod === 'auto' && !verificationCaps.email) {
-      setError(tr('verification_provider_missing', 'No verification provider is configured yet. Please ask admin to configure email verification.'))
+      setError(tr('email_sender_missing', 'No email code sender is configured yet. Please ask admin to configure email sending for verification codes.'))
       return
     }
     setError('')
@@ -397,11 +397,11 @@ export default function Login() {
       return
     }
     if (codeLoginMethod === 'email' && !verificationCaps.email) {
-      setError(tr('email_provider_setup_needed', 'Email verification is not configured yet. Ask admin to configure an email provider.'))
+      setError(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'))
       return
     }
     if (codeLoginMethod === 'auto' && !verificationCaps.email) {
-      setError(tr('verification_provider_missing', 'No verification provider is configured yet. Please ask admin to configure email verification.'))
+      setError(tr('email_sender_missing', 'No email code sender is configured yet. Please ask admin to configure email sending for verification codes.'))
       return
     }
 
