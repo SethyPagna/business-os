@@ -71,6 +71,8 @@ const PORTAL_TEXT = {
     phone: 'Phone',
     email: 'Email',
     address: 'Address',
+    addressLink: 'Address link',
+    addressLinkHint: 'Optional external map or directions link opened when customers tap the address.',
     media: 'Images',
     logoImage: 'Logo image',
     coverImage: 'Cover image',
@@ -199,6 +201,8 @@ const PORTAL_TEXT = {
     phone: 'លេខទូរស័ព្ទ',
     email: 'អ៊ីមែល',
     address: 'អាសយដ្ឋាន',
+    addressLink: 'តំណអាសយដ្ឋាន',
+    addressLinkHint: 'ជាជម្រើស សម្រាប់តំណផែនទី ឬទិសដៅខាងក្រៅ ដែលបើកពេលអតិថិជនចុចអាសយដ្ឋាន។',
     media: 'រូបភាព',
     logoImage: 'រូបសញ្ញា',
     coverImage: 'រូបភាពផ្ទាំងខាងលើ',
@@ -432,6 +436,7 @@ const DEFAULT_CONFIG = {
   businessPhone: '',
   businessEmail: '',
   businessAddress: '',
+  addressLink: '',
   businessTagline: '',
   googleMapsEmbed: '',
   showGoogleMap: true,
@@ -533,6 +538,13 @@ function normalizeHexColor(value, fallback) {
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
+/** Keep optional outbound portal links to full http/https URLs only. */
+function normalizeExternalUrl(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  return /^https?:\/\//i.test(raw) ? raw : ''
+}
+
 /** Convert hex color to rgba for layered hero background gradients. */
 function hexToRgba(hex, alpha) {
   const safeHex = normalizeHexColor(hex, '#0f172a')
@@ -599,6 +611,7 @@ function buildDraft(config) {
     business_phone: config.businessPhone || '',
     business_email: config.businessEmail || '',
     business_address: config.businessAddress || '',
+    customer_portal_address_link: config.addressLink || '',
     customer_portal_business_tagline: config.businessTagline || '',
     customer_portal_google_maps_embed: config.googleMapsEmbed || '',
     customer_portal_show_google_map: !!config.showGoogleMap,
@@ -687,6 +700,7 @@ function applyDraft(config, draft) {
     businessPhone: draft.business_phone || '',
     businessEmail: draft.business_email || '',
     businessAddress: draft.business_address || '',
+    addressLink: normalizeExternalUrl(draft.customer_portal_address_link || ''),
     businessTagline: draft.customer_portal_business_tagline || '',
     googleMapsEmbed: normalizeGoogleMapsEmbed(draft.customer_portal_google_maps_embed || config.googleMapsEmbed || ''),
     showGoogleMap: toBoolean(draft.customer_portal_show_google_map, config.showGoogleMap),
@@ -1998,7 +2012,7 @@ export default function CatalogPage({ publicView = false }) {
   const businessFacts = [
     { key: 'phone', enabled: previewConfig.showPhone, label: copy('phone', 'Phone'), value: previewConfig.businessPhone, href: previewConfig.businessPhone ? `tel:${previewConfig.businessPhone}` : '', icon: Phone },
     { key: 'email', enabled: previewConfig.showEmail, label: copy('email', 'Email'), value: previewConfig.businessEmail, href: previewConfig.businessEmail ? `mailto:${previewConfig.businessEmail}` : '', icon: Mail },
-    { key: 'address', enabled: previewConfig.showAddress, label: copy('address', 'Address'), value: previewConfig.businessAddress, href: '', icon: MapPin },
+    { key: 'address', enabled: previewConfig.showAddress, label: copy('address', 'Address'), value: previewConfig.businessAddress, href: normalizeExternalUrl(previewConfig.addressLink), icon: MapPin },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
@@ -2568,7 +2582,27 @@ export default function CatalogPage({ publicView = false }) {
             </div>
           </div>
         )) : null}
-        {!previewConfig.aboutContent && !previewConfig.aboutBlocks?.length ? (
+        {mapEmbedUrl ? (
+          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                <MapPin className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="text-sm font-semibold text-slate-900">{copy('mapCard', 'Store map')}</div>
+                {addressFact?.value ? <div className="text-xs text-slate-500">{addressFact.value}</div> : null}
+              </div>
+            </div>
+            <iframe
+              title="portal-about-map"
+              src={mapEmbedUrl}
+              className="h-64 w-full border-0"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        ) : null}
+        {!previewConfig.aboutContent && !previewConfig.aboutBlocks?.length && !mapEmbedUrl ? (
           <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6">
             <p className="text-sm text-slate-500">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
           </div>
@@ -3195,6 +3229,19 @@ export default function CatalogPage({ publicView = false }) {
               <label htmlFor="portal-business-address" className="block text-sm font-medium text-slate-700">{copy('address', 'Address')}</label>
               <textarea id="portal-business-address" name="business_address" autoComplete="street-address" className="input resize-none" rows={2} value={editorDraft.business_address || ''} onChange={(event) => setDraft('business_address', event.target.value)} />
             </div>
+            <div>
+              <label htmlFor="portal-address-link" className="block text-sm font-medium text-slate-700">{copy('addressLink', 'Address link')}</label>
+              <input
+                id="portal-address-link"
+                name="customer_portal_address_link"
+                autoComplete="url"
+                className="input"
+                placeholder="https://maps.google.com/..."
+                value={editorDraft.customer_portal_address_link || ''}
+                onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
+              />
+              <p className="mt-2 text-xs text-slate-500">{copy('addressLinkHint', 'Optional external map or directions link opened when customers tap the address.')}</p>
+            </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="mb-3 text-sm font-semibold text-slate-900">{copy('contactVisibility', 'Contact visibility')}</div>
@@ -3761,21 +3808,6 @@ export default function CatalogPage({ publicView = false }) {
                             </a>
                           )
                         })}
-                      </div>
-                    ) : null}
-                    {addressFact && mapEmbedUrl ? (
-                      <div className="mt-4 overflow-hidden rounded-[24px] border border-white/15 bg-white/10 shadow-lg backdrop-blur">
-                        <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-semibold text-white/90">
-                          <MapPin className="h-4 w-4 text-amber-100" />
-                          {addressFact.value}
-                        </div>
-                        <iframe
-                          title="portal-address-map"
-                          src={mapEmbedUrl}
-                          className="h-56 w-full border-0 sm:h-64"
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
                       </div>
                     ) : null}
                   </div>

@@ -121,6 +121,7 @@ function buildPortalConfig() {
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    addressLink: normalizeUrl(settings.customer_portal_address_link),
     businessTagline: settings.customer_portal_business_tagline || '',
     businessLogo: settings.customer_portal_logo_image || '',
     businessFavicon: settings.customer_portal_favicon_image || '',
