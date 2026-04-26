@@ -6,6 +6,7 @@ const { safeCompare } = require('./security')
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const PUBLIC_API_ALLOWLIST = [
   { method: 'GET', pattern: /^\/api\/system\/config\/?$/i },
+  { method: 'GET', pattern: /^\/api\/auth\/verification-capabilities\/?$/i },
   { method: 'GET', pattern: /^\/api\/catalog\/meta\/?$/i },
   { method: 'GET', pattern: /^\/api\/catalog\/products\/?$/i },
   { method: 'GET', pattern: /^\/api\/portal\/config\/?$/i },
