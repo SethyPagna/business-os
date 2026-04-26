@@ -99,7 +99,11 @@ async function stopServer(child) {
 }
 
 async function fetchJson(baseUrl, pathname, options = {}) {
-  const response = await fetch(`${baseUrl}${pathname}`, options)
+  const headers = {
+    ...(options.headers || {}),
+  }
+  if (options.authToken) headers['x-auth-session'] = options.authToken
+  const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers })
   const text = await response.text()
   const json = text ? JSON.parse(text) : {}
   if (!response.ok || json?.success === false) {
@@ -108,7 +112,24 @@ async function fetchJson(baseUrl, pathname, options = {}) {
   return json
 }
 
-async function uploadPortalLogo(baseUrl) {
+async function loginAsAdmin(baseUrl) {
+  const result = await fetchJson(baseUrl, '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'admin',
+      password: 'admin',
+      sessionDuration: 'session',
+      clientTime: new Date().toISOString(),
+      deviceTz: 'UTC',
+      deviceName: 'QA Browser',
+    }),
+  })
+  assert.ok(result?.authToken, 'Expected auth token from admin login')
+  return result.authToken
+}
+
+async function uploadPortalLogo(baseUrl, authToken) {
   const form = new FormData()
   form.append('file', new Blob([PNG_BUFFER], { type: 'image/png' }), 'portal-logo.png')
   form.append('userId', '1')
@@ -116,17 +137,19 @@ async function uploadPortalLogo(baseUrl) {
   form.append('deviceName', 'QA Browser')
   form.append('deviceTz', 'UTC')
   form.append('clientTime', new Date().toISOString())
-  return fetchJson(baseUrl, '/api/files/upload', { method: 'POST', body: form })
+  return fetchJson(baseUrl, '/api/files/upload', { method: 'POST', body: form, authToken })
 }
 
 async function seedSourceServer(baseUrl) {
-  const branches = await fetchJson(baseUrl, '/api/branches')
+  const authToken = await loginAsAdmin(baseUrl)
+  const branches = await fetchJson(baseUrl, '/api/branches', { authToken })
   const branch = Array.isArray(branches) ? branches.find((item) => item.is_default) || branches[0] : null
   assert.ok(branch?.id, 'Expected an active default branch')
 
   const product = await fetchJson(baseUrl, '/api/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       name: 'Roundtrip Product',
       sku: 'RT-001',
@@ -142,6 +165,7 @@ async function seedSourceServer(baseUrl) {
   const customer = await fetchJson(baseUrl, '/api/customers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       name: 'Roundtrip Customer',
       membership_number: 'MEM-001',
@@ -154,6 +178,7 @@ async function seedSourceServer(baseUrl) {
   const sale = await fetchJson(baseUrl, '/api/sales', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       cashier_id: 1,
       cashier_name: 'QA',
@@ -178,11 +203,12 @@ async function seedSourceServer(baseUrl) {
     }),
   })
 
-  const upload = await uploadPortalLogo(baseUrl)
+  const upload = await uploadPortalLogo(baseUrl, authToken)
 
   await fetchJson(baseUrl, '/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       business_name: 'Roundtrip Business',
       customer_portal_logo_image: upload.public_path,
@@ -194,6 +220,7 @@ async function seedSourceServer(baseUrl) {
   const customTable = await fetchJson(baseUrl, '/api/custom-tables', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       name: 'qa_notes',
       display_name: 'QA Notes',
@@ -207,6 +234,7 @@ async function seedSourceServer(baseUrl) {
   await fetchJson(baseUrl, `/api/custom-tables/${customTable.name}/rows`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    authToken,
     body: JSON.stringify({
       data: {
         status: 'ready',
@@ -215,28 +243,30 @@ async function seedSourceServer(baseUrl) {
     }),
   })
 
-  return { productId: product.id, customerId: customer.id, saleId: sale.id, uploadPath: upload.public_path, customTableName: customTable.name }
+  return { authToken, productId: product.id, customerId: customer.id, saleId: sale.id, uploadPath: upload.public_path, customTableName: customTable.name }
 }
 
-async function exportBackup(baseUrl) {
-  const response = await fetch(`${baseUrl}/api/system/backup/export`)
+async function exportBackup(baseUrl, authToken) {
+  const response = await fetch(`${baseUrl}/api/system/backup/export`, {
+    headers: { 'x-auth-session': authToken },
+  })
   assert.equal(response.ok, true, 'Backup export failed')
   return JSON.parse(await response.text())
 }
 
-async function assertRoundtripState(baseUrl, expected) {
-  const products = await fetchJson(baseUrl, '/api/products')
-  const customers = await fetchJson(baseUrl, '/api/customers')
-  const settings = await fetchJson(baseUrl, '/api/settings')
-  const filesResponse = await fetchJson(baseUrl, '/api/files')
-  const customTables = await fetchJson(baseUrl, '/api/custom-tables')
-  const auditLogs = await fetchJson(baseUrl, '/api/system/audit-logs')
+async function assertRoundtripState(baseUrl, expected, authToken) {
+  const products = await fetchJson(baseUrl, '/api/products', { authToken })
+  const customers = await fetchJson(baseUrl, '/api/customers', { authToken })
+  const settings = await fetchJson(baseUrl, '/api/settings', { authToken })
+  const filesResponse = await fetchJson(baseUrl, '/api/files', { authToken })
+  const customTables = await fetchJson(baseUrl, '/api/custom-tables', { authToken })
+  const auditLogs = await fetchJson(baseUrl, '/api/system/audit-logs', { authToken })
 
   const files = Array.isArray(filesResponse?.items) ? filesResponse.items : []
   const qaTable = Array.isArray(customTables) ? customTables.find((row) => row.name === expected.customTableName) : null
   assert.ok(qaTable, 'Expected custom table metadata after import')
 
-  const qaRows = await fetchJson(baseUrl, `/api/custom-tables/${expected.customTableName}/data`)
+  const qaRows = await fetchJson(baseUrl, `/api/custom-tables/${expected.customTableName}/data`, { authToken })
   const uploadedFile = files.find((item) => item.public_path === expected.uploadPath)
 
   assert.equal(Array.isArray(products), true)
@@ -266,7 +296,7 @@ runTest('backup export/import roundtrip keeps current data, uploads, custom tabl
   try {
     sourceServer = await startServer(sourceRuntime)
     const seeded = await seedSourceServer(sourceServer.baseUrl)
-    const backup = await exportBackup(sourceServer.baseUrl)
+    const backup = await exportBackup(sourceServer.baseUrl, seeded.authToken)
 
     assert.equal(Number(backup?.summary?.tables?.products || 0) >= 1, true)
     assert.equal(Number(backup?.summary?.tables?.sales || 0) >= 1, true)
@@ -275,13 +305,16 @@ runTest('backup export/import roundtrip keeps current data, uploads, custom tabl
     assert.equal(Number(backup?.summary?.totals?.uploadCount || 0) >= 1, true)
 
     targetServer = await startServer(targetRuntime)
+    const targetAuthToken = await loginAsAdmin(targetServer.baseUrl)
     await fetchJson(targetServer.baseUrl, '/api/system/backup/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      authToken: targetAuthToken,
       body: JSON.stringify(backup),
     })
 
-    await assertRoundtripState(targetServer.baseUrl, seeded)
+    const refreshedTargetAuthToken = await loginAsAdmin(targetServer.baseUrl)
+    await assertRoundtripState(targetServer.baseUrl, seeded, refreshedTargetAuthToken)
   } finally {
     await stopServer(sourceServer?.child)
     await stopServer(targetServer?.child)

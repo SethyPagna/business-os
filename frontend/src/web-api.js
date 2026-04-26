@@ -13,10 +13,11 @@
  *   api/methods.js   — all domain API methods
  */
 
-import { setSyncServerUrl, setSyncToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
+import { setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
 import { connectWS, disconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
+import { STORAGE_KEYS }            from './constants.js'
 
 // ── Silence Capacitor/vendor bridge noise that fires in plain web context ──────
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
@@ -79,20 +80,34 @@ window.api = {
 
   setSyncToken(token) {
     const clean = (token || '').trim()
-    setSyncToken(clean)
-    dexieDb.settings.put({ key: 'sync_token', value: clean }).catch(() => {})
+    setSyncToken('')
+    try {
+      localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
+      sessionStorage.removeItem('businessos_sync_token_session')
+    } catch (_) {}
+    dexieDb.settings.delete('sync_token').catch(() => {})
+    if (clean) {
+      console.warn('[web-api] Sync token support has been retired in favor of user sign-in sessions.')
+    }
+  },
+
+  setAuthSessionToken(token) {
+    const clean = (token || '').trim()
+    setAuthSessionToken(clean)
+    try {
+      if (clean) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, clean)
+      else localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
+    } catch (_) {}
     disconnectWS()
     if (clean) connectWS()
   },
 
   useSessionSyncToken(token) {
-    const clean = (token || '').trim()
-    setSyncToken(clean)
-    disconnectWS()
-    if (clean) connectWS()
+    window.api.setSyncToken(token)
   },
 
   ...methods,
+  getAuthSessionToken,
   getCallLog,
   clearCallLog,
 }
@@ -115,12 +130,13 @@ if (typeof window !== 'undefined') {
       (location.port === '5173' || location.port === '5174')
 
     // Retrieve auth token from storage
-    let token = localStorage.getItem('businessos_sync_token') || ''
+    let authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''
     try {
-      const stored = await dexieDb.settings.bulkGet(['sync_token'])
-      if (!token && stored[0]?.value) token = stored[0].value
+      localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
+      sessionStorage.removeItem('businessos_sync_token_session')
+      await dexieDb.settings.delete('sync_token')
     } catch (_) {}
-    if (token) setSyncToken(token)
+    if (authToken) setAuthSessionToken(authToken)
 
     // Determine the correct sync server URL
     let url
@@ -140,7 +156,7 @@ if (typeof window !== 'undefined') {
 
     if (url) {
       setSyncServerUrl(url)
-      connectWS()
+      if (authToken) connectWS()
       methods.flushPendingSyncQueue?.().catch(() => {})
       startHealthCheck()  // ping every 12 s so offline→online recovery works
     }

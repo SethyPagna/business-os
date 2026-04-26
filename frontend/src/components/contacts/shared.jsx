@@ -261,8 +261,8 @@ export function ImportModal({ type, onClose, onDone }) {
     try {
       const baseUrl = String(window.api.getSyncServerUrl?.() || '').replace(/\/$/, '')
       const headers = { 'bypass-tunnel-reminder': 'true' }
-      const syncToken = window.api.getSyncToken?.()
-      if (syncToken) headers['x-sync-token'] = syncToken
+      const authToken = window.api.getAuthSessionToken?.()
+      if (authToken) headers['x-auth-session'] = authToken
       const response = await fetch(`${baseUrl}${path}`, { headers })
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
       setCsvText(await response.text())

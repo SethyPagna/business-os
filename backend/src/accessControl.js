@@ -102,14 +102,12 @@ function isPublicApiRequest(req) {
 }
 
 function classifyRequestAccess(req) {
-  const syncToken = getConfiguredSyncToken()
-  const presentedToken = getPresentedSyncToken(req)
   const trustedTailscale = hasTrustedTailscaleIdentity(req)
   const localRequest = isLocalHostRequest(req)
   const remoteRequest = !localRequest && !trustedTailscale
   const publicRemote = isPublicRemoteRequest(req)
-  const tokenRequired = remoteRequest
-  const tokenValid = !!(syncToken && presentedToken && safeCompare(syncToken, presentedToken))
+  const tokenRequired = false
+  const tokenValid = false
   let mode = 'local'
   if (trustedTailscale) mode = 'tailscale-private'
   else if (publicRemote && isTsNetHost(getRequestHost(req))) mode = 'tailscale-public'
@@ -124,8 +122,8 @@ function classifyRequestAccess(req) {
     remoteRequest,
     publicRemote,
     tokenRequired,
-    hasConfiguredToken: !!syncToken,
-    tokenProvided: !!presentedToken,
+    hasConfiguredToken: false,
+    tokenProvided: false,
     tokenValid,
     configuredTailscaleHost: getConfiguredTailscaleHost(),
   }
@@ -133,28 +131,7 @@ function classifyRequestAccess(req) {
 
 function authorizeProtectedRequest(req) {
   const access = classifyRequestAccess(req)
-  if (!access.tokenRequired) {
-    return { allowed: true, status: 200, code: 'trusted_local', access }
-  }
-  if (!access.hasConfiguredToken) {
-    return {
-      allowed: false,
-      status: 401,
-      code: 'public_token_required',
-      message: 'Public or remote access requires a sync token. Open the app locally or through private Tailscale, then configure SYNC_TOKEN for public access.',
-      access,
-    }
-  }
-  if (!access.tokenValid) {
-    return {
-      allowed: false,
-      status: 401,
-      code: 'invalid_sync_token',
-      message: 'A valid sync token is required for public or remote access.',
-      access,
-    }
-  }
-  return { allowed: true, status: 200, code: 'token_verified', access }
+  return { allowed: true, status: 200, code: 'session_required', access }
 }
 
 module.exports = {

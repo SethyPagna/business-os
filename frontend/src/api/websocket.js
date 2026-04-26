@@ -8,7 +8,7 @@
  */
 
 import { SYNC } from '../constants.js'
-import { getSyncServerUrl, getSyncToken } from './http.js'
+import { getSyncServerUrl, getAuthSessionToken } from './http.js'
 
 let ws               = null
 let wsReconnectTimer = null
@@ -22,9 +22,10 @@ export function connectWS() {
 
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
-  const syncToken = getSyncToken()
+  const authToken = getAuthSessionToken()
+  if (!authToken) return
   const wsUrl = syncServerUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws'
-    + (syncToken ? `?token=${encodeURIComponent(syncToken)}` : '')
+    + `?token=${encodeURIComponent(authToken)}`
 
   try {
     console.debug('[ws] attempting connect to', wsUrl)
@@ -72,8 +73,8 @@ export function connectWS() {
     if (code === 4001) {
       window.dispatchEvent(new CustomEvent('sync:error', {
         detail: {
-          channel: 'system:sync_access',
-          error: reason || 'Public or remote access requires a valid sync token.',
+          channel: 'system:session_access',
+          error: reason || 'Please sign in again to continue.',
           ts: new Date().toISOString(),
         },
       }))

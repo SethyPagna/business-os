@@ -17,6 +17,7 @@ import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/dev
 // ─── Mutable connection state (module-level, intentionally not React state) ───
 let syncServerUrl = ''
 let syncToken     = ''
+let authSessionToken = ''
 const RECONNECT_REFRESH_CHANNELS = [
   'settings',
   'products',
@@ -36,9 +37,11 @@ const RECONNECT_REFRESH_CHANNELS = [
 
 export function getSyncServerUrl() { return syncServerUrl }
 export function getSyncToken()     { return syncToken }
+export function getAuthSessionToken() { return authSessionToken }
 
 export function setSyncServerUrl(url) { syncServerUrl = (url || '').trim().replace(/\/$/, '') }
 export function setSyncToken(token)   { syncToken = (token || '').trim() }
+export function setAuthSessionToken(token) { authSessionToken = (token || '').trim() }
 
 // ─── In-memory read cache with request deduplication ────────────────────────
 const _cache      = {}
@@ -93,6 +96,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   const base    = syncServerUrl.replace(/\/$/, '')
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
   if (syncToken) headers['x-sync-token'] = syncToken
+  if (authSessionToken) headers['x-auth-session'] = authSessionToken
 
   const ctrl  = new AbortController()
   let timedOut = false
@@ -111,7 +115,14 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     clearTimeout(timer)
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      const msg  = (() => { try { return JSON.parse(text).error || text } catch { return text } })()
+      const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
+      const msg  = parsed?.error || text
+      if (res.status === 401 && parsed?.code === 'invalid_session' && authSessionToken && typeof window !== 'undefined') {
+        authSessionToken = ''
+        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+          detail: { code: parsed.code, error: parsed.error || 'Please sign in again to continue.' },
+        }))
+      }
       throw new Error(msg || `HTTP ${res.status}`)
     }
     return res.json()

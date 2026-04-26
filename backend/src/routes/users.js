@@ -118,6 +118,7 @@ function getActorFromPayload(payload = {}, query = {}) {
 }
 
 function getActorFromRequest(req) {
+  if (req?.user?.id) return req.user
   return getActorFromPayload(req.body || {}, req.query || {})
 }
 

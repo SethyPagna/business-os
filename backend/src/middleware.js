@@ -6,23 +6,27 @@ const multer = require('multer')
 const { UPLOADS_PATH } = require('./config')
 const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessControl')
 const { buildUniqueStoredName, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
+const { getSessionUser } = require('./sessionAuth')
 
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 
 function authToken(req, res, next) {
-  const result = authorizeProtectedRequest(req)
-  if (result.allowed) return next()
-  return res.status(result.status || 401).json({
+  const sessionUser = getSessionUser(req)
+  if (sessionUser) {
+    req.user = sessionUser
+    return next()
+  }
+  return res.status(401).json({
     success: false,
-    error: result.message || 'Unauthorized - wrong or missing access token',
-    code: result.code || 'unauthorized',
+    error: 'Please sign in again to continue.',
+    code: 'invalid_session',
   })
 }
 
 function networkAccessGuard(req, res, next) {
   if (isPublicApiRequest(req)) return next()
-  return authToken(req, res, next)
+  return next()
 }
 
 function sanitiseFilename(originalname) {

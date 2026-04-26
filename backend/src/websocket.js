@@ -10,7 +10,7 @@
 
 const { WebSocketServer } = require('ws')
 const { wss_clients }     = require('./helpers')
-const { authorizeProtectedRequest } = require('./accessControl')
+const { getSessionUser } = require('./sessionAuth')
 
 /**
  * Attach the WebSocket server to an existing http.Server instance.
@@ -20,12 +20,14 @@ function attachWss(httpServer) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 
   wss.on('connection', (ws, req) => {
-    const result = authorizeProtectedRequest(req)
-    if (!result.allowed) {
-      console.warn(`[WS] unauthorized connection attempt from ${req.socket.remoteAddress} (${result.code || 'unauthorized'})`)
-      try { ws.close(4001, result.message || 'Unauthorized') } catch (_) {}
+    const sessionUser = getSessionUser(req)
+    if (!sessionUser) {
+      console.warn(`[WS] unauthorized connection attempt from ${req.socket.remoteAddress} (invalid_session)`)
+      try { ws.close(4001, 'Please sign in again to continue.') } catch (_) {}
       return
     }
+
+    ws.user = sessionUser
 
     wss_clients.add(ws)
     console.log(`[WS] Client connected from ${req.socket.remoteAddress}. Total: ${wss_clients.size}`)

@@ -79,6 +79,13 @@ export function AppProvider({ children }) {
       const expiry = localStorage.getItem(STORAGE_KEYS.USER_EXPIRY)
       const serverStartTime = localStorage.getItem(STORAGE_KEYS.SERVER_START_TIME)
       
+      const authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
+      if (stored && !authToken) {
+        localStorage.removeItem(STORAGE_KEYS.USER)
+        localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
+        return null
+      }
+
       if (stored && expiry) {
         // Check if session expired
         if (Date.now() > parseInt(expiry, 10)) {
@@ -193,14 +200,32 @@ export function AppProvider({ children }) {
       console.error('[sync:error]', e.detail)
       // The SyncErrorBanner in App.jsx picks this up via its own listener
     }
+    const onUnauthorized = (e) => {
+      const message = e?.detail?.error || 'Please sign in again to continue.'
+      setUser(null)
+      setPage('dashboard')
+      cacheClearAll()
+      try {
+        localStorage.removeItem(STORAGE_KEYS.USER)
+        localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
+        localStorage.removeItem(STORAGE_KEYS.SERVER_START_TIME)
+        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
+      } catch (_) {}
+      window.api?.setAuthSessionToken?.('')
+      setSyncConnected(false)
+      setSyncServerUnreachable(false)
+      setNotification({ message, type: 'error', id: Date.now() })
+    }
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
     window.addEventListener('sync:error',  onError)
+    window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
       clearInterval(pollTimer)
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
+      window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
   }, [loadSettings])
@@ -210,22 +235,23 @@ export function AppProvider({ children }) {
     const handleOtpLogin = async (e) => {
       const otpUser = e.detail
       if (!otpUser) return
-      const { password: _pw, otp_secret: _sec, ...safeUser } = otpUser
+      const { password: _pw, otp_secret: _sec, authToken = '', sessionDuration = 'session', ...safeUser } = otpUser
 
       let expiryTime = null
       try {
-        const sessionDuration = localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'session'
         if (sessionDuration === '7d') expiryTime = Date.now() + (7 * 24 * 60 * 60 * 1000)
         if (sessionDuration === '30d') expiryTime = Date.now() + (30 * 24 * 60 * 60 * 1000)
       } catch (_) {}
 
       try {
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(safeUser))
+        if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
         if (expiryTime) localStorage.setItem(STORAGE_KEYS.USER_EXPIRY, expiryTime.toString())
         else localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
         localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
       } catch (_) {}
 
+      window.api?.setAuthSessionToken?.(authToken || '')
       setUser(safeUser)
       await loadSettings()
       setPage('dashboard')
@@ -423,14 +449,8 @@ export function AppProvider({ children }) {
     if (clean) startHealthCheck()
   }, [])
 
-  const updateSyncToken = useCallback((token) => {
-    const clean = (token || '').trim()
-    try { clean ? localStorage.setItem(STORAGE_KEYS.SYNC_TOKEN, clean) : localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN) } catch (_) {}
-    window.api?.setSyncToken?.(clean || null)
-  }, [])
-
   // ?? Auth ??????????????????????????????????????????????????????????????????
-  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session') => {
+  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', authToken = '') => {
     let expiryTime = null
     if (sessionDuration === '7d') {
       expiryTime = Date.now() + (7 * 24 * 60 * 60 * 1000)
@@ -440,6 +460,8 @@ export function AppProvider({ children }) {
 
     try {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(nextUser))
+      if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
+      else localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
       if (expiryTime) {
         localStorage.setItem(STORAGE_KEYS.USER_EXPIRY, expiryTime.toString())
       } else {
@@ -448,6 +470,7 @@ export function AppProvider({ children }) {
       localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
     } catch (_) {}
 
+    window.api?.setAuthSessionToken?.(authToken || '')
     cacheClearAll()
     startHealthCheck()
     setUser(nextUser)
@@ -460,12 +483,13 @@ export function AppProvider({ children }) {
       const device = getClientDeviceInfo()
       const result = await window.api.login({
         username, password,
+        sessionDuration,
         clientTime: new Date().toISOString(),
         deviceTz: device.deviceTz,
         deviceName: device.deviceName,
       })
       if (result.success) {
-        await persistAuthenticatedUser(result.user, sessionDuration)
+        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
       }
       return result
     } catch (e) {
@@ -480,13 +504,18 @@ export function AppProvider({ children }) {
     }
   }, [persistAuthenticatedUser])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await window.api.logout?.()
+    } catch (_) {}
+    window.api?.setAuthSessionToken?.('')
     setUser(null)
     setPage('dashboard')
     try {
       localStorage.removeItem(STORAGE_KEYS.USER)
       localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
       localStorage.removeItem(STORAGE_KEYS.SERVER_START_TIME)
+      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
     } catch (_) {}
   }, [])
 
@@ -626,7 +655,7 @@ export function AppProvider({ children }) {
     formatPrice, fmtUSD, fmtKHR,
     usdSymbol, khrSymbol, displayCurrency, exchangeRate,
     usdToKhr, khrToUsd,
-    syncUrl, updateSyncUrl, updateSyncToken,
+    syncUrl, updateSyncUrl,
     // Expose sync status so components that use useApp() (legacy) can read it.
     syncConnected,
     syncChannel,

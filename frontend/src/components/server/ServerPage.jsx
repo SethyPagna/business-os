@@ -330,9 +330,8 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
 }
 
 export default function ServerPage() {
-  const { t, notify, syncConnected, syncUrl, updateSyncUrl, updateSyncToken } = useApp()
+  const { t, notify, syncConnected, syncUrl, updateSyncUrl } = useApp()
   const [urlInput, setUrlInput] = useState('')
-  const [tokenInput, setTokenInput] = useState('')
   const [securityConfig, setSecurityConfig] = useState(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
@@ -344,9 +343,6 @@ export default function ServerPage() {
 
   useEffect(() => {
     setUrlInput(syncUrl || '')
-    try {
-      setTokenInput(localStorage.getItem('businessos_sync_token') || '')
-    } catch {}
   }, [syncUrl])
 
   useEffect(() => {
@@ -416,18 +412,15 @@ export default function ServerPage() {
   function handleSave() {
     const url = urlInput.trim().replace(/\/$/, '')
     updateSyncUrl(url || null)
-    updateSyncToken(tokenInput.trim() || null)
     if (url) notify('Server URL saved - reconnecting...', 'success')
     else notify('Switched to local-only mode', 'success')
   }
 
   function handleDisconnect() {
     setUrlInput('')
-    setTokenInput('')
     setTestResult(null)
     setOnlineCount(null)
     updateSyncUrl(null)
-    updateSyncToken(null)
     notify('Switched to local-only mode', 'success')
   }
 
@@ -552,34 +545,11 @@ export default function ServerPage() {
                 <p className="mt-1 text-xs text-gray-400">{t('sync_manual_url_hint') || 'No trailing slash.'}</p>
               </div>
 
-              <div>
-                <label htmlFor="server-access-token" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('sync_access_token') || 'Access Token'} <span className="font-normal text-gray-400">({t('access_token_optional') || 'optional'})</span>
-                </label>
-                <input
-                  id="server-access-token"
-                  name="server_access_token"
-                  type="password"
-                  autoComplete="off"
-                  value={tokenInput}
-                  onChange={(event) => setTokenInput(event.target.value)}
-                  placeholder={t('sync_token_hint') || 'Leave blank unless SYNC_TOKEN is set'}
-                  className="input text-sm"
-                />
-                <p className="mt-1 text-xs text-gray-400">
-                  {securityConfig?.accessMode === 'tailscale-public' || securityConfig?.accessMode === 'remote'
-                    ? 'Required for public Funnel or other remote access.'
-                    : securityConfig?.accessMode === 'tailscale-private'
-                      ? 'Private Tailscale access can work without a token when trusted identity headers are present.'
-                      : 'Localhost access can work without a token.'}
-                </p>
-              </div>
-
               {securityConfig ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300">
                   <p><strong>Detected mode:</strong> {securityConfig.accessMode || 'local'}</p>
-                  <p><strong>Token required here:</strong> {securityConfig.requiresToken ? 'Yes' : 'No'}</p>
-                  <p><strong>Token configured on server:</strong> {securityConfig.hasConfiguredToken ? 'Yes' : 'No'}</p>
+                  <p><strong>Sign-in:</strong> Browser sessions now use your normal Business OS login after the page loads.</p>
+                  <p><strong>Trusted path:</strong> {securityConfig.accessMode === 'tailscale-private' ? 'Private Tailscale identity' : 'Public or direct browser access'}</p>
                 </div>
               ) : null}
 

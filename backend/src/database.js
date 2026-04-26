@@ -59,6 +59,22 @@ CREATE TABLE IF NOT EXISTS users (
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  device_name  TEXT,
+  device_tz    TEXT,
+  client_time  TEXT,
+  user_agent   TEXT,
+  last_ip      TEXT,
+  last_seen_at TEXT DEFAULT (datetime('now')),
+  expires_at   TEXT NOT NULL,
+  revoked_at   TEXT,
+  created_at   TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS roles (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,

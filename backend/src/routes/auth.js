@@ -48,6 +48,7 @@ const {
   requestVerificationCode,
   verifyCode,
 } = require('../services/verification')
+const { createAuthSession, getPresentedSessionToken, revokeAuthSession } = require('../sessionAuth')
 
 const router = express.Router()
 
@@ -213,6 +214,17 @@ function getUserById(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
 }
 
+function issueAuthSession(req, userId, details = {}) {
+  return createAuthSession(userId, {
+    sessionDuration: details.sessionDuration,
+    deviceName: details.deviceName || null,
+    deviceTz: details.deviceTz || null,
+    clientTime: details.clientTime || null,
+    ip: String(req.ip || req.socket?.remoteAddress || '').trim() || null,
+    userAgent: String(req.headers['user-agent'] || '').trim() || null,
+  })
+}
+
 function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
   const supabaseUserId = String(authUser?.id || '').trim() || null
   const email = normalizeEmail(authUser?.email || '') || null
@@ -248,7 +260,7 @@ router.get('/verification-capabilities', (_req, res) => {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const t0 = Date.now()
-  const { username, password, clientTime, deviceTz, deviceName } = req.body || {}
+  const { username, password, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!username || !password) return err(res, 'Username or email and password are required')
   const lockKey = getLoginLockKey(username)
   const lockState = checkAbuseLock('auth:login_lock', lockKey, LOGIN_LOCK_WINDOW_MS)
@@ -310,7 +322,8 @@ router.post('/login', async (req, res) => {
     clientTime: clientTime || null,
   })
 
-  ok(res, { user: buildUserPayload(user) })
+  const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
+  ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
 })
 
 // POST /api/auth/login/request-code
@@ -369,7 +382,7 @@ router.post('/login/request-code', async (req, res) => {
 
 // POST /api/auth/login/verify-code
 router.post('/login/verify-code', (req, res) => {
-  const { identifier, method, code, clientTime, deviceTz, deviceName } = req.body || {}
+  const { identifier, method, code, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!identifier) return err(res, 'Username or email is required')
   if (!code) return err(res, 'Verification code is required')
   const normalizedMethod = normalizeVerificationMethod(method)
@@ -410,7 +423,8 @@ router.post('/login/verify-code', (req, res) => {
     clientTime: clientTime || null,
   })
 
-  return ok(res, { user: buildUserPayload(user) })
+  const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
+  return ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
 })
 
 // POST /api/auth/oauth/start
@@ -438,6 +452,7 @@ router.post('/oauth/complete', async (req, res) => {
     clientTime,
     deviceTz,
     deviceName,
+    sessionDuration,
   } = req.body || {}
 
   const oauthMode = normalizeOauthMode(mode)
@@ -535,15 +550,19 @@ router.post('/oauth/complete', async (req, res) => {
     clientTime: clientTime || null,
   })
 
+  const session = issueAuthSession(req, localUser.id, { sessionDuration, deviceName, deviceTz, clientTime })
+
   return ok(res, {
     provider: normalizedProvider,
     user: buildUserPayload(localUser),
+    authToken: session.token,
+    sessionExpiresAt: session.expiresAt,
   })
 })
 
 // POST /api/auth/otp/verify
 router.post('/otp/verify', (req, res) => {
-  const { userId, token, clientTime, deviceTz, deviceName } = req.body || {}
+  const { userId, token, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!userId || !token) return err(res, 'userId and token required')
 
   const limitKey = getClientKey(req, String(userId))
@@ -585,7 +604,14 @@ router.post('/otp/verify', (req, res) => {
     clientTime: clientTime || null,
   })
 
-  ok(res, { user: buildUserPayload(user) })
+  const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
+  ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
+})
+
+router.post('/logout', (req, res) => {
+  const token = getPresentedSessionToken(req)
+  if (token) revokeAuthSession(token)
+  ok(res, { success: true })
 })
 
 // POST /api/auth/otp/setup

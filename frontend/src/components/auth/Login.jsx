@@ -16,8 +16,6 @@ import { useApp } from '../../AppContext'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.js'
 
-const SESSION_SYNC_TOKEN_KEY = 'businessos_sync_token_session'
-
 function OauthButton({ icon: Icon, label, onClick, disabled, loading }) {
   return (
     <button
@@ -84,19 +82,6 @@ export default function Login() {
     googleOauth: false,
     facebookOauth: false,
   })
-  const [syncToken, setSyncToken] = useState(() => {
-    try {
-      return window.api?.getSyncToken?.() || sessionStorage.getItem(SESSION_SYNC_TOKEN_KEY) || ''
-    } catch (_) {
-      return ''
-    }
-  })
-  const [accessConfig, setAccessConfig] = useState({
-    requiresToken: false,
-    hasConfiguredToken: false,
-    accessMode: 'local',
-  })
-
   const [codeLoginIdentifier, setCodeLoginIdentifier] = useState('')
   const [codeLoginMethod, setCodeLoginMethod] = useState('auto')
   const [codeLoginSent, setCodeLoginSent] = useState(false)
@@ -121,13 +106,6 @@ export default function Login() {
   }, [sessionDuration])
 
   useEffect(() => {
-    try {
-      if (syncToken) sessionStorage.setItem(SESSION_SYNC_TOKEN_KEY, syncToken)
-      else sessionStorage.removeItem(SESSION_SYNC_TOKEN_KEY)
-    } catch (_) {}
-  }, [syncToken])
-
-  useEffect(() => {
     let active = true
     const loadCapabilities = async () => {
       try {
@@ -143,27 +121,6 @@ export default function Login() {
       } catch (_) {}
     }
     loadCapabilities()
-    return () => { active = false }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    const loadAccessConfig = async () => {
-      try {
-        const response = await fetch(`${window.location.origin}/api/system/config`, {
-          headers: { 'bypass-tunnel-reminder': 'true' },
-        })
-        if (!response.ok) return
-        const config = await response.json().catch(() => ({}))
-        if (!active) return
-        setAccessConfig({
-          requiresToken: config?.requiresToken === true,
-          hasConfiguredToken: config?.hasConfiguredToken === true,
-          accessMode: String(config?.accessMode || 'local'),
-        })
-      } catch (_) {}
-    }
-    loadAccessConfig()
     return () => { active = false }
   }, [])
 
@@ -195,12 +152,12 @@ export default function Login() {
       setLoading(true)
       setError('')
       try {
-        if (syncToken) window.api.useSessionSyncToken?.(syncToken)
         const device = getClientDeviceInfo()
         const result = await window.api.completeSupabaseOauth({
           accessToken,
           provider,
           mode: 'login',
+          sessionDuration,
           clientTime: new Date().toISOString(),
           deviceTz: device.deviceTz,
           deviceName: device.deviceName,
@@ -214,7 +171,7 @@ export default function Login() {
           return
         }
         if (result?.success && result?.user) {
-          await persistAuthenticatedUser(result.user, sessionDuration)
+          await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
           return
         }
         setError(result?.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
@@ -239,22 +196,6 @@ export default function Login() {
 
   const getDeviceContext = () => getClientDeviceInfo()
 
-  const applySyncTokenIfNeeded = () => {
-    const token = String(syncToken || '').trim()
-    if (accessConfig.requiresToken && !accessConfig.hasConfiguredToken) {
-      setError('Public access is locked until a sync token is configured locally in Server settings.')
-      return false
-    }
-    if (accessConfig.requiresToken && !token) {
-      setError('Enter the sync token to use this public or remote connection.')
-      return false
-    }
-    if (token) {
-      window.api.useSessionSyncToken?.(token)
-    }
-    return true
-  }
-
   const resetResetForm = () => {
     setResetSent(false)
     setResetCode('')
@@ -271,7 +212,6 @@ export default function Login() {
 
   const handleLogin = async (event) => {
     event.preventDefault()
-    if (!applySyncTokenIfNeeded()) return
     setError('')
     setLoading(true)
     const result = await login(username, password, sessionDuration)
@@ -298,13 +238,14 @@ export default function Login() {
       const verifyResult = await window.api.otpVerify({
         userId: pendingUserId,
         token: otp.trim(),
+        sessionDuration,
         clientTime: new Date().toISOString(),
         deviceTz: device.deviceTz,
         deviceName: device.deviceName,
       })
 
       if (verifyResult?.success && verifyResult?.user) {
-        await persistAuthenticatedUser(verifyResult.user, sessionDuration)
+        await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.authToken || '')
       } else {
         setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
       }
@@ -320,7 +261,6 @@ export default function Login() {
   }
 
   const handleSendResetCode = async () => {
-    if (!applySyncTokenIfNeeded()) return
     if (!resetIdentifier.trim()) {
       setError(tr('enter_username_email_first', 'Enter your username or email first.'))
       return
@@ -358,7 +298,6 @@ export default function Login() {
   }
 
   const handleCompleteReset = async () => {
-    if (!applySyncTokenIfNeeded()) return
     if (!resetCode.trim()) return setError(tr('enter_verification_code', 'Enter the verification code.'))
     if (resetNewPassword.length < 4) return setError(tr('password_min_4', 'Use at least 4 characters for the new password.'))
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
@@ -391,7 +330,6 @@ export default function Login() {
   }
 
   const handleSendLoginCode = async () => {
-    if (!applySyncTokenIfNeeded()) return
     if (!codeLoginIdentifier.trim()) {
       setError(tr('enter_username_email_first', 'Enter your username or email first.'))
       return
@@ -430,7 +368,6 @@ export default function Login() {
   }
 
   const handleVerifyLoginCode = async () => {
-    if (!applySyncTokenIfNeeded()) return
     if (!codeLoginIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
     if (!codeLoginValue.trim()) return setError(tr('enter_verification_code', 'Enter the verification code.'))
 
@@ -441,10 +378,11 @@ export default function Login() {
         identifier: codeLoginIdentifier.trim(),
         method: codeLoginMethod,
         code: codeLoginValue.trim(),
+        sessionDuration,
         ...getDeviceContext(),
       })
       if (result?.success && result?.user) {
-        await persistAuthenticatedUser(result.user, sessionDuration)
+        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
         return
       }
       setError(result?.error || 'Invalid verification code')
@@ -456,7 +394,6 @@ export default function Login() {
   }
 
   const handleStartOauth = async (provider) => {
-    if (!applySyncTokenIfNeeded()) return
     setError('')
     setOauthLoading(provider)
     try {
@@ -486,32 +423,6 @@ export default function Login() {
     resetCodeLoginForm()
   }
 
-  const showSyncTokenField = accessConfig.requiresToken || !!syncToken
-  const accessHint = accessConfig.accessMode === 'tailscale-public' || accessConfig.accessMode === 'remote'
-    ? 'Public or remote access requires the sync token before sign-in.'
-    : accessConfig.accessMode === 'tailscale-private'
-      ? 'Private Tailscale access is trusted through Tailscale identity headers.'
-      : 'Local access does not require a sync token.'
-  const syncTokenField = showSyncTokenField ? (
-    <div className="mb-4">
-      <label htmlFor="login-sync-token" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-        <KeyRound className="h-4 w-4 text-gray-400" />
-        <span>{tr('sync_token', 'Sync Token')}</span>
-      </label>
-      <input
-        id="login-sync-token"
-        name="sync-token"
-        className="input"
-        type="password"
-        value={syncToken}
-        onChange={(event) => setSyncToken(event.target.value)}
-        placeholder={tr('sync_token_hint', 'Leave blank if no SYNC_TOKEN was set')}
-        autoComplete="off"
-      />
-      <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{accessHint}</p>
-    </div>
-  ) : null
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/95 p-6 shadow-2xl backdrop-blur dark:bg-slate-900/95">
@@ -526,9 +437,6 @@ export default function Login() {
               : tr('secure_signin_workspace', 'Secure sign-in for your business workspace')}
           </p>
         </div>
-
-        {syncTokenField}
-
         {!otpRequired && !showReset && !showCodeLogin ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>

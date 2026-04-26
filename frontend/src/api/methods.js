@@ -11,7 +11,7 @@ function getDeviceInfo() {
  * where available, a local Dexie fallback for offline-first reads.
  */
 
-import { apiFetch, route, getSyncServerUrl, getSyncToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
+import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, buildCSVTemplate } from './localDb.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
@@ -59,8 +59,11 @@ function appendActorQuery(path, extra = {}) {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export async function login({ username, password, clientTime, deviceTz, deviceName }) {
-  return apiFetch('POST', '/api/auth/login', { username, password, clientTime, deviceTz, deviceName })
+export async function login({ username, password, sessionDuration, clientTime, deviceTz, deviceName }) {
+  return apiFetch('POST', '/api/auth/login', { username, password, sessionDuration, clientTime, deviceTz, deviceName })
+}
+export async function logout() {
+  return apiFetch('POST', '/api/auth/logout', {})
 }
 export async function requestLoginCode(payload) {
   return apiFetch('POST', '/api/auth/login/request-code', payload || {})
@@ -302,8 +305,8 @@ export async function uploadFileAsset({ file, userId, userName }) {
     'x-device-tz': device.deviceTz || '',
     'x-device-name': device.deviceName || '',
   }
-  const token = getSyncToken()
-  if (token) headers['x-sync-token'] = token
+  const authToken = getAuthSessionToken()
+  if (authToken) headers['x-auth-session'] = authToken
 
   const form = new FormData()
   form.append('file', file, file.name)
@@ -334,8 +337,8 @@ export async function deleteFileAsset(id) {
 export async function uploadProductImage({ productId, filePath, fileName }) {
   const base    = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
-  const token   = getSyncToken()
-  if (token) headers['x-sync-token'] = token
+  const authToken   = getAuthSessionToken()
+  if (authToken) headers['x-auth-session'] = authToken
 
   const fd = new FormData()
 
@@ -371,8 +374,8 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
   }
   const base = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
-  const token = getSyncToken()
-  if (token) headers['x-sync-token'] = token
+  const authToken = getAuthSessionToken()
+  if (authToken) headers['x-auth-session'] = authToken
 
   if (!filePath || !filePath.startsWith('data:')) {
     throw new Error('No avatar image data provided')
@@ -430,7 +433,7 @@ export function getImageDataUrl(_path) {
 }
 
 /** getSyncServerUrl — exposed on window.api for components that build URLs directly. */
-export { getSyncServerUrl, getSyncToken }
+export { getSyncServerUrl, getAuthSessionToken }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
@@ -460,7 +463,7 @@ export async function createSale(d) {
 
 export async function flushPendingSyncQueue() {
   const syncServerUrl = getSyncServerUrl()
-  if (!syncServerUrl) return { processed: 0, failed: 0 }
+  if (!syncServerUrl || !getAuthSessionToken()) return { processed: 0, failed: 0 }
 
   const pending = await dexieDb.sync_queue
     .where('status')
@@ -593,8 +596,8 @@ export async function exportBackup() {
   const url = getSyncServerUrl()
   if (!url) throw new Error('Server required for backup export')
   const headers = { 'bypass-tunnel-reminder': 'true' }
-  const token = getSyncToken()
-  if (token) headers['x-sync-token'] = token
+  const authToken = getAuthSessionToken()
+  if (authToken) headers['x-auth-session'] = authToken
   const res  = await fetch(`${url}/api/system/backup/export`, { headers })
   if (!res.ok) throw new Error('Backup export failed')
   const blob = await res.blob()

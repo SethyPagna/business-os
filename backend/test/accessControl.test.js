@@ -68,18 +68,19 @@ runTest('private Tailscale Serve identity bypasses sync token', () => {
   assert.equal(result.access.mode, 'tailscale-private')
 })
 
-runTest('public remote access requires a configured sync token', () => {
+runTest('public remote access now defers to signed user sessions', () => {
   process.env.SYNC_TOKEN = ''
   const result = authorizeProtectedRequest(makeReq({
     originalUrl: '/api/auth/login',
     host: 'device.example.ts.net',
     remoteAddress: '127.0.0.1',
   }))
-  assert.equal(result.allowed, false)
-  assert.equal(result.code, 'public_token_required')
+  assert.equal(result.allowed, true)
+  assert.equal(result.code, 'session_required')
+  assert.equal(result.access.mode, 'tailscale-public')
 })
 
-runTest('public remote access accepts a valid sync token', () => {
+runTest('public remote access ignores legacy sync token headers', () => {
   process.env.SYNC_TOKEN = 'secret-token'
   const result = authorizeProtectedRequest(makeReq({
     originalUrl: '/api/auth/login',
@@ -91,6 +92,7 @@ runTest('public remote access accepts a valid sync token', () => {
   }))
   assert.equal(result.allowed, true)
   assert.equal(result.access.mode, 'tailscale-public')
+  assert.equal(result.code, 'session_required')
 })
 
 process.env.SYNC_TOKEN = previousSyncToken
