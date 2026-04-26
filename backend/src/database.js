@@ -419,6 +419,54 @@ CREATE TABLE IF NOT EXISTS file_assets (
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS ai_provider_configs (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  name                 TEXT NOT NULL,
+  provider             TEXT NOT NULL,
+  provider_type        TEXT DEFAULT 'chat',
+  account_email        TEXT,
+  project_name         TEXT,
+  api_key_encrypted    TEXT NOT NULL,
+  default_model        TEXT,
+  supported_models_json TEXT DEFAULT '[]',
+  endpoint_override    TEXT,
+  notes                TEXT,
+  enabled              INTEGER DEFAULT 1,
+  priority             INTEGER DEFAULT 50,
+  requests_per_minute  INTEGER DEFAULT 10,
+  max_input_chars      INTEGER DEFAULT 1000,
+  max_completion_tokens INTEGER DEFAULT 1200,
+  timeout_ms           INTEGER DEFAULT 15000,
+  cooldown_seconds     INTEGER DEFAULT 20,
+  last_status          TEXT DEFAULT 'untested',
+  last_error           TEXT,
+  last_checked_at      TEXT,
+  created_by_id        INTEGER,
+  created_by_name      TEXT,
+  created_at           TEXT DEFAULT (datetime('now')),
+  updated_at           TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ai_response_logs (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  surface              TEXT DEFAULT 'portal',
+  provider_config_id   INTEGER,
+  provider_name        TEXT,
+  provider             TEXT,
+  model                TEXT,
+  actor_user_id        INTEGER,
+  actor_user_name      TEXT,
+  actor_label          TEXT,
+  prompt_text          TEXT,
+  question_text        TEXT,
+  profile_json         TEXT DEFAULT '{}',
+  candidate_products_json TEXT DEFAULT '[]',
+  recommendations_json TEXT DEFAULT '[]',
+  citations_json       TEXT DEFAULT '[]',
+  answer_text          TEXT,
+  created_at           TEXT DEFAULT (datetime('now'))
+);
 `)
 
 
@@ -486,6 +534,14 @@ const migrations = [
   `ALTER TABLE file_assets ADD COLUMN width INTEGER`,
   `ALTER TABLE file_assets ADD COLUMN height INTEGER`,
   `ALTER TABLE file_assets ADD COLUMN updated_at TEXT`,
+
+  // ai provider configs
+  `ALTER TABLE ai_provider_configs ADD COLUMN priority INTEGER DEFAULT 50`,
+  `ALTER TABLE ai_provider_configs ADD COLUMN requests_per_minute INTEGER DEFAULT 10`,
+  `ALTER TABLE ai_provider_configs ADD COLUMN max_input_chars INTEGER DEFAULT 1000`,
+  `ALTER TABLE ai_provider_configs ADD COLUMN max_completion_tokens INTEGER DEFAULT 1200`,
+  `ALTER TABLE ai_provider_configs ADD COLUMN timeout_ms INTEGER DEFAULT 15000`,
+  `ALTER TABLE ai_provider_configs ADD COLUMN cooldown_seconds INTEGER DEFAULT 20`,
 
   // returns — columns required by routes/returns.js INSERT
   `ALTER TABLE returns ADD COLUMN customer_name TEXT`,
@@ -749,6 +805,15 @@ seedIfEmpty('settings', [
   ['customer_portal_about_title', 'About us'],
   ['customer_portal_about_content', ''],
   ['customer_portal_about_blocks', '[]'],
+  ['customer_portal_ai_enabled', 'true'],
+  ['customer_portal_ai_title', 'Beauty Assistant'],
+  ['customer_portal_ai_intro', 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.'],
+  ['customer_portal_ai_disclaimer', 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.'],
+  ['customer_portal_ai_provider_id', ''],
+  ['customer_portal_ai_prompt', ''],
+  ['customer_portal_show_faq', 'true'],
+  ['customer_portal_faq_title', 'Frequently asked questions'],
+  ['customer_portal_faq_items', '[]'],
   ['customer_portal_hero_gradient_start', '#0f172a'],
   ['customer_portal_hero_gradient_mid', '#14532d'],
   ['customer_portal_hero_gradient_end', '#ea580c'],
@@ -797,6 +862,27 @@ try {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_file_assets_media_type
     ON file_assets(media_type)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ai_provider_configs_enabled
+    ON ai_provider_configs(enabled, provider, updated_at DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ai_response_logs_created_at
+    ON ai_response_logs(created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ai_response_logs_surface
+    ON ai_response_logs(surface, created_at DESC)
   `)
 } catch (_) {}
 

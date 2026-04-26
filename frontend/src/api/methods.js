@@ -176,10 +176,45 @@ export async function createPortalSubmission(payload) {
   if (!res.ok) throw new Error(json.error || `Submission failed: ${res.status}`)
   return json
 }
+export async function getPortalAiStatus() {
+  const base = getPortalBaseUrl()
+  const res = await fetch(`${base}/api/portal/ai/status`, {
+    headers: { 'bypass-tunnel-reminder': 'true' },
+  })
+  if (!res.ok) throw new Error(`Portal AI status failed: ${res.status}`)
+  return res.json()
+}
+export async function askPortalAi(payload) {
+  const base = getPortalBaseUrl()
+  const res = await fetch(`${base}/api/portal/ai/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'bypass-tunnel-reminder': 'true',
+    },
+    body: JSON.stringify(payload || {}),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || `Portal AI failed: ${res.status}`)
+  return json
+}
 export const getPortalSubmissionsForReview = () =>
   route('portalSubmissions:get', () => apiFetch('GET', '/api/portal/submissions/review'), () => [])
 export const reviewPortalSubmission = (id, payload) =>
   route('portalSubmissions:review', () => apiFetch('PATCH', `/api/portal/submissions/${id}/review`, payload), null, true)
+
+export const getAiProviders = () =>
+  route('ai:providers:get', () => apiFetch('GET', appendActorQuery('/api/ai/providers')), () => ({ items: [], providerMeta: {} }))
+export const createAiProvider = (payload) =>
+  route('ai:providers:create', () => apiFetch('POST', '/api/ai/providers', payload), null, true)
+export const updateAiProvider = (id, payload) =>
+  route('ai:providers:update', () => apiFetch('PUT', `/api/ai/providers/${id}`, payload), null, true)
+export const deleteAiProvider = (id, payload) =>
+  route('ai:providers:delete', () => apiFetch('DELETE', `/api/ai/providers/${id}`, payload), null, true)
+export const testAiProvider = (id, payload) =>
+  route('ai:providers:test', () => apiFetch('POST', `/api/ai/providers/${id}/test`, payload), null, true)
+export const getAiResponses = (limit = 80) =>
+  route(`ai:responses:${limit}`, () => apiFetch('GET', appendActorQuery(`/api/ai/responses?limit=${limit}`)), () => ({ items: [] }))
 export async function createProduct(d) {
   // Auto-create supplier if new
   if (d.supplier?.trim()) {

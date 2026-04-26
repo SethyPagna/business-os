@@ -116,6 +116,7 @@ function mountApiRoutes(target) {
   target.use('/api/branches', require('./src/routes/branches'))
   target.use('/api/products', require('./src/routes/products'))
   target.use('/api/files', require('./src/routes/files'))
+  target.use('/api/ai', require('./src/routes/ai'))
   target.use('/api/catalog', require('./src/routes/catalog'))
   target.use('/api/portal', require('./src/routes/portal'))
   target.use('/api/inventory', require('./src/routes/inventory'))

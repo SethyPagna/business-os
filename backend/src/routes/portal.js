@@ -10,6 +10,7 @@ const { db } = require('../database')
 const { tryParse, broadcast } = require('../helpers')
 const { authToken } = require('../middleware')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils')
+const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')
 
 const router = express.Router()
 
@@ -73,6 +74,20 @@ function normalizeRedeemValueKhr(value, fallback = 4100) {
 function normalizeHexColor(value, fallback) {
   const raw = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
+}
+
+/** Normalize editable FAQ entries into safe public question/answer pairs. */
+function normalizeFaqItems(value) {
+  const input = Array.isArray(value) ? value : tryParse(value, [])
+  if (!Array.isArray(input)) return []
+  return input
+    .map((item, index) => ({
+      id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
+      question: String(item?.question || '').trim(),
+      answer: String(item?.answer || '').trim(),
+    }))
+    .filter((item) => item.question && item.answer)
+    .slice(0, 24)
 }
 
 /** Load global settings table into key/value map for fast lookup. */
@@ -143,6 +158,16 @@ function buildPortalConfig() {
     title: settings.customer_portal_title || settings.business_name || 'Customer Portal',
     titleSize: Math.min(64, Math.max(28, Number(settings.customer_portal_title_size || 40) || 40)),
     intro: settings.customer_portal_intro || 'Browse products and check membership details.',
+    aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
+    aiTitle: String(settings.customer_portal_ai_title || 'Beauty Assistant').trim() || 'Beauty Assistant',
+    aiIntro: String(settings.customer_portal_ai_intro || 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.').trim(),
+    aiDisclaimer: String(settings.customer_portal_ai_disclaimer || 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.').trim()
+      || 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
+    aiProviderId: Number(settings.customer_portal_ai_provider_id || 0) || null,
+    aiPrompt: String(settings.customer_portal_ai_prompt || '').trim(),
+    showFaq: normalizeBoolean(settings.customer_portal_show_faq, true),
+    faqTitle: String(settings.customer_portal_faq_title || 'Frequently asked questions').trim() || 'Frequently asked questions',
+    faqItems: normalizeFaqItems(settings.customer_portal_faq_items || '[]'),
     showAbout: normalizeBoolean(settings.customer_portal_show_about, true),
     aboutTitle: String(settings.customer_portal_about_title || 'About us').trim() || 'About us',
     aboutContent: String(settings.customer_portal_about_content || '').trim(),
@@ -308,6 +333,25 @@ function sanitizeScreenshots(value) {
     .slice(0, 8)
 }
 
+/** Normalize public AI assistant profile payload into short searchable fields. */
+function sanitizeAiProfile(value) {
+  const profile = value && typeof value === 'object' ? value : {}
+  return {
+    brand: String(profile.brand || '').trim().slice(0, 120),
+    skinType: String(profile.skinType || '').trim().slice(0, 120),
+    concerns: String(profile.concerns || '').trim().slice(0, 220),
+    shoppingFor: String(profile.shoppingFor || '').trim().slice(0, 120),
+    goal: String(profile.goal || '').trim().slice(0, 180),
+  }
+}
+
+/** Build a lightweight visitor fingerprint for AI throttling/fairness only. */
+function getVisitorFingerprint(req) {
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().slice(0, 120)
+  const ua = String(req.get('user-agent') || '').trim().slice(0, 240)
+  return `${ip}|${ua || 'unknown-agent'}`
+}
+
 router.get('/config', (_req, res) => {
   res.json(buildPortalConfig())
 })
@@ -359,6 +403,93 @@ router.get('/catalog/meta', (_req, res) => {
 
 router.get('/catalog/products', (_req, res) => {
   res.json(getPortalProducts())
+})
+
+router.get('/ai/status', (_req, res) => {
+  const config = buildPortalConfig()
+  const usage = getPortalAiUsageStatus(config, config.aiProviderId)
+  res.json({
+    success: true,
+    enabled: !!config.aiEnabled,
+    title: config.aiTitle,
+    disclaimer: config.aiDisclaimer,
+    usage,
+  })
+})
+
+router.post('/ai/chat', async (req, res) => {
+  try {
+    const config = buildPortalConfig()
+    if (!config.aiEnabled) {
+      return res.status(403).json({ error: 'Portal AI is currently disabled' })
+    }
+
+    const question = String(req.body?.question || '').trim().slice(0, 2000)
+    const profile = sanitizeAiProfile(req.body?.profile)
+    if (!question && !Object.values(profile).some(Boolean)) {
+      return res.status(400).json({ error: 'Add a question or at least one shopping preference first' })
+    }
+
+    const products = getPortalProducts()
+    const response = await generatePortalAiResponse({
+      config,
+      profile,
+      question,
+      products,
+      visitorFingerprint: getVisitorFingerprint(req),
+    })
+
+    const citations = response.recommendations.flatMap((item) => Array.isArray(item?.citations) ? item.citations : [])
+    try {
+      db.prepare(`
+        INSERT INTO ai_response_logs (
+          surface,
+          provider_config_id,
+          provider_name,
+          provider,
+          model,
+          actor_label,
+          prompt_text,
+          question_text,
+          profile_json,
+          candidate_products_json,
+          recommendations_json,
+          citations_json,
+          answer_text,
+          created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        'portal',
+        response.provider?.id || null,
+        response.provider?.name || '',
+        response.provider?.provider || '',
+        response.provider?.default_model || '',
+        'customer portal visitor',
+        response.promptText || '',
+        question,
+        JSON.stringify(profile),
+        JSON.stringify(response.candidates || []),
+        JSON.stringify(response.recommendations || []),
+        JSON.stringify(citations),
+        response.summary || '',
+        new Date().toISOString(),
+      )
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      summary: response.summary || '',
+      notice: response.notice || config.aiDisclaimer,
+      contactNote: response.contact_note || config.aiDisclaimer,
+      followUpQuestions: response.follow_up_questions || [],
+      recommendations: response.recommendations || [],
+      usage: response.usage || getPortalAiUsageStatus(config, config.aiProviderId),
+      requestPolicy: response.requestPolicy || {},
+      failovers: response.failovers || [],
+    })
+  } catch (error) {
+    res.status(400).json({ error: error?.message || 'Portal AI request failed' })
+  }
 })
 
 router.get('/membership/:membershipNumber', (req, res) => {

@@ -1,11 +1,15 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BadgeDollarSign,
+  Bot,
+  ChevronDown,
+  ChevronUp,
   Eye,
   EyeOff,
   ExternalLink,
   Facebook,
   Globe,
+  HelpCircle,
   Instagram,
   Mail,
   MapPin,
@@ -181,6 +185,7 @@ const PORTAL_TEXT = {
     reviewSaved: 'Review saved.',
   },
   km: {
+    assistantUsageCompact: 'មានអ្នកប្រើ {users} នាក់កំពុងប្រើឥឡូវនេះ។ ម្នាក់ៗអាចស្វែងរកបាន {searches} ដងក្នុងមួយនាទី។',
     previewBadge: 'កែទំព័រអតិថិជន',
     publicBadge: 'ទំព័រអតិថិជន',
     studioTitle: 'ផ្ទាំងកែទំព័រ',
@@ -337,6 +342,48 @@ const PORTAL_TEXT_EXTRA = {
     filterCompactHint: 'Use quick filters to narrow products faster.',
     dotsLabel: 'Image {current} of {total}',
     portalAboutFallback: 'Add your business story in the editor so customers can quickly learn about your brand.',
+    portalAssistant: 'AI assistant',
+    portalAssistantSettings: 'AI assistant settings',
+    portalAssistantHint: 'This floating helper suggests products from your live catalog and can include online references when the selected provider supports them.',
+    assistantEnabled: 'Enable AI assistant',
+    assistantTitle: 'Assistant title',
+    assistantIntro: 'Assistant intro',
+    assistantDisclaimer: 'Assistant disclaimer',
+    assistantProvider: 'AI provider entry',
+    assistantPrompt: 'Extra prompt instructions',
+    assistantPromptHint: 'Optional store-specific rules, such as tone or what categories to prioritize.',
+    faq: 'FAQ',
+    faqTitle: 'FAQ title',
+    faqSettings: 'FAQ settings',
+    faqHint: 'Add your most common customer questions here. Customers can open each answer one by one.',
+    faqEnabled: 'Show FAQ section',
+    addFaq: 'Add FAQ',
+    faqQuestion: 'Question',
+    faqAnswer: 'Answer',
+    askAssistant: 'Ask AI assistant',
+    assistantQuestion: 'What would you like help finding?',
+    assistantQuestionPlaceholder: 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.',
+    assistantBrand: 'Preferred brand',
+    assistantSkinType: 'Skin type',
+    assistantConcerns: 'Skin concerns',
+    assistantShoppingFor: 'Shopping for',
+    assistantGoal: 'Goal / use case',
+    assistantResults: 'Suggested matches',
+    assistantFollowUps: 'Helpful follow-up questions',
+    assistantUsageCompact: '{users} user(s) are using this right now. Each visitor can send {searches} search(es) per minute.',
+    assistantNoProvider: 'Choose and test an AI provider in Library before enabling the portal assistant.',
+    assistantNoAnswer: 'No AI answer yet. Ask a question to generate suggestions.',
+    assistantLoading: 'Thinking...',
+    assistantNotice: 'AI generated, for reference only.',
+    assistantContactNote: 'For more accurate inquiries, please contact our store on Instagram or Facebook.',
+    assistantEvidence: 'Online references',
+    assistantWhy: 'Why this match',
+    assistantUse: 'How to use',
+    assistantCaution: 'Caution',
+    assistantIngredients: 'Ingredients focus',
+    assistantReviews: 'Online review summary',
+    assistantReset: 'Clear',
+    assistantOpen: 'Open assistant',
   },
   km: {
     customerUrlHint: 'កំណត់ path សាធារណៈផ្ទាល់ខ្លួននៅទីនេះ ហើយបង្ហោះ path នេះតាម Funnel សម្រាប់អតិថិជន ដើម្បីឲ្យតំណអតិថិជនពិបាកទាយពីផ្នែកគ្រប់គ្រង។',
@@ -411,6 +458,15 @@ const DEFAULT_CONFIG = {
   title: 'Customer Portal',
   titleSize: 40,
   intro: 'Browse products and check membership details.',
+  aiEnabled: true,
+  aiTitle: 'Beauty Assistant',
+  aiIntro: 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.',
+  aiDisclaimer: 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
+  aiProviderId: null,
+  aiPrompt: '',
+  showFaq: true,
+  faqTitle: 'Frequently asked questions',
+  faqItems: [],
   showAbout: true,
   aboutTitle: 'About us',
   aboutContent: '',
@@ -575,6 +631,15 @@ function buildDraft(config) {
     customer_portal_title: config.title || '',
     customer_portal_title_size: String(config.titleSize ?? 40),
     customer_portal_intro: config.intro || '',
+    customer_portal_ai_enabled: !!config.aiEnabled,
+    customer_portal_ai_title: config.aiTitle || '',
+    customer_portal_ai_intro: config.aiIntro || '',
+    customer_portal_ai_disclaimer: config.aiDisclaimer || '',
+    customer_portal_ai_provider_id: config.aiProviderId ? String(config.aiProviderId) : '',
+    customer_portal_ai_prompt: config.aiPrompt || '',
+    customer_portal_show_faq: !!config.showFaq,
+    customer_portal_faq_title: config.faqTitle || '',
+    customer_portal_faq_items: JSON.stringify(Array.isArray(config.faqItems) ? config.faqItems : []),
     customer_portal_show_about: !!config.showAbout,
     customer_portal_about_title: config.aboutTitle || '',
     customer_portal_about_content: config.aboutContent || '',
@@ -658,6 +723,33 @@ function applyDraft(config, draft) {
     title: draft.customer_portal_title || config.title,
     titleSize: Math.min(64, Math.max(28, Math.round(toNumber(draft.customer_portal_title_size, config.titleSize || 40)))),
     intro: draft.customer_portal_intro || config.intro,
+    aiEnabled: toBoolean(draft.customer_portal_ai_enabled, config.aiEnabled),
+    aiTitle: String(draft.customer_portal_ai_title || config.aiTitle || 'Beauty Assistant').trim() || 'Beauty Assistant',
+    aiIntro: String(draft.customer_portal_ai_intro || config.aiIntro || '').trim(),
+    aiDisclaimer: String(draft.customer_portal_ai_disclaimer || config.aiDisclaimer || 'AI generated, for reference only.').trim() || 'AI generated, for reference only.',
+    aiProviderId: (() => {
+      const id = Number(draft.customer_portal_ai_provider_id || config.aiProviderId || 0) || 0
+      return id > 0 ? id : null
+    })(),
+    aiPrompt: String(draft.customer_portal_ai_prompt || config.aiPrompt || '').trim(),
+    showFaq: toBoolean(draft.customer_portal_show_faq, config.showFaq),
+    faqTitle: String(draft.customer_portal_faq_title || config.faqTitle || 'Frequently asked questions').trim() || 'Frequently asked questions',
+    faqItems: (() => {
+      try {
+        const parsed = JSON.parse(draft.customer_portal_faq_items || JSON.stringify(config.faqItems || []))
+        return Array.isArray(parsed)
+          ? parsed
+            .map((item, index) => ({
+              id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
+              question: String(item?.question || '').trim(),
+              answer: String(item?.answer || '').trim(),
+            }))
+            .filter((item) => item.question && item.answer)
+          : []
+      } catch (_) {
+        return Array.isArray(config.faqItems) ? config.faqItems : []
+      }
+    })(),
     showAbout: toBoolean(draft.customer_portal_show_about, config.showAbout),
     aboutTitle: String(draft.customer_portal_about_title || config.aboutTitle || 'About us').trim() || 'About us',
     aboutContent: String(draft.customer_portal_about_content || config.aboutContent || '').trim(),
@@ -1014,6 +1106,7 @@ export default function CatalogPage({ publicView = false }) {
   const [submissionSaving, setSubmissionSaving] = useState(false)
   const [reviewItems, setReviewItems] = useState([])
   const [reviewSavingId, setReviewSavingId] = useState(null)
+  const [aiProviders, setAiProviders] = useState([])
   const [translateReady, setTranslateReady] = useState(false)
   const [translateTarget, setTranslateTarget] = useState('original')
   const [mobileHeroToolsOpen, setMobileHeroToolsOpen] = useState(false)
@@ -1022,6 +1115,21 @@ export default function CatalogPage({ publicView = false }) {
   const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
   const [activeEditorSection, setActiveEditorSection] = useState('branding')
   const [dragAboutBlockId, setDragAboutBlockId] = useState(null)
+  const [assistantQuestion, setAssistantQuestion] = useState('')
+  const [assistantProfile, setAssistantProfile] = useState({
+    brand: '',
+    skinType: '',
+    concerns: '',
+    shoppingFor: '',
+    goal: '',
+  })
+  const [assistantLoading, setAssistantLoading] = useState(false)
+  const [assistantResponse, setAssistantResponse] = useState(null)
+  const [assistantError, setAssistantError] = useState('')
+  const [assistantExpandedProductId, setAssistantExpandedProductId] = useState(null)
+  const [assistantUsage, setAssistantUsage] = useState(null)
+  const [assistantRequestPolicy, setAssistantRequestPolicy] = useState(null)
+  const [expandedFaqId, setExpandedFaqId] = useState(null)
   const deferredSearch = useDeferredValue(search)
   const loadRequestRef = useRef(0)
   const syncReloadTimerRef = useRef(null)
@@ -1039,6 +1147,8 @@ export default function CatalogPage({ publicView = false }) {
       cfg.showCatalog ? 'products' : null,
       cfg.showMembership ? 'membership' : null,
       cfg.showAbout ? 'about' : null,
+      cfg.showFaq ? 'faq' : null,
+      cfg.aiEnabled ? 'ai' : null,
     ].filter(Boolean)
     if (!visible.length) return 'products'
     return visible.includes(candidate) ? candidate : visible[0]
@@ -1076,10 +1186,52 @@ export default function CatalogPage({ publicView = false }) {
     () => normalizeAboutBlocks(editorDraft.customer_portal_about_blocks || previewConfig.aboutBlocks || [], { keepEmpty: true }),
     [editorDraft.customer_portal_about_blocks, previewConfig.aboutBlocks]
   )
+  const faqItems = useMemo(() => {
+    const raw = editorDraft.customer_portal_faq_items || JSON.stringify(previewConfig.faqItems || [])
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed)
+        ? parsed.map((item, index) => ({
+            id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
+            question: String(item?.question || '').trim(),
+            answer: String(item?.answer || '').trim(),
+          }))
+        : []
+    } catch (_) {
+      return Array.isArray(previewConfig.faqItems) ? previewConfig.faqItems : []
+    }
+  }, [editorDraft.customer_portal_faq_items, previewConfig.faqItems])
+  const assistantCategoryOptions = useMemo(() => {
+    const names = categories.map((entry) => String(entry?.name || '').trim()).filter(Boolean)
+    return Array.from(new Set([
+      ...names,
+      'Skincare',
+      'Cosmetics',
+      'Perfume',
+      'Body care',
+      'Hair care',
+      'Cleanser',
+      'Sunscreen',
+    ])).sort((left, right) => left.localeCompare(right))
+  }, [categories])
 
   useEffect(() => {
     setActiveTab((current) => resolveVisibleTab(current, previewConfig))
-  }, [previewConfig.showCatalog, previewConfig.showMembership, previewConfig.showAbout])
+  }, [previewConfig.showCatalog, previewConfig.showMembership, previewConfig.showAbout, previewConfig.showFaq, previewConfig.aiEnabled])
+
+  useEffect(() => {
+    if (!publicView || !previewConfig.aiEnabled) {
+      setAssistantUsage(null)
+      setAssistantRequestPolicy(null)
+      return
+    }
+
+    window.api.getPortalAiStatus()
+      .then((result) => {
+        setAssistantUsage(result?.usage || null)
+      })
+      .catch(() => {})
+  }, [publicView, previewConfig.aiEnabled, previewConfig.aiProviderId])
 
   /** Open modal gallery for selected product image list. */
   function openProductGallery(product, startIndex = 0) {
@@ -1140,6 +1292,13 @@ export default function CatalogPage({ publicView = false }) {
     })
 
     if (!canEdit) return
+    window.api.getAiProviders()
+      .then((providerResult) => {
+        if (requestId !== loadRequestRef.current) return
+        setAiProviders(Array.isArray(providerResult?.items) ? providerResult.items : [])
+      })
+      .catch(() => {})
+
     window.api.getPortalSubmissionsForReview()
       .then((reviewData) => {
         if (requestId !== loadRequestRef.current) return
@@ -1448,6 +1607,46 @@ export default function CatalogPage({ publicView = false }) {
     setAboutBlocksDraft(aboutBlocks.filter((block) => block.id !== blockId))
   }
 
+  function setFaqDraft(nextItems) {
+    setDraft('customer_portal_faq_items', JSON.stringify(nextItems))
+  }
+
+  function addFaqItem() {
+    setFaqDraft([
+      ...faqItems,
+      {
+        id: `faq-${Date.now()}`,
+        question: '',
+        answer: '',
+      },
+    ])
+  }
+
+  function updateFaqItem(itemId, key, value) {
+    setFaqDraft(faqItems.map((item) => (
+      item.id === itemId ? { ...item, [key]: value } : item
+    )))
+  }
+
+  function removeFaqItem(itemId) {
+    setFaqDraft(faqItems.filter((item) => item.id !== itemId))
+  }
+
+  function clearAssistantState() {
+    setAssistantQuestion('')
+    setAssistantProfile({
+      brand: '',
+      skinType: '',
+      concerns: '',
+      shoppingFor: '',
+      goal: '',
+    })
+    setAssistantResponse(null)
+    setAssistantError('')
+    setAssistantExpandedProductId(null)
+    setAssistantRequestPolicy(null)
+  }
+
   async function uploadPortalImage(accept = 'image/*') {
     try {
       const file = await new Promise((resolve) => {
@@ -1512,8 +1711,10 @@ export default function CatalogPage({ publicView = false }) {
         !editorDraft.customer_portal_show_catalog
         && !editorDraft.customer_portal_show_membership
         && !editorDraft.customer_portal_show_about
+        && !editorDraft.customer_portal_show_faq
+        && !editorDraft.customer_portal_ai_enabled
       ) {
-        notify(copy('portalVisibilityRequired', 'Enable at least one customer section (products, membership, or about) before saving the portal.'), 'error')
+        notify(copy('portalVisibilityRequired', 'Enable at least one customer section before saving the portal.'), 'error')
         return
       }
 
@@ -1575,6 +1776,15 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_title: editorDraft.customer_portal_title || '',
         customer_portal_title_size: String(Math.min(64, Math.max(28, Math.round(toNumber(editorDraft.customer_portal_title_size, 40))))),
         customer_portal_intro: editorDraft.customer_portal_intro || '',
+        customer_portal_ai_enabled: editorDraft.customer_portal_ai_enabled ? 'true' : 'false',
+        customer_portal_ai_title: String(editorDraft.customer_portal_ai_title || '').trim(),
+        customer_portal_ai_intro: String(editorDraft.customer_portal_ai_intro || '').trim(),
+        customer_portal_ai_disclaimer: String(editorDraft.customer_portal_ai_disclaimer || '').trim(),
+        customer_portal_ai_provider_id: String(editorDraft.customer_portal_ai_provider_id || '').trim(),
+        customer_portal_ai_prompt: String(editorDraft.customer_portal_ai_prompt || '').trim(),
+        customer_portal_show_faq: editorDraft.customer_portal_show_faq ? 'true' : 'false',
+        customer_portal_faq_title: String(editorDraft.customer_portal_faq_title || '').trim(),
+        customer_portal_faq_items: JSON.stringify(faqItems),
         customer_portal_show_about: editorDraft.customer_portal_show_about ? 'true' : 'false',
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
@@ -1596,6 +1806,7 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
         customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
+        customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
       })
       setConfig((current) => applyDraft(current, editorDraft))
@@ -1605,6 +1816,39 @@ export default function CatalogPage({ publicView = false }) {
       notify(error?.message || 'Failed to save portal', 'error')
     } finally {
       setEditorSaving(false)
+    }
+  }
+
+  async function askAssistant() {
+    if (!previewConfig.aiEnabled) {
+      notify(copy('assistantEnabled', 'Enable AI assistant'), 'error')
+      return
+    }
+    if (!previewConfig.aiProviderId) {
+      notify(copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the portal assistant.'), 'error')
+      return
+    }
+    if (!assistantQuestion.trim() && !Object.values(assistantProfile).some(Boolean)) {
+      notify('Add a question or at least one shopping preference first.', 'error')
+      return
+    }
+
+    setAssistantLoading(true)
+    setAssistantError('')
+    setAssistantExpandedProductId(null)
+    try {
+      const result = await window.api.askPortalAi({
+        question: assistantQuestion.trim(),
+        profile: assistantProfile,
+      })
+      setAssistantResponse(result || null)
+      setAssistantUsage(result?.usage || null)
+      setAssistantRequestPolicy(result?.requestPolicy || null)
+    } catch (error) {
+      setAssistantError(error?.message || 'Portal AI request failed')
+      notify(error?.message || 'Portal AI request failed', 'error')
+    } finally {
+      setAssistantLoading(false)
     }
   }
 
@@ -1756,6 +2000,7 @@ export default function CatalogPage({ publicView = false }) {
     { key: 'email', enabled: previewConfig.showEmail, label: copy('email', 'Email'), value: previewConfig.businessEmail, href: previewConfig.businessEmail ? `mailto:${previewConfig.businessEmail}` : '', icon: Mail },
     { key: 'address', enabled: previewConfig.showAddress, label: copy('address', 'Address'), value: previewConfig.businessAddress, href: '', icon: MapPin },
   ].filter((item) => item.enabled && item.value)
+  const addressFact = businessFacts.find((item) => item.key === 'address')
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
     copy('redeemSummary', 'Minimum {points} points per unit. Available now: {units} unit(s).'),
@@ -2213,7 +2458,7 @@ export default function CatalogPage({ publicView = false }) {
                     onPaste={handleSubmissionPaste}
                   />
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
                   <button type="button" className="btn-secondary text-sm" disabled={!previewConfig.submissionEnabled} onClick={() => pickMultipleImagesAsDataUrls().then(addSubmissionImages).catch((error) => notify(error?.message || 'Image upload failed', 'error'))}>
                     <Upload className="mr-2 inline h-4 w-4" />
                     {copy('shareUpload', 'Upload screenshots')}
@@ -2328,19 +2573,198 @@ export default function CatalogPage({ publicView = false }) {
             <p className="text-sm text-slate-500">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
           </div>
         ) : null}
-        {mapEmbedUrl ? (
-          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-800">
-              <MapPin className="h-4 w-4 text-slate-500" />
-              {copy('mapCard', 'Store map')}
+      </div>
+    </SectionShell>
+  )
+
+  const publicFaqItems = Array.isArray(previewConfig.faqItems) ? previewConfig.faqItems.filter((item) => item?.question && item?.answer) : []
+  const faqSection = (
+    <SectionShell
+      title={previewConfig.faqTitle || copy('faq', 'FAQ')}
+      subtitle={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+    >
+      <div className="space-y-3">
+        {publicFaqItems.length ? publicFaqItems.map((item, index) => {
+          const open = expandedFaqId === item.id
+          return (
+            <article key={item.id || index} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+                onClick={() => setExpandedFaqId((current) => current === item.id ? null : item.id)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                    <HelpCircle className="h-4 w-4" />
+                  </span>
+                  <div className="text-sm font-semibold text-slate-900">{item.question}</div>
+                </div>
+                <span className="rounded-full bg-slate-100 p-2 text-slate-500">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+              </button>
+              {open ? <div className="border-t border-slate-100 px-5 py-4 text-sm leading-7 text-slate-600">{item.answer}</div> : null}
+            </article>
+          )
+        }) : (
+          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+            {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+          </div>
+        )}
+      </div>
+    </SectionShell>
+  )
+
+  const aiUsageSummary = assistantUsage || null
+  const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
+  const aiSection = (
+    <SectionShell
+      title={previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
+      subtitle={previewConfig.aiIntro || copy('assistantNotice', 'AI generated, for reference only.')}
+      action={(
+        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+          <Bot className="h-3.5 w-3.5" />
+          AI query
+        </span>
+      )}
+    >
+      <div className="space-y-4">
+        <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
+          <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand')}</label>
+                <select className="input mt-1" value={assistantProfile.brand} onChange={(event) => setAssistantProfile((current) => ({ ...current, brand: event.target.value }))}>
+                  <option value="">{copy('all', 'All')}</option>
+                  {brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantSkinType', 'Skin type')}</label>
+                <select className="input mt-1" value={assistantProfile.skinType} onChange={(event) => setAssistantProfile((current) => ({ ...current, skinType: event.target.value }))}>
+                  <option value="">{copy('all', 'All')}</option>
+                  {['Dry', 'Oily', 'Combination', 'Sensitive', 'Normal', 'Acne-prone'].map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantShoppingFor', 'Shopping for')}</label>
+                <select className="input mt-1" value={assistantProfile.shoppingFor} onChange={(event) => setAssistantProfile((current) => ({ ...current, shoppingFor: event.target.value }))}>
+                  <option value="">{copy('all', 'All')}</option>
+                  {assistantCategoryOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantGoal', 'Goal / use case')}</label>
+                <input className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder="Daily use, brightening, long wear..." />
+              </div>
             </div>
-            <iframe
-              title="portal-about-map"
-              src={mapEmbedUrl}
-              className="h-72 w-full border-0"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
+
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-slate-700">{copy('assistantConcerns', 'Skin concerns')}</label>
+              <input className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder="Acne, sensitivity, dark spots, dryness..." />
+            </div>
+
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-slate-700">{copy('assistantQuestion', 'What would you like help finding?')}</label>
+              <textarea className="input mt-1 resize-none" rows={5} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.')} />
+              <div className="mt-1 text-right text-xs text-slate-500">{assistantQuestion.length}/{questionCharLimit}</div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className="btn-primary text-sm" onClick={askAssistant} disabled={assistantLoading}>
+                <Send className="mr-2 inline h-4 w-4" />
+                {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('askAssistant', 'Ask AI assistant')}
+              </button>
+              <button type="button" className="btn-secondary text-sm" onClick={clearAssistantState}>
+                <RotateCcw className="mr-2 inline h-4 w-4" />
+                {copy('assistantReset', 'Clear')}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-600">
+              {replaceVars(copy('assistantUsageCompact', '{users} user(s) are using this right now. Each visitor can send {searches} search(es) per minute.'), {
+                users: aiUsageSummary?.activeVisitors || 1,
+                searches: assistantRequestPolicy?.perUserPerMinute || aiUsageSummary?.perUserPerMinute || 1,
+              })}
+            </div>
+
+            <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900">
+              {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
+            </div>
+          </div>
+        </div>
+
+        {assistantError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{assistantError}</div> : null}
+
+        {assistantResponse?.summary ? (
+          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantResults', 'Suggested matches')}</div>
+            <p className="mt-2 text-sm leading-7 text-slate-700">{assistantResponse.summary}</p>
+            {assistantResponse.followUpQuestions?.length ? (
+              <div className="mt-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {assistantResponse.followUpQuestions.map((question) => (
+                    <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm" onClick={() => setAssistantQuestion(question)}>
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {assistantResponse?.recommendations?.length ? (
+          <div className="space-y-3">
+            {assistantResponse.recommendations.map((item) => {
+              const open = assistantExpandedProductId === item.product_id
+              return (
+                <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
+                    {item.image_path ? (
+                      <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
+                    ) : (
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                        <ShoppingBag className="h-5 w-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-slate-900">{item.name}</div>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">{item.brand || 'No brand'}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{item.category || 'No category'} | {previewConfig.priceDisplay === 'KHR' ? `${item.selling_price_khr || 0} KHR` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
+                      {item.reason ? <div className="mt-2 text-sm text-slate-600">{item.reason}</div> : null}
+                    </div>
+                    <span className="rounded-full bg-slate-100 p-2 text-slate-500">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+                  </button>
+                  {open ? (
+                    <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700">
+                      {item.fit_summary ? <div><span className="font-semibold text-slate-900">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
+                      {item.how_to_use ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantUse', 'How to use')}:</span> {item.how_to_use}</div> : null}
+                      {item.cautions ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantCaution', 'Caution')}:</span> {item.cautions}</div> : null}
+                      {item.ingredients_focus?.length ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantIngredients', 'Ingredients focus')}:</span> {item.ingredients_focus.join(', ')}</div> : null}
+                      {item.online_review_summary ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantReviews', 'Online review summary')}:</span> {item.online_review_summary}</div> : null}
+                      {item.citations?.length ? (
+                        <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantEvidence', 'Online references')}</div>
+                          <div className="mt-2 space-y-2">
+                            {item.citations.map((citation, index) => (
+                              <div key={`${item.product_id}-${index}`} className="rounded-xl bg-white px-3 py-2 text-xs text-slate-600">
+                                <div className="font-medium text-slate-900">{citation.title || citation.source || citation.url}</div>
+                                {citation.note ? <div className="mt-1">{citation.note}</div> : null}
+                                {citation.url ? <a href={citation.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-sky-600 hover:underline"><ExternalLink className="h-3 w-3" />{citation.source || 'Open source'}</a> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              )
+            })}
           </div>
         ) : null}
       </div>
@@ -2351,6 +2775,7 @@ export default function CatalogPage({ publicView = false }) {
     ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
     ['portal-section-display', 'display', copy('display', 'Display settings')],
     ['portal-section-theme', 'about', copy('about', 'About')],
+    ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
     ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
     ['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')],
   ]
@@ -2607,6 +3032,98 @@ export default function CatalogPage({ publicView = false }) {
                     Add your first About block to build a richer page with reorderable text, images, and video.
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+
+          <div id="portal-section-assistant" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'assistant' ? '' : 'hidden'}`}>
+            <div className="space-y-5">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">{copy('portalAssistantSettings', 'AI assistant settings')}</div>
+                <p className="mt-2 text-sm text-slate-600">{copy('portalAssistantHint', 'This customer-facing AI page suggests products from your live catalog and can include online references when the selected provider supports them.')}</p>
+              </div>
+
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('assistantEnabled', 'Enable AI assistant')}</span>
+                <input type="checkbox" checked={!!editorDraft.customer_portal_ai_enabled} onChange={(event) => setDraft('customer_portal_ai_enabled', event.target.checked)} />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">{copy('assistantTitle', 'Assistant title')}</label>
+                  <input className="input mt-1" value={editorDraft.customer_portal_ai_title || ''} onChange={(event) => setDraft('customer_portal_ai_title', event.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry')}</label>
+                  <select className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
+                    <option value="">{copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the portal assistant.')}</option>
+                    {aiProviders.map((provider) => (
+                      <option key={provider.id} value={String(provider.id)}>
+                        {provider.name} | {provider.provider_label || provider.provider} | {provider.default_model || 'No model'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantIntro', 'Assistant intro')}</label>
+                <textarea className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_intro || ''} onChange={(event) => setDraft('customer_portal_ai_intro', event.target.value)} />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantDisclaimer', 'Assistant disclaimer')}</label>
+                <textarea className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_disclaimer || ''} onChange={(event) => setDraft('customer_portal_ai_disclaimer', event.target.value)} />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
+                <textarea className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
+                <p className="mt-2 text-xs text-slate-500">{copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')}</p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
+                    <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
+                  </div>
+                  <button type="button" className="btn-secondary text-sm" onClick={addFaqItem}>{copy('addFaq', 'Add FAQ')}</button>
+                </div>
+                <div className="mt-4 grid gap-4">
+                  <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span className="text-sm font-medium text-slate-700">{copy('faqEnabled', 'Show FAQ section')}</span>
+                    <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
+                  </label>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
+                    <input className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
+                  </div>
+                  <div className="space-y-3">
+                    {faqItems.length ? faqItems.map((item, index) => (
+                      <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-900">{copy('faq', 'FAQ')} #{index + 1}</div>
+                          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>Remove</button>
+                        </div>
+                        <div className="mt-3 grid gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
+                            <input className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
+                            <textarea className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
+                          </div>
+                        </div>
+                      </article>
+                    )) : (
+                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                        {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3112,9 +3629,9 @@ export default function CatalogPage({ publicView = false }) {
     )
   }
 
-  const previewTitle = String(previewConfig.title || '').trim()
+  const previewTitle = String(previewConfig.title || previewConfig.businessName || '').trim()
   const previewBusinessName = String(previewConfig.businessName || '').trim()
-  const showSeparatePreviewTitle = previewTitle && previewTitle.toLowerCase() !== previewBusinessName.toLowerCase()
+  const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const showHeroToolsPanel = false
   const showPortalToolsBar = publicView && previewConfig.translateWidgetEnabled
 
@@ -3189,16 +3706,18 @@ export default function CatalogPage({ publicView = false }) {
                         )}
                       </div>
                       <div>
-                        <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{previewConfig.businessName}</div>
+                        {showBrandLabel ? (
+                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{previewConfig.businessName}</div>
+                        ) : null}
                         {previewConfig.businessTagline ? (
                           <div className="mt-1 text-sm text-slate-100/90">{previewConfig.businessTagline}</div>
                         ) : null}
                       </div>
                     </div>
 
-                    {showSeparatePreviewTitle ? (
+                    {previewTitle ? (
                       <h1
-                        className="notranslate mt-5 font-semibold tracking-tight"
+                        className="notranslate mt-5 font-semibold tracking-tight text-white"
                         style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05 }}
                         translate="no"
                       >
@@ -3242,6 +3761,21 @@ export default function CatalogPage({ publicView = false }) {
                             </a>
                           )
                         })}
+                      </div>
+                    ) : null}
+                    {addressFact && mapEmbedUrl ? (
+                      <div className="mt-4 overflow-hidden rounded-[24px] border border-white/15 bg-white/10 shadow-lg backdrop-blur">
+                        <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-semibold text-white/90">
+                          <MapPin className="h-4 w-4 text-amber-100" />
+                          {addressFact.value}
+                        </div>
+                        <iframe
+                          title="portal-address-map"
+                          src={mapEmbedUrl}
+                          className="h-56 w-full border-0 sm:h-64"
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -3297,15 +3831,14 @@ export default function CatalogPage({ publicView = false }) {
               </div>
 
               {showPortalToolsBar ? (
-                <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-8">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 sm:max-w-md">
+                <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-8">
+                  <div className="flex justify-end">
+                    <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                       <Globe className="h-4 w-4 shrink-0 text-slate-500" />
-                      <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{copy('language', 'Language')}</span>
                       <select
                         id="portal-language-tools"
                         name="portal_language_tools"
-                        className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none"
+                        className="min-w-[132px] bg-transparent text-sm text-slate-700 outline-none"
                         value={translateTarget}
                         onChange={(event) => changeTranslateTarget(event.target.value)}
                       >
@@ -3316,11 +3849,6 @@ export default function CatalogPage({ publicView = false }) {
                         ))}
                       </select>
                     </label>
-                    <div className="text-xs text-slate-500">
-                      {translateReady
-                        ? copy('translateWidgetHint', 'Customers can switch languages with Google Translate.')
-                        : copy('preparingTranslations', 'Preparing translation tools...')}
-                    </div>
                     <div className="hidden">
                       <div id="business-os-portal-translate" />
                     </div>
@@ -3329,10 +3857,10 @@ export default function CatalogPage({ publicView = false }) {
               ) : null}
 
               <div className="border-t border-slate-200 bg-white px-6 py-4 sm:px-8">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1">
                   {previewConfig.showCatalog ? (
                     <button
-                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('products')}
                     >
                       <ShoppingBag className="h-4 w-4" />
@@ -3341,7 +3869,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showMembership ? (
                     <button
-                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('membership')}
                     >
                       <Ticket className="h-4 w-4" />
@@ -3350,11 +3878,29 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showAbout ? (
                     <button
-                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('about')}
                     >
                       <Store className="h-4 w-4" />
                       {copy('about', 'About')}
+                    </button>
+                  ) : null}
+                  {previewConfig.showFaq ? (
+                    <button
+                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      onClick={() => setActiveTab('faq')}
+                    >
+                      <HelpCircle className="h-4 w-4" />
+                      {copy('faq', 'FAQ')}
+                    </button>
+                  ) : null}
+                  {previewConfig.aiEnabled ? (
+                    <button
+                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      onClick={() => setActiveTab('ai')}
+                    >
+                      <Bot className="h-4 w-4" />
+                      {previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
                     </button>
                   ) : null}
                 </div>
@@ -3364,6 +3910,8 @@ export default function CatalogPage({ publicView = false }) {
             {activeTab === 'products' && previewConfig.showCatalog ? catalogSection : null}
             {activeTab === 'membership' && previewConfig.showMembership ? membershipSection : null}
             {activeTab === 'about' && previewConfig.showAbout ? aboutSection : null}
+            {activeTab === 'faq' && previewConfig.showFaq ? faqSection : null}
+            {activeTab === 'ai' && previewConfig.aiEnabled ? aiSection : null}
           </div>
         </div>
         {false && productGalleryView.open && productGalleryView.items.length ? (
