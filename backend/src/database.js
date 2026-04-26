@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
   username    TEXT NOT NULL UNIQUE,
   name        TEXT NOT NULL,
   phone       TEXT,
+  phone_lookup TEXT,
   phone_verified INTEGER DEFAULT 0,
   email       TEXT,
   email_verified INTEGER DEFAULT 0,
@@ -506,6 +507,7 @@ CREATE TABLE IF NOT EXISTS google_drive_sync_entries (
 const migrations = [
   // users
   `ALTER TABLE users ADD COLUMN phone TEXT`,
+  `ALTER TABLE users ADD COLUMN phone_lookup TEXT`,
   `ALTER TABLE users ADD COLUMN email TEXT`,
   `ALTER TABLE users ADD COLUMN phone_verified INTEGER DEFAULT 0`,
   `ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0`,
@@ -643,6 +645,11 @@ function ensureColumn(tableName, columnName, sqlType = 'TEXT') {
   }
 }
 
+function normalizeUserPhoneLookup(value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  return digits.length >= 6 && digits.length <= 20 ? digits : ''
+}
+
 if (ensureColumn('customers', 'membership_number', 'TEXT')) {
   try {
     db.exec(`
@@ -654,6 +661,52 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
     // Never crash startup on index creation for legacy/corrupt customer schemas.
   }
 }
+
+if (ensureColumn('users', 'phone_lookup', 'TEXT')) {
+  try {
+    const rows = db.prepare('SELECT id, phone FROM users').all()
+    const updatePhoneLookup = db.prepare('UPDATE users SET phone_lookup = ? WHERE id = ?')
+    const backfill = db.transaction((items) => {
+      items.forEach((row) => {
+        const phoneLookup = normalizeUserPhoneLookup(row.phone)
+        updatePhoneLookup.run(phoneLookup || null, row.id)
+      })
+    })
+    backfill(rows)
+  } catch (_) {}
+}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lookup
+    ON users(lower(trim(username)))
+    WHERE username IS NOT NULL AND trim(username) != '';
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_lookup
+    ON users(lower(trim(name)))
+    WHERE name IS NOT NULL AND trim(name) != '';
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lookup
+    ON users(lower(trim(email)))
+    WHERE email IS NOT NULL AND trim(email) != '';
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_lookup
+    ON users(phone_lookup)
+    WHERE phone_lookup IS NOT NULL AND trim(phone_lookup) != '';
+  `)
+} catch (_) {}
 
 if (ensureColumn('users', 'firebase_user_id', 'TEXT')) {
   try {

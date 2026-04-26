@@ -44,11 +44,9 @@ function normalizeEmail(value) {
 function normalizePhone(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
-  const cleaned = raw.replace(/[^\d+]/g, '')
-  if (!cleaned || !cleaned.startsWith('+')) return ''
-  const digits = cleaned.slice(1).replace(/[^\d]/g, '')
-  if (digits.length < 8 || digits.length > 15) return ''
-  return `+${digits}`
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 6 || digits.length > 20) return ''
+  return digits
 }
 
 function maskDestination(channel, destination) {

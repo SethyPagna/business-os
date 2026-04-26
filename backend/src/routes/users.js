@@ -31,7 +31,7 @@ const {
   verifyPasswordWithSupabase,
   unlinkAuthIdentity,
 } = require('../services/supabaseAuth')
-const { normalizeEmail } = require('../services/verification')
+const { normalizeEmail, normalizePhone } = require('../services/verification')
 
 const router = express.Router()
 
@@ -51,6 +51,78 @@ function parseJson(value, fallback = {}) {
   } catch (_) {
     return fallback
   }
+}
+
+function normalizeLookupText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizePhoneLookup(value) {
+  return normalizePhone(value || '')
+}
+
+function findUserIdentityConflict({ username, name, email, phoneLookup, supabaseUserId }, excludeUserId = null) {
+  const excludeId = Number(excludeUserId || 0) || 0
+  const usernameLookup = normalizeLookupText(username)
+  if (usernameLookup) {
+    const row = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE lower(trim(username)) = ?
+        AND (? = 0 OR id != ?)
+      LIMIT 1
+    `).get(usernameLookup, excludeId, excludeId)
+    if (row) return { field: 'username', message: 'Username already exists' }
+  }
+
+  const nameLookup = normalizeLookupText(name)
+  if (nameLookup) {
+    const row = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE lower(trim(name)) = ?
+        AND (? = 0 OR id != ?)
+      LIMIT 1
+    `).get(nameLookup, excludeId, excludeId)
+    if (row) return { field: 'name', message: 'Name already exists' }
+  }
+
+  const emailLookup = normalizeEmail(email || '')
+  if (emailLookup) {
+    const row = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE lower(trim(email)) = ?
+        AND (? = 0 OR id != ?)
+      LIMIT 1
+    `).get(emailLookup, excludeId, excludeId)
+    if (row) return { field: 'email', message: 'Email already exists' }
+  }
+
+  if (phoneLookup) {
+    const row = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE phone_lookup = ?
+        AND (? = 0 OR id != ?)
+      LIMIT 1
+    `).get(phoneLookup, excludeId, excludeId)
+    if (row) return { field: 'phone', message: 'Phone number already exists' }
+  }
+
+  const providerUserId = String(supabaseUserId || '').trim()
+  if (providerUserId) {
+    const row = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE supabase_user_id = ?
+        AND (? = 0 OR id != ?)
+      LIMIT 1
+    `).get(providerUserId, excludeId, excludeId)
+    if (row) return { field: 'supabase_user_id', message: 'This Google or Facebook account is already linked to another user' }
+  }
+
+  return null
 }
 
 /**
@@ -145,7 +217,10 @@ function syncLocalEmailVerification(userId, authUser) {
   if (!existing) return
   const localEmail = normalizeEmail(existing.email || '')
   const authEmail = normalizeEmail(authUser.email || '')
-  const shouldReplaceEmail = !localEmail || (authEmail && localEmail === authEmail)
+  const emailConflict = authEmail
+    ? db.prepare('SELECT id FROM users WHERE id != ? AND lower(trim(email)) = ? LIMIT 1').get(userId, authEmail)
+    : null
+  const shouldReplaceEmail = !emailConflict && (!localEmail || (authEmail && localEmail === authEmail))
   db.prepare(`
     UPDATE users
     SET email = CASE
@@ -459,17 +534,28 @@ router.post('/users', authToken, async (req, res) => {
 
   try {
     const hash = bcrypt.hashSync(password, 10)
+    const normalizedUsername = username.trim()
+    const normalizedName = (name || username).trim()
     const normalizedPhone = String(phone || '').trim() || null
+    const normalizedPhoneLookup = normalizePhoneLookup(normalizedPhone)
     const normalizedEmail = String(email || '').trim().toLowerCase() || null
+    const conflict = findUserIdentityConflict({
+      username: normalizedUsername,
+      name: normalizedName,
+      email: normalizedEmail,
+      phoneLookup: normalizedPhoneLookup,
+    })
+    if (conflict) return err(res, conflict.message, 409)
     const result = db.prepare(`
       INSERT INTO users (
-        username, name, phone, phone_verified, email, email_verified,
+        username, name, phone, phone_lookup, phone_verified, email, email_verified,
         avatar_path, password, permissions, role_id, is_active
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      username.trim(),
-      (name || username).trim(),
+      normalizedUsername,
+      normalizedName,
       normalizedPhone,
+      normalizedPhoneLookup || null,
       0,
       normalizedEmail,
       0,
@@ -504,7 +590,12 @@ router.post('/users', authToken, async (req, res) => {
     broadcast('users')
     ok(res, { id: createdId })
   } catch (e) {
-    err(res, e?.message?.includes('UNIQUE') ? 'Username already exists' : (e?.message || 'Failed to create user'))
+    const message = String(e?.message || '')
+    if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
+    if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
+    if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
+    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google or Facebook account is already linked to another user', 409)
+    err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to create user'))
   }
 })
 
@@ -545,12 +636,23 @@ router.put('/users/:id', authToken, async (req, res) => {
 
     let nextPermissions = permissions || {}
     if (permissions === undefined) nextPermissions = parseJson(existing.permissions, {})
+    const normalizedUsername = username.trim()
+    const normalizedName = (name || username).trim()
     const nextPhone = String(phone || '').trim() || null
+    const nextPhoneLookup = normalizePhoneLookup(nextPhone)
     const nextEmail = String(email || '').trim().toLowerCase() || null
     const phoneChanged = String(existing.phone || '') !== String(nextPhone || '')
     const emailChanged = String(existing.email || '') !== String(nextEmail || '')
     const nextPhoneVerified = 0
     const nextEmailVerified = nextEmail ? (emailChanged ? 0 : Number(existing.email_verified || 0)) : 0
+    const conflict = findUserIdentityConflict({
+      username: normalizedUsername,
+      name: normalizedName,
+      email: nextEmail,
+      phoneLookup: nextPhoneLookup,
+      supabaseUserId: existing.supabase_user_id,
+    }, existing.id)
+    if (conflict) return err(res, conflict.message, 409)
 
     const markDeleted = !!delete_user
     const nextIsActive = markDeleted ? 0 : (is_active ?? Number(existing.is_active || 0))
@@ -562,12 +664,13 @@ router.put('/users/:id', authToken, async (req, res) => {
     }
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?
       WHERE id = ?
     `).run(
-      username.trim(),
-      (name || username).trim(),
+      normalizedUsername,
+      normalizedName,
       nextPhone,
+      nextPhoneLookup || null,
       nextPhoneVerified,
       nextEmail,
       nextEmailVerified,
@@ -602,7 +705,12 @@ router.put('/users/:id', authToken, async (req, res) => {
     broadcast('users')
     ok(res, {})
   } catch (e) {
-    err(res, e?.message?.includes('UNIQUE') ? 'Username already exists' : (e?.message || 'Failed to update user'))
+    const message = String(e?.message || '')
+    if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
+    if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
+    if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
+    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google or Facebook account is already linked to another user', 409)
+    err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to update user'))
   }
 })
 
@@ -645,7 +753,10 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
   }
 
   try {
+    const normalizedUsername = username.trim()
+    const normalizedName = (name || username).trim()
     const nextPhone = String(phone || '').trim() || null
+    const nextPhoneLookup = normalizePhoneLookup(nextPhone)
     const nextEmail = String(email || '').trim().toLowerCase() || null
     const phoneChanged = String(user.phone || '') !== String(nextPhone || '')
     const emailChanged = String(user.email || '') !== String(nextEmail || '')
@@ -653,30 +764,14 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
     const nextEmailVerified = nextEmail
       ? (emailChanged ? 0 : Number(user.email_verified || 0))
       : 0
-
-    const duplicateUsername = db.prepare(`
-      SELECT id
-      FROM users
-      WHERE username = ?
-        AND id != ?
-        AND deleted_at IS NULL
-    `).get(username.trim(), req.params.id)
-    if (duplicateUsername) {
-      return err(res, 'Username already exists', 409)
-    }
-
-    if (nextEmail) {
-      const duplicateEmail = db.prepare(`
-        SELECT id
-        FROM users
-        WHERE lower(trim(email)) = ?
-          AND id != ?
-          AND deleted_at IS NULL
-      `).get(nextEmail, req.params.id)
-      if (duplicateEmail) {
-        return err(res, 'Email already exists', 409)
-      }
-    }
+    const conflict = findUserIdentityConflict({
+      username: normalizedUsername,
+      name: normalizedName,
+      email: nextEmail,
+      phoneLookup: nextPhoneLookup,
+      supabaseUserId: user.supabase_user_id,
+    }, user.id)
+    if (conflict) return err(res, conflict.message, 409)
 
     if (isSupabaseAuthConfigured() && user.supabase_user_id && !nextEmail) {
       return err(res, 'Email is required for Supabase-linked accounts.')
@@ -711,12 +806,13 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
 
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
       WHERE id = ?
     `).run(
-      username.trim(),
-      (name || username).trim(),
+      normalizedUsername,
+      normalizedName,
       nextPhone,
+      nextPhoneLookup || null,
       nextPhoneVerified,
       nextEmail,
       nextEmailVerified,
@@ -738,8 +834,20 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
     ok(res, sanitizeUserRow(getUserWithRole(req.params.id)))
   } catch (e) {
     const message = String(e?.message || '')
+    if (message.includes('idx_users_name_lookup')) {
+      return err(res, 'Name already exists', 409)
+    }
     if (message.includes('UNIQUE constraint failed: users.email')) {
       return err(res, 'Email already exists', 409)
+    }
+    if (message.includes('idx_users_email_lookup')) {
+      return err(res, 'Email already exists', 409)
+    }
+    if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) {
+      return err(res, 'Phone number already exists', 409)
+    }
+    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) {
+      return err(res, 'This Google or Facebook account is already linked to another user', 409)
     }
     if (message.includes('UNIQUE')) {
       return err(res, 'Username already exists', 409)

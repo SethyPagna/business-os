@@ -312,7 +312,7 @@ export default function Login() {
             <div>
               <label htmlFor="login-username" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <Mail className="h-4 w-4 text-gray-400" />
-                <span>{tr('username_or_email', 'Username or email')}</span>
+                <span>{tr('username_name_email_phone', 'Username, name, email, or phone')}</span>
               </label>
               <input
                 id="login-username"
@@ -322,7 +322,7 @@ export default function Login() {
                 type="text"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                placeholder="admin or name@email.com"
+                placeholder="admin / your name / +85512345678 / name@email.com"
                 required
                 autoComplete="username"
               />
@@ -448,9 +448,9 @@ export default function Login() {
             </div>
             <div>
               <label htmlFor="reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('username_or_email', 'Username or email')}
+                {tr('username_name_email_phone', 'Username, name, email, or phone')}
               </label>
-              <input id="reset-identifier" name="reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / email" />
+              <input id="reset-identifier" name="reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
             </div>
             <div>
               <label htmlFor="reset-otp" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

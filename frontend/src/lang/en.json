@@ -1485,6 +1485,7 @@
   "two_factor_authentication": "Two-Factor Authentication",
   "secure_signin_workspace": "Secure sign-in for your business workspace",
   "username_or_email": "Username or email",
+  "username_name_email_phone": "Username, name, email, or phone",
   "or_continue_with": "Or continue with",
   "continue_with_google": "Google",
   "continue_with_facebook": "Facebook",

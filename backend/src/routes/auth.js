@@ -43,6 +43,7 @@ const {
 const {
   getVerificationCapabilities,
   normalizeEmail,
+  normalizePhone,
 } = require('../services/verification')
 const { createAuthSession, getPresentedSessionToken, revokeAuthSession } = require('../sessionAuth')
 
@@ -87,6 +88,10 @@ function applyRateLimit(req, res, { bucket, key, max, windowMs, message }) {
  */
 function getLoginLockKey(identifier) {
   return String(identifier || '').trim().toLowerCase().slice(0, 160)
+}
+
+function normalizeLookupText(value) {
+  return String(value || '').trim().toLowerCase()
 }
 
 /**
@@ -140,6 +145,7 @@ function getOtpSecret(user, field = 'otp_secret') {
 function buildUserPayload(user) {
   const {
     password: _pw,
+    phone_lookup: _phoneLookup,
     otp_secret: _sec,
     otp_pending_secret: _pendingSec,
     otp_pending_created_at: _pendingCreatedAt,
@@ -159,7 +165,7 @@ function buildUserPayload(user) {
 }
 
 /**
- * 1.8 Lookup active user by username/email.
+ * 1.8 Lookup active user by username/name/email/phone.
  * @param {string} identifier
  * @param {{requireVerifiedContact?: boolean}} options
  */
@@ -179,6 +185,19 @@ function findUserByIdentifier(identifier, options = {}) {
       return byEmail
     }
   }
+
+  const phoneLookup = normalizePhone(value)
+  if (phoneLookup) {
+    const byPhone = db.prepare('SELECT * FROM users WHERE phone_lookup = ? AND is_active = 1 AND deleted_at IS NULL').get(phoneLookup)
+    if (byPhone) return byPhone
+  }
+
+  const lookup = normalizeLookupText(value)
+  const byUsernameLookup = db.prepare('SELECT * FROM users WHERE lower(trim(username)) = ? AND is_active = 1 AND deleted_at IS NULL').get(lookup)
+  if (byUsernameLookup) return byUsernameLookup
+
+  const byName = db.prepare('SELECT * FROM users WHERE lower(trim(name)) = ? AND is_active = 1 AND deleted_at IS NULL').get(lookup)
+  if (byName) return byName
 
   return null
 }
@@ -213,7 +232,10 @@ function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
   const emailVerified = authUser?.emailConfirmed ? 1 : 0
   const existing = getUserById(userId)
   const localEmail = normalizeEmail(existing?.email || '')
-  const shouldReplaceEmail = !localEmail || (email && localEmail === email)
+  const emailConflict = email
+    ? db.prepare('SELECT id FROM users WHERE id != ? AND lower(trim(email)) = ? LIMIT 1').get(userId, email)
+    : null
+  const shouldReplaceEmail = !emailConflict && (!localEmail || (email && localEmail === email))
   db.prepare(`
     UPDATE users
     SET supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id),
@@ -250,7 +272,7 @@ router.get('/verification-capabilities', (_req, res) => {
 router.post('/login', async (req, res) => {
   const t0 = Date.now()
   const { username, password, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
-  if (!username || !password) return err(res, 'Username or email and password are required')
+  if (!username || !password) return err(res, 'Username, name, email, or phone number and password are required')
   const lockKey = getLoginLockKey(username)
   const lockState = checkAbuseLock('auth:login_lock', lockKey, LOGIN_LOCK_WINDOW_MS)
   if (lockState.locked) {
@@ -349,19 +371,26 @@ router.post('/oauth/complete', async (req, res) => {
 
   const authUser = authResult.user
   const authEmail = normalizeEmail(authUser.email || '')
-  if (!authEmail) {
-    return err(res, 'The identity provider did not return an email address. Configure email permission and try again.', 400)
-  }
+  const oauthIdentityConflict = db.prepare(`
+    SELECT id, username, is_active, deleted_at
+    FROM users
+    WHERE supabase_user_id = ?
+      AND (? = 0 OR id != ?)
+    LIMIT 1
+  `).get(authUser.id, Number(currentUserId || 0), Number(currentUserId || 0))
 
   if (oauthMode === 'link') {
     const actorId = Number(currentUserId || 0)
     if (!actorId) return err(res, 'A local user session is required to link an identity.', 401)
+    if (oauthIdentityConflict) {
+      return err(res, 'This Google or Facebook account is already linked to another user.', 409)
+    }
 
     let localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
     if (!localUser) return err(res, 'Local account is not available.', 404)
 
     let localEmail = normalizeEmail(localUser.email)
-    if (!localEmail) {
+    if (!localEmail && authEmail) {
       const conflictUser = db.prepare(`
         SELECT id
         FROM users
@@ -408,6 +437,10 @@ router.post('/oauth/complete', async (req, res) => {
     })
   }
 
+  if (oauthIdentityConflict && Number(oauthIdentityConflict.is_active || 0) === 1 && !oauthIdentityConflict.deleted_at) {
+    return err(res, 'This Google or Facebook account is already linked to another user.', 409)
+  }
+
   let localUser = db.prepare(`
     SELECT *
     FROM users
@@ -415,14 +448,20 @@ router.post('/oauth/complete', async (req, res) => {
       AND deleted_at IS NULL
       AND (
         supabase_user_id = ?
-        OR lower(trim(email)) = ?
+        OR (? != '' AND lower(trim(email)) = ?)
       )
     ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
     LIMIT 1
-  `).get(authUser.id, authEmail, authUser.id)
+  `).get(authUser.id, authEmail, authEmail, authUser.id)
 
   if (!localUser) {
+    if (!authEmail) {
+      return err(res, 'No active local account matches this sign-in method yet. Ask an admin to create your account first and link this provider from My Profile.', 403)
+    }
     return err(res, 'No active local account matches this sign-in method yet. Ask an admin to create your account first.', 403)
+  }
+  if (String(localUser.supabase_user_id || '').trim() && String(localUser.supabase_user_id).trim() !== authUser.id) {
+    return err(res, 'This local account is already linked to a different Google or Facebook identity.', 409)
   }
 
   localUser = updateLocalUserSupabaseIdentity(localUser.id, authUser)
