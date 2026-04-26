@@ -25,8 +25,6 @@ const PAGE_IMPORTERS = {
   inventory: () => import('./components/inventory/Inventory'),
   branches: () => import('./components/branches/Branches'),
   contacts: () => import('./components/contacts/Contacts'),
-  catalog: () => import('./components/catalog/CatalogPage'),
-  loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
   users: () => import('./components/users/Users'),
   audit_log: () => import('./components/utils-settings/AuditLog'),
   receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
@@ -34,6 +32,8 @@ const PAGE_IMPORTERS = {
   settings: () => import('./components/utils-settings/Settings'),
   files: () => import('./components/files/FilesPage'),
   server: () => import('./components/server/ServerPage'),
+  catalog: () => import('./components/catalog/CatalogPage'),
+  loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
 }
 
 const WARMUP_PAGE_IDS = [
@@ -175,8 +175,6 @@ const Returns = lazyWithRetry(PAGE_IMPORTERS.returns, 'returns')
 const Inventory = lazyWithRetry(PAGE_IMPORTERS.inventory, 'inventory')
 const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
-const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
-const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
 const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
 const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
 const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
@@ -184,7 +182,8 @@ const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
 const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
-
+const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
+const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
 const PAGE_COMPONENTS = {
   dashboard: Dashboard,
   products: Products,

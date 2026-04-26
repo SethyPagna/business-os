@@ -333,15 +333,15 @@ export default function Users() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('users') || 'Users'}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{tr('users_page_desc', 'Manage staff accounts, roles, and login security from one place.')}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary text-sm" onClick={() => setProfileOpen(true)}>{tr('my_profile', 'My Profile')}</button>
-          {tab === 'users' && canManage ? <button type="button" className="btn-primary text-sm" onClick={openCreateUser}>+ {t('add_user') || 'Add user'}</button> : null}
-          {tab === 'roles' && canManage ? <button type="button" className="btn-primary text-sm" onClick={openCreateRole}>+ {t('create_role') || 'Create role'}</button> : null}
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0">
+          <button type="button" className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>{tr('my_profile', 'My Profile')}</button>
+          {tab === 'users' && canManage ? <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateUser}>+ {t('add_user') || 'Add user'}</button> : null}
+          {tab === 'roles' && canManage ? <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateRole}>+ {t('create_role') || 'Create role'}</button> : null}
         </div>
       </div>
 

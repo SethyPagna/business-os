@@ -1,6 +1,6 @@
 ﻿
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Eye, Globe, LayoutList, Palette, Printer, RotateCcw, Save, Truck, Type } from 'lucide-react'
+import { Eye, Globe, LayoutList, Palette, Printer, Save, Truck, Type } from 'lucide-react'
 import ErrorBoundary from './ErrorBoundary'
 import { useApp } from '../../AppContext'
 import { DEFAULT_TEMPLATE } from './constants'
@@ -124,12 +124,6 @@ export default function ReceiptSettings() {
     }
   }
 
-  const handleReset = () => {
-    if (confirm(t('reset_confirm') || 'Reset receipt template to defaults?')) {
-      setTpl({ ...DEFAULT_TEMPLATE })
-    }
-  }
-
   const SECTIONS = [
     { id: 'fields', label: t('receipt_fields') || 'All Fields', icon: LayoutList },
     { id: 'order', label: t('receipt_order') || 'Field Order', icon: LayoutList },
@@ -152,16 +146,12 @@ export default function ReceiptSettings() {
             {t('receipt_template')}
           </h1>
           <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0 lg:justify-end">
-            <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs sm:hidden">
+            <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:hidden">
               <Eye className="h-4 w-4" />
               {t('live_preview') || 'Preview'}
             </button>
-            <button onClick={handleReset} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-              <RotateCcw className="h-4 w-4" />
-              {t('reset_template')}
-            </button>
             <button onClick={handleSave} disabled={saving}
-              className="btn-primary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">
+              className="btn-primary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">
               <Save className="h-4 w-4" />
               {saving ? 'Saving...' : (t('save_template') || 'Save template')}
             </button>

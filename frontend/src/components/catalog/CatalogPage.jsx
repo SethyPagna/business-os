@@ -61,7 +61,7 @@ function withAssetVersion(url, versionSeed) {
 const PORTAL_TEXT = {
   en: {
     previewBadge: 'Portal Studio',
-    publicBadge: 'Customer Portal',
+    publicBadge: '',
     studioTitle: 'Portal Editor',
     studioHint: 'Edit the customer-facing portal here. The public page remains read-only.',
     saveChanges: 'Save changes',
@@ -193,7 +193,7 @@ const PORTAL_TEXT = {
   km: {
     assistantUsageCompact: 'មានអ្នកប្រើ {users} នាក់កំពុងប្រើឥឡូវនេះ។ ម្នាក់ៗអាចស្វែងរកបាន {searches} ដងក្នុងមួយនាទី។',
     previewBadge: 'កែទំព័រអតិថិជន',
-    publicBadge: 'ទំព័រអតិថិជន',
+    publicBadge: '',
     studioTitle: 'ផ្ទាំងកែទំព័រ',
     studioHint: 'កែសម្រួលទំព័រអតិថិជននៅទីនេះ។ ទំព័រសាធារណៈនៅតែអាចមើលបានតែប៉ុណ្ណោះ។',
     saveChanges: 'រក្សាទុក',
@@ -553,7 +553,7 @@ function normalizeExternalUrl(value) {
   if (!raw) return ''
   const normalized = /^https?:\/\//i.test(raw)
     ? raw
-    : (/^(www\.|[\w-]+(\.[\w-]+)+)/i.test(raw) ? `https://${raw}` : '')
+    : (/^(www\.|[\w-]+(\.[\w-]+)+|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(raw) ? `https://${raw}` : '')
   if (!normalized) return ''
   try {
     const url = new URL(normalized)
@@ -591,6 +591,56 @@ function buildFaqStarterItems() {
       question: 'How can I contact Leang Cosmetics for more accurate advice?',
       answer: 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.',
     },
+    {
+      id: `faq-${Date.now()}-6`,
+      question: 'Do you have products for sensitive skin?',
+      answer: 'Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.',
+    },
+    {
+      id: `faq-${Date.now()}-7`,
+      question: 'Can I ask whether a product is original or from a specific brand line?',
+      answer: 'Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.',
+    },
+    {
+      id: `faq-${Date.now()}-8`,
+      question: 'Do you sell skincare, makeup, hair care, and body care together?',
+      answer: 'Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.',
+    },
+    {
+      id: `faq-${Date.now()}-9`,
+      question: 'Can the store help me build a full routine?',
+      answer: 'Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.',
+    },
+    {
+      id: `faq-${Date.now()}-10`,
+      question: 'What should I do if an item is out of stock?',
+      answer: 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.',
+    },
+    {
+      id: `faq-${Date.now()}-11`,
+      question: 'Can I ask for products within a specific budget?',
+      answer: 'Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.',
+    },
+    {
+      id: `faq-${Date.now()}-12`,
+      question: 'Do you have gift-friendly items or bundles?',
+      answer: 'Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.',
+    },
+    {
+      id: `faq-${Date.now()}-13`,
+      question: 'Can I ask for alternatives if my preferred brand is unavailable?',
+      answer: 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.',
+    },
+    {
+      id: `faq-${Date.now()}-14`,
+      question: 'Can I check whether a product is suitable for oily, dry, or combination skin?',
+      answer: 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.',
+    },
+    {
+      id: `faq-${Date.now()}-15`,
+      question: 'Do you also carry hair, body, and fragrance products?',
+      answer: 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.',
+    },
   ]
 }
 
@@ -610,6 +660,16 @@ function buildAiFaqStarterItems() {
       id: `faq-ai-${Date.now()}-3`,
       question: 'Should I trust the AI as medical or skin-treatment advice?',
       answer: 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.',
+    },
+    {
+      id: `faq-ai-${Date.now()}-4`,
+      question: 'Why does the assistant sometimes suggest several options instead of one product?',
+      answer: 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.',
+    },
+    {
+      id: `faq-ai-${Date.now()}-5`,
+      question: 'Can the assistant explain why a product was recommended?',
+      answer: 'Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.',
     },
   ]
 }
@@ -2649,7 +2709,7 @@ export default function CatalogPage({ publicView = false }) {
       title={previewConfig.aboutTitle || copy('about', 'About')}
       subtitle={copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}
     >
-      <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         {previewConfig.aboutContent ? (
           <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6">
             <p className="whitespace-pre-line text-sm leading-7 text-slate-700">{previewConfig.aboutContent}</p>
@@ -2711,7 +2771,7 @@ export default function CatalogPage({ publicView = false }) {
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
     >
-      <div className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {publicFaqItems.length ? publicFaqItems.map((item, index) => {
           const open = expandedFaqId === item.id
           return (
@@ -3085,10 +3145,19 @@ export default function CatalogPage({ publicView = false }) {
                   <div className="text-sm font-semibold text-slate-900">About blocks</div>
                   <p className="mt-1 text-xs text-slate-500">Add text, image, and video sections, then move them into the order you want customers to see.</p>
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-                  <button type="button" className="btn-secondary text-sm" onClick={() => addAboutBlock('text')}>Add text</button>
-                  <button type="button" className="btn-secondary text-sm" onClick={() => addAboutBlock('image')}>Add image</button>
-                  <button type="button" className="btn-secondary text-sm" onClick={() => addAboutBlock('video')}>Add video</button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('text')}>
+                    <Plus className="h-4 w-4" />
+                    Text
+                  </button>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('image')}>
+                    <Images className="h-4 w-4" />
+                    Image
+                  </button>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('video')}>
+                    <Plus className="h-4 w-4" />
+                    Video
+                  </button>
                 </div>
               </div>
               <div className="mt-4 space-y-4">
@@ -3178,15 +3247,15 @@ export default function CatalogPage({ publicView = false }) {
                   <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addFaqStarterSet}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addFaqStarterSet}>
                     <Sparkles className="h-4 w-4" />
                     {copy('addStarterSet', 'Starter set')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addAiFaqStarterSet}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addAiFaqStarterSet}>
                     <Bot className="h-4 w-4" />
                     {copy('addAiStarterSet', 'AI starter')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-sm" onClick={addFaqItem}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addFaqItem}>
                     <Plus className="h-4 w-4" />
                     {copy('addFaq', 'Add FAQ')}
                   </button>
@@ -3205,7 +3274,7 @@ export default function CatalogPage({ publicView = false }) {
                   {faqItems.length ? faqItems.map((item, index) => (
                     <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-900">{copy('faq', 'FAQ')} #{index + 1}</div>
+                        <div className="text-sm font-semibold text-slate-900">#{index + 1}</div>
                         <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>Remove</button>
                       </div>
                       <div className="mt-3 grid gap-3">
@@ -3482,7 +3551,7 @@ export default function CatalogPage({ publicView = false }) {
             </div>
           </div>
 
-          <div id="portal-section-media" className={activeEditorSection === 'media' ? 'grid gap-4' : 'hidden'}>
+          <div id="portal-section-media" className={activeEditorSection === 'media' ? 'grid min-w-0 gap-4 2xl:grid-cols-2' : 'hidden'}>
             <ImageField
               label={copy('logoImage', 'Logo image')}
               value={editorDraft.customer_portal_logo_image}
@@ -3513,11 +3582,12 @@ export default function CatalogPage({ publicView = false }) {
               previewLabel={copy('openGallery', 'Open image gallery')}
               hint={copy('faviconHint', 'Shown in browser tabs and saved shortcuts. If empty, the circular logo is used automatically.')}
             />
-            <label className="mt-1 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-logo">
-              <span className="text-sm font-medium text-slate-700">{copy('showLogo', 'Show logo')}</span>
-              <input id="portal-show-logo" name="customer_portal_show_logo" type="checkbox" checked={!!editorDraft.customer_portal_show_logo} onChange={(event) => setDraft('customer_portal_show_logo', event.target.checked)} />
-            </label>
-            <div className="mt-3 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-4">
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-logo">
+                <span className="text-sm font-medium text-slate-700">{copy('showLogo', 'Show logo')}</span>
+                <input id="portal-show-logo" name="customer_portal_show_logo" type="checkbox" checked={!!editorDraft.customer_portal_show_logo} onChange={(event) => setDraft('customer_portal_show_logo', event.target.checked)} />
+              </label>
+              <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">{copy('logoSize', 'Logo size')}</span>
                 <input
@@ -3591,44 +3661,45 @@ export default function CatalogPage({ publicView = false }) {
                 />
                 <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_y || '50'}%</span>
               </label>
-            </div>
-            {editorDraft.customer_portal_logo_image ? (
-              <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Header logo preview</div>
-                <div
-                  className="mt-3 rounded-[28px] p-4 text-white"
-                  style={{
-                    backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')} 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')} 50%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')} 100%)`,
-                  }}
-                >
-                  <div className="flex items-center gap-4">
-                    <div
-                      className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
-                      style={{
-                        height: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
-                        width: `${Math.min(144, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
-                      }}
-                    >
-                      <img
-                        src={editorDraft.customer_portal_logo_image}
-                        alt={copy('logoImage', 'Logo image')}
-                        className="h-full w-full"
+              </div>
+              {editorDraft.customer_portal_logo_image ? (
+                <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Logo preview</div>
+                  <div
+                    className="mt-3 rounded-[28px] p-4 text-white"
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')} 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')} 50%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')} 100%)`,
+                    }}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
                         style={{
-                          objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
-                          objectPosition: `${editorDraft.customer_portal_logo_position_x || '50'}% ${editorDraft.customer_portal_logo_position_y || '50'}%`,
-                          transform: `scale(${Math.max(0.8, Math.min(1.8, (toNumber(editorDraft.customer_portal_logo_zoom, 100) || 100) / 100))})`,
-                          transformOrigin: 'center',
+                          height: `${Math.min(128, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
+                          width: `${Math.min(128, Math.max(48, toNumber(editorDraft.customer_portal_logo_size, 80)))}px`,
                         }}
-                      />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
-                      <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the circular logo frame on the live header.'}</div>
+                      >
+                        <img
+                          src={editorDraft.customer_portal_logo_image}
+                          alt={copy('logoImage', 'Logo image')}
+                          className="h-full w-full"
+                          style={{
+                            objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
+                            objectPosition: `${editorDraft.customer_portal_logo_position_x || '50'}% ${editorDraft.customer_portal_logo_position_y || '50'}%`,
+                            transform: `scale(${Math.max(0.8, Math.min(1.8, (toNumber(editorDraft.customer_portal_logo_zoom, 100) || 100) / 100))})`,
+                            transformOrigin: 'center',
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
+                        <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the circular logo frame on the live header.'}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
 
             <ImageField
               label={copy('coverImage', 'Cover image')}
@@ -3645,7 +3716,7 @@ export default function CatalogPage({ publicView = false }) {
               previewLabel={copy('openGallery', 'Open image gallery')}
               hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
             />
-            <label className="mt-1 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-cover">
+            <label className="xl:col-span-2 mt-1 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-cover">
               <span className="text-sm font-medium text-slate-700">{copy('showCover', 'Show cover image')}</span>
               <input id="portal-show-cover" name="customer_portal_show_cover" type="checkbox" checked={!!editorDraft.customer_portal_show_cover} onChange={(event) => setDraft('customer_portal_show_cover', event.target.checked)} />
             </label>
@@ -4003,10 +4074,10 @@ export default function CatalogPage({ publicView = false }) {
               ) : null}
 
               <div className="border-t border-slate-200 bg-white px-6 py-4 sm:px-8">
-                <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                   {previewConfig.showCatalog ? (
                     <button
-                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('products')}
                     >
                       <ShoppingBag className="h-4 w-4" />
@@ -4015,7 +4086,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showMembership ? (
                     <button
-                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('membership')}
                     >
                       <Ticket className="h-4 w-4" />
@@ -4024,7 +4095,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showAbout ? (
                     <button
-                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('about')}
                     >
                       <Store className="h-4 w-4" />
@@ -4033,7 +4104,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showFaq ? (
                     <button
-                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('faq')}
                     >
                       <HelpCircle className="h-4 w-4" />
@@ -4042,7 +4113,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.aiEnabled ? (
                     <button
-                      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       onClick={() => setActiveTab('ai')}
                     >
                       <Bot className="h-4 w-4" />

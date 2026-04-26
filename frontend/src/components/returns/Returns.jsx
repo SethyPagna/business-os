@@ -132,8 +132,8 @@ export default function Returns() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div>
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">{tr('returns_scope_hint', 'Customer refunds and supplier returns are tracked separately.')}</p>
         </div>
@@ -142,12 +142,12 @@ export default function Returns() {
             onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
             className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
           >
-            {tr('export_csv', 'Export CSV')}
+            {tr('export_csv', 'Export')}
           </button>
           {scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-sm sm:w-auto sm:flex-none">+ {tr('return_to_supplier', 'Return to Supplier')}</button>
+            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">+ {tr('return_to_supplier', 'Return to Supplier')}</button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-sm sm:w-auto sm:flex-none">+ {tr('new_return', 'New Return')}</button>
+            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">+ {tr('new_return', 'New Return')}</button>
           )}
         </div>
       </div>

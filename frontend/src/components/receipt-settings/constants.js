@@ -42,7 +42,7 @@ export const DEFAULT_TEMPLATE = {
   delivery_show_fee: true,
   delivery_fee_position: 'totals',
   discount_position: 'before_tax',
-  show_emojis: true,
+  show_emojis: false,
   field_order: [
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',
@@ -85,7 +85,6 @@ export function getFieldItems(t) {
     { key: 'show_item_unit_price', label: T('item_unit_price', 'Unit Price'), section: sections.items, desc: T('rfd_item_unit_price', 'Price per unit') },
     { key: 'show_item_khr', label: T('item_khr', 'Price in KHR'), section: sections.items, desc: T('rfd_item_khr', 'Secondary KHR price per item') },
     { key: 'item_separator', label: T('item_separator', 'Item Separator'), section: sections.items, desc: T('rfd_item_separator', 'Line between items') },
-    { key: 'show_emojis', label: T('show_emojis', 'Show Emojis'), section: sections.style, desc: T('rfd_show_emojis', 'Show emoji icons in receipts') },
     { key: 'show_subtotal', label: T('subtotal', 'Subtotal'), section: sections.totals, desc: T('rfd_subtotal', 'Sum before discounts/tax') },
     { key: 'show_discount', label: T('discount', 'Discount'), section: sections.totals, desc: T('rfd_discount', 'Applied discount amount') },
     { key: 'show_tax', label: T('tax', 'Tax'), section: sections.totals, desc: T('rfd_tax', 'Tax amount line') },

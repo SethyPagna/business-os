@@ -223,30 +223,33 @@ export default function AuditLog() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex items-center justify-between gap-2 min-w-0">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2 min-w-0">
         <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
           <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           {t('audit_log') || 'Audit Log'}
         </h1>
         <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
-          <div className="relative flex-shrink-0">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              className="input w-40 pl-9 text-sm sm:w-56"
-              placeholder={t('search_audit_placeholder') || 'Search logs'}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <button onClick={load} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm">
+          <button onClick={load} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className="h-4 w-4" />
             {t('refresh') || 'Refresh'}
           </button>
-          <button onClick={exportCsv} className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm">
+          <button onClick={exportCsv} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <Download className="h-4 w-4" />
-            {t('export_csv_label') || 'Export CSV'}
+            {t('export_csv') || 'CSV'}
           </button>
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            className="input w-full pl-9 text-sm"
+            placeholder={t('search_audit_placeholder') || 'Search logs'}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            autoComplete="off"
+          />
         </div>
       </div>
 

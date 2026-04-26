@@ -119,13 +119,20 @@ export default function Sales() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('sales')}</h1>
-        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
-          <span className="flex-shrink-0 text-sm text-gray-400">{filtered.length} {t('entries') || 'records'}</span>
-          <button onClick={() => setShowExport(true)} className="btn-primary flex-shrink-0 text-xs px-3 py-1.5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('sales')}</h1>
+          {!loading && filtered.length > 0 ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {filtered.length} {t('sales')} - {fmtUSD(revenue)} {t('revenue')}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0">
+          <span className="flex-shrink-0 text-xs text-gray-400">{filtered.length} {t('entries') || 'entries'}</span>
+          <button onClick={() => setShowExport(true)} className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs">
             <Download className="h-4 w-4" />
-            <span>{t('export_sales_report') || 'Export'}</span>
+            <span>{t('export_csv') || 'Export'}</span>
           </button>
         </div>
       </div>
@@ -159,8 +166,7 @@ export default function Sales() {
       </div>
 
       {filtered.length > 0 && (
-        <div className="mb-3 grid gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm dark:bg-blue-900/20 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
-          <span className="text-gray-500 dark:text-gray-400">{filtered.length} {t('sales')}</span>
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-blue-50 px-4 py-2.5 text-sm dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
           {pendingRevenue > 0 ? (
             <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>

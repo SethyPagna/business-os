@@ -2,7 +2,7 @@ const API_PREFIX = '/api/'
 const UPLOADS_PREFIX = '/uploads/'
 const STATIC_ASSET_RE = /\.[a-z0-9]+$/i
 
-export const MAX_MOUNTED_PAGES = 6
+export const MAX_MOUNTED_PAGES = 14
 
 export function isPublicCatalogPath(pathname) {
   const value = String(pathname || '/')

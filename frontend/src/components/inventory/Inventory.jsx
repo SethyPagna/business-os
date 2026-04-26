@@ -382,12 +382,15 @@ export default function Inventory() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-          <Boxes className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          {t('inventory')}
-        </h1>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+            <Boxes className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            {t('inventory')}
+          </h1>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{filteredSummary.length} {t('products') || 'products'} - {groupedMovements.length} {t('movements') || 'movements'}</p>
+        </div>
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:justify-end sm:pb-0">
           {/* Export inventory summary CSV */}
           <button
             onClick={() => {
@@ -407,7 +410,7 @@ export default function Inventory() {
               }))
               downloadCSV(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
-            className="btn-secondary flex-1 text-xs sm:flex-none sm:text-sm"
+            className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
             title={t('export_csv')||'Export Inventory CSV'}
           >
             <span className="inline-flex items-center gap-2">
@@ -430,7 +433,7 @@ export default function Inventory() {
               }))
               downloadCSV(`inventory-movements-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
-            className="btn-secondary flex-1 text-xs sm:flex-none sm:text-sm"
+            className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
             title={t('stock_movements')||'Export Movements CSV'}
           >
             <span className="inline-flex items-center gap-2">

@@ -20,6 +20,13 @@ const BACKUP_SECTION_CONFIG = [
   { key: 'file_assets', label: 'Files library' },
 ]
 
+const QUICK_BACKUP_SECTIONS = [
+  'Products + inventory',
+  'Sales + returns',
+  'Contacts + users',
+  'Portal + files',
+]
+
 function useCopy(t) {
   return (key, fallback) => {
     const value = t?.(key)
@@ -523,14 +530,6 @@ export default function Backup() {
     return () => { cancelled = true }
   }, [])
 
-  const exportSections = [
-    'Products and inventory',
-    'Sales and returns',
-    'Contacts and users',
-    'Portal settings and submissions',
-    'Files, uploads, and audit log',
-  ]
-
   const browseServerFolders = async (target, dir) => {
     try {
       setBrowserBusy(target)
@@ -660,7 +659,7 @@ export default function Backup() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <h1 className="mb-6 flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+      <h1 className="mb-4 flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
         <HardDriveDownload className="h-5 w-5 text-blue-600 dark:text-blue-400" />
         {copy('backup', 'Backup')}
       </h1>
@@ -668,13 +667,13 @@ export default function Backup() {
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            {copy('export_backup_title', 'Create Folder Backup')}
+            {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Choose a destination folder and Business OS will duplicate the full live data folder there, including database, uploads, and generated files.')}
+            {copy('export_backup_desc', 'Export a full backup copy of the live data folder, or download the older JSON format when needed.')}
           </p>
           <div className="mb-4 flex flex-wrap gap-2">
-            {exportSections.map((section) => (
+            {QUICK_BACKUP_SECTIONS.map((section) => (
               <span key={section} className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300">
                 {section}
               </span>
@@ -682,7 +681,7 @@ export default function Backup() {
           </div>
 
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
-            <div className="flex flex-col gap-3 lg:flex-row">
+            <div className="flex flex-col gap-2 lg:flex-row">
               <input
                 id="backup-folder-export-path"
                 name="backup_folder_export_path"
@@ -691,14 +690,16 @@ export default function Backup() {
                 onChange={(event) => setFolderExportPath(event.target.value)}
                 placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
               />
-              <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
                 <FolderOutput className="h-4 w-4" />
-                {exportBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
+                {exportBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('browse', 'Browse')}
               </button>
-              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)} disabled={!hostUiAvailable}>
-                <FolderOutput className="h-4 w-4" />
-                {copy('browse_folder', 'Choose Folder')}
-              </button>
+              {hostUiAvailable ? (
+                <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
+                  <FolderOutput className="h-4 w-4" />
+                  {copy('browse_folder', 'Choose Folder')}
+                </button>
+              ) : null}
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {copy('server_folder_note', 'Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.')}
@@ -723,11 +724,11 @@ export default function Backup() {
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderExport} disabled={loading === 'folder-export'}>
                 <ArchiveRestore className="h-4 w-4" />
-                {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('folder_backup_btn', 'Create Folder Backup')}
+                {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </button>
               <button className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={handleExport} disabled={loading === 'export'}>
                 <Download className="h-4 w-4" />
-                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Download JSON Backup')}
+                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'JSON')}
               </button>
             </div>
           </div>
@@ -736,14 +737,14 @@ export default function Backup() {
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderInput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            {copy('import_backup_title', 'Restore From Folder')}
+            {copy('import_backup_title', 'Restore backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('import_backup_desc', 'Choose a Business OS backup folder or a business-os-data folder, then restore it into the current system.')}
+            {copy('import_backup_desc', 'Restore a full folder backup, or use a legacy JSON backup file below if that is what you exported earlier.')}
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
-            <div className="flex flex-col gap-3 lg:flex-row">
+            <div className="flex flex-col gap-2 lg:flex-row">
               <input
                 id="backup-folder-import-path"
                 name="backup_folder_import_path"
@@ -752,14 +753,16 @@ export default function Backup() {
                 onChange={(event) => setFolderImportPath(event.target.value)}
                 placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
               />
-              <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
+              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
                 <FolderInput className="h-4 w-4" />
-                {restoreBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
+                {restoreBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('browse', 'Browse')}
               </button>
-              <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)} disabled={!hostUiAvailable}>
-                <FolderInput className="h-4 w-4" />
-                {copy('browse_folder', 'Choose Folder')}
-              </button>
+              {hostUiAvailable ? (
+                <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
+                  <FolderInput className="h-4 w-4" />
+                  {copy('browse_folder', 'Choose Folder')}
+                </button>
+              ) : null}
             </div>
             <p className="text-xs text-amber-700 dark:text-amber-300">
               {copy('server_restore_note', 'Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.')}
@@ -784,7 +787,7 @@ export default function Backup() {
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderImport} disabled={loading === 'folder-import'}>
                 <Upload className="h-4 w-4" />
-                {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('folder_restore_btn', 'Restore Folder Backup')}
+                {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </button>
             </div>
 
@@ -793,12 +796,12 @@ export default function Backup() {
             </p>
           </div>
 
-          <div className="mt-5 border-t border-gray-200 pt-5 dark:border-zinc-700">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
+          <details className="mt-5 rounded-2xl border border-gray-200 bg-gray-50/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
               <FileArchive className="h-4 w-4 text-gray-500" />
-              {copy('legacy_json_backup', 'Legacy JSON Backup')}
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+              {copy('legacy_json_backup', 'Legacy JSON')}
+            </summary>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <button className="btn-secondary w-full text-sm sm:w-auto" onClick={handleChooseImportFile} disabled={loading === 'import'}>
                 {copy('choose_backup_file', 'Choose Backup File')}
               </button>
@@ -813,7 +816,7 @@ export default function Backup() {
                 </button>
               ) : null}
             </div>
-          </div>
+          </details>
 
           {pendingImport ? (
             <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">

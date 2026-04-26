@@ -76,6 +76,12 @@ function emptyProviderForm() {
   }
 }
 
+function compactTabLabel(label) {
+  if (label === 'AI Providers') return 'Providers'
+  if (label === 'AI Responses') return 'Responses'
+  return label
+}
+
 export default function FilesPage() {
   const { notify, user, t } = useApp()
   const [activeTab, setActiveTab] = useState('assets')
@@ -320,10 +326,10 @@ export default function FilesPage() {
     <button
       type="button"
       onClick={() => setActiveTab(id)}
-      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === id ? 'bg-slate-950 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition sm:text-sm ${activeTab === id ? 'bg-slate-950 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
     >
       <Icon className="h-4 w-4" />
-      {label}
+      <span className="truncate">{compactTabLabel(label)}</span>
     </button>
   )
 
@@ -336,7 +342,7 @@ export default function FilesPage() {
             {tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.')}
           </p>
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="grid grid-cols-3 gap-1.5">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
           {tabButton('providers', tr('library_ai_providers', 'AI Providers'), KeyRound)}
           {tabButton('responses', tr('library_ai_responses', 'AI Responses'), History)}
