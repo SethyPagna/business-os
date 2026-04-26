@@ -220,7 +220,7 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const requestContactCode = async () => {
-    if (!verificationCaps.email) {
+    if (!verificationCaps.email && !verificationCaps.supabaseEmailAuth) {
       notify(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'), 'error')
       return
     }
@@ -235,6 +235,7 @@ export default function UserProfileModal({ onClose }) {
       const result = await window.api.requestUserContactVerification(user.id, {
         channel: 'email',
         value,
+        redirectTo: `${window.location.origin}${window.location.pathname}`,
         userId: user.id,
       })
       if (result?.success === false) {
@@ -242,7 +243,11 @@ export default function UserProfileModal({ onClose }) {
         return
       }
       notify(
-        result?.destination
+        result?.mode === 'supabase_email_link'
+          ? (result?.alreadyConfirmed
+            ? tr('email_already_verified', 'Email is already verified.')
+            : tr('verification_email_sent_to', 'Verification email sent to {destination}. Open it and click the confirmation link, then refresh status here.').replace('{destination}', profile?.email || 'your inbox'))
+          : result?.destination
           ? tr('verification_code_sent_to', 'Verification code sent to {destination}').replace('{destination}', result.destination)
           : tr('verification_code_sent', 'Verification code sent.'),
         'success',
@@ -292,6 +297,37 @@ export default function UserProfileModal({ onClose }) {
       notify(tr('email_verified_success', 'Email verified.'), 'success')
     } catch (error) {
       notify(error?.message || 'Verification failed', 'error')
+    } finally {
+      setVerifyingEmailCode(false)
+    }
+  }
+
+  const refreshEmailVerification = async () => {
+    setVerifyingEmailCode(true)
+    try {
+      const authMethodsResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
+      const profileResult = await window.api.getUserProfile(user.id)
+      if (profileResult?.success === false) {
+        notify(profileResult.error || tr('verification_refresh_failed', 'Failed to refresh verification status.'), 'error')
+        return
+      }
+      const { success: _success, ...nextUser } = profileResult || {}
+      if (nextUser) {
+        setProfile(nextUser)
+        window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
+      }
+      if (authMethodsResult && authMethodsResult.success !== false) {
+        const { success: _authSuccess, ...authData } = authMethodsResult || {}
+        setAuthMethods(authData)
+      }
+      notify(
+        nextUser?.email_verified
+          ? tr('email_verified_success', 'Email verified.')
+          : tr('verification_status_refreshed', 'Verification status refreshed. If you just clicked the email link, wait a moment and try again.'),
+        'success',
+      )
+    } catch (error) {
+      notify(error?.message || tr('verification_refresh_failed', 'Failed to refresh verification status.'), 'error')
     } finally {
       setVerifyingEmailCode(false)
     }
@@ -425,7 +461,27 @@ export default function UserProfileModal({ onClose }) {
                       />
                     </div>
                     <div>
-                      {verificationCaps.email ? (
+                      {verificationCaps.supabaseEmailAuth ? (
+                        <>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_verification', 'Email verification')}</div>
+                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                              {tr('supabase_smtp_ready', 'Supabase ready')}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={requestContactCode} disabled={sendingEmailCode}>
+                              {sendingEmailCode ? tr('sending', 'Sending...') : tr('send_verification_email', 'Send verification email')}
+                            </button>
+                            <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={refreshEmailVerification} disabled={verifyingEmailCode}>
+                              {verifyingEmailCode ? tr('refreshing', 'Refreshing...') : tr('refresh_status', 'Refresh status')}
+                            </button>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            {tr('supabase_verification_email_note', 'Supabase sends the confirmation email through your configured SMTP. Open the email, confirm the address, then refresh status here.')}
+                          </p>
+                        </>
+                      ) : verificationCaps.email ? (
                         <>
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', '6-digit email code sender')}</div>
@@ -457,9 +513,7 @@ export default function UserProfileModal({ onClose }) {
                         </>
                       ) : (
                         <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
-                          {verificationCaps.supabaseEmailAuth
-                            ? tr('supabase_email_handles_signin_note', 'Supabase email sign-in is enabled. Use your saved email on the login page, and keep Google or Facebook linked there too. The separate 6-digit mail sender is turned off in this setup.')
-                            : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
+                          {tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
                         </div>
                       )}
                     </div>

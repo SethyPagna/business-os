@@ -1538,5 +1538,15 @@
   "host_ui_local_only": "This action only works on the server machine. Type or paste a server path manually when connected remotely.",
   "open_folder_local_only": "Opening the folder is only available on the server machine.",
   "host_ui_remote_note": "Remote sessions cannot open the server machine folder dialog or Explorer window. Use Browse folders below or type a server path manually.",
+  "verification_email_sent_to": "បានផ្ញើអ៊ីមែលផ្ទៀងផ្ទាត់ទៅ {destination}។ សូមបើកអ៊ីមែល ហើយចុចតំណបញ្ជាក់ បន្ទាប់មកចុចផ្ទៀងផ្ទាត់ស្ថានភាពម្ដងទៀត។",
+  "email_already_verified": "អ៊ីមែលនេះបានផ្ទៀងផ្ទាត់រួចហើយ។",
+  "verification_status_refreshed": "បានផ្ទៀងផ្ទាត់ស្ថានភាពឡើងវិញ។ បើអ្នកទើបចុចតំណក្នុងអ៊ីមែល សូមរង់ចាំបន្តិចហើយសាកម្ដងទៀត។",
+  "verification_refresh_failed": "មិនអាចផ្ទៀងផ្ទាត់ស្ថានភាពឡើងវិញបានទេ។",
+  "email_verification": "ការផ្ទៀងផ្ទាត់អ៊ីមែល",
+  "supabase_smtp_ready": "Supabase រួចរាល់",
+  "send_verification_email": "ផ្ញើអ៊ីមែលផ្ទៀងផ្ទាត់",
+  "refresh_status": "ផ្ទៀងផ្ទាត់ស្ថានភាព",
+  "refreshing": "កំពុងផ្ទៀងផ្ទាត់...",
+  "supabase_verification_email_note": "Supabase នឹងផ្ញើអ៊ីមែលបញ្ជាក់តាម SMTP ដែលអ្នកបានកំណត់។ សូមបើកអ៊ីមែល បញ្ជាក់អាសយដ្ឋាន ហើយបន្ទាប់មកផ្ទៀងផ្ទាត់ស្ថានភាពនៅទីនេះ។",
   "unknown_error": "??????????????"
 }

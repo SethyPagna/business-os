@@ -29,6 +29,7 @@ const {
   updateAuthPassword,
   setAuthUserActive,
   getAuthUserById,
+  sendSupabaseVerificationEmail,
 } = require('../services/supabaseAuth')
 const {
   normalizeEmail,
@@ -157,6 +158,21 @@ function getUserWithRole(id) {
   `).get(id)
 }
 
+function syncLocalEmailVerification(userId, authUser) {
+  if (!authUser?.emailConfirmed) return
+  db.prepare(`
+    UPDATE users
+    SET email = COALESCE(?, email),
+        email_verified = 1,
+        supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
+    WHERE id = ?
+  `).run(
+    normalizeEmail(authUser.email || '') || null,
+    String(authUser.id || '').trim() || null,
+    userId,
+  )
+}
+
 function sanitizeUserRow(row) {
   if (!row) return null
   const merged = getMergedPermissions(row)
@@ -209,8 +225,21 @@ router.get('/users/:id/profile', authToken, (req, res) => {
     return err(res, 'No permission', 403)
   }
 
-  const row = getUserWithRole(req.params.id)
+  let row = getUserWithRole(req.params.id)
   if (!row) return err(res, 'User not found', 404)
+
+  if (String(row.supabase_user_id || '').trim() && Number(row.email_verified || 0) !== 1) {
+    getAuthUserById(row.supabase_user_id)
+      .then((result) => {
+        if (result?.success && result.user?.emailConfirmed) {
+          syncLocalEmailVerification(row.id, result.user)
+          row = getUserWithRole(req.params.id) || row
+        }
+      })
+      .finally(() => ok(res, sanitizeUserRow(row)))
+    return
+  }
+
   ok(res, sanitizeUserRow(row))
 })
 
@@ -236,7 +265,14 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
   let authUser = null
   if (providerConfig.enabled && String(user.supabase_user_id || '').trim()) {
     const result = await getAuthUserById(user.supabase_user_id)
-    if (result?.success) authUser = result.user
+    if (result?.success) {
+      authUser = result.user
+      if (authUser?.emailConfirmed && Number(user.email_verified || 0) !== 1) {
+        syncLocalEmailVerification(user.id, authUser)
+        user.email_verified = 1
+        user.email = normalizeEmail(authUser.email || '') || user.email
+      }
+    }
   }
 
   ok(res, {
@@ -304,6 +340,48 @@ router.post('/users/:id/contact-verification/request', authToken, async (req, re
     return err(res, 'Valid email is required')
   }
 
+  const providerConfig = getSupabaseAuthPublicConfig()
+  if (providerConfig.emailAuthEnabled) {
+    const targetWithAuth = db.prepare(`
+      SELECT id, username, email, email_verified, supabase_user_id, is_active, deleted_at
+      FROM users
+      WHERE id = ? AND deleted_at IS NULL
+    `).get(targetUserId)
+
+    if (!targetWithAuth) return err(res, 'User not found', 404)
+    if (!String(targetWithAuth.supabase_user_id || '').trim()) {
+      return err(res, 'Save your profile first so the account can be linked to Supabase before sending a verification email.', 400)
+    }
+
+    const redirectTo = String(req.body?.redirectTo || '').trim()
+    const verificationResult = await sendSupabaseVerificationEmail(destination, { redirectTo })
+    if (!verificationResult.success && !verificationResult.skipped) {
+      return err(res, verificationResult.error || 'Failed to send verification email')
+    }
+
+    audit(actor.id, actor.name, 'contact_verification_request', 'user', targetUserId, {
+      channel,
+      destination: destination,
+      delivered: verificationResult.success,
+      provider: verificationResult.provider || 'supabase',
+      mode: 'supabase_email_link',
+      alreadyConfirmed: !!verificationResult.alreadyConfirmed,
+    })
+
+    return ok(res, {
+      channel,
+      destination,
+      destinationMasked: destination,
+      delivered: !!verificationResult.success,
+      provider: verificationResult.provider || 'supabase',
+      alreadyConfirmed: !!verificationResult.alreadyConfirmed,
+      mode: 'supabase_email_link',
+      message: verificationResult.alreadyConfirmed
+        ? 'Email is already confirmed.'
+        : 'Verification email sent.',
+    })
+  }
+
   const purpose = 'verify_email'
   const requestResult = await requestVerificationCode({
     userId: targetUserId,
@@ -331,6 +409,7 @@ router.post('/users/:id/contact-verification/request', authToken, async (req, re
     expiresAt: requestResult.expiresAt,
     delivered: requestResult.delivered,
     provider: requestResult.provider,
+    mode: 'local_code',
   })
 })
 

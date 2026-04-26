@@ -78,6 +78,11 @@ function buildSupabaseUrl(pathname) {
   return `${SUPABASE_URL}/auth/v1${pathname}`
 }
 
+function normalizeRedirectTo(value) {
+  const text = trim(value || '')
+  return isHttpUrl(text) ? text : ''
+}
+
 function getSupabaseAuthPublicConfig() {
   const enabled = isSupabaseAuthConfigured()
   return {
@@ -359,6 +364,40 @@ async function verifyPasswordWithSupabase(localUser, password) {
   return { success: true, userId: returnedUserId || trim(localUser?.supabase_user_id || '') }
 }
 
+async function sendSupabaseVerificationEmail(email, options = {}) {
+  if (!isSupabaseAuthConfigured()) return { success: false, skipped: true, reason: 'not_configured' }
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return { success: false, skipped: true, reason: 'missing_email' }
+  if (!SUPABASE_EMAIL_AUTH_ENABLED) {
+    return { success: false, skipped: true, reason: 'email_auth_disabled' }
+  }
+
+  const redirectTo = normalizeRedirectTo(options.redirectTo)
+  const payload = {
+    type: 'signup',
+    email: normalizedEmail,
+  }
+  if (redirectTo) {
+    payload.options = { emailRedirectTo: redirectTo }
+  }
+
+  const result = await callSupabasePublic('POST', '/resend', payload)
+  if (!result.ok) {
+    const providerCode = String(result.providerCode || '').trim().toUpperCase()
+    if (providerCode.includes('EMAIL_ALREADY_CONFIRMED') || providerCode.includes('USER_ALREADY_CONFIRMED')) {
+      return { success: true, alreadyConfirmed: true, provider: 'supabase' }
+    }
+    return { success: false, error: result.error, providerCode: result.providerCode || '' }
+  }
+
+  return {
+    success: true,
+    provider: 'supabase',
+    alreadyConfirmed: false,
+    data: result.data || null,
+  }
+}
+
 function buildOauthStartUrl({ provider, redirectTo, queryParams = {} }) {
   const normalizedProvider = trim(provider || '').toLowerCase()
   if (!isAllowedOauthProvider(normalizedProvider)) {
@@ -403,6 +442,7 @@ module.exports = {
   updateAuthPassword,
   setAuthUserActive,
   verifyPasswordWithSupabase,
+  sendSupabaseVerificationEmail,
   getAuthUserById,
   getAuthUserFromAccessToken,
   buildOauthStartUrl,
