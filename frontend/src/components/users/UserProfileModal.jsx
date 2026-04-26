@@ -49,6 +49,7 @@ export default function UserProfileModal({ onClose }) {
   const [emailCode, setEmailCode] = useState('')
   const [sendingEmailCode, setSendingEmailCode] = useState(false)
   const [verifyingEmailCode, setVerifyingEmailCode] = useState(false)
+  const [oauthConnecting, setOauthConnecting] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({ email: true, googleOauth: false, facebookOauth: false, supabaseAuth: false })
   const [authMethods, setAuthMethods] = useState(null)
   const [currentPassword, setCurrentPassword] = useState('')
@@ -291,6 +292,38 @@ export default function UserProfileModal({ onClose }) {
 
   const handleAvatarPick = () => avatarFileInputRef.current?.click()
 
+  const handleStartOauthLink = async (provider) => {
+    const normalizedProvider = String(provider || '').trim().toLowerCase()
+    if (!normalizedProvider) return
+    if (!verificationCaps.supabaseAuth) {
+      notify(tr('supabase_auth_not_ready', 'Supabase auth is not ready yet.'), 'error')
+      return
+    }
+    if (!String(profile?.email || '').trim()) {
+      notify(tr('add_email_for_social_link', 'Add and save your account email first, then connect this sign-in method.'), 'error')
+      return
+    }
+
+    setOauthConnecting(normalizedProvider)
+    try {
+      const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(normalizedProvider)}`
+      const result = await window.api.startSupabaseOauth({
+        provider: normalizedProvider,
+        mode: 'link',
+        redirectTo,
+      })
+      if (result?.success === false || !result?.url) {
+        notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
+        return
+      }
+      window.location.assign(result.url)
+    } catch (error) {
+      notify(error?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
+    } finally {
+      setOauthConnecting('')
+    }
+  }
+
   /**
    * 6. Avatar Upload
    * 6.1 Read image as data URL.
@@ -386,7 +419,7 @@ export default function UserProfileModal({ onClose }) {
                     </div>
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', 'Verification email sender')}</div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', '6-digit email code sender')}</div>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
                           {verificationCaps.email ? tr('email_sender_ready', 'Sender ready') : tr('email_sender_not_configured', 'Sender not configured')}
                         </span>
@@ -411,7 +444,7 @@ export default function UserProfileModal({ onClose }) {
                       </div>
                       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                         {verificationCaps.supabaseAuth
-                          ? tr('email_sender_vs_auth_note', 'Supabase handles sign-in methods. Verification and reset codes still need a separate mail sender such as Resend, SendGrid, or an email webhook.')
+                          ? tr('email_sender_vs_auth_note', 'Supabase is ready for sign-in methods. This separate 6-digit code tool still needs its own mail sender such as Resend, SendGrid, or an email webhook.')
                           : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
                       </p>
                     </div>
@@ -500,10 +533,15 @@ export default function UserProfileModal({ onClose }) {
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {verificationCaps.googleOauth
                       ? (authMethods?.google_ready
-                        ? tr('google_login_ready_note', 'No separate connect step is needed. Use Google on the login screen and it will match this account by email.')
+                        ? tr('google_login_ready_note', 'Save your email, then connect Google once so this account keeps the provider linked and easier to recognize later.')
                         : tr('google_email_required_note', 'Save an email on this profile first. Google sign-in matches accounts by email.'))
                       : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
                   </p>
+                  {verificationCaps.googleOauth && authMethods?.google_ready && !authMethods?.google_linked ? (
+                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
+                      {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
@@ -521,10 +559,15 @@ export default function UserProfileModal({ onClose }) {
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {verificationCaps.facebookOauth
                       ? (authMethods?.facebook_ready
-                        ? tr('facebook_login_ready_note', 'No separate connect step is needed. Use Facebook on the login screen and it will match this account by email.')
+                        ? tr('facebook_login_ready_note', 'Save your email, then connect Facebook once so this account keeps the provider linked and easier to recognize later.')
                         : tr('facebook_email_required_note', 'Save an email on this profile first. Facebook sign-in matches accounts by email.'))
                       : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.')}
                   </p>
+                  {verificationCaps.facebookOauth && authMethods?.facebook_ready && !authMethods?.facebook_linked ? (
+                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'facebook'} onClick={() => handleStartOauthLink('facebook')}>
+                      {oauthConnecting === 'facebook' ? tr('connecting', 'Connecting...') : tr('connect_facebook', 'Connect Facebook')}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

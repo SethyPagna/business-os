@@ -49,9 +49,13 @@ function normalizePublicPath(value) {
 function normalizeUrl(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
-  if (!/^https?:\/\//i.test(raw)) return ''
+  const normalized = /^https?:\/\//i.test(raw)
+    ? raw
+    : (/^(www\.|[\w-]+(\.[\w-]+)+)/i.test(raw) ? `https://${raw}` : '')
+  if (!normalized) return ''
   try {
-    const url = new URL(raw)
+    const url = new URL(normalized)
+    if (!/^https?:$/i.test(url.protocol)) return ''
     return url.toString().replace(/\/$/, '')
   } catch (_) {
     return ''

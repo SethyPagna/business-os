@@ -48,6 +48,9 @@ const WARMUP_PAGE_IDS = [
   'server',
 ]
 
+const CHUNK_IMPORT_TIMEOUT_MS = 12000
+const CHUNK_IMPORT_MAX_ATTEMPTS = 2
+
 function getChunkErrorMessage(error) {
   // Normalize unknown thrown values before chunk retry logic inspects them.
   return String(error?.message || error || '')
@@ -60,6 +63,36 @@ function isChunkLoadError(message) {
     || /ChunkLoadError/i.test(message)
     || /Failed to fetch dynamically imported module/i.test(message)
     || /Importing a module script failed/i.test(message)
+}
+
+function createChunkTimeoutError(key, timeoutMs) {
+  const error = new Error(`Page bundle timed out after ${Math.round(timeoutMs / 1000)}s (${key})`)
+  error.name = 'ChunkTimeoutError'
+  return error
+}
+
+function isRetryableImportError(error) {
+  const message = getChunkErrorMessage(error)
+  return isChunkLoadError(message)
+    || /timed out/i.test(message)
+    || /network/i.test(message)
+    || /aborted/i.test(message)
+}
+
+async function importWithTimeout(importer, key, timeoutMs = CHUNK_IMPORT_TIMEOUT_MS) {
+  let timer = null
+  try {
+    return await Promise.race([
+      importer(),
+      new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(createChunkTimeoutError(key, timeoutMs)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer != null) {
+      window.clearTimeout(timer)
+    }
+  }
 }
 
 function clearRetryMarker(marker) {
@@ -94,24 +127,33 @@ function lazyWithRetry(importer, key) {
   // newest HTML/chunk graph after deployments or proxy cache races.
   return lazy(async () => {
     const marker = `bos-lazy-reload:${key}`
-    try {
-      const loaded = await importer()
-      clearRetryMarker(marker)
-      return loaded
-    } catch (error) {
-      const message = getChunkErrorMessage(error)
-      if (!isChunkLoadError(message) || typeof window === 'undefined') {
+    for (let attempt = 1; attempt <= CHUNK_IMPORT_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const loaded = await importWithTimeout(importer, key)
+        clearRetryMarker(marker)
+        return loaded
+      } catch (error) {
+        if (!isRetryableImportError(error) || typeof window === 'undefined') {
+          throw error
+        }
+
+        const isFinalAttempt = attempt >= CHUNK_IMPORT_MAX_ATTEMPTS
+        if (!isFinalAttempt) {
+          await new Promise((resolve) => window.setTimeout(resolve, 350))
+          continue
+        }
+
+        if (shouldRetryChunk(marker)) {
+          triggerChunkRecoveryReload(marker)
+          return new Promise(() => {})
+        }
+
+        clearRetryMarker(marker)
         throw error
       }
-
-      if (shouldRetryChunk(marker)) {
-        triggerChunkRecoveryReload(marker)
-        return new Promise(() => {})
-      }
-
-      clearRetryMarker(marker)
-      throw error
     }
+
+    throw createChunkTimeoutError(key, CHUNK_IMPORT_TIMEOUT_MS)
   })
 }
 
@@ -155,7 +197,13 @@ const PAGE_COMPONENTS = {
 
 function getWarmupImporters() {
   // Warm up the heaviest next-likely pages after login to hide first-open cost.
-  return WARMUP_PAGE_IDS.map((pageId) => PAGE_IMPORTERS[pageId]).filter(Boolean)
+  return WARMUP_PAGE_IDS
+    .map((pageId) => {
+      const importer = PAGE_IMPORTERS[pageId]
+      if (!importer) return null
+      return () => importWithTimeout(importer, pageId).catch(() => null)
+    })
+    .filter(Boolean)
 }
 
 function useMountedPages(activePage) {
@@ -274,15 +322,27 @@ class PageErrorBoundary extends Component {
       return this.props.children
     }
 
+    const message = this.state.error?.message || String(this.state.error)
+    const retryable = isRetryableImportError(this.state.error)
+
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
         <div className="text-5xl mb-4">!</div>
         <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Page failed to load</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-sm font-mono bg-gray-100 dark:bg-gray-800 rounded-lg p-3 text-left break-words">
-          {this.state.error.message || String(this.state.error)}
+          {message}
         </p>
-        <button className="btn-primary" onClick={() => this.setState({ error: null })}>
-          Retry
+        <button
+          className="btn-primary"
+          onClick={() => {
+            if (retryable && typeof window !== 'undefined') {
+              window.location.reload()
+              return
+            }
+            this.setState({ error: null })
+          }}
+        >
+          {retryable ? 'Reload page' : 'Retry'}
         </button>
       </div>
     )

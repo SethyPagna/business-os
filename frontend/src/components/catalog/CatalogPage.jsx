@@ -543,7 +543,47 @@ function normalizeHexColor(value, fallback) {
 function normalizeExternalUrl(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
-  return /^https?:\/\//i.test(raw) ? raw : ''
+  const normalized = /^https?:\/\//i.test(raw)
+    ? raw
+    : (/^(www\.|[\w-]+(\.[\w-]+)+)/i.test(raw) ? `https://${raw}` : '')
+  if (!normalized) return ''
+  try {
+    const url = new URL(normalized)
+    if (!/^https?:$/i.test(url.protocol)) return ''
+    return url.toString().replace(/\/$/, '')
+  } catch (_) {
+    return ''
+  }
+}
+
+function buildFaqStarterItems() {
+  return [
+    {
+      id: `faq-${Date.now()}-1`,
+      question: 'How do I choose products for my skin type?',
+      answer: 'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.',
+    },
+    {
+      id: `faq-${Date.now()}-2`,
+      question: 'Are the products shown here available in store?',
+      answer: 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.',
+    },
+    {
+      id: `faq-${Date.now()}-3`,
+      question: 'How do I check my membership points?',
+      answer: 'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.',
+    },
+    {
+      id: `faq-${Date.now()}-4`,
+      question: 'How does Share & Reward work?',
+      answer: 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.',
+    },
+    {
+      id: `faq-${Date.now()}-5`,
+      question: 'How can I contact Leang Cosmetics for more accurate advice?',
+      answer: 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.',
+    },
+  ]
 }
 
 /** Convert hex color to rgba for layered hero background gradients. */
@@ -1635,6 +1675,20 @@ export default function CatalogPage({ publicView = false }) {
         answer: '',
       },
     ])
+  }
+
+  function addFaqStarterSet() {
+    const starterItems = buildFaqStarterItems()
+    if (!faqItems.length) {
+      setFaqDraft(starterItems)
+      return
+    }
+    const existingQuestions = new Set(faqItems.map((item) => String(item.question || '').trim().toLowerCase()).filter(Boolean))
+    const merged = [
+      ...faqItems,
+      ...starterItems.filter((item) => !existingQuestions.has(String(item.question || '').trim().toLowerCase())),
+    ].slice(0, 24)
+    setFaqDraft(merged)
   }
 
   function updateFaqItem(itemId, key, value) {
@@ -3124,7 +3178,12 @@ export default function CatalogPage({ publicView = false }) {
                     <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
                     <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
                   </div>
-                  <button type="button" className="btn-secondary text-sm" onClick={addFaqItem}>{copy('addFaq', 'Add FAQ')}</button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-secondary text-sm" onClick={addFaqStarterSet}>
+                      {copy('addFaqStarterSet', 'Add FAQ starter set')}
+                    </button>
+                    <button type="button" className="btn-secondary text-sm" onClick={addFaqItem}>{copy('addFaq', 'Add FAQ')}</button>
+                  </div>
                 </div>
                 <div className="mt-4 grid gap-4">
                   <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -3786,7 +3845,7 @@ export default function CatalogPage({ publicView = false }) {
                             </>
                           )
                           return item.href ? (
-                            <a key={item.key} href={item.href} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/15">
+                            <a key={item.key} href={item.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/15">
                               {content}
                             </a>
                           ) : (
