@@ -46,9 +46,6 @@ export default function UserProfileModal({ onClose }) {
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [otpEnabled, setOtpEnabled] = useState(false)
   const [otpMode, setOtpMode] = useState(null)
-  const [emailCode, setEmailCode] = useState('')
-  const [sendingEmailCode, setSendingEmailCode] = useState(false)
-  const [verifyingEmailCode, setVerifyingEmailCode] = useState(false)
   const [oauthConnecting, setOauthConnecting] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     email: true,
@@ -120,7 +117,7 @@ export default function UserProfileModal({ onClose }) {
   const verificationHelp = useMemo(() => {
     return canAdminOverride
       ? tr('admin_profile_override_hint', 'Admins can overwrite account fields directly and still send verification codes when needed.')
-      : tr('self_service_profile_hint', 'Self-service changes require your current password. You can verify your email with a one-time check.')
+      : tr('self_service_profile_hint', 'Self-service changes require your current password.')
   }, [canAdminOverride, t])
 
   /**
@@ -217,120 +214,6 @@ export default function UserProfileModal({ onClose }) {
     setOtpMode(null)
     await loadProfile()
     notify(tr('security_settings_updated', 'Security settings updated'), 'success')
-  }
-
-  const requestContactCode = async () => {
-    if (!verificationCaps.email && !verificationCaps.supabaseEmailAuth) {
-      notify(tr('email_sender_setup_needed', 'Email code sending is not configured yet. Ask admin to configure an email sender provider.'), 'error')
-      return
-    }
-    const value = profile?.email
-    if (!String(value || '').trim()) {
-      notify(tr('add_email_first', 'Add an email first.'), 'error')
-      return
-    }
-    setSendingEmailCode(true)
-
-    try {
-      const result = await window.api.requestUserContactVerification(user.id, {
-        channel: 'email',
-        value,
-        redirectTo: `${window.location.origin}${window.location.pathname}`,
-        userId: user.id,
-      })
-      if (result?.success === false) {
-        notify(result.error || 'Failed to send verification code', 'error')
-        return
-      }
-      notify(
-        result?.mode === 'supabase_email_link'
-          ? (result?.alreadyConfirmed
-            ? tr('email_already_verified', 'Email is already verified.')
-            : tr('verification_email_sent_to', 'Verification email sent to {destination}. Open it and click the confirmation link, then refresh status here.').replace('{destination}', profile?.email || 'your inbox'))
-          : result?.destination
-          ? tr('verification_code_sent_to', 'Verification code sent to {destination}').replace('{destination}', result.destination)
-          : tr('verification_code_sent', 'Verification code sent.'),
-        'success',
-      )
-    } catch (error) {
-      notify(error?.message || 'Failed to send verification code', 'error')
-    } finally {
-      setSendingEmailCode(false)
-    }
-  }
-
-  const confirmContactCode = async () => {
-    const code = emailCode
-    const value = profile?.email
-    if (!String(code || '').trim()) {
-      notify(tr('enter_verification_code_first', 'Enter the verification code first.'), 'error')
-      return
-    }
-    if (!String(value || '').trim()) {
-      notify(tr('email_missing', 'Email is missing.'), 'error')
-      return
-    }
-    setVerifyingEmailCode(true)
-
-    try {
-      const result = await window.api.confirmUserContactVerification(user.id, {
-        channel: 'email',
-        value,
-        code: String(code).trim(),
-        userId: user.id,
-      })
-      if (result?.success === false) {
-        notify(result.error || 'Invalid verification code', 'error')
-        return
-      }
-      const { success: _success, ...nextUser } = result || {}
-      if (nextUser) {
-        setProfile(nextUser)
-        window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
-      }
-      const authResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
-      if (authResult && authResult.success !== false) {
-        const { success: _authSuccess, ...authData } = authResult || {}
-        setAuthMethods(authData)
-      }
-      setEmailCode('')
-      notify(tr('email_verified_success', 'Email verified.'), 'success')
-    } catch (error) {
-      notify(error?.message || 'Verification failed', 'error')
-    } finally {
-      setVerifyingEmailCode(false)
-    }
-  }
-
-  const refreshEmailVerification = async () => {
-    setVerifyingEmailCode(true)
-    try {
-      const authMethodsResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
-      const profileResult = await window.api.getUserProfile(user.id)
-      if (profileResult?.success === false) {
-        notify(profileResult.error || tr('verification_refresh_failed', 'Failed to refresh verification status.'), 'error')
-        return
-      }
-      const { success: _success, ...nextUser } = profileResult || {}
-      if (nextUser) {
-        setProfile(nextUser)
-        window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
-      }
-      if (authMethodsResult && authMethodsResult.success !== false) {
-        const { success: _authSuccess, ...authData } = authMethodsResult || {}
-        setAuthMethods(authData)
-      }
-      notify(
-        nextUser?.email_verified
-          ? tr('email_verified_success', 'Email verified.')
-          : tr('verification_status_refreshed', 'Verification status refreshed. If you just clicked the email link, wait a moment and try again.'),
-        'success',
-      )
-    } catch (error) {
-      notify(error?.message || tr('verification_refresh_failed', 'Failed to refresh verification status.'), 'error')
-    } finally {
-      setVerifyingEmailCode(false)
-    }
   }
 
   const handleAvatarPick = () => avatarFileInputRef.current?.click()
@@ -447,8 +330,8 @@ export default function UserProfileModal({ onClose }) {
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <label htmlFor="profile-email" className="text-sm font-medium text-gray-700 dark:text-gray-300">{tr('email', 'Email')}</label>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${profile.email_verified ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                          {profile.email_verified ? tr('verified', 'Verified') : tr('not_verified', 'Not verified')}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${profile.email?.trim() ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                          {profile.email?.trim() ? tr('saved', 'Saved') : tr('optional', 'Optional')}
                         </span>
                       </div>
                       <input
@@ -459,63 +342,14 @@ export default function UserProfileModal({ onClose }) {
                         value={profile.email || ''}
                         onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
                       />
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        {tr('profile_email_note', 'Used for email login, password reset, and matching Google or Facebook sign-in to this account.')}
+                      </p>
                     </div>
                     <div>
-                      {verificationCaps.supabaseEmailAuth ? (
-                        <>
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_verification', 'Email verification')}</div>
-                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                              {tr('supabase_smtp_ready', 'Supabase ready')}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={requestContactCode} disabled={sendingEmailCode}>
-                              {sendingEmailCode ? tr('sending', 'Sending...') : tr('send_verification_email', 'Send verification email')}
-                            </button>
-                            <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={refreshEmailVerification} disabled={verifyingEmailCode}>
-                              {verifyingEmailCode ? tr('refreshing', 'Refreshing...') : tr('refresh_status', 'Refresh status')}
-                            </button>
-                          </div>
-                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                            {tr('supabase_verification_email_note', 'Supabase sends the confirmation email through your configured SMTP. Open the email, confirm the address, then refresh status here.')}
-                          </p>
-                        </>
-                      ) : verificationCaps.email ? (
-                        <>
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', '6-digit email code sender')}</div>
-                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                              {tr('email_sender_ready', 'Sender ready')}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={requestContactCode} disabled={sendingEmailCode}>
-                              {sendingEmailCode ? tr('sending', 'Sending...') : tr('send_code', 'Send code')}
-                            </button>
-                            <input
-                              id="profile-email-code"
-                              name="email_code"
-                              className="input min-w-[120px] flex-1 text-sm"
-                              inputMode="numeric"
-                              maxLength={6}
-                              placeholder={tr('six_digit_code', '6-digit code')}
-                              value={emailCode}
-                              onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                            />
-                            <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={confirmContactCode} disabled={verifyingEmailCode}>
-                              {verifyingEmailCode ? tr('verifying', 'Verifying...') : tr('verify', 'Verify')}
-                            </button>
-                          </div>
-                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                            {tr('email_sender_ready_note', 'Use this only if you want local 6-digit verification codes in addition to Supabase sign-in.')}
-                          </p>
-                        </>
-                      ) : (
-                        <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
-                          {tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
-                        </div>
-                      )}
+                      <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
+                        {tr('email_login_simple_note', 'No separate email verification step is required here. Save your email once, then use it for email sign-in and social provider matching.')}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -581,9 +415,7 @@ export default function UserProfileModal({ onClose }) {
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {!profile.email?.trim()
                       ? tr('add_email_for_login_note', 'Add your account email first to use email sign-in on the login screen.')
-                      : profile.email_verified
-                        ? tr('email_login_ready_note', 'Email sign-in is ready. Verified email also helps recovery and provider matching.')
-                        : tr('verify_email_first_note', 'Email sign-in works with your saved email. Verify it to make recovery and provider matching more reliable.')}
+                      : tr('email_login_ready_note_simple', 'Email sign-in is ready once this email is saved on your account.')}
                   </p>
                 </div>
 
@@ -654,8 +486,8 @@ export default function UserProfileModal({ onClose }) {
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('profile_security_desc', 'Manage password, OTP login protection, and your default login duration.')}</p>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-zinc-700 dark:text-gray-300">{tr('username_login', 'Username login')}</span>
-                  <span className={`rounded-full px-2 py-0.5 ${profile.email_verified ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                    {tr('email_login', 'Email login')} {profile.email_verified ? tr('enabled', 'enabled') : tr('verify_to_enable', 'verify to enable')}
+                  <span className={`rounded-full px-2 py-0.5 ${profile.email?.trim() ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                    {tr('email_login', 'Email login')} {profile.email?.trim() ? tr('enabled', 'enabled') : tr('add_email', 'add email')}
                   </span>
                   <span className={`rounded-full px-2 py-0.5 ${otpEnabled ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
                     OTP 2FA {otpEnabled ? tr('on', 'on') : tr('off', 'off')}

@@ -239,6 +239,7 @@ export default function Settings() {
   const previewFontFamily = FONT_PREVIEW_CSS[form.ui_font_family || 'system'] || FONT_PREVIEW_CSS.system
   const previewBaseSize = Math.max(14, Math.round((parseFloat(form.ui_font_size || 14) / 14) * 16))
   const previewTitleSize = form.ui_title_font_size || Math.max(20, Math.round((parseFloat(form.ui_font_size || 14) || 14) * 1.75))
+  const previewSidebarSize = form.ui_sidebar_font_size || Math.max(13, Math.round(previewBaseSize * 0.95))
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
   const selectedDisplayTimezone = form.display_timezone || settings.display_timezone || deviceTimezone
   const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'
