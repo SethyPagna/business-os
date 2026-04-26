@@ -114,6 +114,12 @@ function triggerChunkRecoveryReload(marker) {
   return true
 }
 
+function createChunkReloadStallError(key) {
+  const error = new Error(`Loading chunk recovery reload did not complete (${key}). Please tap Reload page.`)
+  error.name = 'ChunkReloadStallError'
+  return error
+}
+
 function shouldRetryChunk(marker) {
   // One reload per page key avoids infinite loops while still healing most
   // stale-index / evicted-chunk deployment states.
@@ -147,7 +153,9 @@ function lazyWithRetry(importer, key) {
 
         if (shouldRetryChunk(marker)) {
           triggerChunkRecoveryReload(marker)
-          return new Promise(() => {})
+          await new Promise((resolve) => window.setTimeout(resolve, 1400))
+          clearRetryMarker(marker)
+          throw createChunkReloadStallError(key)
         }
 
         clearRetryMarker(marker)
