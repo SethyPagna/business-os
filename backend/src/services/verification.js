@@ -65,7 +65,7 @@ function maskDestination(channel, destination) {
 }
 
 function generateCode() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(crypto.randomInt(100000, 1000000))
 }
 
 function hashCode(code, salt) {
@@ -95,6 +95,19 @@ function cleanupExpiredCodes() {
   `).run()
 }
 
+function invalidateActiveCodes({ userId, purpose, channel, destination }) {
+  db.prepare(`
+    UPDATE verification_codes
+    SET consumed_at = datetime('now')
+    WHERE user_id IS ?
+      AND purpose = ?
+      AND channel = ?
+      AND destination = ?
+      AND consumed_at IS NULL
+      AND datetime(expires_at) >= datetime('now')
+  `).run(userId || null, purpose, channel, destination)
+}
+
 function createVerificationRecord({ userId, purpose, channel, destination, meta = {}, ttlMinutes = DEFAULT_CODE_TTL_MINUTES }) {
   const code = generateCode()
   const salt = crypto.randomBytes(16).toString('hex')
@@ -102,6 +115,7 @@ function createVerificationRecord({ userId, purpose, channel, destination, meta 
   const expiresAt = toIso(nowMs() + (Math.max(1, Number(ttlMinutes || DEFAULT_CODE_TTL_MINUTES)) * 60 * 1000))
 
   cleanupExpiredCodes()
+  invalidateActiveCodes({ userId, purpose, channel, destination })
 
   db.prepare(`
     INSERT INTO verification_codes (

@@ -135,8 +135,8 @@ function rejectLogin(res, t0, lockKey, identifierPreview, reason = 'invalid_cred
 /**
  * 1.6 Decrypt stored OTP secret for TOTP checks.
  */
-function getOtpSecret(user) {
-  return decryptSecret(user?.otp_secret || '')
+function getOtpSecret(user, field = 'otp_secret') {
+  return decryptSecret(user?.[field] || '')
 }
 
 /**
@@ -145,7 +145,13 @@ function getOtpSecret(user) {
  * - merges role permissions + user overrides
  */
 function buildUserPayload(user) {
-  const { password: _pw, otp_secret: _sec, ...safeUser } = user
+  const {
+    password: _pw,
+    otp_secret: _sec,
+    otp_pending_secret: _pendingSec,
+    otp_pending_created_at: _pendingCreatedAt,
+    ...safeUser
+  } = user
   const userPerms = tryParse(safeUser.permissions, {})
   let mergedPerms = { ...userPerms }
   if (safeUser.role_id) {
@@ -549,8 +555,16 @@ router.post('/otp/verify', (req, res) => {
     message: 'Too many OTP attempts.',
   })) return
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(userId)
-  if (!user || !user.otp_secret) return err(res, 'Invalid request', 401)
+  const user = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE id = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND otp_enabled = 1
+      AND otp_secret IS NOT NULL
+  `).get(userId)
+  if (!user) return err(res, 'Invalid request', 401)
   const otpSecret = getOtpSecret(user)
   if (!otpSecret) return err(res, 'OTP secret is unavailable. Please set up OTP again.', 400)
 
@@ -581,7 +595,11 @@ router.post('/otp/setup', authToken, async (req, res) => {
   if (!user) return err(res, 'User not found')
 
   const secret = speakeasy.generateSecret({ name: `BusinessOS (${user.username})`, length: 20 })
-  db.prepare('UPDATE users SET otp_secret = ?, otp_enabled = 0 WHERE id = ?').run(encryptSecret(secret.base32), userId)
+  db.prepare(`
+    UPDATE users
+    SET otp_pending_secret = ?, otp_pending_created_at = datetime('now')
+    WHERE id = ?
+  `).run(encryptSecret(secret.base32), userId)
 
   try {
     const qrDataUrl = await qrcode.toDataURL(secret.otpauth_url)
@@ -596,9 +614,9 @@ router.post('/otp/confirm', authToken, (req, res) => {
   const { userId, token } = req.body || {}
   if (!userId || !token) return err(res, 'userId and token required')
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
-  if (!user || !user.otp_secret) return err(res, 'OTP not set up')
-  const otpSecret = getOtpSecret(user)
-  if (!otpSecret) return err(res, 'OTP secret is unavailable. Please set up OTP again.', 400)
+  if (!user || !user.otp_pending_secret) return err(res, 'OTP not set up')
+  const otpSecret = getOtpSecret(user, 'otp_pending_secret')
+  if (!otpSecret) return err(res, 'OTP setup secret is unavailable. Please start setup again.', 400)
 
   const verified = speakeasy.totp.verify({
     secret: otpSecret,
@@ -608,7 +626,14 @@ router.post('/otp/confirm', authToken, (req, res) => {
   })
   if (!verified) return err(res, 'Invalid code. Check your authenticator app time sync.')
 
-  db.prepare('UPDATE users SET otp_enabled = 1 WHERE id = ?').run(userId)
+  db.prepare(`
+    UPDATE users
+    SET otp_secret = otp_pending_secret,
+        otp_pending_secret = NULL,
+        otp_pending_created_at = NULL,
+        otp_enabled = 1
+    WHERE id = ?
+  `).run(userId)
   audit(userId, user.username, 'update', 'user', userId, { action: 'otp_enabled' })
   ok(res, {})
 })
@@ -620,7 +645,14 @@ router.post('/otp/disable', authToken, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
   if (!user) return err(res, 'User not found')
   if (password && !bcrypt.compareSync(password, user.password)) return err(res, 'Incorrect password', 401)
-  db.prepare('UPDATE users SET otp_enabled = 0, otp_secret = NULL WHERE id = ?').run(userId)
+  db.prepare(`
+    UPDATE users
+    SET otp_enabled = 0,
+        otp_secret = NULL,
+        otp_pending_secret = NULL,
+        otp_pending_created_at = NULL
+    WHERE id = ?
+  `).run(userId)
   audit(userId, user.username, 'update', 'user', userId, { action: 'otp_disabled' })
   ok(res, {})
 })

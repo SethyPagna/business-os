@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS users (
   permissions TEXT DEFAULT '{}',
   otp_enabled INTEGER DEFAULT 0,
   otp_secret  TEXT,
+  otp_pending_secret TEXT,
+  otp_pending_created_at TEXT,
   is_active   INTEGER DEFAULT 1,
   created_at  TEXT DEFAULT (datetime('now'))
 );
@@ -485,6 +487,8 @@ const migrations = [
   `ALTER TABLE users ADD COLUMN deleted_at TEXT`,
   `ALTER TABLE users ADD COLUMN otp_enabled INTEGER DEFAULT 0`,
   `ALTER TABLE users ADD COLUMN otp_secret TEXT`,
+  `ALTER TABLE users ADD COLUMN otp_pending_secret TEXT`,
+  `ALTER TABLE users ADD COLUMN otp_pending_created_at TEXT`,
 
   // roles
   `ALTER TABLE roles ADD COLUMN code TEXT`,
