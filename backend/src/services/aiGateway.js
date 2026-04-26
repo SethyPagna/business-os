@@ -183,11 +183,15 @@ async function callChatProvider(providerConfig, messages, options = {}) {
 
   if (provider === 'groq' || provider === 'mistral' || provider === 'cerebras') {
     const endpoint = trim(providerConfig?.endpoint_override) || PROVIDER_META[provider].defaultEndpoint
+    const temperature = typeof options.temperature === 'number' ? options.temperature : 0.45
+    const topP = typeof options.topP === 'number'
+      ? options.topP
+      : (provider === 'mistral' && temperature <= 0 ? 1 : 0.95)
     const body = {
       model,
       messages,
-      temperature: typeof options.temperature === 'number' ? options.temperature : 0.45,
-      top_p: typeof options.topP === 'number' ? options.topP : 0.95,
+      temperature,
+      top_p: topP,
       stream: false,
     }
 

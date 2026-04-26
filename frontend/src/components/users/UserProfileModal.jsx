@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Chrome, Facebook, Link2, Loader2, Mail, ShieldCheck } from 'lucide-react'
+import { Chrome, Facebook, Link2, Mail, ShieldCheck } from 'lucide-react'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
@@ -51,7 +51,6 @@ export default function UserProfileModal({ onClose }) {
   const [verifyingEmailCode, setVerifyingEmailCode] = useState(false)
   const [verificationCaps, setVerificationCaps] = useState({ email: true, googleOauth: false, facebookOauth: false, supabaseAuth: false })
   const [authMethods, setAuthMethods] = useState(null)
-  const [linkingProvider, setLinkingProvider] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -115,31 +114,6 @@ export default function UserProfileModal({ onClose }) {
       ? tr('admin_profile_override_hint', 'Admins can overwrite account fields directly and still send verification codes when needed.')
       : tr('self_service_profile_hint', 'Self-service changes require your current password. You can verify your email with a one-time check.')
   }, [canAdminOverride, t])
-
-  const handleStartProviderLink = async (provider) => {
-    if (!profile?.email?.trim()) {
-      notify(tr('add_email_before_connecting', 'Add your account email before connecting a sign-in provider.'), 'error')
-      return
-    }
-    setLinkingProvider(provider)
-    try {
-      const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(provider)}`
-      const result = await window.api.startSupabaseOauth({
-        provider,
-        mode: 'link',
-        redirectTo,
-      })
-      if (result?.success === false || !result?.url) {
-        notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
-        return
-      }
-      window.location.assign(result.url)
-    } catch (error) {
-      notify(error?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
-    } finally {
-      setLinkingProvider('')
-    }
-  }
 
   /**
    * 4. Profile + Security Mutations
@@ -412,7 +386,7 @@ export default function UserProfileModal({ onClose }) {
                     </div>
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', 'Email code sender')}</div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('email_code_sender', 'Verification email sender')}</div>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${verificationCaps.email ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'}`}>
                           {verificationCaps.email ? tr('email_sender_ready', 'Sender ready') : tr('email_sender_not_configured', 'Sender not configured')}
                         </span>
@@ -437,7 +411,7 @@ export default function UserProfileModal({ onClose }) {
                       </div>
                       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                         {verificationCaps.supabaseAuth
-                          ? tr('email_sender_vs_auth_note', 'Supabase auth is ready for sign-in methods. Email code sending needs a separate mail provider for verification and reset codes.')
+                          ? tr('email_sender_vs_auth_note', 'Supabase handles sign-in methods. Verification and reset codes still need a separate mail sender such as Resend, SendGrid, or an email webhook.')
                           : tr('email_sender_only_note', 'Email verification and reset codes need a configured mail sender.')}
                       </p>
                     </div>
@@ -503,9 +477,11 @@ export default function UserProfileModal({ onClose }) {
                     {authMethods?.email_login_enabled ? tr('enabled', 'enabled') : tr('setup_needed', 'setup needed')}
                   </div>
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {profile.email_verified
-                      ? tr('email_login_ready_note', 'Verified email can be used for provider-backed sign-in and recovery.')
-                      : tr('verify_email_first_note', 'Verify your email first to make email-based recovery more reliable.')}
+                    {!profile.email?.trim()
+                      ? tr('add_email_for_login_note', 'Add your account email first to use email sign-in on the login screen.')
+                      : profile.email_verified
+                        ? tr('email_login_ready_note', 'Email sign-in is ready. Verified email also helps recovery and provider matching.')
+                        : tr('verify_email_first_note', 'Email sign-in works with your saved email. Verify it to make recovery and provider matching more reliable.')}
                   </p>
                 </div>
 
@@ -514,19 +490,20 @@ export default function UserProfileModal({ onClose }) {
                     <Chrome className="h-4 w-4 text-gray-400" />
                     <span>{tr('google_signin', 'Google')}</span>
                   </div>
-                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.google_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
-                    {authMethods?.google_linked ? tr('connected', 'Connected') : tr('not_connected', 'Not connected')}
+                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.google_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : authMethods?.google_ready ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
+                    {authMethods?.google_linked
+                      ? tr('connected', 'Connected')
+                      : authMethods?.google_ready
+                        ? tr('ready_on_login', 'Ready on login')
+                        : tr('email_needed', 'Email needed')}
                   </div>
-                  <button
-                    type="button"
-                    className="btn-secondary mt-3 w-full justify-center"
-                    disabled={!verificationCaps.googleOauth || !!linkingProvider}
-                    onClick={() => handleStartProviderLink('google')}
-                  >
-                    {linkingProvider === 'google'
-                      ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{tr('connecting', 'Connecting...')}</span>
-                      : tr('connect_google', 'Connect Google')}
-                  </button>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {verificationCaps.googleOauth
+                      ? (authMethods?.google_ready
+                        ? tr('google_login_ready_note', 'No separate connect step is needed. Use Google on the login screen and it will match this account by email.')
+                        : tr('google_email_required_note', 'Save an email on this profile first. Google sign-in matches accounts by email.'))
+                      : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
+                  </p>
                 </div>
 
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
@@ -534,19 +511,20 @@ export default function UserProfileModal({ onClose }) {
                     <Facebook className="h-4 w-4 text-gray-400" />
                     <span>{tr('facebook_signin', 'Facebook')}</span>
                   </div>
-                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.facebook_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
-                    {authMethods?.facebook_linked ? tr('connected', 'Connected') : tr('not_connected', 'Not connected')}
+                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.facebook_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : authMethods?.facebook_ready ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
+                    {authMethods?.facebook_linked
+                      ? tr('connected', 'Connected')
+                      : authMethods?.facebook_ready
+                        ? tr('ready_on_login', 'Ready on login')
+                        : tr('email_needed', 'Email needed')}
                   </div>
-                  <button
-                    type="button"
-                    className="btn-secondary mt-3 w-full justify-center"
-                    disabled={!verificationCaps.facebookOauth || !!linkingProvider}
-                    onClick={() => handleStartProviderLink('facebook')}
-                  >
-                    {linkingProvider === 'facebook'
-                      ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{tr('connecting', 'Connecting...')}</span>
-                      : tr('connect_facebook', 'Connect Facebook')}
-                  </button>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {verificationCaps.facebookOauth
+                      ? (authMethods?.facebook_ready
+                        ? tr('facebook_login_ready_note', 'No separate connect step is needed. Use Facebook on the login screen and it will match this account by email.')
+                        : tr('facebook_email_required_note', 'Save an email on this profile first. Facebook sign-in matches accounts by email.'))
+                      : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.')}
+                  </p>
                 </div>
               </div>
 

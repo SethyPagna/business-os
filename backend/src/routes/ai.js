@@ -16,6 +16,12 @@ const {
 const router = express.Router()
 
 function getActor(req) {
+  if (req?.user?.id) {
+    return {
+      userId: Number(req.user.id || 0) || null,
+      userName: String(req.user.name || req.user.username || '').trim() || null,
+    }
+  }
   return {
     userId: Number(req.body?.userId || req.query?.userId || 0) || null,
     userName: String(req.body?.userName || req.query?.userName || '').trim() || null,

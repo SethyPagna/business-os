@@ -27,6 +27,7 @@ const RECONNECT_REFRESH_CHANNELS = [
   'customers',
   'suppliers',
   'delivery_contacts',
+  'deliveryContacts',
   'branches',
   'dashboard',
   'catalog',

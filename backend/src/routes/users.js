@@ -152,7 +152,7 @@ function getUserSecurityContext(id) {
  */
 function resolveVerificationContext(req) {
   const targetUserId = Number(req.params.id)
-  const actor = getActorFromPayload(req.body || {}, req.query || {})
+  const actor = getActorFromRequest(req)
   const target = db.prepare('SELECT id, username, phone, phone_verified, email, email_verified FROM users WHERE id = ? AND deleted_at IS NULL').get(targetUserId)
   const targetSecurity = getUserSecurityContext(targetUserId)
   return { targetUserId, actor, target, targetSecurity }
@@ -259,7 +259,9 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
     is_active: Number(user.is_active || 0) === 1 && !user.deleted_at,
     supabase_connected: !!String(user.supabase_user_id || '').trim(),
     supabase_user_id: String(user.supabase_user_id || '').trim(),
-    email_login_enabled: !!String(user.email || '').trim() && !!String(user.supabase_user_id || '').trim(),
+    email_login_enabled: !!String(user.email || '').trim(),
+    google_ready: providerConfig.googleEnabled && !!String(user.email || '').trim(),
+    facebook_ready: providerConfig.facebookEnabled && !!String(user.email || '').trim(),
     google_linked: !!authUser?.hasGoogle,
     facebook_linked: !!authUser?.hasFacebook,
     linked_providers: Array.isArray(authUser?.providers) ? authUser.providers : [],
@@ -584,7 +586,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
   if (!username?.trim()) return err(res, 'Username required')
   if (!isValidEmail(email)) return err(res, 'Valid email required')
 
-  const actor = getActorFromPayload(req.body || {}, req.query || {})
+  const actor = getActorFromRequest(req)
   if (!actor) return err(res, 'No permission', 403)
   const actorCanManage = hasAdminControl(actor)
   const targetSecurity = getUserSecurityContext(req.params.id)
@@ -631,7 +633,10 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
         is_active: Number(user.is_active || 0),
         deleted_at: user.deleted_at || null,
       }
-      const syncResult = await createOrUpdateAuthUser(syncCandidate, '')
+      const provisioningPassword = !supabaseUserId && nextEmail && !adminOverride
+        ? String(currentPassword || '')
+        : ''
+      const syncResult = await createOrUpdateAuthUser(syncCandidate, provisioningPassword)
       if (!syncResult.success && !syncResult.skipped) {
         return err(res, syncResult.error || 'Failed to sync profile with Supabase authentication.')
       }
@@ -668,7 +673,7 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
   const { currentPassword, newPassword, adminOverride, userId, userName } = req.body || {}
   if (!newPassword) return err(res, 'New password required')
 
-  const actor = getActorFromPayload(req.body || {}, req.query || {})
+  const actor = getActorFromRequest(req)
   if (!actor) return err(res, 'No permission', 403)
   const actorCanManage = hasAdminControl(actor)
   const targetSecurity = getUserSecurityContext(req.params.id)
