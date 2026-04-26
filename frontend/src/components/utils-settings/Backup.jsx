@@ -145,6 +145,113 @@ function SectionChip({ label, value, tone = 'slate' }) {
   )
 }
 
+function FolderBrowserPanel({
+  browseState,
+  busy,
+  copy,
+  onBrowse,
+  onBrowseDrives,
+  onClose,
+  onSelect,
+  useCurrentLabel,
+  currentPathLabel,
+}) {
+  if (!browseState) return null
+  const browseCrumbs = buildPathCrumbs(browseState?.base || '')
+  const selectedFolderLabel = String(browseState?.base || '').split(/[/\\]/).pop() || String(browseState?.base || '')
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/30">
+      <div className="border-b border-gray-200 bg-gray-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800/80">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => browseState.parent && onBrowse(browseState.parent)}
+            disabled={busy || !browseState.parent}
+            className={`rounded-lg px-2.5 py-1.5 text-xs ${browseState.parent ? 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-zinc-700 dark:text-gray-200 dark:hover:bg-zinc-600' : 'cursor-not-allowed bg-gray-100 text-gray-300 dark:bg-zinc-800 dark:text-gray-600'}`}
+          >
+            {browseState.parent === '__ROOTS__' ? copy('browse_drives', 'Browse drives') : copy('up', 'Up')}
+          </button>
+          <button
+            onClick={onBrowseDrives}
+            disabled={busy}
+            className="rounded-lg bg-white px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:bg-zinc-700 dark:text-gray-200 dark:hover:bg-zinc-600"
+          >
+            {copy('browse_drives', 'Browse drives')}
+          </button>
+          <button
+            onClick={onClose}
+            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-zinc-700 dark:hover:text-gray-200"
+          >
+            {copy('close', 'Close')}
+          </button>
+        </div>
+        <div className="mt-3">
+          {!browseState.isRootList && browseCrumbs.length ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {browseCrumbs.map((crumb, index) => (
+                <button
+                  key={`${crumb.path}-${index}`}
+                  className="rounded-full bg-white px-2.5 py-1 font-mono text-gray-600 hover:bg-blue-50 hover:text-blue-700 dark:bg-zinc-700 dark:text-gray-300 dark:hover:bg-blue-900/30 dark:hover:text-blue-200"
+                  onClick={() => onBrowse(crumb.path)}
+                >
+                  {crumb.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="font-mono text-xs text-gray-500 dark:text-gray-400">{browseState.base}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="max-h-72 overflow-y-auto p-3">
+        {browseState.error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-500 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+            {browseState.error}
+          </div>
+        ) : null}
+        {!browseState.error && browseState.dirs.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-200 px-4 py-4 text-sm text-gray-400 dark:border-zinc-700">
+            {copy('no_subfolders_found', 'No subfolders found')}
+          </div>
+        ) : null}
+
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {browseState.dirs.map((dir) => (
+            <div key={dir.fullPath} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <button
+                className="w-full text-left text-sm font-medium text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
+                onClick={() => onBrowse(dir.fullPath)}
+              >
+                {dir.name}
+              </button>
+              <div className="mt-1 truncate text-[11px] font-mono text-gray-400">{dir.fullPath}</div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-gray-400">{browseState.isRootList ? copy('drive', 'Drive') : copy('folder', 'Folder')}</span>
+                <button
+                  className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50"
+                  onClick={() => onSelect(dir.fullPath)}
+                >
+                  {copy('use_folder', 'Use')}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {!browseState.isRootList ? (
+        <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800/70 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-xs text-gray-500 dark:text-gray-400">{currentPathLabel}</span>
+          <button className="btn-primary w-full px-3 py-1.5 text-xs sm:w-auto" onClick={() => onSelect(browseState.base)}>
+            {useCurrentLabel || `${copy('use_folder', 'Use')} "${selectedFolderLabel}"`}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function DataFolderLocation({ t, notify }) {
   const copy = useCopy(t)
   const [info, setInfo] = useState(null)
@@ -226,7 +333,7 @@ function DataFolderLocation({ t, notify }) {
     const next = !showAdvancedBrowser
     setShowAdvancedBrowser(next)
     if (next && !browseState) {
-      await openBrowser(inputPath || info?.dataRootParent || info?.dataRoot || '')
+      await openDriveBrowser()
     }
   }
 
@@ -290,9 +397,6 @@ function DataFolderLocation({ t, notify }) {
     }
   }
 
-  const browseCrumbs = buildPathCrumbs(browseState?.base || '')
-  const selectedFolderLabel = String(browseState?.base || '').split(/[/\\]/).pop() || String(browseState?.base || '')
-
   return (
     <div className="card p-5 sm:p-6">
       <h2 className="mb-1 text-base font-semibold text-gray-900 dark:text-white">
@@ -318,7 +422,7 @@ function DataFolderLocation({ t, notify }) {
         {copy('data_folder_safe_copy', 'When you apply a new location, Business OS copies the current database, uploads, and generated files into the new folder first. The old folder is left alone so you have a rollback copy.')}
       </p>
 
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+      <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:flex-wrap">
         <input
           id="backup-data-folder-path"
           name="backup_data_folder_path"
@@ -330,13 +434,13 @@ function DataFolderLocation({ t, notify }) {
           onChange={(event) => setInputPath(event.target.value)}
           spellCheck={false}
         />
-        <button className="btn-primary w-full text-sm sm:w-auto" onClick={openInlinePicker} disabled={busy}>
+        <button className="btn-primary w-full text-sm lg:w-auto" onClick={openInlinePicker} disabled={busy}>
           {showAdvancedBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
         </button>
-        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={pickFolderNatively} disabled={busy}>
+        <button className="btn-secondary w-full text-sm lg:w-auto" onClick={pickFolderNatively} disabled={busy}>
           {copy('system_folder_picker', 'Choose Folder')}
         </button>
-        <button className="btn-secondary w-full text-sm sm:w-auto" onClick={openInExplorer} disabled={!hostUiAvailable || !String(info?.dataRoot || previewPath || '').trim()}>
+        <button className="btn-secondary w-full text-sm lg:w-auto" onClick={openInExplorer} disabled={!hostUiAvailable || !String(info?.dataRoot || previewPath || '').trim()}>
           {copy('open_in_explorer', 'Open active folder')}
         </button>
       </div>
@@ -350,7 +454,7 @@ function DataFolderLocation({ t, notify }) {
       {showAdvancedBrowser ? (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.dataRootParent || info?.dataRoot)} disabled={busy}>
-            {copy('browse', 'Browse current path')}
+            {copy('browse', 'Current folder')}
           </button>
           <button className="btn-secondary w-full text-xs sm:w-auto" onClick={openDriveBrowser} disabled={busy}>
             {copy('browse_drives', 'Browse drives')}
@@ -358,70 +462,17 @@ function DataFolderLocation({ t, notify }) {
         </div>
       ) : null}
 
-      {showAdvancedBrowser && browseState ? (
-        <div className="mt-3 overflow-hidden rounded-xl border border-gray-200 dark:border-zinc-600">
-          <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800">
-            <div className="mb-2 flex items-center gap-2">
-              <button
-                onClick={() => browseState.parent && openBrowser(browseState.parent)}
-                disabled={!browseState.parent}
-                className={`rounded px-2 py-1 text-xs ${browseState.parent ? 'text-gray-700 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-700' : 'cursor-not-allowed text-gray-300 dark:text-gray-600'}`}
-              >
-                {browseState.parent === '__ROOTS__' ? copy('browse_drives', 'Browse drives') : copy('up', 'Up')}
-              </button>
-              <button onClick={() => setBrowseState(null)} className="ml-auto rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-zinc-700">Close</button>
-            </div>
-            {!browseState.isRootList && browseCrumbs.length ? (
-              <div className="flex flex-wrap items-center gap-1 text-xs">
-                {browseCrumbs.map((crumb, index) => (
-                  <button
-                    key={`${crumb.path}-${index}`}
-                    className="rounded bg-white px-2 py-1 font-mono text-gray-600 hover:bg-blue-50 hover:text-blue-700 dark:bg-zinc-700 dark:text-gray-300 dark:hover:bg-blue-900/30"
-                    onClick={() => openBrowser(crumb.path)}
-                  >
-                    {crumb.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{browseState.base}</span>
-            )}
-          </div>
-
-          <div className="max-h-72 overflow-y-auto p-3">
-            {browseState.error ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-500">{browseState.error}</div>
-            ) : null}
-            {!browseState.error && browseState.dirs.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 px-4 py-4 text-sm text-gray-400 dark:border-zinc-700">{copy('no_subfolders_found', 'No subfolders found')}</div>
-            ) : null}
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {browseState.dirs.map((dir) => (
-                <div key={dir.fullPath} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-                  <button
-                    className="w-full text-left text-sm font-medium text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
-                    onClick={() => openBrowser(dir.fullPath)}
-                  >
-                    {browseState.isRootList ? copy('drive', 'Drive') : 'Folder'}: {dir.name}
-                  </button>
-                  <div className="mt-1 truncate text-[11px] font-mono text-gray-400">{dir.fullPath}</div>
-                  <button className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300" onClick={() => selectDir(dir.fullPath)}>
-                    {copy('select', 'Select')}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {!browseState.isRootList ? (
-            <div className="flex flex-col items-start gap-2 border-t border-gray-200 bg-gray-50 px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-xs text-gray-500">{copy('use_this_folder_directly', 'Use this folder as the parent location')}</span>
-              <button className="btn-primary w-full px-3 py-1 text-xs sm:w-auto" onClick={() => selectDir(browseState.base)}>
-                {copy('use_folder', 'Use')} "{selectedFolderLabel}"
-              </button>
-            </div>
-          ) : null}
-        </div>
+      {showAdvancedBrowser ? (
+        <FolderBrowserPanel
+          browseState={browseState}
+          busy={busy}
+          copy={copy}
+          onBrowse={openBrowser}
+          onBrowseDrives={openDriveBrowser}
+          onClose={() => setBrowseState(null)}
+          onSelect={selectDir}
+          currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
+        />
       ) : null}
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -450,6 +501,9 @@ export default function Backup() {
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
   const [hostUiAvailable, setHostUiAvailable] = useState(false)
+  const [exportBrowser, setExportBrowser] = useState(null)
+  const [restoreBrowser, setRestoreBrowser] = useState(null)
+  const [browserBusy, setBrowserBusy] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -471,6 +525,30 @@ export default function Backup() {
     'Files, uploads, and audit log',
   ]
 
+  const browseServerFolders = async (target, dir) => {
+    try {
+      setBrowserBusy(target)
+      const result = await window.api.browseDir(dir || '__ROOTS__')
+      if (target === 'export') setExportBrowser(result)
+      if (target === 'restore') setRestoreBrowser(result)
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBrowserBusy('')
+    }
+  }
+
+  const toggleServerBrowser = async (target, currentPath = '') => {
+    const isExport = target === 'export'
+    const visible = isExport ? !!exportBrowser : !!restoreBrowser
+    if (visible) {
+      if (isExport) setExportBrowser(null)
+      else setRestoreBrowser(null)
+      return
+    }
+    await browseServerFolders(target, currentPath || '__ROOTS__')
+  }
+
   const handleExport = async () => {
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     setLoading('export')
@@ -486,7 +564,7 @@ export default function Backup() {
 
   const pickFolder = async (setter, hintPath = '') => {
     if (!hostUiAvailable) {
-      notify(copy('host_ui_local_only', 'This action only works on the server machine. Type or paste a server path manually when connected remotely.'), 'info')
+      notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
       return
     }
     try {
@@ -598,7 +676,7 @@ export default function Backup() {
           </div>
 
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 lg:flex-row">
               <input
                 id="backup-folder-export-path"
                 name="backup_folder_export_path"
@@ -607,6 +685,10 @@ export default function Backup() {
                 onChange={(event) => setFolderExportPath(event.target.value)}
                 placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
               />
+              <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
+                <FolderOutput className="h-4 w-4" />
+                {exportBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
+              </button>
               <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderExportPath, folderExportPath)} disabled={!hostUiAvailable}>
                 <FolderOutput className="h-4 w-4" />
                 {copy('browse_folder', 'Choose Folder')}
@@ -615,6 +697,22 @@ export default function Backup() {
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {copy('server_folder_note', 'Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.')}
             </p>
+
+            {exportBrowser ? (
+              <FolderBrowserPanel
+                browseState={exportBrowser}
+                busy={browserBusy === 'export'}
+                copy={copy}
+                onBrowse={(dir) => browseServerFolders('export', dir)}
+                onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
+                onClose={() => setExportBrowser(null)}
+                onSelect={(fullPath) => {
+                  setFolderExportPath(fullPath)
+                  setExportBrowser(null)
+                }}
+                currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
+              />
+            ) : null}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderExport} disabled={loading === 'folder-export'}>
@@ -639,7 +737,7 @@ export default function Backup() {
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 lg:flex-row">
               <input
                 id="backup-folder-import-path"
                 name="backup_folder_import_path"
@@ -648,6 +746,10 @@ export default function Backup() {
                 onChange={(event) => setFolderImportPath(event.target.value)}
                 placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
               />
+              <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
+                <FolderInput className="h-4 w-4" />
+                {restoreBrowser ? copy('hide_advanced_browser', 'Hide browser') : copy('show_advanced_browser', 'Browse folders')}
+              </button>
               <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => pickFolder(setFolderImportPath, folderImportPath)} disabled={!hostUiAvailable}>
                 <FolderInput className="h-4 w-4" />
                 {copy('browse_folder', 'Choose Folder')}
@@ -656,6 +758,22 @@ export default function Backup() {
             <p className="text-xs text-amber-700 dark:text-amber-300">
               {copy('server_restore_note', 'Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.')}
             </p>
+
+            {restoreBrowser ? (
+              <FolderBrowserPanel
+                browseState={restoreBrowser}
+                busy={browserBusy === 'restore'}
+                copy={copy}
+                onBrowse={(dir) => browseServerFolders('restore', dir)}
+                onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
+                onClose={() => setRestoreBrowser(null)}
+                onSelect={(fullPath) => {
+                  setFolderImportPath(fullPath)
+                  setRestoreBrowser(null)
+                }}
+                currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
+              />
+            ) : null}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <button className="btn-primary inline-flex items-center gap-2 text-sm" onClick={handleFolderImport} disabled={loading === 'folder-import'}>

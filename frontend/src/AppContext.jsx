@@ -24,6 +24,12 @@ const langs = { en, km }
 const AppContext = createContext(null)
 const SyncContext = createContext(null)
 
+function normalizeDateInput(value) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date?.getTime?.()) ? null : date
+}
+
 export const PAGE_PERMISSIONS = {
   dashboard:        null,        // Always accessible
   catalog:          'customer_portal',
@@ -628,6 +634,8 @@ export function AppProvider({ children }) {
   const usdSymbol       = settings.currency_usd_symbol             || '$'
   const khrSymbol       = settings.currency_khr_symbol             || '៛'
   const displayCurrency = settings.display_currency                || 'USD'
+  const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const displayTimezone = settings.display_timezone || deviceTimezone
 
   const fmtUSD = useCallback((n) => {
     return `${usdSymbol}${Number(n||0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
@@ -644,6 +652,21 @@ export function AppProvider({ children }) {
   }, [displayCurrency, fmtUSD, fmtKHR, exchangeRate])
   const usdToKhr = useCallback((usd) => (usd||0) * exchangeRate, [exchangeRate])
   const khrToUsd = useCallback((khr) => (khr||0) / exchangeRate, [exchangeRate])
+  const formatDateTime = useCallback((value, options = {}) => {
+    const date = normalizeDateInput(value)
+    if (!date) return '--'
+    return date.toLocaleString(undefined, {
+      hour12: false,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: displayTimezone,
+      ...options,
+    })
+  }, [displayTimezone])
 
   const appValue = {
     user, login, logout, persistAuthenticatedUser,
@@ -655,6 +678,7 @@ export function AppProvider({ children }) {
     formatPrice, fmtUSD, fmtKHR,
     usdSymbol, khrSymbol, displayCurrency, exchangeRate,
     usdToKhr, khrToUsd,
+    displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
     // Expose sync status so components that use useApp() (legacy) can read it.
     syncConnected,

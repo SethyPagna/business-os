@@ -30,6 +30,7 @@ function StatusRow({ label, value, mono = false, extra = null }) {
 }
 
 function InfoTab({ syncUrl, syncConnected }) {
+  const { settings, t, formatDateTime, displayTimezone, deviceTimezone } = useApp()
   const [clientTime, setClientTime] = useState(new Date())
   const [serverTime, setServerTime] = useState(null)
   const [serverErr, setServerErr] = useState(null)
@@ -79,19 +80,8 @@ function InfoTab({ syncUrl, syncConnected }) {
     return () => clearInterval(timer)
   }, [fetchServerTime])
 
-  const fmt = (value) => value
-    ? value.toLocaleString(undefined, {
-        hour12: false,
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    : '--'
-
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const fmt = (value) => formatDateTime(value)
+  const appliedTimezone = settings?.display_timezone || displayTimezone
   const mode = syncUrl ? (isAutoDetected(syncUrl) ? 'Auto-detected (same origin)' : 'Manual') : 'Local (IndexedDB only)'
   const ws = syncUrl ? (syncConnected ? 'Connected' : 'Reconnecting...') : 'Local only'
 
@@ -123,8 +113,8 @@ function InfoTab({ syncUrl, syncConnected }) {
       <div className="space-y-1 border-t border-gray-100 pt-2 dark:border-gray-700">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">Client (This Device)</p>
         <StatusRow label="Local time" value={fmt(clientTime)} mono />
-        <StatusRow label="Timezone" value={tz} mono />
-        <StatusRow label="UTC offset" value={`UTC${clientTime.toTimeString().split('GMT')[1]?.replace(/\s*\(.*\)/, '') || ''}`} mono />
+        <StatusRow label="Display timezone" value={appliedTimezone} mono />
+        <StatusRow label="Device timezone" value={deviceTimezone} mono />
       </div>
 
       {syncUrl ? (
@@ -161,8 +151,8 @@ function InfoTab({ syncUrl, syncConnected }) {
 
           <div className="mt-1 space-y-0.5 rounded-lg bg-blue-50 p-2 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
             <p className="font-semibold">Time handling:</p>
-            <p>Sales and audit logs record your <strong>device timezone</strong> (`client_time`).</p>
-            <p>Server records stay in UTC and render back in local time.</p>
+            <p>Client and server previews use the selected <strong>{t('display_timezone')}</strong>.</p>
+            <p>Audit metadata still keeps each device timezone for traceability.</p>
             <p>Offline activity queues locally and syncs timestamps after reconnect.</p>
             <p>If drift is above 10s, check the device clock settings.</p>
           </div>

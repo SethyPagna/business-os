@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
-import { BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Receipt, RotateCcw, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
@@ -8,10 +8,6 @@ import { createCircularFaviconDataUrl } from '../../utils/favicon'
 
 const FALLBACK_COPY = {
   en: {
-    customerPortalTitle: 'Customer Portal',
-    customerPortalDesc: 'Portal layout, business info, public path, images, and customer-facing content are edited inside the Customer Portal page with live preview. Point rules are managed in Loyalty Points.',
-    openEditor: 'Open editor',
-    openPublicRoute: 'Open public route',
     appearanceHintAccent: 'Buttons, active links, and highlights',
     sidebarColorTitle: 'Sidebar Color',
     sidebarColorHint: 'Navigation background',
@@ -37,10 +33,6 @@ const FALLBACK_COPY = {
     navReset: 'Reset navigation',
   },
   km: {
-    customerPortalTitle: 'Customer Portal',
-    customerPortalDesc: 'Portal layout, business info, public path, images, and customer-facing content are edited inside the Customer Portal page with live preview. Point rules are managed in Loyalty Points.',
-    openEditor: 'Open editor',
-    openPublicRoute: 'Open public route',
     appearanceHintAccent: 'Buttons, active links, and highlights',
     sidebarColorTitle: 'Sidebar Color',
     sidebarColorHint: 'Navigation background',
@@ -209,17 +201,6 @@ const SETTINGS_NAV_ICONS = {
   server: Server,
 }
 
-function normalizePortalPath(value) {
-  const cleaned = String(value || '')
-    .trim()
-    .replace(/^https?:\/\/[^/]+/i, '')
-    .replace(/[^a-zA-Z0-9/_-]/g, '-')
-    .replace(/\/+/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\/+$/, '')
-  return cleaned ? `/${cleaned}` : '/customer-portal'
-}
-
 function useCopy(language, t) {
   return (key, fallback) => {
     const translated = t?.(key)
@@ -288,7 +269,7 @@ function SwatchPicker({ colors, value, onChange, fallbackValue, title, hint, res
 }
 
 export default function Settings() {
-  const { t, settings, saveSettings, user, navigateTo, notify } = useApp()
+  const { t, settings, saveSettings, user, notify, deviceTimezone } = useApp()
   const [otpStatus, setOtpStatus] = useState(false)
   const [otpModal, setOtpModal] = useState(null)
   const [pmList, setPmList] = useState([])
@@ -306,6 +287,25 @@ export default function Settings() {
   const previewSectionSize = form.ui_section_font_size || Math.max(13, Math.round((parseFloat(form.ui_font_size || 14) || 14) * 1.14))
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
   const previewChipSize = form.ui_chip_font_size || Math.max(11, Math.round((parseFloat(form.ui_font_size || 14) || 14) * 0.92))
+  const selectedDisplayTimezone = form.display_timezone || settings.display_timezone || deviceTimezone
+  const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'
+  const typographyPreview = previewLanguage === 'km'
+    ? {
+        eyebrow: 'Khmer',
+        title: 'លាង កូស្មេធីក',
+        sidebar: 'ម៉ឺនុយចំហៀង',
+        section: 'ចំណងជើងផ្នែក',
+        body: 'ទំព័រផលិតផល បង្កាន់ដៃ និងការកំណត់ នឹងប្រើពុម្ពអក្សរ និងទំហំអក្សរនេះ។',
+        chip: 'ប្រភេទ',
+      }
+    : {
+        eyebrow: 'English',
+        title: 'Leang Cosmetics',
+        sidebar: 'Sidebar item',
+        section: 'Section heading',
+        body: 'Products, receipts, settings, and forms will use this font family and size scale.',
+        chip: 'Category',
+      }
 
   useEffect(() => {
     if (user?.id) {
@@ -361,10 +361,22 @@ export default function Settings() {
     return mobilePinned.map((id) => byId.get(id)).filter(Boolean)
   }, [mobilePinned, navItems])
 
-  const publicPortalPath = normalizePortalPath(form.customer_portal_path || settings.customer_portal_path || '/customer-portal')
-  const publicPortalUrl = typeof window !== 'undefined' ? `${window.location.origin}${publicPortalPath}` : publicPortalPath
-
   const setValue = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const formatPreviewDateTime = (value) => {
+    const date = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(date.getTime())) return '--'
+    return date.toLocaleString(undefined, {
+      hour12: false,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: selectedDisplayTimezone,
+      timeZoneName: 'short',
+    })
+  }
 
   const moveNavItem = (id, direction) => {
     const items = [...navItems]
@@ -481,7 +493,7 @@ export default function Settings() {
             <div>
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Browser tab icon</h2>
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Used for the Business OS admin tab. The portal tab icon is managed in the Customer Portal editor.
+                Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page.
               </p>
             </div>
             <div className="flex h-16 w-16 items-center justify-center rounded-full border border-gray-200 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -518,10 +530,6 @@ export default function Settings() {
                 <Trash2 className="h-4 w-4" />
                 <span>Clear</span>
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => navigateTo('catalog')}>
-                <FolderOpen className="h-4 w-4" />
-                <span>Portal editor</span>
-              </button>
             </div>
           </div>
         </div>
@@ -539,24 +547,6 @@ export default function Settings() {
                 <option value="KHR">{t('khr_only')}</option>
                 <option value="BOTH">{t('both_currencies')}</option>
               </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="card p-4 sm:p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">{copy('customerPortalTitle', 'Customer Portal')}</h2>
-              <p className="text-xs text-gray-400 mt-1">{copy('customerPortalDesc', 'Portal layout, business info, public path, images, and customer-facing content are edited inside the Customer Portal page with live preview. Point rules are managed in Loyalty Points.')}</p>
-              <div className="mt-2 text-xs text-gray-500 break-all">{publicPortalUrl}</div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-              <button type="button" className="btn-secondary text-sm" onClick={() => navigateTo('catalog')}>
-                {copy('openEditor', 'Open editor')}
-              </button>
-              <a className="btn-secondary text-sm" href={publicPortalUrl} target="_blank" rel="noreferrer">
-                {copy('openPublicRoute', 'Open public route')}
-              </a>
             </div>
           </div>
         </div>
@@ -761,54 +751,22 @@ export default function Settings() {
 
             <div className="sm:col-span-2 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-zinc-900/40">
               <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Typography preview</div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-zinc-800" style={{ fontFamily: previewFontFamily, fontSize: `${previewBaseSize}px` }}>
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-400">English</div>
-                  <div className="mt-2 font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>Leang Cosmetics</div>
-                  <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-slate-600 dark:bg-zinc-700 dark:text-zinc-200" style={{ fontSize: `${previewSidebarSize}px` }}>
-                    Sidebar example
-                  </div>
-                  <div className="mt-3 font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewSectionSize}px` }}>Section heading</div>
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                    Product pages, receipts, settings, and forms follow this font family and the stronger size scale across the app.
-                  </p>
-                  <div className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" style={{ fontSize: `${previewChipSize}px` }}>
-                    Category chip
-                  </div>
-                  <div className="mt-3 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <div className="grid grid-cols-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-gray-500 dark:border-gray-700 dark:bg-zinc-900/40" style={{ fontSize: `${previewTableSize}px` }}>
-                      <span>Product</span>
-                      <span className="text-right">Price</span>
-                    </div>
-                    <div className="grid grid-cols-2 px-3 py-2 text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewTableSize}px` }}>
-                      <span>Lip Tint</span>
-                      <span className="text-right">$9.90</span>
-                    </div>
-                  </div>
+              <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-zinc-800" style={{ fontFamily: previewFontFamily, fontSize: `${previewBaseSize}px` }}>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">{typographyPreview.eyebrow}</div>
+                <div className="mt-2 font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>
+                  {typographyPreview.title}
                 </div>
-                <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-zinc-800" style={{ fontFamily: previewFontFamily, fontSize: `${previewBaseSize}px` }}>
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Khmer</div>
-                  <div className="mt-2 font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>លាង កូស្មេធីក</div>
-                  <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-slate-600 dark:bg-zinc-700 dark:text-zinc-200" style={{ fontSize: `${previewSidebarSize}px` }}>
-                    ម៉ឺនុយចំហៀង
-                  </div>
-                  <div className="mt-3 font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewSectionSize}px` }}>ចំណងជើងផ្នែក</div>
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                    ទំព័រផលិតផល បង្កាន់ដៃ ការកំណត់ និងសំណុំបែបបទនឹងប្រើពុម្ពអក្សរ និងទំហំអក្សរនេះ។
-                  </p>
-                  <div className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" style={{ fontSize: `${previewChipSize}px` }}>
-                    ប្រភេទ
-                  </div>
-                  <div className="mt-3 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <div className="grid grid-cols-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-gray-500 dark:border-gray-700 dark:bg-zinc-900/40" style={{ fontSize: `${previewTableSize}px` }}>
-                      <span>ទំនិញ</span>
-                      <span className="text-right">តម្លៃ</span>
-                    </div>
-                    <div className="grid grid-cols-2 px-3 py-2 text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewTableSize}px` }}>
-                      <span>លីបធីន</span>
-                      <span className="text-right">$9.90</span>
-                    </div>
-                  </div>
+                <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-slate-600 dark:bg-zinc-700 dark:text-zinc-200" style={{ fontSize: `${previewSidebarSize}px` }}>
+                  {typographyPreview.sidebar}
+                </div>
+                <div className="mt-3 font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: `${previewSectionSize}px` }}>
+                  {typographyPreview.section}
+                </div>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                  {typographyPreview.body}
+                </p>
+                <div className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" style={{ fontSize: `${previewChipSize}px` }}>
+                  {typographyPreview.chip}
                 </div>
               </div>
             </div>
@@ -904,8 +862,9 @@ export default function Settings() {
 
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs">
               <p className="font-semibold text-blue-700 dark:text-blue-300 mb-1">{t('current_device_time')}</p>
-              <p className="font-mono text-blue-600 dark:text-blue-400">{new Date().toLocaleString(undefined, { timeZoneName: 'short' })}</p>
-              <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{Intl.DateTimeFormat().resolvedOptions().timeZone}</strong></p>
+              <p className="font-mono text-blue-600 dark:text-blue-400">{formatPreviewDateTime(new Date())}</p>
+              <p className="text-gray-500 mt-1">{t('display_timezone')}: <strong>{selectedDisplayTimezone}</strong></p>
+              <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{deviceTimezone}</strong></p>
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>
             </div>
           </div>
@@ -929,9 +888,11 @@ export default function Settings() {
                     setDragPinnedId(null)
                   }}
                   onDragEnd={() => setDragPinnedId(null)}
-                  className={`flex flex-col gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/40 sm:flex-row sm:items-center ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
+                  className={`flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/40 ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
                 >
-                  <span className="cursor-grab text-gray-400" title={copy('dragToReorder', 'Drag to reorder')}>::</span>
+                  <span className="cursor-grab text-gray-400" title={copy('dragToReorder', 'Drag to reorder')}>
+                    <GripVertical className="h-4 w-4" />
+                  </span>
                   <span className="min-w-0 flex flex-1 items-center gap-2 truncate text-gray-700 dark:text-gray-200">
                     {(() => {
                       const Icon = SETTINGS_NAV_ICONS[item.id] || SettingsIcon
@@ -941,19 +902,23 @@ export default function Settings() {
                   </span>
                   <button
                     type="button"
-                    className="btn-secondary h-7 w-12 px-0 py-0 text-[11px]"
+                    className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
                     onClick={() => movePinnedItem(item.id, 'up')}
                     disabled={index === 0}
+                    aria-label={copy('moveUp', 'Up')}
+                    title={copy('moveUp', 'Up')}
                   >
-                    {copy('moveUp', 'Up')}
+                    <ArrowUp className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
-                    className="btn-secondary h-7 w-12 px-0 py-0 text-[11px]"
+                    className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
                     onClick={() => movePinnedItem(item.id, 'down')}
                     disabled={index === mobilePinnedItems.length - 1}
+                    aria-label={copy('moveDown', 'Down')}
+                    title={copy('moveDown', 'Down')}
                   >
-                    {copy('moveDown', 'Down')}
+                    <ArrowDown className="h-3.5 w-3.5" />
                   </button>
                 </div>
               )) : (
@@ -982,15 +947,35 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-3 gap-1.5">
-                    <button type="button" className="btn-secondary h-8 px-0 py-0 text-[11px]" onClick={() => moveNavItem(item.id, 'up')} disabled={index === 0} title={copy('moveUp', 'Up')}>Up</button>
-                    <button type="button" className="btn-secondary h-8 px-0 py-0 text-[11px]" onClick={() => moveNavItem(item.id, 'down')} disabled={index === navItems.length - 1} title={copy('moveDown', 'Down')}>Down</button>
+                  <div className="mt-3 flex items-center justify-end gap-1.5">
                     <button
                       type="button"
-                      className={`h-8 rounded-md border px-2 py-0 text-[11px] transition-colors ${isPinned ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
-                      onClick={() => toggleMobilePinned(item.id)}
+                      className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
+                      onClick={() => moveNavItem(item.id, 'up')}
+                      disabled={index === 0}
+                      aria-label={copy('moveUp', 'Up')}
+                      title={copy('moveUp', 'Up')}
                     >
-                      {isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary flex h-8 w-8 items-center justify-center px-0 py-0"
+                      onClick={() => moveNavItem(item.id, 'down')}
+                      disabled={index === navItems.length - 1}
+                      aria-label={copy('moveDown', 'Down')}
+                      title={copy('moveDown', 'Down')}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex h-8 min-w-[2.25rem] items-center justify-center rounded-md border px-2 py-0 transition-colors ${isPinned ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                      onClick={() => toggleMobilePinned(item.id)}
+                      aria-label={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
+                      title={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
+                    >
+                      {isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
                     </button>
                   </div>
                 </div>
