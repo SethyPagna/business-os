@@ -1346,6 +1346,7 @@
   "off": "Off",
   "current_password_required_save": "Current password is required to save account changes",
   "profile_updated": "Profile updated",
+  "profile_updated_email_reverify": "Profile updated. Your new email replaced the previous one and now needs verification.",
   "new_password_min_length": "Use at least 4 characters for the new password",
   "new_password_confirm_mismatch": "New password confirmation does not match",
   "current_password_required_change": "Current password is required to change password",

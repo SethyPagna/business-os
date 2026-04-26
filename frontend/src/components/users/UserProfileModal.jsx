@@ -141,6 +141,8 @@ export default function UserProfileModal({ onClose }) {
 
     setSavingProfile(true)
     try {
+      const previousEmail = String(profile.email || '').trim().toLowerCase()
+      const previousVerified = Number(profile.email_verified || 0) === 1
       const result = await window.api.updateUserProfile(user.id, {
         name: profile.name,
         username: profile.username,
@@ -167,7 +169,14 @@ export default function UserProfileModal({ onClose }) {
         setAuthMethods(authData)
       }
       setCurrentPassword('')
-      notify(tr('profile_updated', 'Profile updated'), 'success')
+      const nextEmail = String(nextUser?.email || '').trim().toLowerCase()
+      const nextVerified = Number(nextUser?.email_verified || 0) === 1
+      const emailChanged = previousEmail !== nextEmail
+      if (emailChanged && nextEmail && previousVerified && !nextVerified) {
+        notify(tr('profile_updated_email_reverify', 'Profile updated. Your new email replaced the previous one and now needs verification.'), 'success')
+      } else {
+        notify(tr('profile_updated', 'Profile updated'), 'success')
+      }
     } catch (error) {
       notify(error?.message || 'Failed to save profile', 'error')
     } finally {

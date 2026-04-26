@@ -679,8 +679,33 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
     const emailChanged = String(user.email || '') !== String(nextEmail || '')
     const nextPhoneVerified = 0
     const nextEmailVerified = nextEmail
-      ? (adminOverride ? 1 : (emailChanged ? 0 : Number(user.email_verified || 0)))
+      ? (emailChanged ? 0 : Number(user.email_verified || 0))
       : 0
+
+    const duplicateUsername = db.prepare(`
+      SELECT id
+      FROM users
+      WHERE username = ?
+        AND id != ?
+        AND deleted_at IS NULL
+    `).get(username.trim(), req.params.id)
+    if (duplicateUsername) {
+      return err(res, 'Username already exists', 409)
+    }
+
+    if (nextEmail) {
+      const duplicateEmail = db.prepare(`
+        SELECT id
+        FROM users
+        WHERE lower(trim(email)) = ?
+          AND id != ?
+          AND deleted_at IS NULL
+      `).get(nextEmail, req.params.id)
+      if (duplicateEmail) {
+        return err(res, 'Email already exists', 409)
+      }
+    }
+
     if (isSupabaseAuthConfigured() && user.supabase_user_id && !nextEmail) {
       return err(res, 'Email is required for Supabase-linked accounts.')
     }
@@ -728,11 +753,26 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
       req.params.id,
     )
 
-    audit(userId || actor.id, userName || actor.name, 'update', 'user', req.params.id, { mode: 'profile' })
+    audit(userId || actor.id, userName || actor.name, 'update', 'user', req.params.id, {
+      mode: 'profile',
+      email_changed: emailChanged,
+      email_verification_reset: !!(emailChanged && nextEmail),
+      previous_email: user.email || null,
+      next_email: nextEmail,
+      previous_email_verified: Number(user.email_verified || 0) === 1,
+      next_email_verified: Number(nextEmailVerified || 0) === 1,
+    })
     broadcast('users')
     ok(res, sanitizeUserRow(getUserWithRole(req.params.id)))
   } catch (e) {
-    err(res, e?.message?.includes('UNIQUE') ? 'Username already exists' : (e?.message || 'Failed to update profile'))
+    const message = String(e?.message || '')
+    if (message.includes('UNIQUE constraint failed: users.email')) {
+      return err(res, 'Email already exists', 409)
+    }
+    if (message.includes('UNIQUE')) {
+      return err(res, 'Username already exists', 409)
+    }
+    err(res, message || 'Failed to update profile')
   }
 })
 
