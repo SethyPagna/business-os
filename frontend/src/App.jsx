@@ -5,13 +5,6 @@ import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import PageHelpButton from './components/shared/PageHelpButton'
 import { createCircularFaviconDataUrl } from './utils/favicon'
-import Users from './components/users/Users'
-import AuditLog from './components/utils-settings/AuditLog'
-import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
-import Backup from './components/utils-settings/Backup'
-import Settings from './components/utils-settings/Settings'
-import FilesPage from './components/files/FilesPage'
-import ServerPage from './components/server/ServerPage'
 
 /**
  * Frontend application shell.
@@ -32,6 +25,13 @@ const PAGE_IMPORTERS = {
   inventory: () => import('./components/inventory/Inventory'),
   branches: () => import('./components/branches/Branches'),
   contacts: () => import('./components/contacts/Contacts'),
+  users: () => import('./components/users/Users'),
+  audit_log: () => import('./components/utils-settings/AuditLog'),
+  receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
+  backup: () => import('./components/utils-settings/Backup'),
+  settings: () => import('./components/utils-settings/Settings'),
+  files: () => import('./components/files/FilesPage'),
+  server: () => import('./components/server/ServerPage'),
   catalog: () => import('./components/catalog/CatalogPage'),
   loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
 }
@@ -46,6 +46,13 @@ const WARMUP_PAGE_IDS = [
   'pos',
   'branches',
   'contacts',
+  'users',
+  'audit_log',
+  'receipt_settings',
+  'backup',
+  'settings',
+  'files',
+  'server',
 ]
 
 const CHUNK_IMPORT_TIMEOUT_MS = 8000
@@ -173,6 +180,13 @@ const Returns = lazyWithRetry(PAGE_IMPORTERS.returns, 'returns')
 const Inventory = lazyWithRetry(PAGE_IMPORTERS.inventory, 'inventory')
 const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
+const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
+const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
+const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
+const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
+const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
+const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
+const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
 const PAGE_COMPONENTS = {
@@ -277,11 +291,20 @@ function useChunkWarmup(user) {
     let idleId = null
     let timeoutId = null
     let followupId = null
+    let started = false
     const importers = getWarmupImporters()
 
-    const runWarmup = () => {
-      if (cancelled) return
-      Promise.allSettled(importers.map((load) => load())).catch(() => {})
+    const runWarmup = async () => {
+      if (cancelled || started) return
+      started = true
+      for (const load of importers) {
+        if (cancelled) return
+        try {
+          await load()
+        } catch (_) {
+          // Warmup is best-effort only; real navigation still has page-level retry.
+        }
+      }
     }
 
     timeoutId = window.setTimeout(runWarmup, 120)

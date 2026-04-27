@@ -210,6 +210,40 @@ echo [OK] Frontend built to frontend/dist/
 echo.
 
 REM ============================================================
+REM  STEP 3B - Verify frontend and backend before packaging
+REM  Release output should only be produced from a known-good build.
+REM ============================================================
+echo [STEP 3B] Running verification checks...
+pushd "%FRONTEND_SRC%"
+echo [INFO] Running: npm run verify:i18n >> "%LOG%" 2>&1
+call npm run verify:i18n >> "%LOG%" 2>&1
+if errorlevel 1 (
+    popd
+    echo.
+    echo [ERROR] Frontend i18n verification failed.
+    echo         Check %LOG% for details.
+    echo.
+    pause
+    exit /b 1
+)
+popd
+pushd "%BACKEND_SRC%"
+echo [INFO] Running: npm run test:utils >> "%LOG%" 2>&1
+call npm run test:utils >> "%LOG%" 2>&1
+if errorlevel 1 (
+    popd
+    echo.
+    echo [ERROR] Backend utility tests failed.
+    echo         Check %LOG% for details.
+    echo.
+    pause
+    exit /b 1
+)
+popd
+echo [OK] Verification checks passed
+echo.
+
+REM ============================================================
 REM  STEP 4 - Stage frontend into backend package assets
 REM  pkg bundles backend/frontend-dist into the packaged EXE.
 REM ============================================================

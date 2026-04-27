@@ -51,6 +51,18 @@ function fixCrossorigin() {
   }
 }
 
+function manualChunks(id) {
+  // Keep the shared vendor graph stable while still letting route chunks stay
+  // small enough that first-open admin pages do not drag the whole app shell
+  // over the wire up front.
+  if (!id.includes('node_modules')) return undefined
+  if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+  if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
+  if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return 'vendor-lucide'
+  if (/[\\/]node_modules[\\/]@capacitor[\\/]/.test(id)) return 'vendor-capacitor'
+  return 'vendor'
+}
+
 export default defineConfig({
   plugins: [react(), fixCrossorigin()],
 
@@ -63,11 +75,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Stable chunk names ensure proper cache invalidation
-        manualChunks: {
-          vendor:  ['react', 'react-dom'],
-          dexie:   ['dexie'],
-          lucide:  ['lucide-react'],
-        },
+        manualChunks,
         // Keep lazy route chunk names stable so public Funnel sessions do not
         // break when an older shell requests a page bundle after a deploy.
         chunkFileNames: 'assets/[name].js',

@@ -9,7 +9,11 @@ const { resolveProjectRoot } = require('./lib/fs-utils')
 // the repository root.
 const ROOT = resolveProjectRoot(__dirname)
 const DOCS_REF = path.join(ROOT, 'ops', 'docs', 'reference')
-const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts']
+const VARIANT_ROOTS = fs.readdirSync(ROOT, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && /^business-os-v\d/i.test(entry.name))
+  .map((entry) => entry.name)
+  .sort((a, b) => a.localeCompare(b))
+const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts', ...VARIANT_ROOTS]
 const EXCLUDED_DIRS = new Set([
   'node_modules',
   'dist',

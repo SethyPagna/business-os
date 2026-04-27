@@ -226,6 +226,27 @@ if errorlevel 1 (
 )
 echo [OK] Frontend built successfully
 
+echo.
+echo [INFO] Verifying frontend translation coverage...
+call npm run verify:i18n
+if errorlevel 1 (
+    echo [ERROR] Frontend i18n verification failed.
+    pause
+    exit /b 1
+)
+echo [OK] Frontend verification passed
+
+echo.
+echo [INFO] Verifying backend utility tests...
+cd /d "%ROOT%\backend"
+call npm run test:utils
+if errorlevel 1 (
+    echo [ERROR] Backend utility tests failed.
+    pause
+    exit /b 1
+)
+echo [OK] Backend verification passed
+
 REM ---- PM2 (optional process manager) ------------------------------------
 REM Used by start-server.bat for auto-restart/background execution.
 echo.

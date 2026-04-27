@@ -10,7 +10,7 @@ Total files documented: **8**
 
 | No. | File | Symbols |
 |---:|---|---:|
-| 1 | `temp-vite-build.mjs` | 0 |
+| 1 | `clean-generated.ps1` | 0 |
 | 2 | `ops/scripts/backend/verify-data-integrity.js` | 10 |
 | 3 | `ops/scripts/frontend/verify-i18n.js` | 5 |
 | 4 | `ops/scripts/generate-doc-reference.js` | 18 |
@@ -21,7 +21,7 @@ Total files documented: **8**
 
 ## 3. Detailed Function Commentary
 
-### 3.1 `temp-vite-build.mjs`
+### 3.1 `clean-generated.ps1`
 
 - No top-level named function/class symbols detected.
 
@@ -77,32 +77,32 @@ Total files documented: **8**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 45 |
-| 2 | `toPosix` | function | 49 |
-| 3 | `rel` | function | 53 |
-| 4 | `shouldSkipDir` | function | 57 |
-| 5 | `collectFilesAndFolders` | function | 61 |
-| 6 | `getAllProjectFilesAndFolders` | function | 82 |
-| 7 | `isProbablyText` | function | 105 |
-| 8 | `readText` | function | 118 |
-| 9 | `lineCount` | function | 126 |
-| 10 | `fileCategory` | function | 131 |
-| 11 | `inferPurpose` | function | 151 |
-| 12 | `markdownHeader` | function | 176 |
-| 13 | `markdownSection` | function | 180 |
-| 14 | `extractImportsExports` | function | 184 |
-| 15 | `findSymbols` | function | 224 |
-| 16 | `writeAllFunctionReference` | function | 250 |
-| 17 | `resolveInternalImport` | function | 288 |
-| 18 | `writeAllFileInventory` | function | 313 |
-| 19 | `folderPurpose` | function | 335 |
-| 20 | `writeFolderCoverage` | function | 350 |
-| 21 | `writeImportExportReference` | function | 409 |
-| 22 | `readJsonObject` | function | 483 |
-| 23 | `translationSectionForKey` | function | 491 |
-| 24 | `writeTranslationSectionReference` | function | 542 |
-| 25 | `writeMainCoverageSummary` | function | 591 |
-| 26 | `main` | function | 620 |
+| 1 | `ensureDir` | function | 49 |
+| 2 | `toPosix` | function | 53 |
+| 3 | `rel` | function | 57 |
+| 4 | `shouldSkipDir` | function | 61 |
+| 5 | `collectFilesAndFolders` | function | 65 |
+| 6 | `getAllProjectFilesAndFolders` | function | 86 |
+| 7 | `isProbablyText` | function | 109 |
+| 8 | `readText` | function | 122 |
+| 9 | `lineCount` | function | 130 |
+| 10 | `fileCategory` | function | 135 |
+| 11 | `inferPurpose` | function | 155 |
+| 12 | `markdownHeader` | function | 180 |
+| 13 | `markdownSection` | function | 184 |
+| 14 | `extractImportsExports` | function | 188 |
+| 15 | `findSymbols` | function | 228 |
+| 16 | `writeAllFunctionReference` | function | 254 |
+| 17 | `resolveInternalImport` | function | 292 |
+| 18 | `writeAllFileInventory` | function | 317 |
+| 19 | `folderPurpose` | function | 339 |
+| 20 | `writeFolderCoverage` | function | 354 |
+| 21 | `writeImportExportReference` | function | 413 |
+| 22 | `readJsonObject` | function | 487 |
+| 23 | `translationSectionForKey` | function | 495 |
+| 24 | `writeTranslationSectionReference` | function | 546 |
+| 25 | `writeMainCoverageSummary` | function | 595 |
+| 26 | `main` | function | 624 |
 
 ### 3.6 `ops/scripts/lib/fs-utils.js`
 
