@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Chrome, Facebook, Link2, Mail, ShieldCheck } from 'lucide-react'
+import { Chrome, Link2, Mail, ShieldCheck } from 'lucide-react'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
@@ -52,7 +52,6 @@ export default function UserProfileModal({ onClose }) {
   const [disconnectingProvider, setDisconnectingProvider] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     googleOauth: false,
-    facebookOauth: false,
     supabaseAuth: false,
     supabaseEmailAuth: false,
   })
@@ -97,7 +96,6 @@ export default function UserProfileModal({ onClose }) {
       if (capsResult && capsResult.success !== false) {
         setVerificationCaps({
           googleOauth: capsResult.google_oauth === true,
-          facebookOauth: capsResult.facebook_oauth === true,
           supabaseAuth: capsResult.supabase_auth === true,
           supabaseEmailAuth: capsResult.supabase_email_auth === true,
         })
@@ -385,7 +383,7 @@ export default function UserProfileModal({ onClose }) {
                         onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
                       />
                       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        {tr('profile_email_note', 'Used for email login, password changes, account notices, and matching existing provider records when helpful. Google and Facebook can still be linked independently.')}
+                        {tr('profile_email_note', 'Used for email login, password changes, account notices, and matching existing provider records when helpful. Google can still be linked independently.')}
                       </p>
                     </div>
                     <div>
@@ -396,7 +394,7 @@ export default function UserProfileModal({ onClose }) {
                         </span>
                       </div>
                       <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
-                        {tr('email_login_simple_note', 'No separate email verification step is required here. Save your email once, then use OTP, Google, Facebook, or your password for account access and recovery flows.')}
+                        {tr('email_login_simple_note', 'No separate email verification step is required here. Save your email once, then use OTP, Google, or your password for account access and recovery flows.')}
                       </div>
                     </div>
                   </div>
@@ -447,11 +445,11 @@ export default function UserProfileModal({ onClose }) {
                   <span>{tr('sign_in_methods', 'Sign-in methods')}</span>
                 </h3>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {tr('sign_in_methods_desc', 'Keep your local admin-created account and add email, Google, or Facebook sign-in methods whenever you want them.' )}
+                  {tr('sign_in_methods_desc', 'Keep your local admin-created account and add email or Google sign-in methods whenever you want them.' )}
                 </p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
                     <Mail className="h-4 w-4 text-gray-400" />
@@ -499,42 +497,11 @@ export default function UserProfileModal({ onClose }) {
                   ) : null}
                 </div>
 
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-                    <Facebook className="h-4 w-4 text-gray-400" />
-                    <span>{tr('facebook_signin', 'Facebook')}</span>
-                  </div>
-                  <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.facebook_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : authMethods?.facebook_ready ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
-                    {authMethods?.facebook_linked
-                      ? tr('connected', 'Connected')
-                      : authMethods?.facebook_ready
-                        ? tr('ready_on_login', 'Ready on login')
-                        : tr('setup_needed', 'setup needed')}
-                  </div>
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {verificationCaps.facebookOauth
-                      ? (authMethods?.facebook_ready
-                        ? tr('facebook_login_ready_note', 'Connect Facebook once here, then you can keep signing in with that Facebook account.')
-                        : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.'))
-                      : tr('facebook_provider_disabled_note', 'Facebook sign-in is not enabled in Supabase yet.')}
-                  </p>
-                  {verificationCaps.facebookOauth && authMethods?.facebook_ready ? (
-                    authMethods?.facebook_linked ? (
-                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'facebook'} onClick={() => handleDisconnectOauthProvider('facebook')}>
-                        {disconnectingProvider === 'facebook' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_facebook', 'Disconnect Facebook')}
-                      </button>
-                    ) : (
-                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'facebook'} onClick={() => handleStartOauthLink('facebook')}>
-                        {oauthConnecting === 'facebook' ? tr('connecting', 'Connecting...') : tr('connect_facebook', 'Connect Facebook')}
-                      </button>
-                    )
-                  ) : null}
-                </div>
               </div>
 
               <div className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500 dark:bg-zinc-800/70 dark:text-gray-400">
-                <div>{tr('provider_email_match_note', 'Google and Facebook stay linked to this local account once connected here. Disabled or deleted local users still cannot access the app.')}</div>
-                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google or Facebook account, disconnect the current one first and then connect the new provider.')}</div>
+                <div>{tr('provider_email_match_note', 'Google stays linked to this local account once connected here. Disabled or deleted local users still cannot access the app.')}</div>
+                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google account, disconnect the current one first and then connect the new provider.')}</div>
               </div>
             </section>
 

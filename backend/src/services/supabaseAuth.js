@@ -44,7 +44,7 @@ function clampPassword(value) {
 }
 
 function isAllowedOauthProvider(provider) {
-  return provider === 'google' || provider === 'facebook'
+  return provider === 'google'
 }
 
 function isHttpUrl(value) {
@@ -59,7 +59,6 @@ const SUPABASE_EMAIL_AUTH_ENABLED = truthy(process.env.SUPABASE_EMAIL_AUTH_ENABL
 const SUPABASE_MAGIC_LINK_ENABLED = truthy(process.env.SUPABASE_MAGIC_LINK_ENABLED || 'true')
 const SUPABASE_INVITE_ENABLED = truthy(process.env.SUPABASE_INVITE_ENABLED || 'true')
 const SUPABASE_GOOGLE_OAUTH_ENABLED = truthy(process.env.SUPABASE_GOOGLE_OAUTH_ENABLED || 'false')
-const SUPABASE_FACEBOOK_OAUTH_ENABLED = truthy(process.env.SUPABASE_FACEBOOK_OAUTH_ENABLED || 'false')
 const SUPABASE_MFA_TOTP_ENABLED = truthy(process.env.SUPABASE_MFA_TOTP_ENABLED || 'false')
 
 function isSupabaseAuthConfigured() {
@@ -94,7 +93,7 @@ function getSupabaseAuthPublicConfig() {
     magicLinkEnabled: enabled && SUPABASE_MAGIC_LINK_ENABLED,
     inviteEnabled: enabled && SUPABASE_INVITE_ENABLED,
     googleEnabled: enabled && SUPABASE_GOOGLE_OAUTH_ENABLED,
-    facebookEnabled: enabled && SUPABASE_FACEBOOK_OAUTH_ENABLED,
+    facebookEnabled: false,
     mfaTotpEnabled: enabled && SUPABASE_MFA_TOTP_ENABLED,
   }
 }
@@ -246,7 +245,7 @@ function summarizeAuthUser(authUser) {
     lastSignInAt: trim(authUser.last_sign_in_at || ''),
     providers,
     hasGoogle: providers.includes('google'),
-    hasFacebook: providers.includes('facebook'),
+    hasFacebook: false,
     hasEmail: providers.includes('email') || !!normalizeEmail(authUser.email || ''),
     raw: authUser,
   }
@@ -475,6 +474,30 @@ async function sendSupabaseVerificationEmail(email, options = {}) {
   }
 }
 
+async function sendSupabasePasswordRecoveryEmail(email, options = {}) {
+  if (!isSupabaseAuthConfigured()) return { success: false, skipped: true, reason: 'not_configured' }
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return { success: false, skipped: true, reason: 'missing_email' }
+  if (!SUPABASE_EMAIL_AUTH_ENABLED) {
+    return { success: false, skipped: true, reason: 'email_auth_disabled' }
+  }
+
+  const redirectTo = normalizeRedirectTo(options.redirectTo)
+  const payload = { email: normalizedEmail }
+  if (redirectTo) payload.redirect_to = redirectTo
+
+  const result = await callSupabasePublic('POST', '/recover', payload)
+  if (!result.ok) {
+    return { success: false, error: result.error, providerCode: result.providerCode || '' }
+  }
+
+  return {
+    success: true,
+    provider: 'supabase',
+    data: result.data || null,
+  }
+}
+
 function buildOauthStartUrl({ provider, redirectTo, queryParams = {} }) {
   const normalizedProvider = trim(provider || '').toLowerCase()
   if (!isAllowedOauthProvider(normalizedProvider)) {
@@ -488,10 +511,6 @@ function buildOauthStartUrl({ provider, redirectTo, queryParams = {} }) {
   if (normalizedProvider === 'google' && !providerConfig.googleEnabled) {
     return { success: false, error: 'Google sign-in is not enabled yet.' }
   }
-  if (normalizedProvider === 'facebook' && !providerConfig.facebookEnabled) {
-    return { success: false, error: 'Facebook sign-in is not enabled yet.' }
-  }
-
   if (!isHttpUrl(redirectTo)) {
     return { success: false, error: 'A valid redirect URL is required.' }
   }
@@ -520,6 +539,7 @@ module.exports = {
   setAuthUserActive,
   verifyPasswordWithSupabase,
   sendSupabaseVerificationEmail,
+  sendSupabasePasswordRecoveryEmail,
   getAuthUserById,
   getAuthUserFromAccessToken,
   findAuthUserByEmail,

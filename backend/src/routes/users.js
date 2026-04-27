@@ -124,7 +124,7 @@ function findUserIdentityConflict({ username, name, email, phoneLookup, supabase
         AND (? = 0 OR id != ?)
       LIMIT 1
     `).get(providerUserId, excludeId, excludeId)
-    if (row) return { field: 'supabase_user_id', message: 'This Google or Facebook account is already linked to another user' }
+    if (row) return { field: 'supabase_user_id', message: 'This Google account is already linked to another user' }
   }
 
   return null
@@ -320,19 +320,15 @@ function buildAuthMethodsPayload(user, authUser, providerConfig) {
     supabase_user_id: String(user.supabase_user_id || '').trim(),
     email_login_enabled: !!String(user.email || '').trim(),
     google_ready: providerConfig.googleEnabled,
-    facebook_ready: providerConfig.facebookEnabled,
     google_linked: !!authUser?.hasGoogle,
-    facebook_linked: !!authUser?.hasFacebook,
     linked_providers: providerList,
     linked_identity_count: identities.length,
     email_identity_ready: hasEmailIdentity,
     can_disconnect_google: !!authUser?.hasGoogle && identities.length > 1,
-    can_disconnect_facebook: !!authUser?.hasFacebook && identities.length > 1,
     last_sign_in_at: authUser?.lastSignInAt || '',
     capabilities: {
       supabase_auth: providerConfig.enabled,
       google_oauth: providerConfig.googleEnabled,
-      facebook_oauth: providerConfig.facebookEnabled,
       supabase_email_auth: providerConfig.emailAuthEnabled,
       supabase_mfa_totp: providerConfig.mfaTotpEnabled,
     },
@@ -423,7 +419,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
 
   const provider = String(req.body?.provider || '').trim().toLowerCase()
   const currentPassword = String(req.body?.currentPassword || '')
-  if (provider !== 'google' && provider !== 'facebook') {
+  if (provider !== 'google') {
     return err(res, 'Unsupported provider', 400)
   }
   if (!currentPassword) {
@@ -451,8 +447,6 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
 
   const providerConfig = getSupabaseAuthPublicConfig()
   if (provider === 'google' && !providerConfig.googleEnabled) return err(res, 'Google sign-in is not enabled in Supabase yet.', 400)
-  if (provider === 'facebook' && !providerConfig.facebookEnabled) return err(res, 'Facebook sign-in is not enabled in Supabase yet.', 400)
-
   const provisionResult = await createOrUpdateAuthUser(resolvedUser, currentPassword)
   if (!provisionResult.success && !provisionResult.skipped) {
     return err(res, provisionResult.error || 'Failed to prepare the Supabase account for provider changes.')
@@ -513,11 +507,11 @@ router.post('/users/avatar-upload', authToken, upload.single('image'), validateU
  * provider sign-in. Keep the endpoints predictable for stale clients.
  */
 router.post('/users/:id/contact-verification/request', authToken, (_req, res) => {
-  err(res, 'Email verification is disabled in this build. Use OTP, Google, or Facebook sign-in instead.', 410)
+  err(res, 'Email verification is disabled in this build. Use OTP, Google, or password sign-in instead.', 410)
 })
 
 router.post('/users/:id/contact-verification/confirm', authToken, (_req, res) => {
-  err(res, 'Email verification is disabled in this build. Use OTP, Google, or Facebook sign-in instead.', 410)
+  err(res, 'Email verification is disabled in this build. Use OTP, Google, or password sign-in instead.', 410)
 })
 
 /**
@@ -615,7 +609,7 @@ router.post('/users', authToken, async (req, res) => {
     if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
     if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
     if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
-    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google or Facebook account is already linked to another user', 409)
+    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google account is already linked to another user', 409)
     err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to create user'))
   }
 })
@@ -730,7 +724,7 @@ router.put('/users/:id', authToken, async (req, res) => {
     if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
     if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
     if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
-    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google or Facebook account is already linked to another user', 409)
+    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google account is already linked to another user', 409)
     err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to update user'))
   }
 })
@@ -868,7 +862,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
       return err(res, 'Phone number already exists', 409)
     }
     if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) {
-      return err(res, 'This Google or Facebook account is already linked to another user', 409)
+      return err(res, 'This Google account is already linked to another user', 409)
     }
     if (message.includes('UNIQUE')) {
       return err(res, 'Username already exists', 409)

@@ -17,6 +17,7 @@
 
 const express = require('express')
 const bcrypt = require('bcryptjs')
+const crypto = require('crypto')
 const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
 const { db } = require('../database')
@@ -39,6 +40,7 @@ const {
   updateAuthPassword,
   getAuthUserFromAccessToken,
   buildOauthStartUrl,
+  sendSupabasePasswordRecoveryEmail,
 } = require('../services/supabaseAuth')
 const {
   getVerificationCapabilities,
@@ -282,6 +284,10 @@ function getUserById(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
 }
 
+function generateTemporaryAuthPassword() {
+  return crypto.randomBytes(18).toString('base64url')
+}
+
 function issueAuthSession(req, userId, details = {}) {
   return createAuthSession(userId, {
     sessionDuration: details.sessionDuration,
@@ -327,7 +333,7 @@ router.get('/verification-capabilities', (_req, res) => {
     sms: false,
     supabase_auth: supabase.enabled,
     google_oauth: supabase.googleEnabled,
-    facebook_oauth: supabase.facebookEnabled,
+    facebook_oauth: false,
     supabase_email_auth: supabase.emailAuthEnabled,
     supabase_magic_link: supabase.magicLinkEnabled,
     supabase_invite: supabase.inviteEnabled,
@@ -461,7 +467,7 @@ router.post('/oauth/complete', async (req, res) => {
     const actorId = Number(currentUserId || 0)
     if (!actorId) return err(res, 'A local user session is required to link an identity.', 401)
     if (oauthIdentityConflict) {
-      return err(res, 'This Google or Facebook account is already linked to another user.', 409)
+      return err(res, 'This Google account is already linked to another user.', 409)
     }
 
     let localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
@@ -520,7 +526,7 @@ router.post('/oauth/complete', async (req, res) => {
     const conflictOrgId = Number(oauthIdentityConflict.organization_id || 0) || 0
     const requestedOrgId = Number(organizationRecord?.id || 0) || 0
     if (requestedOrgId && conflictOrgId && requestedOrgId !== conflictOrgId) {
-      return err(res, 'This Google or Facebook account belongs to a different organization.', 409)
+      return err(res, 'This Google account belongs to a different organization.', 409)
     }
     localUser = getExactActiveUserById(oauthIdentityConflict.id, requestedOrgId)
   }
@@ -548,7 +554,7 @@ router.post('/oauth/complete', async (req, res) => {
     return err(res, 'No active local account matches this sign-in method yet. Ask an admin to create your account first.', 403)
   }
   if (String(localUser.supabase_user_id || '').trim() && String(localUser.supabase_user_id).trim() !== authUser.id) {
-    return err(res, 'This local account is already linked to a different Google or Facebook identity.', 409)
+    return err(res, 'This local account is already linked to a different Google identity.', 409)
   }
 
   localUser = updateLocalUserSupabaseIdentity(localUser.id, authUser)
@@ -739,7 +745,7 @@ router.post('/password-reset/otp', async (req, res) => {
     organizationId: Number(organizationRecord?.id || 0),
   })
   if (!user) return err(res, 'Invalid reset request', 400)
-  if (!Number(user.otp_enabled || 0)) return err(res, 'OTP is not enabled for this account. Use Google, Facebook, or ask an admin to reset the password.', 400)
+  if (!Number(user.otp_enabled || 0)) return err(res, 'OTP is not enabled for this account. Use Google, email recovery, or ask an admin to reset the password.', 400)
 
   const otpSecret = getOtpSecret(user)
   if (!otpSecret) return err(res, 'OTP is unavailable for this account. Please contact admin.', 503)
@@ -778,6 +784,106 @@ router.post('/password-reset/otp', async (req, res) => {
   })
 
   return ok(res, { message: 'Password reset successfully.' })
+})
+
+// POST /api/auth/password-reset/email
+router.post('/password-reset/email', async (req, res) => {
+  const { identifier, organization, redirectTo } = req.body || {}
+  if (!identifier) return err(res, 'Username, name, email, or phone is required')
+
+  const limitKey = getClientKey(req, `email-reset:${identifier}`)
+  if (!applyRateLimit(req, res, {
+    bucket: 'auth:password_reset_email',
+    key: limitKey,
+    max: 4,
+    windowMs: 5 * 60 * 1000,
+    message: 'Too many password reset requests.',
+  })) return
+
+  const organizationRecord = resolveOrganizationLookup(organization)
+  const user = findUserByIdentifier(identifier, {
+    requireVerifiedContact: false,
+    organizationId: Number(organizationRecord?.id || 0),
+  })
+  if (!user || !user.email) {
+    return ok(res, { message: 'If this account can receive recovery email, reset instructions have been sent.' })
+  }
+
+  let supabaseUserId = String(user.supabase_user_id || '').trim()
+  if (isSupabaseAuthConfigured() && (supabaseUserId || user.email)) {
+    if (!supabaseUserId) {
+      const provision = await createOrUpdateAuthUser(user, generateTemporaryAuthPassword())
+      if (!provision.success && !provision.skipped) {
+        return err(res, provision.error || 'Failed to prepare password recovery.', 400)
+      }
+      if (provision.success && provision.userId) {
+        supabaseUserId = String(provision.userId)
+        db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(supabaseUserId, user.id)
+      }
+    }
+
+    const recovery = await sendSupabasePasswordRecoveryEmail(user.email, { redirectTo })
+    if (!recovery.success) {
+      return err(res, recovery.error || 'Failed to send password recovery email.', 400)
+    }
+  }
+
+  audit(user.id, user.username, 'password_reset_requested', 'user', user.id, {
+    method: 'email',
+  })
+  return ok(res, { message: 'If this account can receive recovery email, reset instructions have been sent.' })
+})
+
+// POST /api/auth/password-reset/complete
+router.post('/password-reset/complete', async (req, res) => {
+  const { accessToken, newPassword } = req.body || {}
+  if (!accessToken) return err(res, 'Recovery access token is required')
+  if (!newPassword || String(newPassword).length < 6) {
+    return err(res, 'New password must be at least 6 characters.')
+  }
+
+  const authResult = await getAuthUserFromAccessToken(accessToken)
+  if (!authResult.success || !authResult.user) {
+    return err(res, authResult.error || 'Recovery session is no longer valid.', 401)
+  }
+
+  const authUser = authResult.user
+  const authEmail = normalizeEmail(authUser.email || '')
+  const localUser = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE is_active = 1
+      AND deleted_at IS NULL
+      AND (
+        supabase_user_id = ?
+        OR (? != '' AND lower(trim(email)) = ?)
+      )
+    ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
+    LIMIT 1
+  `).get(authUser.id, authEmail, authEmail, authUser.id)
+
+  if (!localUser) {
+    return err(res, 'No active local account matches this recovery link. Ask an admin to create or repair your account first.', 404)
+  }
+
+  const sync = await updateAuthPassword(authUser.id, newPassword)
+  if (!sync.success && !sync.skipped) {
+    return err(res, sync.error || 'Failed to update password in authentication provider.', 400)
+  }
+
+  const hash = bcrypt.hashSync(String(newPassword), 10)
+  db.prepare(`
+    UPDATE users
+    SET password = ?,
+        supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
+    WHERE id = ?
+  `).run(hash, String(authUser.id || '').trim(), localUser.id)
+
+  audit(localUser.id, localUser.username, 'password_reset_complete', 'user', localUser.id, {
+    method: 'email',
+  })
+
+  return ok(res, { message: 'Password updated successfully.' })
 })
 
 module.exports = router

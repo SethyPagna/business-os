@@ -86,6 +86,12 @@ export async function logout() {
 export async function resetPasswordWithOtp(payload) {
   return apiFetch('POST', '/api/auth/password-reset/otp', payload || {})
 }
+export async function requestPasswordResetEmail(payload) {
+  return apiFetch('POST', '/api/auth/password-reset/email', payload || {})
+}
+export async function completePasswordReset(payload) {
+  return apiFetch('POST', '/api/auth/password-reset/complete', payload || {})
+}
 export async function getVerificationCapabilities() {
   return apiFetch('GET', '/api/auth/verification-capabilities')
 }

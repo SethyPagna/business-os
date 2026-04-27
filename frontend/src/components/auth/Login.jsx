@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Building2,
   Chrome,
-  Facebook,
   KeyRound,
   Loader2,
   LockKeyhole,
@@ -65,6 +64,8 @@ export default function Login() {
   })
 
   const [showOtpReset, setShowOtpReset] = useState(false)
+  const [showEmailReset, setShowEmailReset] = useState(false)
+  const [recoveryAccessToken, setRecoveryAccessToken] = useState('')
   const [resetIdentifier, setResetIdentifier] = useState('')
   const [resetOtp, setResetOtp] = useState('')
   const [resetNewPassword, setResetNewPassword] = useState('')
@@ -72,7 +73,6 @@ export default function Login() {
   const [resetInfo, setResetInfo] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     googleOauth: false,
-    facebookOauth: false,
     supabaseAuth: false,
     supabaseEmailAuth: false,
   })
@@ -102,7 +102,7 @@ export default function Login() {
       else usernameRef.current?.focus()
     }, 150)
     return () => clearTimeout(timer)
-  }, [otpRequired, showOtpReset])
+  }, [otpRequired, showOtpReset, showEmailReset, recoveryAccessToken])
 
   useEffect(() => {
     try {
@@ -118,7 +118,6 @@ export default function Login() {
         if (!active || !result || result.success === false) return
         setVerificationCaps({
           googleOauth: result.google_oauth === true,
-          facebookOauth: result.facebook_oauth === true,
           supabaseAuth: result.supabase_auth === true,
           supabaseEmailAuth: result.supabase_email_auth === true,
         })
@@ -180,10 +179,10 @@ export default function Login() {
     if (typeof window === 'undefined') return undefined
     const url = new URL(window.location.href)
     const mode = String(url.searchParams.get('auth_mode') || '').trim().toLowerCase()
-    if (mode !== 'login') return undefined
 
     const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''))
     const accessToken = hash.get('access_token') || ''
+    const tokenType = String(hash.get('type') || url.searchParams.get('type') || '').trim().toLowerCase()
     const provider = String(url.searchParams.get('auth_provider') || '').trim().toLowerCase()
     const errorDescription = hash.get('error_description') || url.searchParams.get('error_description') || ''
     if (!accessToken && !errorDescription) return undefined
@@ -195,6 +194,23 @@ export default function Login() {
     }
 
     const run = async () => {
+      if (tokenType === 'recovery' && accessToken) {
+        clearCallbackUrl()
+        if (!cancelled) {
+          setRecoveryAccessToken(accessToken)
+          setShowEmailReset(false)
+          setShowOtpReset(false)
+          setError('')
+          setResetInfo(tr('set_new_password_from_email', 'Set your new password below to finish email recovery.'))
+        }
+        return
+      }
+
+      if (mode !== 'login') {
+        clearCallbackUrl()
+        return
+      }
+
       if (errorDescription) {
         clearCallbackUrl()
         if (!cancelled) setError(errorDescription)
@@ -341,6 +357,62 @@ export default function Login() {
     }
   }
 
+  const handleResetWithEmail = async () => {
+    const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
+    if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
+    if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username, name, email, or phone first.'))
+
+    setError('')
+    setLoading(true)
+    try {
+      const redirectTo = `${window.location.origin}${window.location.pathname}`
+      const result = await window.api.requestPasswordResetEmail({
+        identifier: resetIdentifier.trim(),
+        organization: resolvedOrganization,
+        redirectTo,
+      })
+      if (result?.success === false) {
+        setError(result.error || tr('email_reset_failed', 'Failed to send password reset email.'))
+        return
+      }
+      setResetInfo(result?.message || tr('email_reset_sent', 'If this account can receive recovery email, reset instructions have been sent.'))
+    } catch (resetError) {
+      setError(resetError?.message || tr('email_reset_failed', 'Failed to send password reset email.'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCompleteEmailReset = async () => {
+    if (!recoveryAccessToken) {
+      setError(tr('recovery_link_missing', 'Recovery link is missing or expired. Please request a new email reset link.'))
+      return
+    }
+    if (resetNewPassword.length < 6) return setError(tr('password_min_6', 'Use at least 6 characters for the new password.'))
+    if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
+
+    setError('')
+    setLoading(true)
+    try {
+      const result = await window.api.completePasswordReset({
+        accessToken: recoveryAccessToken,
+        newPassword: resetNewPassword,
+      })
+      if (result?.success === false) {
+        setError(result.error || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
+        return
+      }
+      setRecoveryAccessToken('')
+      setResetNewPassword('')
+      setResetConfirmPassword('')
+      setResetInfo(tr('email_reset_complete_done', 'Password reset complete. You can now log in with your email and new password.'))
+    } catch (resetError) {
+      setError(resetError?.message || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleStartOauth = async (provider) => {
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) {
@@ -373,6 +445,8 @@ export default function Login() {
 
   const closeAuxMode = () => {
     setShowOtpReset(false)
+    setShowEmailReset(false)
+    setRecoveryAccessToken('')
     setError('')
     setResetInfo('')
     setResetOtp('')
@@ -395,7 +469,7 @@ export default function Login() {
           </p>
         </div>
 
-        {!otpRequired && !showOtpReset ? (
+        {!otpRequired && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
@@ -518,12 +592,12 @@ export default function Login() {
               )}
             </button>
 
-            {(verificationCaps.googleOauth || verificationCaps.facebookOauth) ? (
+            {verificationCaps.googleOauth ? (
               <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
                 <div className="text-center text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {tr('login_with', 'Login with')}
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2">
                   <OauthButton
                     icon={Chrome}
                     label={tr('login_with_google', 'Google')}
@@ -531,40 +605,74 @@ export default function Login() {
                     loading={oauthLoading === 'google'}
                     onClick={() => handleStartOauth('google')}
                   />
-                  <OauthButton
-                    icon={Facebook}
-                    label={tr('login_with_facebook', 'Facebook')}
-                    disabled={!verificationCaps.facebookOauth || !!oauthLoading || loading}
-                    loading={oauthLoading === 'facebook'}
-                    onClick={() => handleStartOauth('facebook')}
-                  />
                 </div>
                 <p className="text-center text-[11px] text-gray-500 dark:text-gray-400">
-                  {tr('oauth_local_account_hint', 'An admin still needs to create your local Business OS account first. Once linked, Google and Facebook keep working on later sign-ins.')}
+                  {tr('oauth_local_account_hint', 'An admin still needs to create your local Business OS account first. Once linked, Google keeps working on later sign-ins.')}
                 </p>
               </div>
             ) : null}
 
-            <button
-              type="button"
-              className="w-full text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-              onClick={() => {
-                setShowOtpReset(true)
-                setError('')
-                setResetInfo('')
-                setResetIdentifier(username || '')
-              }}
-            >
-              {tr('reset_password_with_otp', 'Reset password with OTP')}
-            </button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="w-full text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                onClick={() => {
+                  setShowEmailReset(true)
+                  setShowOtpReset(false)
+                  setRecoveryAccessToken('')
+                  setError('')
+                  setResetInfo('')
+                  setResetIdentifier(username || '')
+                }}
+              >
+                {tr('reset_password_with_email', 'Reset password with email')}
+              </button>
+              <button
+                type="button"
+                className="w-full text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                onClick={() => {
+                  setShowOtpReset(true)
+                  setShowEmailReset(false)
+                  setRecoveryAccessToken('')
+                  setError('')
+                  setResetInfo('')
+                  setResetIdentifier(username || '')
+                }}
+              >
+                {tr('reset_password_with_otp', 'Reset password with OTP')}
+              </button>
+            </div>
 
           </form>
+        ) : null}
+
+        {!otpRequired && showEmailReset && !recoveryAccessToken ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+              {tr('email_reset_notice', 'Enter your username, name, email, or phone. If this account has a saved email, Business OS will send a password reset link there.')}
+            </div>
+            <div>
+              <label htmlFor="email-reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('username_name_email_phone', 'Username, name, email, or phone')}
+              </label>
+              <input id="email-reset-identifier" name="email_reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+            </div>
+
+            {resetInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
+            {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
+
+            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithEmail}>
+              {loading ? tr('sending_reset_email', 'Sending reset email...') : tr('send_reset_email', 'Send reset email')}
+            </button>
+
+            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
+          </div>
         ) : null}
 
         {!otpRequired && showOtpReset ? (
           <div className="space-y-4">
             <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-              {tr('otp_reset_notice', 'Use the OTP code from your authenticator app to set a new password. If OTP is not enabled on your account, use Google/Facebook sign-in or ask an admin to reset the password.')}
+              {tr('otp_reset_notice', 'Use the OTP code from your authenticator app to set a new password. If OTP is not enabled on your account, use Google sign-in, email recovery, or ask an admin to reset the password.')}
             </div>
             <div>
               <label htmlFor="reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -605,6 +713,34 @@ export default function Login() {
 
             <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithOtp}>
               {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
+            </button>
+
+            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
+          </div>
+        ) : null}
+
+        {!otpRequired && recoveryAccessToken ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+              {resetInfo || tr('set_new_password_from_email', 'Set your new password below to finish email recovery.')}
+            </div>
+            <div>
+              <label htmlFor="recovery-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('new_password', 'New password')}
+              </label>
+              <input id="recovery-password-new" name="recovery_password_new" type="password" className="input" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
+            </div>
+            <div>
+              <label htmlFor="recovery-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('confirm_new_password', 'Confirm new password')}
+              </label>
+              <input id="recovery-password-confirm" name="recovery_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
+            </div>
+
+            {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
+
+            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleCompleteEmailReset}>
+              {loading ? tr('updating_password', 'Updating password...') : tr('save_new_password', 'Save new password')}
             </button>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
