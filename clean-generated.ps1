@@ -38,6 +38,89 @@ $targets = @(
   'business-os-server.exe'
 ) | ForEach-Object { Join-Path $root $_ }
 
+function Get-ProjectListenerProcesses {
+  $results = @()
+  try {
+    $connections = Get-NetTCPConnection -State Listen -LocalPort 4000 -ErrorAction Stop
+  } catch {
+    return @()
+  }
+
+  foreach ($connection in $connections) {
+    try {
+      $proc = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
+      if (-not $proc) { continue }
+      $name = [string]$proc.Name
+      $isProjectProcess = $name -ieq 'node' -or $name -ieq 'business-os-server'
+      if ($isProjectProcess) {
+        $results += [pscustomobject]@{
+          ProcessId = $proc.Id
+          Name = $name
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return $results
+}
+
+function Stop-ProjectProcesses {
+  param(
+    [switch]$PreviewOnly
+  )
+
+  $pm2Path = Get-Command pm2.cmd -ErrorAction SilentlyContinue
+  if (-not $pm2Path) {
+    $pm2Path = Get-Command pm2 -ErrorAction SilentlyContinue
+  }
+  if ($pm2Path) {
+    if ($PreviewOnly) {
+      Write-Host 'Would stop PM2 app "business-os" if it is running.'
+    } else {
+      try {
+        & $pm2Path.Source stop business-os *> $null
+        Write-Host 'Stopped PM2 app "business-os" (if it was running).'
+      } catch {
+        Write-Host 'PM2 stop skipped or failed; continuing with direct process checks.'
+      }
+    }
+  }
+
+  try {
+    $packaged = Get-Process business-os-server -ErrorAction SilentlyContinue
+    if ($packaged) {
+      if ($PreviewOnly) {
+        Write-Host 'Would stop packaged process business-os-server.exe.'
+      } else {
+        $packaged | Stop-Process -Force
+        Write-Host 'Stopped packaged process business-os-server.exe.'
+      }
+    }
+  } catch {
+    Write-Host 'Packaged server stop skipped; continuing.'
+  }
+
+  $projectListeners = Get-ProjectListenerProcesses
+  foreach ($listener in $projectListeners) {
+    if ($PreviewOnly) {
+      Write-Host ("Would stop process PID {0} ({1}) listening on port 4000." -f $listener.ProcessId, $listener.Name)
+      continue
+    }
+    try {
+      Stop-Process -Id $listener.ProcessId -Force -ErrorAction Stop
+      Write-Host ("Stopped process PID {0} ({1}) that was listening on port 4000." -f $listener.ProcessId, $listener.Name)
+    } catch {
+      Write-Host ("Could not stop PID {0}; continuing cleanup attempt." -f $listener.ProcessId)
+    }
+  }
+
+  if (-not $PreviewOnly) {
+    Start-Sleep -Milliseconds 800
+  }
+}
+
 Write-Host ''
 Write-Host 'Business OS generated-artifact cleanup'
 Write-Host '-------------------------------------'
@@ -47,6 +130,8 @@ if ($Preview) {
   Write-Host 'Preview mode is ON. No files will be removed.'
 }
 Write-Host ''
+
+Stop-ProjectProcesses -PreviewOnly:$Preview
 
 foreach ($target in $targets) {
   if (-not (Test-Path -LiteralPath $target)) { continue }
@@ -59,7 +144,11 @@ foreach ($target in $targets) {
     continue
   }
   Write-Host "Removing $resolved"
-  Remove-Item -LiteralPath $resolved -Recurse -Force
+  try {
+    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
+  } catch {
+    throw "Failed to remove $resolved. Make sure Business OS is not still using this path. Inner error: $($_.Exception.Message)"
+  }
 }
 
 Write-Host ''
