@@ -10,6 +10,7 @@ const SESSION_3D_MS = Math.max(SESSION_1D_MS, Number(process.env.AUTH_SESSION_3D
 const SESSION_14D_MS = Math.max(SESSION_3D_MS, Number(process.env.AUTH_SESSION_14D_MS || 14 * 24 * 60 * 60 * 1000))
 const SESSION_7D_MS = Math.max(DEFAULT_SESSION_MS, Number(process.env.AUTH_SESSION_7D_MS || 7 * 24 * 60 * 60 * 1000))
 const SESSION_30D_MS = Math.max(SESSION_14D_MS, Number(process.env.AUTH_SESSION_30D_MS || 30 * 24 * 60 * 60 * 1000))
+const SESSION_ROTATION_GRACE_MS = Math.max(0, Number(process.env.AUTH_SESSION_ROTATION_GRACE_MS || 20 * 1000))
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex')
@@ -50,6 +51,11 @@ function createAuthSession(userId, options = {}) {
     expiresAt,
   )
   return { token, expiresAt }
+}
+
+function buildRevocationTimestamp(graceMs = 0) {
+  const delay = Math.max(0, Number(graceMs || 0))
+  return new Date(Date.now() + delay).toISOString()
 }
 
 function getPresentedSessionToken(req) {
@@ -116,12 +122,12 @@ function getSessionUser(req) {
     LEFT JOIN organizations o ON o.id = u.organization_id
     LEFT JOIN organization_groups g ON g.id = u.organization_group_id
     WHERE s.token_hash = ?
-      AND s.revoked_at IS NULL
+      AND (s.revoked_at IS NULL OR s.revoked_at > ?)
       AND s.expires_at > ?
       AND u.is_active = 1
       AND u.deleted_at IS NULL
     LIMIT 1
-  `).get(tokenHash, nowIso)
+  `).get(tokenHash, nowIso, nowIso)
   if (!row) return null
 
   db.prepare(`
@@ -139,18 +145,21 @@ function getSessionUser(req) {
   return row
 }
 
-function revokeAuthSession(token) {
+function revokeAuthSession(token, options = {}) {
   const value = String(token || '').trim()
   if (!value) return
+  const revokedAt = buildRevocationTimestamp(options.graceMs)
   db.prepare(`
     UPDATE user_sessions
-    SET revoked_at = datetime('now')
-    WHERE token_hash = ? AND revoked_at IS NULL
-  `).run(hashToken(value))
+    SET revoked_at = ?
+    WHERE token_hash = ?
+      AND (revoked_at IS NULL OR revoked_at > ?)
+  `).run(revokedAt, hashToken(value), revokedAt)
 }
 
 module.exports = {
   SESSION_COOKIE_NAME,
+  SESSION_ROTATION_GRACE_MS,
   buildSessionExpiry,
   createAuthSession,
   getPresentedSessionToken,

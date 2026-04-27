@@ -316,8 +316,6 @@ function resolveAuthIdentityUuid(identity) {
   const candidates = [
     identity?.identity_id,
     identity?.id,
-    identity?.identity_data?.identity_id,
-    identity?.identity_data?.id,
   ]
   const match = candidates.find((value) => isUuid(value))
   return match ? String(match).trim() : ''

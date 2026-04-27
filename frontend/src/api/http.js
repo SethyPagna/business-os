@@ -142,7 +142,8 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
   if (syncToken) headers['x-sync-token'] = syncToken
   hydrateAuthTokenFromStorage()
-  if (authSessionToken) headers['x-auth-session'] = authSessionToken
+  const requestAuthSessionToken = authSessionToken
+  if (requestAuthSessionToken) headers['x-auth-session'] = requestAuthSessionToken
 
   const ctrl  = new AbortController()
   let timedOut = false
@@ -163,16 +164,27 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       const text = await res.text().catch(() => '')
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       const msg  = parsed?.error || text
-      if (res.status === 401 && parsed?.code === 'invalid_session' && authSessionToken && typeof window !== 'undefined') {
+      if (res.status === 401 && parsed?.code === 'invalid_session' && requestAuthSessionToken && typeof window !== 'undefined') {
+        const latestInMemoryToken = authSessionToken
         const storedToken = readAuthTokenFromStorage()
-        const canRetryWithStoredToken = storedToken && storedToken !== authSessionToken
+        const canRetryWithCurrentToken = latestInMemoryToken && latestInMemoryToken !== requestAuthSessionToken
+        if (canRetryWithCurrentToken) {
+          return apiFetch(method, path, body, timeoutMs)
+        }
+        const canRetryWithStoredToken = storedToken && storedToken !== requestAuthSessionToken
         if (canRetryWithStoredToken) {
           authSessionToken = storedToken
           return apiFetch(method, path, body, timeoutMs)
         }
-        authSessionToken = ''
+        if (authSessionToken === requestAuthSessionToken) {
+          authSessionToken = ''
+        }
         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-          detail: { code: parsed.code, error: parsed.error || 'Please sign in again to continue.' },
+          detail: {
+            code: parsed.code,
+            error: parsed.error || 'Please sign in again to continue.',
+            token: requestAuthSessionToken,
+          },
         }))
       }
       throw new Error(msg || `HTTP ${res.status}`)

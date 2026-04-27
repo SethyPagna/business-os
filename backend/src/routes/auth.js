@@ -47,7 +47,12 @@ const {
   normalizeEmail,
   normalizePhone,
 } = require('../services/verification')
-const { createAuthSession, getPresentedSessionToken, revokeAuthSession } = require('../sessionAuth')
+const {
+  createAuthSession,
+  getPresentedSessionToken,
+  revokeAuthSession,
+  SESSION_ROTATION_GRACE_MS,
+} = require('../sessionAuth')
 const {
   findOrganizationByLookup,
   getDefaultOrganization,
@@ -683,7 +688,12 @@ router.post('/session-duration', authToken, (req, res) => {
     deviceName,
   })
 
-  if (currentToken) revokeAuthSession(currentToken)
+  if (currentToken) {
+    // Keep the previous session alive briefly so in-flight HTTP requests and the
+    // old websocket can hand off cleanly to the new token instead of bouncing
+    // the user back to login.
+    revokeAuthSession(currentToken, { graceMs: SESSION_ROTATION_GRACE_MS })
+  }
 
   audit(user.id, user.username, 'session_duration_updated', 'user', user.id, {
     sessionDuration: String(sessionDuration || 'session').trim().toLowerCase() || 'session',

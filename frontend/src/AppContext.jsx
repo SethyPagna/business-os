@@ -344,6 +344,11 @@ export function AppProvider({ children }) {
       // The SyncErrorBanner in App.jsx picks this up via its own listener
     }
     const onUnauthorized = (e) => {
+      const eventToken = String(e?.detail?.token || '').trim()
+      const currentToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
+      if (eventToken && currentToken && eventToken !== currentToken) {
+        return
+      }
       const message = e?.detail?.error || 'Please sign in again to continue.'
       setUser(null)
       setPage('dashboard')

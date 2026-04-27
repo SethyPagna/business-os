@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Building2,
+  ChevronDown,
+  ChevronUp,
   Chrome,
   KeyRound,
   Loader2,
@@ -82,6 +84,7 @@ export default function Login() {
   const [organizationMatches, setOrganizationMatches] = useState([])
   const [organizationLoading, setOrganizationLoading] = useState(false)
   const [organizationLocked, setOrganizationLocked] = useState(false)
+  const [organizationExpanded, setOrganizationExpanded] = useState(true)
 
   const usernameRef = useRef()
   const otpRef = useRef()
@@ -150,6 +153,7 @@ export default function Login() {
           setOrganizationSearch(fallbackOrg.name || fallbackOrg.slug || '')
           setOrganizationId(fallbackOrg.public_id || '')
           setOrganizationMatches(fallbackOrg ? [fallbackOrg] : [])
+          setOrganizationExpanded(false)
           rememberOrganization(fallbackOrg)
           if (boot?.organization && !boot.organizationCreationEnabled) {
             setOrganizationLocked(true)
@@ -483,53 +487,75 @@ export default function Login() {
         {!otpRequired && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
-                <Building2 className="h-4 w-4 text-gray-400" />
-                <span>{tr('organization', 'Organization')}</span>
-              </div>
-              <label htmlFor="organization-search" className="sr-only">{tr('organization_search', 'Search organization')}</label>
-              <input
-                id="organization-search"
-                name="organization_search"
-                className="input"
-                type="text"
-                value={organizationSearch}
-                onChange={(event) => setOrganizationSearch(event.target.value)}
-                placeholder="LeangCosmetics"
-                autoComplete="organization"
-              />
-              <label htmlFor="organization-id" className="sr-only">{tr('organization_id', 'Organization ID')}</label>
-              <input
-                id="organization-id"
-                name="organization_id"
-                className="input"
-                type="text"
-                value={organizationId}
-                onChange={(event) => setOrganizationId(event.target.value)}
-                placeholder="org_xxxxxxxxxxxxxxxx"
-                autoComplete="off"
-              />
-              {organizationLoading ? (
-                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('finding_organization', 'Finding organization...')}</div>
-              ) : null}
-              {!organizationLocked && organizationMatches.length ? (
-                <div className="flex flex-wrap gap-2">
-                  {organizationMatches.map((item) => (
-                    <button
-                      key={item.public_id || item.slug || item.id}
-                      type="button"
-                      className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200"
-                      onClick={() => {
-                        setOrganizationSearch(item.name || item.slug || '')
-                        setOrganizationId(item.public_id || '')
-                        rememberOrganization(item)
-                      }}
-                    >
-                      {item.name} · {item.public_id}
-                    </button>
-                  ))}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  <Building2 className="h-4 w-4 text-gray-400" />
+                  <span>{tr('organization', 'Organization')}</span>
                 </div>
-              ) : null}
+                {(organizationSearch || organizationId) ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200"
+                    onClick={() => setOrganizationExpanded((current) => !current)}
+                  >
+                    <span>{organizationExpanded ? tr('hide', 'Hide') : tr('change', 'Change')}</span>
+                    {organizationExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                ) : null}
+              </div>
+              {!organizationExpanded && (organizationSearch || organizationId) ? (
+                <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-300">
+                  <div className="font-medium text-gray-800 dark:text-gray-100">{organizationSearch || tr('organization_selected', 'Organization selected')}</div>
+                  {organizationId ? <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{organizationId}</div> : null}
+                </div>
+              ) : (
+                <>
+                  <label htmlFor="organization-search" className="sr-only">{tr('organization_search', 'Search organization')}</label>
+                  <input
+                    id="organization-search"
+                    name="organization_search"
+                    className="input"
+                    type="text"
+                    value={organizationSearch}
+                    onChange={(event) => setOrganizationSearch(event.target.value)}
+                    placeholder="LeangCosmetics"
+                    autoComplete="organization"
+                  />
+                  <label htmlFor="organization-id" className="sr-only">{tr('organization_id', 'Organization ID')}</label>
+                  <input
+                    id="organization-id"
+                    name="organization_id"
+                    className="input"
+                    type="text"
+                    value={organizationId}
+                    onChange={(event) => setOrganizationId(event.target.value)}
+                    placeholder="org_xxxxxxxxxxxxxxxx"
+                    autoComplete="off"
+                  />
+                  {organizationLoading ? (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{tr('finding_organization', 'Finding organization...')}</div>
+                  ) : null}
+                  {!organizationLocked && organizationMatches.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {organizationMatches.map((item) => (
+                        <button
+                          key={item.public_id || item.slug || item.id}
+                          type="button"
+                          className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200"
+                          onClick={() => {
+                            setOrganizationSearch(item.name || item.slug || '')
+                            setOrganizationId(item.public_id || '')
+                            setOrganizationExpanded(false)
+                            rememberOrganization(item)
+                          }}
+                        >
+                          {item.name} · {item.public_id}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              )}
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {organizationLocked
                   ? tr('organization_join_locked', 'Organization creation is currently disabled. This server is prepared for LeangCosmetics and future organization-ready expansion.')

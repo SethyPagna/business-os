@@ -105,6 +105,7 @@ export function connectWS() {
           detail: {
             code: 'invalid_session',
             error: reason || 'Please sign in again to continue.',
+            token: wsAuthToken,
           },
         }))
       }, 1200)
