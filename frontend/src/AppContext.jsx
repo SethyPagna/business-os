@@ -802,13 +802,38 @@ export function AppProvider({ children }) {
       writeDeviceSettings(nextDeviceSettings)
     }
     if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
-      writeStoredSessionDuration(mergedUpdates.login_session_duration)
+      const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
+      const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
+      if (user?.id && authToken && typeof window.api?.updateSessionDuration === 'function') {
+        const device = getClientDeviceInfo()
+        const refreshed = await window.api.updateSessionDuration({
+          sessionDuration: normalizedSessionDuration,
+          clientTime: new Date().toISOString(),
+          deviceTz: device.deviceTz,
+          deviceName: device.deviceName,
+        })
+        if (refreshed?.success === false) {
+          throw new Error(refreshed.error || 'Failed to refresh login session duration')
+        }
+        const nextAuthToken = String(refreshed?.authToken || '').trim() || authToken
+        const nextExpiryTime = computeSessionExpiryMs(
+          normalizedSessionDuration,
+          refreshed?.sessionExpiresAt || '',
+        )
+        persistAuthState({
+          user,
+          authToken: nextAuthToken,
+          expiryTime: nextExpiryTime,
+          sessionDuration: normalizedSessionDuration,
+        })
+        window.api?.setAuthSessionToken?.(nextAuthToken)
+      }
     }
     setSettings(prev => ({ ...prev, ...mergedUpdates }))
     if (mergedUpdates.language) setLanguage(mergedUpdates.language)
     if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)
     notify(t('settings_saved'))
-  }, [notify]) // eslint-disable-line
+  }, [notify, user]) // eslint-disable-line
 
   // ?? Permissions ???????????????????????????????????????????????????????????
   const getPermissions = useCallback(() => {

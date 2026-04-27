@@ -669,6 +669,38 @@ router.post('/logout', (req, res) => {
   ok(res, { success: true })
 })
 
+// POST /api/auth/session-duration
+router.post('/session-duration', authToken, (req, res) => {
+  const { sessionDuration, clientTime, deviceTz, deviceName } = req.body || {}
+  const user = req.user
+  if (!user?.id) return err(res, 'Please sign in again to continue.', 401)
+
+  const currentToken = getPresentedSessionToken(req)
+  const session = issueAuthSession(req, user.id, {
+    sessionDuration,
+    clientTime,
+    deviceTz,
+    deviceName,
+  })
+
+  if (currentToken) revokeAuthSession(currentToken)
+
+  audit(user.id, user.username, 'session_duration_updated', 'user', user.id, {
+    sessionDuration: String(sessionDuration || 'session').trim().toLowerCase() || 'session',
+  }, {
+    tableName: 'users',
+    recordId: user.id,
+    deviceName: deviceName || null,
+    deviceTz: deviceTz || null,
+    clientTime: clientTime || null,
+  })
+
+  ok(res, {
+    authToken: session.token,
+    sessionExpiresAt: session.expiresAt,
+  })
+})
+
 // POST /api/auth/otp/setup
 router.post('/otp/setup', authToken, async (req, res) => {
   const { userId } = req.body || {}

@@ -497,9 +497,23 @@ export default function UserProfileModal({ onClose }) {
                       : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
                   </p>
                   {authMethods?.google_linked && needsSensitivePassword ? (
-                    <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
-                      {tr('disconnect_google_password_hint', 'Disconnecting Google uses the current password from the Security section below.')}
-                    </p>
+                    <div className="mt-3 space-y-2">
+                      <label htmlFor="disconnect-google-password" className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                        {tr('current_password', 'Current password')}
+                      </label>
+                      <input
+                        id="disconnect-google-password"
+                        name="disconnect_google_password"
+                        type="password"
+                        autoComplete="current-password"
+                        className="input text-sm"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                      />
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                        {tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')}
+                      </p>
+                    </div>
                   ) : null}
                   {verificationCaps.googleOauth && authMethods?.google_ready ? (
                     authMethods?.google_linked ? (
