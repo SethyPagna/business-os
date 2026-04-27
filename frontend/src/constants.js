@@ -65,7 +65,9 @@ export const STOCK = {
 // ─── Sync / networking ────────────────────────────────────────────────────────
 export const SYNC = {
   /** Milliseconds before a sync server HTTP request times out. */
-  REQUEST_TIMEOUT_MS: 30_000,
+  REQUEST_TIMEOUT_MS: 15_000,
+  /** Serve IndexedDB/local fallback if a read is still waiting after this long. */
+  READ_LOCAL_FALLBACK_MS: 1_200,
   /** Milliseconds before the WebSocket attempts to reconnect after a drop. */
   WS_RECONNECT_DELAY_MS: 5_000,
   /** Debounce delay (ms) for batching rapid sync-push events in AppContext. */

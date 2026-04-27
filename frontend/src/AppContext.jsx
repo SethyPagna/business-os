@@ -1,6 +1,5 @@
 ﻿import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext } from 'react'
 import en from './lang/en.json'
-import km from './lang/km.json'
 import { STORAGE_KEYS, SYNC } from './constants'
 // web-api.js installs window.api synchronously via static imports.
 // Importing it here (rather than dynamic import) ensures window.api
@@ -20,7 +19,11 @@ import { getClientDeviceInfo } from './utils/deviceInfo.js'
  * - provide navigation, notifications, and shared formatters
  */
 
-const langs = { en, km }
+const LANG_LOADERS = {
+  en: async () => en,
+  km: async () => (await import('./lang/km.json')).default,
+}
+const loadedLangs = { en }
 const AppContext = createContext(null)
 const SyncContext = createContext(null)
 const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
@@ -163,6 +166,7 @@ export function AppProvider({ children }) {
   const [theme,               setTheme]               = useState('light')
   const [page,                setPage]                = useState('dashboard')
   const [notification,        setNotification]        = useState(null)
+  const [langRevision,        setLangRevision]        = useState(0)
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
@@ -188,7 +192,7 @@ export function AppProvider({ children }) {
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.
-  const t = useCallback((key) => langs[language]?.[key] ?? langs.en?.[key] ?? key, [language])
+  const t = useCallback((key) => loadedLangs[language]?.[key] ?? loadedLangs.en?.[key] ?? key, [language, langRevision])
 
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async () => {
@@ -405,6 +409,25 @@ export function AppProvider({ children }) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
+
+  useEffect(() => {
+    let cancelled = false
+    const nextLang = String(language || 'en').trim() || 'en'
+    if (loadedLangs[nextLang]) return undefined
+
+    const loader = LANG_LOADERS[nextLang]
+    if (!loader) return undefined
+
+    loader()
+      .then((messages) => {
+        if (cancelled || !messages) return
+        loadedLangs[nextLang] = messages
+        setLangRevision((value) => value + 1)
+      })
+      .catch(() => {})
+
+    return () => { cancelled = true }
+  }, [language])
 
   useEffect(() => {
     const root = document.documentElement

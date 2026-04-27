@@ -222,6 +222,19 @@ export function cacheGetStale(key) {
   return { data: null, stale: false }
 }
 
+function getChannelRefreshKey(channel) {
+  return String(channel || '').split(':')[0] || channel
+}
+
+function emitCacheRefresh(channel) {
+  if (typeof window === 'undefined') return
+  const refreshKey = getChannelRefreshKey(channel)
+  window.dispatchEvent(new CustomEvent('cache:updated', { detail: { channel } }))
+  window.dispatchEvent(new CustomEvent('sync:update', {
+    detail: { channel: refreshKey, ts: Date.now() },
+  }))
+}
+
 // ─── Smart dispatcher ─────────────────────────────────────────────────────────
 /**
  * route() — unified read/write dispatcher with:
@@ -249,7 +262,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         logCall(channel, 'cache-stale', 0)
         serverFn().then(result => {
           cacheSet(channel, result)
-          window.dispatchEvent(new CustomEvent('cache:updated', { detail: { channel } }))
+          emitCacheRefresh(channel)
         }).catch(() => {})
         return cached
       }
@@ -275,11 +288,51 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         
         _inflight[channel] = promise
         
-        try {
-          return await promise
-        } catch (e) {
-          if (isConnectivityError(e)) setServerHealth(false)
-          logCall(channel, 'local-fallback', Date.now() - t0, false)
+        if (localFn) {
+          let fallbackTimer = null
+          const localFallbackPromise = new Promise((resolve) => {
+            fallbackTimer = window.setTimeout(async () => {
+              try {
+                const localResult = await localFn()
+                resolve({ source: 'local', data: localResult })
+              } catch (_) {
+                resolve({ source: 'local', data: null })
+              }
+            }, SYNC.READ_LOCAL_FALLBACK_MS)
+          })
+
+          try {
+            const winner = await Promise.race([
+              promise.then((result) => ({ source: 'server', data: result })),
+              localFallbackPromise,
+            ])
+            if (fallbackTimer != null) {
+              window.clearTimeout(fallbackTimer)
+            }
+
+            if (winner?.source === 'local' && winner.data !== null) {
+              logCall(channel, 'local-fast', Date.now() - t0)
+              promise
+                .then(() => emitCacheRefresh(channel))
+                .catch(() => {})
+              return winner.data
+            }
+
+            return winner?.data ?? await promise
+          } catch (e) {
+            if (fallbackTimer != null) {
+              window.clearTimeout(fallbackTimer)
+            }
+            if (isConnectivityError(e)) setServerHealth(false)
+            logCall(channel, 'local-fallback', Date.now() - t0, false)
+          }
+        } else {
+          try {
+            return await promise
+          } catch (e) {
+            if (isConnectivityError(e)) setServerHealth(false)
+            logCall(channel, 'local-fallback', Date.now() - t0, false)
+          }
         }
       }
     }
