@@ -11,7 +11,7 @@ function getDeviceInfo() {
  * where available, a local Dexie fallback for offline-first reads.
  */
 
-import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
+import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
 import { resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
@@ -98,13 +98,6 @@ export async function discardPendingSyncQueue(reason = 'Offline changes were inv
   }
 }
 
-async function queueOfflineWrite(channel, payload, meta = {}) {
-  void channel
-  void payload
-  void meta
-  return null
-}
-
 function createClientRequestId(prefix = 'req') {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `${prefix}_${crypto.randomUUID()}`
@@ -116,60 +109,6 @@ function ensureClientRequestId(payload, prefix) {
   const current = String(payload?.client_request_id || '').trim()
   if (current) return { ...(payload || {}), client_request_id: current.slice(0, 120) }
   return { ...(payload || {}), client_request_id: createClientRequestId(prefix) }
-}
-
-function getPendingSyncMeta(row = {}) {
-  return {
-    _local_pending: 1,
-    _pending_action: row._pending_action || 'update',
-    _pending_since: row._pending_since || new Date().toISOString(),
-    _sync_error: row._sync_error || null,
-  }
-}
-
-async function updateLocalPendingRecord(tableName, id, updates = {}, action = 'update') {
-  const table = dexieDb.table(tableName)
-  const existing = await table.get(id)
-  const pendingMeta = getPendingSyncMeta({
-    _pending_action: action,
-    _pending_since: existing?._pending_since || new Date().toISOString(),
-  })
-  await table.put({
-    ...(existing || {}),
-    ...updates,
-    id,
-    updated_at: updates.updated_at || new Date().toISOString(),
-    ...pendingMeta,
-  })
-  emitSyncQueueChanged()
-}
-
-async function createLocalPendingRecord(tableName, payload, action = 'create') {
-  const savedAt = new Date().toISOString()
-  const localId = await dexieDb.table(tableName).add({
-    ...payload,
-    id: undefined,
-    created_at: payload.created_at || savedAt,
-    updated_at: payload.updated_at || savedAt,
-    ...getPendingSyncMeta({
-      _pending_action: action,
-      _pending_since: savedAt,
-    }),
-  })
-  emitSyncQueueChanged()
-  return localId
-}
-
-async function removeLocalRecord(tableName, id) {
-  await dexieDb.table(tableName).delete(id).catch(() => {})
-  emitSyncQueueChanged()
-}
-
-function emitSyncRefresh(channel) {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('sync:update', {
-    detail: { channel, ts: Date.now() },
-  }))
 }
 
 export async function getPendingSyncState() {
@@ -609,28 +548,7 @@ export async function createProduct(d) {
       }
     } catch (_) {}
   }
-  try {
-    return await route('products:create', () => apiFetch('POST', '/api/products', payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e  // real server error, not connectivity ??rethrow
-    // Offline: save locally
-    const localId = await dexieDb.products.add({
-      ...payload,
-      id: undefined,  // Dexie auto-assigns
-      stock_quantity: payload.stock_quantity || 0,
-      created_at: new Date().toISOString(),
-      ...getPendingSyncMeta({ _pending_action: 'create' }),
-    })
-    cacheInvalidate('products')
-    // Queue for sync when back online
-    await queueOfflineWrite('products:create', payload, {
-      operation: 'create',
-      entity_table: 'products',
-      entity_id: localId,
-      entity_name: payload.name || '',
-    })
-    return { success: true, id: localId, _offline: true }
-  }
+  return route('products:create', () => apiFetch('POST', '/api/products', payload), null, true)
 }
 export async function updateProduct(id, d) {
   if (d.supplier?.trim()) {
@@ -670,6 +588,10 @@ export async function getFiles(params = {}) {
 
 export async function uploadFileAsset({ file, userId, userName }) {
   if (!(file instanceof File)) throw new Error('Choose a file first')
+  requireLiveServerWrite('files:upload', {
+    offlineMessage: 'Server is offline. File uploads are invalid until the server reconnects.',
+    notConfiguredMessage: 'Server is not connected. File uploads are invalid until a live server is configured.',
+  })
   const base = getSyncServerUrl().replace(/\/$/, '')
   const device = getDeviceInfo()
   const headers = {
@@ -708,6 +630,11 @@ export async function deleteFileAsset(id) {
  * file system path (Electron). Converts to FormData and POSTs as multipart.
  */
 export async function uploadProductImage({ productId, filePath, fileName }) {
+  void productId
+  requireLiveServerWrite('products:uploadImage', {
+    offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
+    notConfiguredMessage: 'Server is not connected. Product image uploads are invalid until a live server is configured.',
+  })
   const base    = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
   const authToken   = getAuthSessionToken()
@@ -745,6 +672,10 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
       asset,
     }
   }
+  requireLiveServerWrite('users:uploadAvatar', {
+    offlineMessage: 'Server is offline. Avatar uploads are invalid until the server reconnects.',
+    notConfiguredMessage: 'Server is not connected. Avatar uploads are invalid until a live server is configured.',
+  })
   const base = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
   const authToken = getAuthSessionToken()
@@ -816,28 +747,7 @@ export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchI
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
-  try {
-    return await route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    // Offline: store sale locally so it isn't lost
-    const receiptNum = payload.receipt_number || `OFFLINE-${Date.now()}`
-    const localId = await dexieDb.sales.add({
-      ...payload,
-      id: undefined,
-      receipt_number: receiptNum,
-      created_at: payload.client_time || new Date().toISOString(),
-      ...getPendingSyncMeta({ _pending_action: 'create' }),
-    })
-    await queueOfflineWrite('sales:create', { ...payload, receipt_number: receiptNum }, {
-      operation: 'create',
-      entity_table: 'sales',
-      entity_id: localId,
-      entity_name: receiptNum,
-    })
-    cacheInvalidate('sales')
-    return { success: true, id: localId, receipt_number: receiptNum, receiptNumber: receiptNum, _offline: true }
-  }
+  return route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
 }
 
 async function runFlushPendingSyncQueue() {
@@ -878,62 +788,15 @@ export const getAnalytics = (params) => {
 export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('customers'))
 export async function createCustomer(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
-  try {
-    return await route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const localId = await createLocalPendingRecord('customers', payload, 'create')
-    cacheInvalidate('customers')
-    await queueOfflineWrite('customers:create', payload, {
-      operation: 'create',
-      entity_table: 'customers',
-      entity_id: localId,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('customers')
-    return { success: true, id: localId, _offline: true }
-  }
+  return route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
 }
 export const updateCustomer = async (id, d) => {
   const payload = await withExpectedUpdatedAt('customers', id, d)
-  try {
-    return await route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    await updateLocalPendingRecord('customers', id, payload, 'update')
-    cacheInvalidate('customers')
-    await queueOfflineWrite('customers:update', payload, {
-      operation: 'update',
-      entity_table: 'customers',
-      entity_id: id,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('customers')
-    return { success: true, id, _offline: true }
-  }
+  return route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
 }
 export const deleteCustomer = async (id) => {
   const payload = await withExpectedUpdatedAt('customers', id, {})
-  try {
-    return await route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const existing = await dexieDb.customers.get(id).catch(() => null)
-    await updateLocalPendingRecord('customers', id, {
-      ...(existing || {}),
-      _pending_action: 'delete',
-      _local_deleted: 1,
-    }, 'delete')
-    cacheInvalidate('customers')
-    await queueOfflineWrite('customers:delete', payload, {
-      operation: 'delete',
-      entity_table: 'customers',
-      entity_id: id,
-      entity_name: existing?.name || '',
-    })
-    emitSyncRefresh('customers')
-    return { success: true, id, _offline: true }
-  }
+  return route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
 }
 export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
 export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
@@ -942,62 +805,15 @@ export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','members
 export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('suppliers'))
 export async function createSupplier(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
-  try {
-    return await route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const localId = await createLocalPendingRecord('suppliers', payload, 'create')
-    cacheInvalidate('suppliers')
-    await queueOfflineWrite('suppliers:create', payload, {
-      operation: 'create',
-      entity_table: 'suppliers',
-      entity_id: localId,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('suppliers')
-    return { success: true, id: localId, _offline: true }
-  }
+  return route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
 }
 export const updateSupplier = async (id, d) => {
   const payload = await withExpectedUpdatedAt('suppliers', id, d)
-  try {
-    return await route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    await updateLocalPendingRecord('suppliers', id, payload, 'update')
-    cacheInvalidate('suppliers')
-    await queueOfflineWrite('suppliers:update', payload, {
-      operation: 'update',
-      entity_table: 'suppliers',
-      entity_id: id,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('suppliers')
-    return { success: true, id, _offline: true }
-  }
+  return route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
 }
 export const deleteSupplier = async (id) => {
   const payload = await withExpectedUpdatedAt('suppliers', id, {})
-  try {
-    return await route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const existing = await dexieDb.suppliers.get(id).catch(() => null)
-    await updateLocalPendingRecord('suppliers', id, {
-      ...(existing || {}),
-      _pending_action: 'delete',
-      _local_deleted: 1,
-    }, 'delete')
-    cacheInvalidate('suppliers')
-    await queueOfflineWrite('suppliers:delete', payload, {
-      operation: 'delete',
-      entity_table: 'suppliers',
-      entity_id: id,
-      entity_name: existing?.name || '',
-    })
-    emitSyncRefresh('suppliers')
-    return { success: true, id, _offline: true }
-  }
+  return route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
 }
 export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
 export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
@@ -1006,62 +822,15 @@ export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone',
 export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('delivery_contacts'))
 export async function createDeliveryContact(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
-  try {
-    return await route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const localId = await createLocalPendingRecord('delivery_contacts', payload, 'create')
-    cacheInvalidate('deliveryContacts')
-    await queueOfflineWrite('deliveryContacts:create', payload, {
-      operation: 'create',
-      entity_table: 'delivery_contacts',
-      entity_id: localId,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('deliveryContacts')
-    return { success: true, id: localId, _offline: true }
-  }
+  return route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)
 }
 export const updateDeliveryContact = async (id, d) => {
   const payload = await withExpectedUpdatedAt('delivery_contacts', id, d)
-  try {
-    return await route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    await updateLocalPendingRecord('delivery_contacts', id, payload, 'update')
-    cacheInvalidate('deliveryContacts')
-    await queueOfflineWrite('deliveryContacts:update', payload, {
-      operation: 'update',
-      entity_table: 'delivery_contacts',
-      entity_id: id,
-      entity_name: payload.name || '',
-    })
-    emitSyncRefresh('deliveryContacts')
-    return { success: true, id, _offline: true }
-  }
+  return route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
 }
 export const deleteDeliveryContact = async (id) => {
   const payload = await withExpectedUpdatedAt('delivery_contacts', id, {})
-  try {
-    return await route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const existing = await dexieDb.delivery_contacts.get(id).catch(() => null)
-    await updateLocalPendingRecord('delivery_contacts', id, {
-      ...(existing || {}),
-      _pending_action: 'delete',
-      _local_deleted: 1,
-    }, 'delete')
-    cacheInvalidate('deliveryContacts')
-    await queueOfflineWrite('deliveryContacts:delete', payload, {
-      operation: 'delete',
-      entity_table: 'delivery_contacts',
-      entity_id: id,
-      entity_name: existing?.name || '',
-    })
-    emitSyncRefresh('deliveryContacts')
-    return { success: true, id, _offline: true }
-  }
+  return route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
 }
 export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImport', () => apiFetch('POST', '/api/delivery-contacts/bulk-import', d), null, true)
 
@@ -1232,48 +1001,13 @@ export async function createReturn(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'return')
   const returnNumber = String(payload.return_number || '').trim() || `RET-${Date.now()}`
   const finalPayload = { ...payload, return_number: returnNumber }
-  try {
-    return await route('returns:create', () => apiFetch('POST', '/api/returns', finalPayload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const localId = await createLocalPendingRecord('returns', finalPayload, 'create')
-    cacheInvalidate('returns')
-    await queueOfflineWrite('returns:create', finalPayload, {
-      operation: 'create',
-      entity_table: 'returns',
-      entity_id: localId,
-      entity_name: returnNumber,
-    })
-    emitSyncRefresh('returns')
-    emitSyncRefresh('sales')
-    emitSyncRefresh('products')
-    emitSyncRefresh('inventory')
-    emitSyncRefresh('dashboard')
-    return { success: true, id: localId, returnNumber, _offline: true }
-  }
+  return route('returns:create', () => apiFetch('POST', '/api/returns', finalPayload), null, true)
 }
 export async function createSupplierReturn(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier_return')
   const returnNumber = String(payload.return_number || '').trim() || `SRET-${Date.now()}`
   const finalPayload = { ...payload, return_number: returnNumber }
-  try {
-    return await route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', finalPayload), null, true)
-  } catch (e) {
-    if (!isNetErr(e)) throw e
-    const localId = await createLocalPendingRecord('returns', finalPayload, 'create')
-    cacheInvalidate('returns')
-    await queueOfflineWrite('returns:createSupplier', finalPayload, {
-      operation: 'create',
-      entity_table: 'returns',
-      entity_id: localId,
-      entity_name: returnNumber,
-    })
-    emitSyncRefresh('returns')
-    emitSyncRefresh('products')
-    emitSyncRefresh('inventory')
-    emitSyncRefresh('dashboard')
-    return { success: true, id: localId, returnNumber, _offline: true }
-  }
+  return route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', finalPayload), null, true)
 }
 export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', `/api/returns/${id}`), () => null)
 

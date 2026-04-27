@@ -349,8 +349,19 @@ function useSyncErrorBanner() {
 
   useEffect(() => {
     const onSyncError = (event) => setSyncError(event.detail)
+    const onSyncRecovered = (event) => {
+      if (event?.detail?.connected) {
+        setSyncError(null)
+      }
+    }
     window.addEventListener('sync:error', onSyncError)
-    return () => window.removeEventListener('sync:error', onSyncError)
+    window.addEventListener('sync:write-blocked', onSyncError)
+    window.addEventListener('sync:status', onSyncRecovered)
+    return () => {
+      window.removeEventListener('sync:error', onSyncError)
+      window.removeEventListener('sync:write-blocked', onSyncError)
+      window.removeEventListener('sync:status', onSyncRecovered)
+    }
   }, [])
 
   return {
@@ -566,12 +577,14 @@ function Notification({ notification }) {
 function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
   const { t } = useApp()
   if (!error) return null
+  const blocked = String(error?.reason || '').startsWith('server_')
+  const title = blocked ? 'Write blocked - server unavailable: ' : 'Write failed - data not saved: '
 
   return (
     <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg">
       <span className="text-lg flex-shrink-0">!</span>
       <div className="flex-1 min-w-0">
-        <span className="font-semibold text-sm">Write failed - data not saved: </span>
+        <span className="font-semibold text-sm">{title}</span>
         <span className="text-sm opacity-90">{error.error}</span>
         {error.channel && <span className="text-xs opacity-70 ml-2">(operation: {error.channel})</span>}
       </div>
@@ -579,6 +592,14 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
         <button onClick={onGoToServer} className="text-xs underline opacity-90 hover:opacity-100 whitespace-nowrap">{t('view_details')}</button>
         <button onClick={onDismiss} className="text-white opacity-70 hover:opacity-100 text-lg leading-none px-1">x</button>
       </div>
+    </div>
+  )
+}
+
+function ReadOnlyServerBanner() {
+  return (
+    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+      Server connection is unavailable. You can review cached data, but changes are blocked until the live server reconnects.
     </div>
   )
 }
@@ -643,6 +664,8 @@ export default function App() {
     writeConflict,
     dismissWriteConflict,
     reloadWriteConflict,
+    syncUrl,
+    canWriteToServer,
   } = useApp()
   const { syncError, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
@@ -731,6 +754,7 @@ export default function App() {
       <Sidebar />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 md:pt-0 pb-16 md:pb-0">
+        {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
         {mountedPages.map((mountedPage) => (
           <PageSlot
             key={mountedPage}

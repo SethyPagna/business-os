@@ -151,6 +151,38 @@ export function isWriteBlockedError(error) {
   return !!(error && error.code === 'write_requires_live_server')
 }
 
+export function requireLiveServerWrite(channel, options = {}) {
+  if (!syncServerUrl) {
+    const message = options.notConfiguredMessage || 'Server is not connected. Changes are invalid until a live server is configured.'
+    dispatchWriteBlocked(channel, message, {
+      reason: 'server_not_configured',
+      serverOnline: false,
+      serverConfigured: false,
+    })
+    throw createWriteBlockedError(channel, message, {
+      reason: 'server_not_configured',
+      serverOnline: false,
+      serverConfigured: false,
+    })
+  }
+
+  if (!_serverOnline) {
+    const message = options.offlineMessage || 'Server is offline. Changes are invalid until the server reconnects.'
+    dispatchWriteBlocked(channel, message, {
+      reason: 'server_offline',
+      serverOnline: false,
+      serverConfigured: true,
+    })
+    throw createWriteBlockedError(channel, message, {
+      reason: 'server_offline',
+      serverOnline: false,
+      serverConfigured: true,
+    })
+  }
+
+  return true
+}
+
 function getConflictRefreshChannels(error, fallbackChannel) {
   const entity = String(error?.entity || '').trim().toLowerCase()
   if (entity === 'settings') return ['settings']
