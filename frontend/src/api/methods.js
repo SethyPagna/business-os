@@ -47,6 +47,8 @@ function queueOfflineWrite(channel, payload) {
   }).catch(() => {})
 }
 
+let flushPendingSyncPromise = null
+
 async function invalidateClientRuntimeState(reason = 'server-mutation') {
   await resetClientRuntimeState({
     clearAuth: false,
@@ -635,7 +637,7 @@ export async function createSale(d) {
   }
 }
 
-export async function flushPendingSyncQueue() {
+async function runFlushPendingSyncQueue() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl || !getAuthSessionToken()) return { processed: 0, failed: 0 }
 
@@ -714,6 +716,15 @@ export async function flushPendingSyncQueue() {
   }
 
   return { processed, failed }
+}
+
+export async function flushPendingSyncQueue() {
+  if (flushPendingSyncPromise) return flushPendingSyncPromise
+  flushPendingSyncPromise = runFlushPendingSyncQueue()
+    .finally(() => {
+      flushPendingSyncPromise = null
+    })
+  return flushPendingSyncPromise
 }
 
 export const getSales   = (params) => {

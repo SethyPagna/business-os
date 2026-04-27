@@ -22,7 +22,7 @@ const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
 const { db } = require('../database')
 const { ok, err, audit, logOp, tryParse } = require('../helpers')
-const { authToken, isAdminControlUser } = require('../middleware')
+const { authToken } = require('../middleware')
 const {
   encryptSecret,
   decryptSecret,
@@ -63,6 +63,7 @@ const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
 const { TAILSCALE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
+const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
 
 const router = express.Router()
 
@@ -183,11 +184,14 @@ function requireOtpActor(req, res) {
   return null
 }
 
-function canManageOtpTarget(actor, targetUserId) {
-  const targetId = Number(targetUserId || 0) || 0
-  if (!actor?.id || !targetId) return false
-  if (Number(actor.id) === targetId) return true
-  return isAdminControlUser(actor)
+function getOtpTargetUser(userId) {
+  return db.prepare(`
+    SELECT u.*, r.permissions AS role_permissions, r.code AS role_code
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = ? AND u.deleted_at IS NULL
+    LIMIT 1
+  `).get(userId)
 }
 
 /**
@@ -813,9 +817,9 @@ router.post('/otp/setup', authToken, async (req, res) => {
   const actor = requireOtpActor(req, res)
   if (!actor) return
   const { userId } = req.body || {}
-  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
-  const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
+  const user = getOtpTargetUser(userId)
   if (!user) return err(res, 'User not found')
+  if (!canManageOtpTarget(actor, user)) return err(res, 'No permission', 403)
 
   const secret = speakeasy.generateSecret({ name: `BusinessOS (${user.username})`, length: 20 })
   db.prepare(`
@@ -838,9 +842,9 @@ router.post('/otp/confirm', authToken, (req, res) => {
   if (!actor) return
   const { userId, token } = req.body || {}
   if (!userId || !token) return err(res, 'userId and token required')
-  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
-  const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
+  const user = getOtpTargetUser(userId)
   if (!user || !user.otp_pending_secret) return err(res, 'OTP not set up')
+  if (!canManageOtpTarget(actor, user)) return err(res, 'No permission', 403)
   const otpSecret = getOtpSecret(user, 'otp_pending_secret')
   if (!otpSecret) return err(res, 'OTP setup secret is unavailable. Please start setup again.', 400)
 
@@ -873,11 +877,11 @@ router.post('/otp/disable', authToken, (req, res) => {
   if (!actor) return
   const { userId, password } = req.body || {}
   if (!userId) return err(res, 'userId required')
-  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
-  const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
+  const user = getOtpTargetUser(userId)
   if (!user) return err(res, 'User not found')
-  const isSelf = Number(actor.id) === Number(userId)
-  if (isSelf && password && !bcrypt.compareSync(password, user.password)) return err(res, 'Incorrect password', 401)
+  if (!canManageOtpTarget(actor, user)) return err(res, 'No permission', 403)
+  if (requiresSelfOtpDisablePassword(actor, user, password)) return err(res, 'Password required', 400)
+  if (Number(actor.id) === Number(user.id) && !bcrypt.compareSync(password, user.password)) return err(res, 'Incorrect password', 401)
   db.prepare(`
     UPDATE users
     SET otp_enabled = 0,
@@ -897,9 +901,9 @@ router.post('/otp/disable', authToken, (req, res) => {
 router.get('/otp/status/:userId', authToken, (req, res) => {
   const actor = requireOtpActor(req, res)
   if (!actor) return
-  if (!canManageOtpTarget(actor, req.params.userId)) return err(res, 'No permission', 403)
-  const user = db.prepare('SELECT id, otp_enabled FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.userId)
+  const user = getOtpTargetUser(req.params.userId)
   if (!user) return err(res, 'User not found')
+  if (!canManageOtpTarget(actor, user)) return err(res, 'No permission', 403)
   ok(res, { otpEnabled: !!user.otp_enabled })
 })
 
