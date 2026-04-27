@@ -14,6 +14,7 @@ let ws               = null
 let wsReconnectTimer = null
 let wsPingTimer      = null
 let reconnectAttempts = 0
+let wsAuthToken = ''
 
 function shouldDebugWs() {
   try {
@@ -40,6 +41,7 @@ export function connectWS() {
 
   const authToken = getAuthSessionToken()
   if (!authToken) return
+  wsAuthToken = authToken
   const wsUrl = syncServerUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws'
     + `?token=${encodeURIComponent(authToken)}`
 
@@ -87,13 +89,25 @@ export function connectWS() {
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
     if (code === 4001) {
-      window.dispatchEvent(new CustomEvent('sync:error', {
-        detail: {
-          channel: 'system:session_access',
-          error: reason || 'Please sign in again to continue.',
-          ts: new Date().toISOString(),
-        },
-      }))
+      // Session-rotation paths (for example changing session duration) revoke the
+      // old token before the frontend finishes reconnecting with the newly
+      // issued one. Give that handoff a moment before treating 4001 as a real
+      // sign-out condition.
+      window.setTimeout(() => {
+        const latestToken = getAuthSessionToken()
+        if (!latestToken) return
+        if (latestToken !== wsAuthToken && getSyncServerUrl()) {
+          logWs('debug', 'session token rotated; reconnecting websocket with fresh token')
+          connectWS()
+          return
+        }
+        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+          detail: {
+            code: 'invalid_session',
+            error: reason || 'Please sign in again to continue.',
+          },
+        }))
+      }, 1200)
       return
     }
     if (getSyncServerUrl()) scheduleReconnect()
@@ -109,6 +123,7 @@ export function disconnectWS() {
   clearTimeout(wsReconnectTimer)
   clearInterval(wsPingTimer)
   wsPingTimer = null
+  wsAuthToken = ''
   if (ws) { ws.onclose = null; ws.close(); ws = null }
   window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
 }
