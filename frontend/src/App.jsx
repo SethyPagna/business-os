@@ -3,6 +3,7 @@ import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
+import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 
@@ -630,7 +631,18 @@ function PublicCatalogView() {
 }
 
 export default function App() {
-  const { user, page, notification, canAccessPage, AccessDenied, setPage, settings } = useApp()
+  const {
+    user,
+    page,
+    notification,
+    canAccessPage,
+    AccessDenied,
+    setPage,
+    settings,
+    writeConflict,
+    dismissWriteConflict,
+    reloadWriteConflict,
+  } = useApp()
   const { syncError, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
 
@@ -719,6 +731,11 @@ export default function App() {
       </main>
 
       <Notification notification={notification} />
+      <WriteConflictModal
+        conflict={writeConflict}
+        onClose={dismissWriteConflict}
+        onReload={reloadWriteConflict}
+      />
       <PageHelpButton pageId={page} />
       <SyncErrorBanner
         error={syncError}

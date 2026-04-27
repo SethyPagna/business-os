@@ -234,6 +234,7 @@ export function AppProvider({ children }) {
   const [theme,               setTheme]               = useState('light')
   const [page,                setPage]                = useState('dashboard')
   const [notification,        setNotification]        = useState(null)
+  const [writeConflict,       setWriteConflict]       = useState(null)
   const [langRevision,        setLangRevision]        = useState(0)
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
@@ -390,15 +391,25 @@ export function AppProvider({ children }) {
       const detail = e?.detail || {}
       const entity = String(detail.entity || '').trim().toLowerCase()
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
+      let entityLabel = 'Item'
       if (entity === 'settings') {
         message = 'Settings changed on another device. Latest values have been reloaded.'
+        entityLabel = 'Settings'
         loadSettings().catch(() => {})
       } else if (entity === 'sale') {
         message = 'This sale changed on another device. Latest data is loading now.'
+        entityLabel = 'Sale'
       } else if (entity === 'return') {
         message = 'This return changed on another device. Latest data is loading now.'
+        entityLabel = 'Return'
       }
       setNotification({ message, type: 'error', id: Date.now() })
+      setWriteConflict({
+        ...detail,
+        entity,
+        entityLabel,
+        id: Date.now(),
+      })
     }
     const onUnauthorized = (e) => {
       const eventToken = String(e?.detail?.token || '').trim()
@@ -769,6 +780,26 @@ export function AppProvider({ children }) {
     setTimeout(() => setNotification(null), duration)
   }, [])
 
+  const dismissWriteConflict = useCallback(() => {
+    setWriteConflict(null)
+  }, [])
+
+  const reloadWriteConflict = useCallback(async () => {
+    const detail = writeConflict
+    if (!detail) return
+
+    const refreshChannels = Array.isArray(detail.refreshChannels) ? detail.refreshChannels : []
+    if (detail.entity === 'settings') {
+      await loadSettings().catch(() => {})
+    }
+    refreshChannels.forEach((channel) => {
+      window.dispatchEvent(new CustomEvent('sync:update', {
+        detail: { channel, ts: Date.now() },
+      }))
+    })
+    setWriteConflict(null)
+  }, [loadSettings, writeConflict])
+
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
 
@@ -992,6 +1023,7 @@ export function AppProvider({ children }) {
     settings, loadSettings, saveSettings,
     language, theme, t,
     notify, notification,
+    writeConflict, dismissWriteConflict, reloadWriteConflict,
     hasPermission, canAccessPage, getPermissions,
     formatPrice, fmtUSD, fmtKHR,
     usdSymbol, khrSymbol, displayCurrency, exchangeRate,
@@ -1042,6 +1074,9 @@ const FALLBACK_APP_CONTEXT = {
   t: (key) => key,
   notify: () => {},
   notification: null,
+  writeConflict: null,
+  dismissWriteConflict: () => {},
+  reloadWriteConflict: async () => {},
   hasPermission: () => false,
   canAccessPage: () => true,
   getPermissions: () => [],
