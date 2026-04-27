@@ -153,7 +153,7 @@ function InfoTab({ syncUrl, syncConnected }) {
             <p className="font-semibold">Time handling:</p>
             <p>Client and server previews use the selected <strong>{t('display_timezone')}</strong>.</p>
             <p>Audit metadata still keeps each device timezone for traceability.</p>
-            <p>Offline activity queues locally and syncs timestamps after reconnect.</p>
+            <p>Reads may fall back locally, but writes are blocked until the server reconnects.</p>
             <p>If drift is above 10s, check the device clock settings.</p>
           </div>
         </div>
@@ -195,10 +195,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
       loadQueueState()
     }
     window.addEventListener('sync:error', onErr)
+    window.addEventListener('sync:write-blocked', onErr)
     window.addEventListener('sync:queue-changed', onQueueChanged)
     return () => {
       mounted.current = false
       window.removeEventListener('sync:error', onErr)
+      window.removeEventListener('sync:write-blocked', onErr)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
   }, [])
@@ -229,10 +231,10 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
   }
 
   async function handleRetryQueue() {
-    if (!window.api?.retryPendingSyncNow) return
+    if (!window.api?.discardPendingSyncQueue) return
     setRetryingQueue(true)
     try {
-      await window.api.retryPendingSyncNow()
+      await window.api.discardPendingSyncQueue()
     } finally {
       setRetryingQueue(false)
     }
@@ -275,7 +277,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
 
       {writeErrors.length > 0 ? (
         <div className="border-b border-red-200 bg-red-50 px-4 py-2 dark:bg-red-900/20">
-          <p className="mb-1 text-xs font-semibold text-red-700">Write failures - data not saved to server:</p>
+          <p className="mb-1 text-xs font-semibold text-red-700">Write blocked - data was not saved to the server:</p>
           {writeErrors.slice(0, 5).map((entry) => (
             <p key={entry._id} className="truncate text-xs text-red-600">
               [{entry.ts?.slice(11, 19)}] <strong>{entry.channel}</strong>: {entry.error}
@@ -348,11 +350,16 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
                 disabled={retryingQueue || pendingSync.total === 0}
                 className="text-blue-600 hover:underline disabled:opacity-40"
               >
-                {retryingQueue ? 'Retrying...' : 'Retry now'}
+                {retryingQueue ? 'Discarding...' : 'Discard invalid changes'}
               </button>
             </div>
+            {pendingSync.total > 0 ? (
+              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                These pending client-side changes are invalid and will not be replayed. Discard them to return this device to server truth.
+              </p>
+            ) : null}
             {pendingSync.total === 0 ? (
-              <p className="py-4 text-center text-xs text-gray-400">No pending client actions.</p>
+              <p className="py-4 text-center text-xs text-gray-400">No invalid pending client actions.</p>
             ) : pendingSync.items.map((item) => (
               <div key={item._seq} className="flex items-center gap-2 border-b border-gray-50 py-1 text-xs dark:border-gray-700/30">
                 <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
@@ -618,8 +625,8 @@ export default function ServerPage() {
         </div>
 
         <div className="card bg-gray-50 p-4 text-sm text-gray-600 dark:bg-gray-800/50 dark:text-gray-400">
-          <strong className="text-gray-700 dark:text-gray-300">{t('offline_first') || 'Offline-first:'} </strong>
-          {t('offline_first_desc') || 'Reads fall back to local IndexedDB when the server is unreachable. Offline sales queue and push automatically on reconnect.'}
+          <strong className="text-gray-700 dark:text-gray-300">{t('offline_first') || 'Server-required writes:'} </strong>
+          Reads can fall back to local IndexedDB when the server is unreachable, but changes are blocked and treated as invalid until the live server reconnects.
         </div>
 
         <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} />

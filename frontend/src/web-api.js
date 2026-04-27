@@ -1,16 +1,16 @@
 /**
- * web-api.js — Browser API bootstrap.
+ * web-api.js ??Browser API bootstrap.
  *
  * FIX: window.api is now installed SYNCHRONOUSLY via static imports.
- * The original used a dynamic import() which is async — this caused
+ * The original used a dynamic import() which is async ??this caused
  * AppContext's polling loop to sometimes run before window.api existed,
  * leaving the app stuck on the loading screen.
  *
  * Architecture:
- *   api/http.js      — apiFetch, route(), read cache
- *   api/websocket.js — WebSocket connection manager
- *   api/localDb.js   — Dexie (IndexedDB) schema + helpers
- *   api/methods.js   — all domain API methods
+ *   api/http.js      ??apiFetch, route(), read cache
+ *   api/websocket.js ??WebSocket connection manager
+ *   api/localDb.js   ??Dexie (IndexedDB) schema + helpers
+ *   api/methods.js   ??all domain API methods
  */
 
 import { setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
@@ -30,7 +30,7 @@ function getStoredAuthToken() {
   }
 }
 
-// ── Silence Capacitor/vendor bridge noise that fires in plain web context ──────
+// ?? Silence Capacitor/vendor bridge noise that fires in plain web context ??????
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
 // rejection when Capacitor's tab-messaging bridge can't find a native listener.
 // This is harmless in web-only mode.
@@ -82,7 +82,7 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
-// ── Synchronous window.api installation ──────────────────────────────────────
+// ?? Synchronous window.api installation ??????????????????????????????????????
 window.api = {
 
   setSyncServerUrl(url) {
@@ -92,10 +92,10 @@ window.api = {
       dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
       cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       connectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
       startHealthCheck()
     } else {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
+      methods.discardPendingSyncQueue?.().catch(() => {})
       disconnectWS()
     }
   },
@@ -119,7 +119,6 @@ window.api = {
     disconnectWS()
     if (clean) {
       connectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
     }
   },
 
@@ -134,13 +133,9 @@ window.api = {
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('sync:reconnected', () => {
-    methods.flushPendingSyncQueue?.().catch(() => {})
-  })
   window.addEventListener('online', () => {
     if (getAuthSessionToken()) {
       reconnectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
     } else {
       connectWS()
     }
@@ -149,21 +144,19 @@ if (typeof window !== 'undefined') {
   window.addEventListener('focus', () => {
     if (getAuthSessionToken()) {
       connectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
     }
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     if (getAuthSessionToken()) {
       connectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
     }
   })
 }
 
-// ── Bootstrap: read stored token, auto-detect server URL from page origin ─────
+// ?? Bootstrap: read stored token, auto-detect server URL from page origin ?????
 // KEY FIX: When not in Vite dev mode the page is served BY the backend, so the
-// current origin is always the correct API/WS server — regardless of any stale
+// current origin is always the correct API/WS server ??regardless of any stale
 // URL that may be saved in localStorage from a previous session or a different
 // device (e.g. localhost saved when first run locally, but accessed via Tailscale
 // on another device).  We always overwrite the stored URL with the current origin.
@@ -184,12 +177,12 @@ if (typeof window !== 'undefined') {
     // Determine the correct sync server URL
     let url
     if (!isViteDev) {
-      // Served by the Node backend — current origin IS the server. Always use it.
+      // Served by the Node backend ??current origin IS the server. Always use it.
       url = sanitizeSyncServerUrl(location.origin)
       try { localStorage.setItem('businessos_sync_server', url) } catch (_) {}
       try { await dexieDb.settings.put({ key: 'sync_server_url', value: url }) } catch (_) {}
     } else {
-      // Vite dev — use stored value (normally points to localhost:4000 backend)
+      // Vite dev ??use stored value (normally points to localhost:4000 backend)
       url = sanitizeSyncServerUrl(localStorage.getItem('businessos_sync_server') || '')
       try {
         const stored = await dexieDb.settings.bulkGet(['sync_server_url'])
@@ -197,11 +190,12 @@ if (typeof window !== 'undefined') {
       } catch (_) {}
     }
 
+    methods.discardPendingSyncQueue?.().catch(() => {})
+
     if (url) {
       setSyncServerUrl(url)
       if (authToken) connectWS()
-      methods.flushPendingSyncQueue?.().catch(() => {})
-      startHealthCheck()  // ping every 12 s so offline→online recovery works
+      startHealthCheck()  // ping every 12 s so offline?nline recovery works
     }
   } catch (e) {
     console.warn('[web-api] Bootstrap error:', e.message)

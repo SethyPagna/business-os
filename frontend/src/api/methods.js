@@ -1,4 +1,4 @@
-﻿
+
 // ─── Device info helper ───────────────────────────────────────────────────────
 function getDeviceInfo() {
   return getClientDeviceInfo()
@@ -13,7 +13,7 @@ function getDeviceInfo() {
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
-import { buildQueuedOperationScope, doesQueuedScopeMatchCurrent, resetClientRuntimeState } from './clientRuntime.js'
+import { resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 
@@ -44,26 +44,65 @@ function emitSyncQueueChanged() {
   }))
 }
 
-async function queueOfflineWrite(channel, payload, meta = {}) {
-  const savedAt = new Date().toISOString()
-  const seq = await dexieDb.sync_queue.add({
-    channel,
-    payload: JSON.stringify(payload || {}),
-    runtime_scope: buildQueuedOperationScope(),
-    operation: meta.operation || null,
-    entity_table: meta.entity_table || null,
-    entity_id: meta.entity_id ?? null,
-    entity_name: meta.entity_name || null,
-    client_request_id: payload?.client_request_id || null,
-    status: 'pending',
-    created_at: savedAt,
-    updated_at: savedAt,
-    retry_count: 0,
-    retry_at: null,
-    error: null,
-  }).catch(() => null)
+const PENDING_LOCAL_TABLES = [
+  'products',
+  'sales',
+  'customers',
+  'suppliers',
+  'delivery_contacts',
+  'returns',
+]
+
+async function clearPendingMirrorState() {
+  await Promise.all(PENDING_LOCAL_TABLES.map(async (tableName) => {
+    const table = dexieDb.table(tableName)
+    const rows = await table
+      .filter((row) => !!row?._local_pending || !!row?._local_deleted)
+      .toArray()
+      .catch(() => [])
+
+    await Promise.all(rows.map(async (row) => {
+      const pendingAction = String(row?._pending_action || '').trim().toLowerCase()
+      if (pendingAction === 'create') {
+        await table.delete(row.id).catch(() => {})
+        return
+      }
+
+      const nextRow = { ...row }
+      delete nextRow._local_pending
+      delete nextRow._pending_action
+      delete nextRow._pending_since
+      delete nextRow._sync_error
+      delete nextRow._local_deleted
+      await table.put(nextRow).catch(() => {})
+    }))
+  }))
+}
+
+export async function discardPendingSyncQueue(reason = 'Offline changes were invalidated because Business OS now requires a live server for writes.') {
+  const existing = await dexieDb.sync_queue.toArray().catch(() => [])
+  await dexieDb.sync_queue.clear().catch(() => {})
+  await clearPendingMirrorState()
   emitSyncQueueChanged()
-  return seq
+  if (typeof window !== 'undefined') {
+    ;['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'].forEach((channel) => {
+      window.dispatchEvent(new CustomEvent('sync:update', {
+        detail: { channel, reason: 'discard-pending-sync-queue', ts: Date.now() },
+      }))
+    })
+  }
+  return {
+    success: true,
+    discarded: existing.length,
+    reason,
+  }
+}
+
+async function queueOfflineWrite(channel, payload, meta = {}) {
+  void channel
+  void payload
+  void meta
+  return null
 }
 
 function createClientRequestId(prefix = 'req') {
@@ -155,6 +194,7 @@ export async function getPendingSyncState() {
   return {
     ...counts,
     oldest_created_at: oldest,
+    writes_require_server: true,
     items: sorted.slice(0, 25).map((item) => ({
       _seq: item._seq,
       channel: item.channel,
@@ -173,16 +213,7 @@ export async function getPendingSyncState() {
 }
 
 export async function retryPendingSyncNow() {
-  await dexieDb.sync_queue
-    .toCollection()
-    .modify({
-      status: 'pending',
-      retry_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .catch(() => {})
-  emitSyncQueueChanged()
-  return flushPendingSyncQueue()
+  return discardPendingSyncQueue()
 }
 
 let flushPendingSyncPromise = null
@@ -415,7 +446,7 @@ export async function getSettings() {
 export async function saveSettings(updates) {
   const payload = await withSettingsExpectedUpdatedAt(updates)
   try {
-    const result = await apiFetch('POST', '/api/settings', payload)
+    const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
     if (result?.updatedAt) {
       await localSaveSettingsMeta(result.updatedAt).catch(() => {})
     }
@@ -573,13 +604,11 @@ export async function createProduct(d) {
     try {
       const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(payload.supplier.trim()).first()
       if (!existing) {
-        try { await apiFetch('POST', '/api/suppliers', { name: payload.supplier.trim(), ...getDeviceInfo() }) }
-        catch (_) { await dexieDb.suppliers.add({ name: payload.supplier.trim(), created_at: new Date().toISOString() }) }
+        await apiFetch('POST', '/api/suppliers', { name: payload.supplier.trim(), ...getDeviceInfo() })
         cacheInvalidate('suppliers')
       }
     } catch (_) {}
   }
-  // Try server; if offline, save to local Dexie + queue for later sync
   try {
     return await route('products:create', () => apiFetch('POST', '/api/products', payload), null, true)
   } catch (e) {
@@ -608,9 +637,7 @@ export async function updateProduct(id, d) {
     try {
       const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(d.supplier.trim()).first()
       if (!existing) {
-        try { await apiFetch('POST', '/api/suppliers', { name: d.supplier.trim(), ...getDeviceInfo() }) } catch (_) {
-          await dexieDb.suppliers.add({ name: d.supplier.trim(), created_at: new Date().toISOString() })
-        }
+        await apiFetch('POST', '/api/suppliers', { name: d.supplier.trim(), ...getDeviceInfo() })
         cacheInvalidate('suppliers')
       }
     } catch (_) {}
@@ -814,145 +841,12 @@ export async function createSale(d) {
 }
 
 async function runFlushPendingSyncQueue() {
-  const syncServerUrl = getSyncServerUrl()
-  if (!syncServerUrl || !getAuthSessionToken()) return { processed: 0, failed: 0 }
-
-  const touchedChannels = new Set()
-
-  const pending = (await dexieDb.sync_queue.toArray())
-    .filter((item) => {
-      const status = String(item?.status || 'pending')
-      if (status === 'pending') return true
-      if (status !== 'failed') return false
-      const retryAt = Date.parse(item?.retry_at || '')
-      return !Number.isFinite(retryAt) || retryAt <= Date.now()
-    })
-    .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
-
-  let processed = 0
-  let failed = 0
-
-    for (const item of pending) {
-      if (!doesQueuedScopeMatchCurrent(item?.runtime_scope)) {
-        await dexieDb.sync_queue.delete(item._seq).catch(() => {})
-        emitSyncQueueChanged()
-        continue
-      }
-
-    let payload = {}
-    try {
-      payload = item?.payload ? JSON.parse(item.payload) : {}
-    } catch (_) {
-      payload = {}
-    }
-
-      try {
-        await dexieDb.sync_queue.update(item._seq, {
-          status: 'syncing',
-          updated_at: new Date().toISOString(),
-          error: null,
-        }).catch(() => {})
-        emitSyncQueueChanged()
-        if (item.channel === 'products:create') {
-          await apiFetch('POST', '/api/products', payload)
-          touchedChannels.add('products')
-          await removeLocalRecord('products', item.entity_id)
-        } else if (item.channel === 'sales:create') {
-          await apiFetch('POST', '/api/sales', payload)
-          touchedChannels.add('sales')
-          touchedChannels.add('products')
-          touchedChannels.add('inventory')
-          touchedChannels.add('dashboard')
-          await removeLocalRecord('sales', item.entity_id)
-        } else if (item.channel === 'customers:create') {
-          await apiFetch('POST', '/api/customers', payload)
-          touchedChannels.add('customers')
-          await removeLocalRecord('customers', item.entity_id)
-        } else if (item.channel === 'customers:update') {
-          await apiFetch('PUT', `/api/customers/${item.entity_id}`, payload)
-          touchedChannels.add('customers')
-        } else if (item.channel === 'customers:delete') {
-          await apiFetch('DELETE', `/api/customers/${item.entity_id}`, payload)
-          touchedChannels.add('customers')
-          await removeLocalRecord('customers', item.entity_id)
-        } else if (item.channel === 'suppliers:create') {
-          await apiFetch('POST', '/api/suppliers', payload)
-          touchedChannels.add('suppliers')
-          await removeLocalRecord('suppliers', item.entity_id)
-        } else if (item.channel === 'suppliers:update') {
-          await apiFetch('PUT', `/api/suppliers/${item.entity_id}`, payload)
-          touchedChannels.add('suppliers')
-        } else if (item.channel === 'suppliers:delete') {
-          await apiFetch('DELETE', `/api/suppliers/${item.entity_id}`, payload)
-          touchedChannels.add('suppliers')
-          await removeLocalRecord('suppliers', item.entity_id)
-        } else if (item.channel === 'deliveryContacts:create') {
-          await apiFetch('POST', '/api/delivery-contacts', payload)
-          touchedChannels.add('deliveryContacts')
-          await removeLocalRecord('delivery_contacts', item.entity_id)
-        } else if (item.channel === 'deliveryContacts:update') {
-          await apiFetch('PUT', `/api/delivery-contacts/${item.entity_id}`, payload)
-          touchedChannels.add('deliveryContacts')
-        } else if (item.channel === 'deliveryContacts:delete') {
-          await apiFetch('DELETE', `/api/delivery-contacts/${item.entity_id}`, payload)
-          touchedChannels.add('deliveryContacts')
-          await removeLocalRecord('delivery_contacts', item.entity_id)
-        } else if (item.channel === 'returns:create') {
-          await apiFetch('POST', '/api/returns', payload)
-          touchedChannels.add('returns')
-          touchedChannels.add('sales')
-          touchedChannels.add('products')
-          touchedChannels.add('inventory')
-          touchedChannels.add('dashboard')
-          await removeLocalRecord('returns', item.entity_id)
-        } else if (item.channel === 'returns:createSupplier') {
-          await apiFetch('POST', '/api/returns/supplier', payload)
-          touchedChannels.add('returns')
-          touchedChannels.add('products')
-          touchedChannels.add('inventory')
-          touchedChannels.add('dashboard')
-          await removeLocalRecord('returns', item.entity_id)
-        } else {
-          await dexieDb.sync_queue.delete(item._seq)
-          emitSyncQueueChanged()
-          continue
-        }
-
-        await dexieDb.sync_queue.delete(item._seq)
-        emitSyncQueueChanged()
-        processed += 1
-      } catch (error) {
-        if (isNetErr(error)) {
-          await dexieDb.sync_queue.update(item._seq, {
-            status: 'pending',
-            updated_at: new Date().toISOString(),
-          }).catch(() => {})
-          emitSyncQueueChanged()
-          failed += 1
-          break
-        }
-      failed += 1
-      const retryCount = Number(item?.retry_count || 0) + 1
-      const retryDelayMs = Math.min(5 * 60 * 1000, 10_000 * Math.pow(2, Math.min(retryCount, 5)))
-        await dexieDb.sync_queue.update(item._seq, {
-          status: 'failed',
-          error: error?.message || 'Sync failed',
-          retry_count: retryCount,
-          retry_at: new Date(Date.now() + retryDelayMs).toISOString(),
-          updated_at: new Date().toISOString(),
-        }).catch(() => {})
-        emitSyncQueueChanged()
-      }
-    }
-
-  if (processed > 0) {
-    touchedChannels.forEach((channel) => {
-      cacheInvalidate(channel)
-      emitSyncRefresh(channel)
-    })
+  const pendingCount = await dexieDb.sync_queue.count().catch(() => 0)
+  return {
+    processed: 0,
+    failed: pendingCount,
+    blocked: true,
   }
-
-  return { processed, failed }
 }
 
 export async function flushPendingSyncQueue() {

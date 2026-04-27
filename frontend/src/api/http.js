@@ -1,11 +1,11 @@
 /**
- * api/http.js — HTTP client for the sync server.
+ * api/http.js ??HTTP client for the sync server.
  *
  * Provides:
- *   apiFetch(method, path, body)  — typed JSON fetch with auth header and timeout
- *   isNetErr(err)                 — classify network errors (vs server errors)
- *   readCache / writeCache        — short-lived in-memory read cache (20 s TTL)
- *   route(channel, serverFn, localFn, isWrite) — smart dispatcher used by every api/* module
+ *   apiFetch(method, path, body)  ??typed JSON fetch with auth header and timeout
+ *   isNetErr(err)                 ??classify network errors (vs server errors)
+ *   readCache / writeCache        ??short-lived in-memory read cache (20 s TTL)
+ *   route(channel, serverFn, localFn, isWrite) ??smart dispatcher used by every api/* module
  *
  * Consumers import from this file; they never access syncServerUrl directly.
  * Call setSyncServerUrl() and setSyncToken() from AppContext or web-api bootstrap.
@@ -14,7 +14,7 @@
 import { SYNC } from '../constants.js'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.js'
 
-// ─── Mutable connection state (module-level, intentionally not React state) ───
+// ??? Mutable connection state (module-level, intentionally not React state) ???
 let syncServerUrl = ''
 let syncToken     = ''
 let authSessionToken = ''
@@ -67,7 +67,7 @@ function readAuthTokenFromStorage() {
   }
 }
 
-// ─── In-memory read cache with request deduplication ────────────────────────
+// ??? In-memory read cache with request deduplication ????????????????????????
 const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
 const CACHE_TTL   = 20_000   // 20 seconds
@@ -90,7 +90,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('sync:update', cacheClearAll)
 }
 
-// ─── Logging ring buffer ──────────────────────────────────────────────────────
+// ??? Logging ring buffer ??????????????????????????????????????????????????????
 let callLog      = []
 const MAX_LOG    = 300
 
@@ -119,8 +119,36 @@ function createApiError(status, parsed, text) {
   return error
 }
 
+function createWriteBlockedError(channel, message, detail = {}) {
+  const error = new Error(message)
+  error.code = 'write_requires_live_server'
+  error.channel = channel
+  error.reason = detail.reason || 'server_unavailable'
+  error.serverOnline = detail.serverOnline !== false
+  error.serverConfigured = detail.serverConfigured !== false
+  return error
+}
+
+function dispatchWriteBlocked(channel, message, detail = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('sync:write-blocked', {
+    detail: {
+      channel,
+      error: message,
+      reason: detail.reason || 'server_unavailable',
+      serverOnline: detail.serverOnline !== false,
+      serverConfigured: detail.serverConfigured !== false,
+      ts: new Date().toISOString(),
+    },
+  }))
+}
+
 export function isWriteConflictError(error) {
   return !!(error && (error.conflict || error.code === 'write_conflict'))
+}
+
+export function isWriteBlockedError(error) {
+  return !!(error && error.code === 'write_requires_live_server')
 }
 
 function getConflictRefreshChannels(error, fallbackChannel) {
@@ -168,7 +196,7 @@ async function resolveLocalRead(channel, localFn, source = 'local') {
   return localResult
 }
 
-// HTTP helpers ─────────────────────────────────────────────────────────────
+// HTTP helpers ?????????????????????????????????????????????????????????????
 export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS) {
   const base    = syncServerUrl.replace(/\/$/, '')
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
@@ -253,7 +281,7 @@ function isConnectivityError(error) {
   )
 }
 
-// ─── Server health state ─────────────────────────────────────────────────────
+// ??? Server health state ?????????????????????????????????????????????????????
 let _serverOnline = true          // optimistic until proven otherwise
 let _healthTimer  = null
 
@@ -264,7 +292,7 @@ function setServerHealth(online) {
   _serverOnline = online
   window.dispatchEvent(new CustomEvent('server:health', { detail: { online } }))
   if (online) {
-    // Server just came back — clear all caches so fresh data is fetched
+    // Server just came back ??clear all caches so fresh data is fetched
     cacheClearAll()
     dispatchGlobalDataRefresh()
     window.dispatchEvent(new CustomEvent('sync:reconnected'))
@@ -291,7 +319,7 @@ async function pingServerHealth() {
   }
 }
 
-// Active health check — runs every 12 s when a server is configured.
+// Active health check ??runs every 12 s when a server is configured.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck() {
@@ -320,10 +348,10 @@ if (typeof window !== 'undefined') {
   })
 }
 
-// ─── Stale-while-revalidate cache (extended TTL for offline resilience) ────
-const STALE_TTL   = 45_000    // 45 s — serve stale while revalidating (was 5 min; reduced so a
+// ??? Stale-while-revalidate cache (extended TTL for offline resilience) ????
+const STALE_TTL   = 45_000    // 45 s ??serve stale while revalidating (was 5 min; reduced so a
                                // server restart clears stale data quickly without blanking the UI)
-const FRESH_TTL   = CACHE_TTL // 20 s — treat as fresh, skip server
+const FRESH_TTL   = CACHE_TTL // 20 s ??treat as fresh, skip server
 
 export function cacheGetStale(key) {
   const e = _cache[key]
@@ -347,24 +375,24 @@ function emitCacheRefresh(channel) {
   }))
 }
 
-// ─── Smart dispatcher ─────────────────────────────────────────────────────────
+// ??? Smart dispatcher ?????????????????????????????????????????????????????????
 /**
- * route() — unified read/write dispatcher with:
+ * route() ??unified read/write dispatcher with:
  *   - Stale-while-revalidate: serve cached data immediately, refresh in background
- *   - Offline write queuing: failed writes are stored and retried on reconnect
+ *   - Writes fail closed when the live server is unavailable
  *   - Cache tag invalidation: invalidate whole entity groups instantly
  *   - Active health awareness: skips server call if known offline
  */
 export async function route(channel, serverFn, localFn, isWrite = false) {
   const t0 = Date.now()
 
-  // ── Reads ───────────────────────────────────────────────────────────────────
+  // ?? Reads ???????????????????????????????????????????????????????????????????
   if (!isWrite) {
     if (syncServerUrl) {
       const { data: cached, stale } = cacheGetStale(channel)
 
       if (cached !== null && !stale) {
-        // Fresh cache hit — return immediately
+        // Fresh cache hit ??return immediately
         logCall(channel, 'cache', 0)
         return cached
       }
@@ -379,7 +407,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         return cached
       }
 
-      // No cache — try server (skip if known offline)
+      // No cache ??try server (skip if known offline)
       if (_serverOnline || !localFn) {
         // Request deduplication: if same request already in flight, wait for it instead of re-requesting
         if (_inflight[channel]) {
@@ -474,14 +502,35 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     return null
   }
 
-  // ── Writes ──────────────────────────────────────────────────────────────────
+  // ?? Writes ??????????????????????????????????????????????????????????????????
   if (!syncServerUrl) {
-    // Pure local mode — reject writes gracefully
+    const message = 'Server is not connected. Changes are invalid until a live server is configured.'
     logCall(channel, 'local-write-skipped', 0, false)
-    window.dispatchEvent(new CustomEvent('sync:error', {
-      detail: { channel, error: 'No server configured — running in read-only offline mode', ts: new Date().toISOString() },
-    }))
-    throw new Error('No server configured')
+    dispatchWriteBlocked(channel, message, {
+      reason: 'server_not_configured',
+      serverOnline: false,
+      serverConfigured: false,
+    })
+    throw createWriteBlockedError(channel, message, {
+      reason: 'server_not_configured',
+      serverOnline: false,
+      serverConfigured: false,
+    })
+  }
+
+  if (!_serverOnline) {
+    const message = 'Server is offline. Changes are invalid until the server reconnects.'
+    logCall(channel, 'server-offline-write-blocked', 0, false)
+    dispatchWriteBlocked(channel, message, {
+      reason: 'server_offline',
+      serverOnline: false,
+      serverConfigured: true,
+    })
+    throw createWriteBlockedError(channel, message, {
+      reason: 'server_offline',
+      serverOnline: false,
+      serverConfigured: true,
+    })
   }
 
   try {
@@ -492,7 +541,21 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     return result
   } catch (e) {
     const ms = Date.now() - t0
-    if (isConnectivityError(e)) setServerHealth(false)
+    if (isConnectivityError(e)) {
+      setServerHealth(false)
+      const message = 'Server is offline. Changes are invalid until the server reconnects.'
+      logCall(channel, 'server', ms, false)
+      dispatchWriteBlocked(channel, message, {
+        reason: 'server_unreachable',
+        serverOnline: false,
+        serverConfigured: true,
+      })
+      throw createWriteBlockedError(channel, message, {
+        reason: 'server_unreachable',
+        serverOnline: false,
+        serverConfigured: true,
+      })
+    }
     logCall(channel, 'server', ms, false)
     if (isWriteConflictError(e)) {
       const refreshChannels = getConflictRefreshChannels(e, channel)

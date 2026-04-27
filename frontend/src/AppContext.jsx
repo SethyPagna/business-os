@@ -269,6 +269,7 @@ export function AppProvider({ children }) {
   const [langRevision,        setLangRevision]        = useState(0)
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
+  const writeBlockedNoticeAtRef = useRef(0)
   const [authReady, setAuthReady] = useState(() => !getStoredAuthToken())
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
@@ -458,6 +459,17 @@ export function AppProvider({ children }) {
       console.error('[sync:error]', e.detail)
       // The SyncErrorBanner in App.jsx picks this up via its own listener
     }
+    const onWriteBlocked = (e) => {
+      const message = e?.detail?.error || 'Server is offline. Changes are invalid until the server reconnects.'
+      setSyncServerUnreachable(true)
+      if (e?.detail?.reason !== 'server_not_configured') {
+        setSyncConnected(false)
+      }
+      const now = Date.now()
+      if ((now - writeBlockedNoticeAtRef.current) < 4000) return
+      writeBlockedNoticeAtRef.current = now
+      setNotification({ message, type: 'error', id: now })
+    }
     const onConflict = (e) => {
       const detail = e?.detail || {}
       const entity = String(detail.entity || '').trim().toLowerCase()
@@ -528,6 +540,7 @@ export function AppProvider({ children }) {
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
     window.addEventListener('sync:error',  onError)
+    window.addEventListener('sync:write-blocked', onWriteBlocked)
     window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
@@ -535,6 +548,7 @@ export function AppProvider({ children }) {
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
+      window.removeEventListener('sync:write-blocked', onWriteBlocked)
       window.removeEventListener('sync:conflict', onConflict)
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
@@ -1150,6 +1164,7 @@ export function AppProvider({ children }) {
     syncConnected,
     syncChannel,
     syncServerUnreachable,
+    canWriteToServer: !!syncUrl && syncConnected && !syncServerUnreachable,
     AccessDenied: () => <AccessDenied t={t} />,
   }
 
@@ -1214,6 +1229,7 @@ const FALLBACK_APP_CONTEXT = {
   syncConnected: false,
   syncChannel: null,
   syncServerUnreachable: false,
+  canWriteToServer: false,
   AccessDenied: () => null,
 }
 
