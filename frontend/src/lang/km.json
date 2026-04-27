@@ -1586,5 +1586,6 @@
   "email_reset_complete_done": "Password reset complete. You can now log in with your email and new password.",
   "save_new_password": "Save new password",
   "otp_code": "OTP code",
-  "unknown_error": "??????????????"
+  "unknown_error": "??????????????",
+  "export": "នាំចេញ"
 }
