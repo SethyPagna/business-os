@@ -19,6 +19,7 @@ import VariantFormModal      from './VariantFormModal'
 import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 function multiMatch(text, terms) {
   return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
@@ -60,18 +61,34 @@ export default function Products() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoadError(null)
     try {
-      const [prods, cats, unitList, fields, brs] = await Promise.all([
-        window.api.getProducts(), window.api.getCategories(), window.api.getUnits(),
-        window.api.getCustomFields(), window.api.getBranches(),
-      ])
-      if (Array.isArray(prods)    && (prods.length    > 0 || !silent)) setProducts(prods || [])
-      if (Array.isArray(cats))     setCategories(cats || [])
-      if (Array.isArray(unitList)) setUnits(unitList || [])
-      if (Array.isArray(fields))   setCustomFields(fields || [])
-      if (Array.isArray(brs))      setBranches((brs||[]).filter(b=>b.is_active))
+      const result = await settleLoaderMap({
+        products: () => window.api.getProducts(),
+        categories: () => window.api.getCategories(),
+        units: () => window.api.getUnits(),
+        customFields: () => window.api.getCustomFields(),
+        branches: () => window.api.getBranches(),
+      })
+      const prods = result.values.products
+      const cats = result.values.categories
+      const unitList = result.values.units
+      const fields = result.values.customFields
+      const brs = result.values.branches
+
+      if (Array.isArray(prods) && (prods.length > 0 || !silent)) setProducts(prods)
+      if (Array.isArray(cats)) setCategories(cats)
+      if (Array.isArray(unitList)) setUnits(unitList)
+      if (Array.isArray(fields)) setCustomFields(fields)
+      if (Array.isArray(brs)) setBranches((brs || []).filter(b => b.is_active))
+
+      if (!result.hasAnySuccess) {
+        throw new Error(getFirstLoaderError(result.errors, 'Failed to load products'))
+      }
+      if (result.hasErrors && !silent) {
+        notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
+      }
     } catch (e) { if (!silent) setLoadError(e.message || 'Failed to load products') }
     finally { if (!silent) setLoading(false) }
-  }, [])
+  }, [notify, t])
   useEffect(() => { load() }, [load])
   useEffect(() => {
     if (!syncChannel) return

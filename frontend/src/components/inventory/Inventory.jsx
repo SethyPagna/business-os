@@ -9,6 +9,7 @@ import { downloadCSV } from '../../utils/csv'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
@@ -36,13 +37,19 @@ export default function Inventory() {
     // branchId must be a number or omitted ??NOT wrapped in a plain object at the call site
     const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter) } : {}
     try {
-      const [sum, movs, brs, rets, dash] = await Promise.all([
-        window.api.getInventorySummary(branchOpts),
-        window.api.getInventoryMovements(branchOpts),
-        window.api.getBranches(),
-        window.api.getReturns({ scope: 'all' }).catch(() => []),
-        window.api.getDashboard().catch(() => ({})),
-      ])
+      const result = await settleLoaderMap({
+        summary: () => window.api.getInventorySummary(branchOpts),
+        movements: () => window.api.getInventoryMovements(branchOpts),
+        branches: () => window.api.getBranches(),
+        returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
+        dashboard: () => window.api.getDashboard().catch(() => ({})),
+      })
+      const sum = result.values.summary
+      const movs = result.values.movements
+      const brs = result.values.branches
+      const rets = result.values.returns
+      const dash = result.values.dashboard
+
       if (Array.isArray(sum)  && (sum.length  > 0 || !silent)) setSummary(sum   || [])
       if (Array.isArray(movs) && (movs.length > 0 || !silent)) setMovements(movs || [])
       if (Array.isArray(brs))  setBranches(brs.filter(b => b.is_active))
@@ -69,6 +76,9 @@ export default function Inventory() {
           supplier_compensation_usd: supplierReturns.reduce((s, r) => s + (r.supplier_compensation_usd || 0), 0),
           supplier_loss_usd: supplierReturns.reduce((s, r) => s + (r.supplier_loss_usd || 0), 0),
         })
+      }
+      if (!result.hasAnySuccess) {
+        throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
       }
     } catch (e) {
       console.warn('[Inventory] load failed:', e.message)

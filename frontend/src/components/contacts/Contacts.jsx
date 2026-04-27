@@ -10,6 +10,7 @@ import { SuppliersTab } from './SuppliersTab'
 import { DeliveryTab } from './DeliveryTab'
 import { ImportModal } from './shared'
 import Modal from '../shared/Modal'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 const TABS = (t) => [
   { id: 'customers', label: t('customers') || 'Customers', icon: Users },
@@ -66,11 +67,14 @@ export default function Contacts() {
 
   const handleExportAll = async () => {
     try {
-      const [customers, suppliers, delivery] = await Promise.all([
-        window.api.getCustomers(),
-        window.api.getSuppliers(),
-        window.api.getDeliveryContacts(),
-      ])
+      const result = await settleLoaderMap({
+        customers: () => window.api.getCustomers(),
+        suppliers: () => window.api.getSuppliers(),
+        delivery: () => window.api.getDeliveryContacts(),
+      })
+      const customers = Array.isArray(result.values.customers) ? result.values.customers : []
+      const suppliers = Array.isArray(result.values.suppliers) ? result.values.suppliers : []
+      const delivery = Array.isArray(result.values.delivery) ? result.values.delivery : []
       const today = new Date().toISOString().slice(0, 10)
 
       if (Array.isArray(customers) && customers.length > 0) {
@@ -109,6 +113,12 @@ export default function Contacts() {
       }
 
       const total = (customers?.length || 0) + (suppliers?.length || 0) + (delivery?.length || 0)
+      if (!result.hasAnySuccess) {
+        throw new Error(getFirstLoaderError(result.errors, 'Failed to export contacts'))
+      }
+      if (result.hasErrors) {
+        notify(t('contacts_partial_export') || 'Some contact groups were unavailable, so only the ready data was exported.', 'warning')
+      }
       notify(`${t('all_contacts_exported') || 'All contacts exported'} (${total} ${t('entries') || 'records'})`)
     } catch (error) {
       notify(`Export failed: ${error.message}`, 'error')

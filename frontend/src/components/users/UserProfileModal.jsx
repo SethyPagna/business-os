@@ -5,6 +5,7 @@ import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
 import { STORAGE_KEYS } from '../../constants'
 import { useApp } from '../../AppContext'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
 
@@ -84,12 +85,20 @@ export default function UserProfileModal({ onClose }) {
     if (!user?.id) return
     setLoading(true)
     try {
-      const [profileResult, otpResult, capsResult, authMethodsResult] = await Promise.all([
-        window.api.getUserProfile(user.id),
-        window.api.otpStatus(user.id),
-        window.api.getVerificationCapabilities?.().catch(() => null),
-        window.api.getUserAuthMethods?.(user.id).catch(() => null),
-      ])
+      const result = await settleLoaderMap({
+        profile: () => window.api.getUserProfile(user.id),
+        otp: () => window.api.otpStatus(user.id),
+        caps: () => window.api.getVerificationCapabilities?.().catch(() => null),
+        authMethods: () => window.api.getUserAuthMethods?.(user.id).catch(() => null),
+      })
+      const profileResult = result.values.profile
+      const otpResult = result.values.otp
+      const capsResult = result.values.caps
+      const authMethodsResult = result.values.authMethods
+
+      if (!result.hasAnySuccess || !profileResult) {
+        throw new Error(getFirstLoaderError(result.errors, 'Failed to load profile'))
+      }
       if (profileResult?.success === false) throw new Error(profileResult.error || 'Failed to load profile')
       const { success: _success, ...profileData } = profileResult || {}
       setProfile(profileData)
@@ -104,6 +113,9 @@ export default function UserProfileModal({ onClose }) {
       if (authMethodsResult && authMethodsResult.success !== false) {
         const { success: _authSuccess, ...authData } = authMethodsResult || {}
         setAuthMethods(authData)
+      }
+      if (result.hasErrors) {
+        notify(tr('profile_partial_load', 'Some sign-in details are still catching up. The main profile is ready.'), 'warning')
       }
     } catch (error) {
       notify(error?.message || 'Failed to load profile', 'error')

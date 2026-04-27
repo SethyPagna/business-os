@@ -4,6 +4,7 @@ import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 /**
  * 1. Branches Page
@@ -57,12 +58,17 @@ export default function Branches() {
    */
   const load = async () => {
     try {
-      const [branchRows, transferRows] = await Promise.all([
-        window.api.getBranches(),
-        window.api.getTransfers({}),
-      ])
-      setBranches(Array.isArray(branchRows) ? branchRows : [])
-      setTransfers(Array.isArray(transferRows) ? transferRows : [])
+      const result = await settleLoaderMap({
+        branches: () => window.api.getBranches(),
+        transfers: () => window.api.getTransfers({}),
+      })
+
+      if (Array.isArray(result.values.branches)) setBranches(result.values.branches)
+      if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers)
+
+      if (!result.hasAnySuccess) {
+        throw new Error(getFirstLoaderError(result.errors, t('failed_to_load_data') || 'Failed to load data'))
+      }
     } catch (error) {
       notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
     }

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:utils": "node tests/appShellUtils.test.mjs && node tests/portalEditorUtils.test.mjs",
+    "test:utils": "node tests/appShellUtils.test.mjs && node tests/portalEditorUtils.test.mjs && node tests/loaders.test.mjs",
     "verify:i18n": "node ../ops/scripts/frontend/verify-i18n.js"
   },
   "dependencies": {

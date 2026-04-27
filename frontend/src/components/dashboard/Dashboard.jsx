@@ -81,7 +81,7 @@ export default function Dashboard() {
     const ch = syncChannel.channel
     if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory') {
       setSilentRefresh(true)
-      Promise.all([
+      Promise.allSettled([
         window.api.getDashboard().then(d => setSummary(d)),
         loadAnalytics(true),
       ]).finally(() => setSilentRefresh(false))

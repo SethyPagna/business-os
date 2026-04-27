@@ -15,6 +15,22 @@ let wsReconnectTimer = null
 let wsPingTimer      = null
 let reconnectAttempts = 0
 
+function shouldDebugWs() {
+  try {
+    if (typeof window === 'undefined') return false
+    if (window.location.hostname === 'localhost') return true
+    return window.localStorage.getItem('businessos_debug_ws') === '1'
+  } catch (_) {
+    return false
+  }
+}
+
+function logWs(level, ...args) {
+  if (!shouldDebugWs()) return
+  const logger = console[level] || console.debug
+  logger('[ws]', ...args)
+}
+
 export function connectWS() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return
@@ -28,16 +44,16 @@ export function connectWS() {
     + `?token=${encodeURIComponent(authToken)}`
 
   try {
-    console.debug('[ws] attempting connect to', wsUrl)
+    logWs('debug', 'attempting connect to', wsUrl)
     ws = new WebSocket(wsUrl)
   } catch (e) {
-    console.warn('[ws] connect error (constructor):', e)
+    logWs('warn', 'connect error (constructor):', e)
     scheduleReconnect()
     return
   }
 
   ws.onopen = () => {
-    console.log('[ws] connected')
+    logWs('debug', 'connected')
     reconnectAttempts = 0
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: true } }))
     // Send a ping every 25 s to prevent idle-timeout drops on reverse proxies
@@ -66,8 +82,8 @@ export function connectWS() {
     wsPingTimer = null
     const code = ev?.code || 0
     const reason = ev?.reason || ''
-    console.log('[ws] disconnected', { code, reason })
-    console.debug('[ws] onclose event', ev)
+    logWs('debug', 'disconnected', { code, reason })
+    logWs('debug', 'onclose event', ev)
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
     if (code === 4001) {
@@ -84,7 +100,7 @@ export function connectWS() {
   }
 
   ws.onerror = (err) => {
-    console.warn('[ws] error', err)
+    logWs('warn', 'error', err)
     try { ws?.close() } catch (_) {}
   }
 }
@@ -107,7 +123,7 @@ function scheduleReconnect() {
   // jitter ±20%
   const jitter = Math.floor(delay * (Math.random() * 0.4 - 0.2))
   const finalDelay = Math.max(1000, Math.floor(delay + jitter))
-  console.debug('[ws] scheduling reconnect in', finalDelay, 'ms (attempt', reconnectAttempts, ')')
+  logWs('debug', 'scheduling reconnect in', finalDelay, 'ms (attempt', reconnectAttempts, ')')
   wsReconnectTimer = setTimeout(connectWS, finalDelay)
 }
 
