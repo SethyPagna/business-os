@@ -9,10 +9,12 @@ const express = require('express')
 const { db } = require('../database')
 const { tryParse, broadcast } = require('../helpers')
 const { authToken } = require('../middleware')
+const { storeDataUrlAsset } = require('../fileAssets')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils')
 const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')
 const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
+const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
 
 const router = express.Router()
 
@@ -56,9 +58,7 @@ function normalizeUrl(value) {
     : (/^(www\.|[\w-]+(\.[\w-]+)+)/i.test(raw) ? `https://${raw}` : '')
   if (!normalized) return ''
   try {
-    const url = new URL(normalized)
-    if (!/^https?:$/i.test(url.protocol)) return ''
-    return url.toString().replace(/\/$/, '')
+    return assertSafeOutboundUrl(normalized, { allowedProtocols: ['https:', 'http:'] }).replace(/\/$/, '')
   } catch (_) {
     return ''
   }
@@ -345,13 +345,25 @@ function sanitizeScreenshots(value) {
   return screenshots
     .map((entry) => String(entry || '').trim())
     .filter((entry) => entry && entry.length <= 2_000_000)
-    .filter((entry) => {
-      if (entry.startsWith('data:image/')) return true
-      if (entry.startsWith('/uploads/')) return true
-      if (!/^https?:\/\//i.test(entry)) return false
-      return /\.(png|jpe?g|webp|gif|bmp)(\?.*)?$/i.test(entry)
-    })
+    .filter((entry) => isSafeExternalImageReference(entry))
     .slice(0, 8)
+}
+
+async function materializePortalScreenshots(screenshots = []) {
+  const resolved = []
+  for (const entry of screenshots) {
+    if (/^data:image\//i.test(entry)) {
+      const asset = await storeDataUrlAsset({
+        dataUrl: entry,
+        fileName: `portal-submission-${Date.now()}.jpg`,
+        source: 'portal_submission',
+      })
+      resolved.push(asset.public_path)
+      continue
+    }
+    resolved.push(entry)
+  }
+  return resolved
 }
 
 /** Normalize public AI assistant profile payload into short searchable fields. */
@@ -670,46 +682,51 @@ router.get('/membership/:membershipNumber', (req, res) => {
   })
 })
 
-router.post('/submissions', (req, res) => {
-  if (!applyPortalRateLimit(req, res, { name: 'portal:submissions', max: 12, windowMs: 15 * 60 * 1000 })) return
-  const config = buildPortalConfig()
-  if (!config.submissionEnabled) {
-    return res.status(403).json({ error: 'Customer submissions are currently disabled' })
+router.post('/submissions', async (req, res) => {
+  try {
+    if (!applyPortalRateLimit(req, res, { name: 'portal:submissions', max: 12, windowMs: 15 * 60 * 1000 })) return
+    const config = buildPortalConfig()
+    if (!config.submissionEnabled) {
+      return res.status(403).json({ error: 'Customer submissions are currently disabled' })
+    }
+
+    const membershipNumber = String(req.body?.membershipNumber || '').trim()
+    if (!membershipNumber) return res.status(400).json({ error: 'Membership number is required' })
+
+    const customer = findCustomerByMembership(membershipNumber)
+    if (!customer) return res.status(404).json({ error: 'Membership not found' })
+
+    const screenshots = sanitizeScreenshots(req.body?.screenshots)
+    if (!screenshots.length) return res.status(400).json({ error: 'At least one screenshot is required' })
+    const persistedScreenshots = await materializePortalScreenshots(screenshots)
+
+    const platform = String(req.body?.platform || '').trim().slice(0, 120)
+    const note = String(req.body?.note || '').trim().slice(0, 4000)
+
+    const result = db.prepare(`
+      INSERT INTO customer_share_submissions (
+        customer_id,
+        membership_number,
+        customer_name,
+        platform,
+        note,
+        screenshots_json,
+        status
+      ) VALUES (?,?,?,?,?,?,'pending')
+    `).run(
+      customer.id || null,
+      customer.membership_number || membershipNumber,
+      customer.name || '',
+      platform || null,
+      note || null,
+      JSON.stringify(persistedScreenshots),
+    )
+
+    broadcast('portalSubmissions')
+    res.json({ success: true, id: result.lastInsertRowid })
+  } catch (error) {
+    res.status(400).json({ error: error?.message || 'Failed to submit screenshots' })
   }
-
-  const membershipNumber = String(req.body?.membershipNumber || '').trim()
-  if (!membershipNumber) return res.status(400).json({ error: 'Membership number is required' })
-
-  const customer = findCustomerByMembership(membershipNumber)
-  if (!customer) return res.status(404).json({ error: 'Membership not found' })
-
-  const screenshots = sanitizeScreenshots(req.body?.screenshots)
-  if (!screenshots.length) return res.status(400).json({ error: 'At least one screenshot is required' })
-
-  const platform = String(req.body?.platform || '').trim().slice(0, 120)
-  const note = String(req.body?.note || '').trim().slice(0, 4000)
-
-  const result = db.prepare(`
-    INSERT INTO customer_share_submissions (
-      customer_id,
-      membership_number,
-      customer_name,
-      platform,
-      note,
-      screenshots_json,
-      status
-    ) VALUES (?,?,?,?,?,?,'pending')
-  `).run(
-    customer.id || null,
-    customer.membership_number || membershipNumber,
-    customer.name || '',
-    platform || null,
-    note || null,
-    JSON.stringify(screenshots),
-  )
-
-  broadcast('portalSubmissions')
-  res.json({ success: true, id: result.lastInsertRowid })
 })
 
 router.get('/submissions/review', authToken, (_req, res) => {

@@ -7,6 +7,8 @@ const { UPLOADS_PATH } = require('./config')
 const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessControl')
 const { buildUniqueStoredName, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
 const { getSessionUser } = require('./sessionAuth')
+const { checkRateLimit } = require('./security')
+const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity')
 
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
@@ -60,46 +62,6 @@ const ALLOWED_ASSET_EXT = new Set([
   ...Object.values(VIDEO_MIME_TO_EXT),
   ...Object.values(DOCUMENT_MIME_TO_EXT),
 ])
-
-function bufferStartsWith(buffer, bytes = []) {
-  return bytes.every((value, index) => buffer[index] === value)
-}
-
-function isLikelyCsvBuffer(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return false
-  let invalidControls = 0
-  let separators = 0
-  for (const byte of buffer) {
-    if (byte === 0) return false
-    if (byte === 44 || byte === 59 || byte === 9) separators += 1
-    const isAllowedControl = byte === 9 || byte === 10 || byte === 13
-    if (byte < 32 && !isAllowedControl) invalidControls += 1
-  }
-  return invalidControls === 0 && separators > 0
-}
-
-function detectStoredFileKind(filePath) {
-  const header = fs.readFileSync(filePath).subarray(0, 8192)
-  if (!header.length) return 'unknown'
-  if (bufferStartsWith(header, [0xFF, 0xD8, 0xFF])) return 'image'
-  if (bufferStartsWith(header, [0x89, 0x50, 0x4E, 0x47])) return 'image'
-  if (bufferStartsWith(header, [0x47, 0x49, 0x46, 0x38])) return 'image'
-  if (bufferStartsWith(header, [0x42, 0x4D])) return 'image'
-  if (header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WEBP') return 'image'
-  if (header.subarray(0, 5).toString('ascii') === '%PDF-') return 'document'
-  if (header.subarray(0, 4).toString('hex').toLowerCase() === '1a45dfa3') return 'video'
-  if (header.length >= 12 && header.subarray(4, 8).toString('ascii') === 'ftyp') return 'video'
-  if (isLikelyCsvBuffer(header)) return 'document'
-  return 'unknown'
-}
-
-function getExpectedUploadedKind(file = {}) {
-  const mediaType = getMediaType({ mimeType: file?.mimetype, fileName: file?.originalname || file?.filename || '' })
-  if (mediaType === 'image') return 'image'
-  if (mediaType === 'video') return 'video'
-  if (mediaType === 'document') return 'document'
-  return 'unknown'
-}
 
 function resolveExtension(file, allowedSet = ALLOWED_ASSET_EXT, fallback = '.bin') {
   const byMime = {
@@ -162,6 +124,24 @@ async function compressImageBuffer(buffer, file = {}) {
   }
 }
 
+function getClientKey(req, suffix = 'upload') {
+  const xForwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  const ip = xForwardedFor || req.ip || req.connection?.remoteAddress || 'unknown-ip'
+  return `${ip}|${String(suffix || 'upload').trim().toLowerCase()}`
+}
+
+function routeRateLimit({ name, max, windowMs, message }) {
+  return (req, res, next) => {
+    const result = checkRateLimit(String(name || 'route'), getClientKey(req, name || 'route'), Math.max(1, Number(max || 20)), Math.max(1000, Number(windowMs || 60_000)))
+    if (result.allowed) return next()
+    res.setHeader('Retry-After', String(result.retryAfterSeconds))
+    return res.status(429).json({
+      success: false,
+      error: `${String(message || 'Too many requests.')} Try again in ${result.retryAfterSeconds} seconds.`,
+    })
+  }
+}
+
 function createStorage() {
   return multer.diskStorage({
     destination: (_req, _file, cb) => {
@@ -181,7 +161,14 @@ function createStorage() {
 function buildUpload({ fileSize, allowAssets }) {
   return multer({
     storage: createStorage(),
-    limits: { fileSize },
+    limits: {
+      fileSize,
+      files: 1,
+      fields: 40,
+      parts: 45,
+      fieldSize: 1024 * 1024,
+      fieldNameSize: 120,
+    },
     fileFilter: (_req, file, cb) => {
       const mime = String(file?.mimetype || '').toLowerCase()
       const ext = String(path.extname(String(file?.originalname || '')).toLowerCase() || '')
@@ -211,18 +198,16 @@ async function compressUpload(req, _res, next) {
 function validateUploadedFile(req, _res, next) {
   const filePath = String(req?.file?.path || '')
   if (!filePath) return next()
-  try {
-    const expectedKind = getExpectedUploadedKind(req.file)
-    const actualKind = detectStoredFileKind(filePath)
-    if (expectedKind !== 'unknown' && actualKind !== expectedKind) {
+  validateUploadedPath(filePath, req.file)
+    .then(() => next())
+    .catch((error) => {
       try { fs.unlinkSync(filePath) } catch (_) {}
-      return next(new Error('Uploaded file contents do not match the selected file type. Please choose a valid image, video, PDF, or CSV file.'))
-    }
-  } catch (error) {
-    try { fs.unlinkSync(filePath) } catch (_) {}
-    return next(new Error(error?.message || 'Failed to validate uploaded file.'))
-  }
-  return next()
+      next(new Error(error?.message || 'Failed to validate uploaded file.'))
+    })
 }
 
-module.exports = { authToken, networkAccessGuard, upload, assetUpload, compressUpload, validateUploadedFile, sanitiseFilename, compressImageBuffer }
+async function validateUploadBufferPayload(buffer, file = {}) {
+  await validateUploadedBuffer(buffer, file)
+}
+
+module.exports = { authToken, networkAccessGuard, upload, assetUpload, compressUpload, validateUploadedFile, sanitiseFilename, compressImageBuffer, routeRateLimit, validateUploadBufferPayload }

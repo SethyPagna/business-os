@@ -6,6 +6,7 @@ let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
 const { UPLOADS_PATH } = require('./config')
+const { validateUploadedBuffer } = require('./uploadSecurity')
 
 const IMAGE_MIME_TO_EXT = {
   'image/jpeg': '.jpg',
@@ -306,6 +307,7 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
   const mimeType = String(match[1] || '').toLowerCase()
   const base64 = String(match[2] || '')
   const buffer = Buffer.from(base64, 'base64')
+  await validateUploadedBuffer(buffer, { mimetype: mimeType, originalname: fileName || `upload${MIME_TO_EXT[mimeType] || '.bin'}` })
   const normalizedOriginalName = sanitizeOriginalFileName(fileName || `upload${MIME_TO_EXT[mimeType] || '.bin'}`)
   const displayOriginalName = preserveOriginalDisplayName(fileName || normalizedOriginalName)
   const storedName = buildUniqueStoredName(normalizedOriginalName)

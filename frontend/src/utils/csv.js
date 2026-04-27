@@ -12,7 +12,10 @@ export function downloadCSV(filename, rows) {
   const headers = Object.keys(rows[0])
   const escape = v => {
     if (v == null) return ''
-    const s = String(v)
+    let s = String(v)
+    if (/^[=+\-@]/.test(s) || /^[\t\r]/.test(s)) {
+      s = `'${s}`
+    }
     return s.includes(',') || s.includes('"') || s.includes('\n')
       ? `"${s.replace(/"/g, '""')}"`
       : s

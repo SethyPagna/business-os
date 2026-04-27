@@ -1,6 +1,7 @@
 'use strict'
 
 const { encryptSecret, decryptSecret } = require('../security')
+const { assertSafeOutboundUrl } = require('../netSecurity')
 
 function nowIso() {
   return new Date().toISOString()
@@ -166,6 +167,13 @@ function providerCanUseWebResearch(providerConfig) {
     && trim(providerConfig?.default_model).toLowerCase().startsWith('groq/compound')
 }
 
+function resolveProviderEndpoint(providerConfig, provider, meta) {
+  const override = trim(providerConfig?.endpoint_override)
+  const target = override || trim(meta?.defaultEndpoint)
+  if (!target) throw new Error('Provider endpoint is not configured')
+  return assertSafeOutboundUrl(target, { allowedProtocols: ['https:'] })
+}
+
 async function callChatProvider(providerConfig, messages, options = {}) {
   const provider = trim(providerConfig?.provider).toLowerCase()
   const meta = getProviderMeta(provider)
@@ -182,7 +190,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
   const requestSignal = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined
 
   if (provider === 'groq' || provider === 'mistral' || provider === 'cerebras') {
-    const endpoint = trim(providerConfig?.endpoint_override) || PROVIDER_META[provider].defaultEndpoint
+    const endpoint = resolveProviderEndpoint(providerConfig, provider, PROVIDER_META[provider])
     const temperature = typeof options.temperature === 'number' ? options.temperature : 0.45
     const topP = typeof options.topP === 'number'
       ? options.topP
@@ -227,7 +235,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
   }
 
   if (provider === 'google') {
-    const base = trim(providerConfig?.endpoint_override) || PROVIDER_META.google.defaultEndpoint
+    const base = resolveProviderEndpoint(providerConfig, provider, PROVIDER_META.google)
     const endpoint = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -267,7 +275,7 @@ async function testProviderConfig(providerConfig) {
     if (!model) throw new Error('Choose a model before testing this embedding provider')
 
     if (provider === 'cohere') {
-      const endpoint = trim(providerConfig?.endpoint_override) || PROVIDER_META.cohere.defaultEndpoint
+      const endpoint = resolveProviderEndpoint(providerConfig, provider, PROVIDER_META.cohere)
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {

@@ -5,6 +5,8 @@ const UPLOADS_PATH_PREFIX = '/uploads/'
 const HEALTH_PATH = '/health'
 const STATIC_FILE_RE = /\.[a-z0-9]+$/i
 const DANGEROUS_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+const STRIP_CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
+const STRIP_BIDI_RE = /[\u202A-\u202E\u2066-\u2069]/g
 
 const CORS_OPTIONS = {
   origin: true,
@@ -41,9 +43,34 @@ function sanitizeObjectKeys(value, depth = 0, maxDepth = 20) {
   return value
 }
 
+function sanitizeStringValue(value) {
+  return String(value || '')
+    .replace(STRIP_CONTROL_CHARS_RE, '')
+    .replace(STRIP_BIDI_RE, '')
+}
+
 function sanitizeRequestPayload(req) {
   sanitizeObjectKeys(req?.body)
   sanitizeObjectKeys(req?.query)
+  sanitizeDeepStrings(req?.body)
+  sanitizeDeepStrings(req?.query)
+}
+
+function sanitizeDeepStrings(value, depth = 0, maxDepth = 20) {
+  if (value == null || depth > maxDepth) return value
+  if (typeof value === 'string') return sanitizeStringValue(value)
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      value[index] = sanitizeDeepStrings(value[index], depth + 1, maxDepth)
+    }
+    return value
+  }
+  if (typeof value === 'object') {
+    for (const key of Object.keys(value)) {
+      value[key] = sanitizeDeepStrings(value[key], depth + 1, maxDepth)
+    }
+  }
+  return value
 }
 
 function isApiOrHealthPath(pathname) {
@@ -68,7 +95,7 @@ function setHtmlNoCacheHeaders(res) {
   res.setHeader('Expires', '0')
 }
 
-function setTunnelSecurityHeaders(res) {
+function setTunnelSecurityHeaders(req, res) {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -76,6 +103,28 @@ function setTunnelSecurityHeaders(res) {
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none')
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
   res.setHeader('Origin-Agent-Cluster', '?1')
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "img-src 'self' data: blob: https:",
+      "media-src 'self' data: blob: https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com",
+      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://*.supabase.co",
+      "script-src 'self' 'unsafe-inline' https://translate.google.com",
+    ].join('; '),
+  )
+  const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()
+  if (proto === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
   res.setHeader('bypass-tunnel-reminder', 'true')
 }
 
@@ -132,7 +181,9 @@ function mapServerError(error) {
 module.exports = {
   CORS_OPTIONS,
   sanitizeObjectKeys,
+  sanitizeStringValue,
   sanitizeRequestPayload,
+  sanitizeDeepStrings,
   isApiOrHealthPath,
   isSpaFallbackEligible,
   setNoStoreHeaders,

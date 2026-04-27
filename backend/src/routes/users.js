@@ -18,7 +18,7 @@ const express = require('express')
 const bcrypt = require('bcryptjs')
 const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
-const { authToken, upload, compressUpload, validateUploadedFile } = require('../middleware')
+const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
 const {
   isSupabaseAuthConfigured,
@@ -494,7 +494,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   })
 })
 
-router.post('/users/avatar-upload', authToken, upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
+router.post('/users/avatar-upload', authToken, routeRateLimit({ name: 'users:avatar_upload', max: 20, windowMs: 5 * 60 * 1000, message: 'Too many avatar uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   registerUploadFromRequest(req.file, req.body || {})
     .then((asset) => ok(res, { path: asset.public_path, asset }))

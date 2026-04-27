@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { authToken, assetUpload, compressUpload, validateUploadedFile } = require('../middleware')
+const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
 const {
   deleteFileAsset,
@@ -12,15 +12,9 @@ const {
 const router = express.Router()
 
 function getActor(req) {
-  if (req?.user?.id) {
-    return {
-      userId: Number(req.user.id || 0) || null,
-      userName: String(req.user.name || req.user.username || '').trim() || null,
-    }
-  }
   return {
-    userId: Number(req.body?.userId || req.query?.userId || 0) || null,
-    userName: String(req.body?.userName || req.query?.userName || '').trim() || null,
+    userId: Number(req?.user?.id || 0) || null,
+    userName: String(req?.user?.name || req?.user?.username || '').trim() || null,
   }
 }
 
@@ -44,7 +38,7 @@ router.get('/', authToken, async (req, res) => {
   }
 })
 
-router.post('/upload', authToken, assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
+router.post('/upload', authToken, routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
   try {
     if (!req.file) return err(res, 'No file uploaded')
     const actor = getActor(req)

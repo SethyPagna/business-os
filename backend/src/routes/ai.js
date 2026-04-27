@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database')
-const { authToken } = require('../middleware')
+const { authToken, routeRateLimit } = require('../middleware')
 const { ok, err, audit } = require('../helpers')
 const {
   PROVIDER_META,
@@ -16,15 +16,9 @@ const {
 const router = express.Router()
 
 function getActor(req) {
-  if (req?.user?.id) {
-    return {
-      userId: Number(req.user.id || 0) || null,
-      userName: String(req.user.name || req.user.username || '').trim() || null,
-    }
-  }
   return {
-    userId: Number(req.body?.userId || req.query?.userId || 0) || null,
-    userName: String(req.body?.userName || req.query?.userName || '').trim() || null,
+    userId: Number(req?.user?.id || 0) || null,
+    userName: String(req?.user?.name || req?.user?.username || '').trim() || null,
   }
 }
 
@@ -166,7 +160,7 @@ router.put('/providers/:id', authToken, async (req, res) => {
   }
 })
 
-router.post('/providers/:id/test', authToken, async (req, res) => {
+router.post('/providers/:id/test', authToken, routeRateLimit({ name: 'ai:provider_test', max: 20, windowMs: 10 * 60 * 1000, message: 'Too many AI provider tests.' }), async (req, res) => {
   try {
     const actor = getActor(req)
     const row = getProviderRow(req.params.id)

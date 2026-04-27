@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict')
 const {
   sanitizeObjectKeys,
+  sanitizeStringValue,
   isApiOrHealthPath,
   isSpaFallbackEligible,
   mapServerError,
@@ -47,6 +48,10 @@ runTest('sanitizeObjectKeys removes prototype-pollution keys recursively', () =>
   assert.equal(payload.nested.child.ok, 'value')
   assert.equal(payload.array[0].prototype, undefined)
   assert.equal(payload.array[0].valid, true)
+})
+
+runTest('sanitizeStringValue strips control and bidi characters', () => {
+  assert.equal(sanitizeStringValue('safe\u0000text\u202E'), 'safetext')
 })
 
 runTest('isApiOrHealthPath detects API and health routes', () => {

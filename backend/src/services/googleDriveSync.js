@@ -333,6 +333,18 @@ async function listDriveChildren(config, parentId) {
   return Array.isArray(json?.files) ? json.files : []
 }
 
+async function getDriveFileIfExists(config, fileId) {
+  try {
+    return await driveApiRequest(
+      config,
+      `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType&supportsAllDrives=true`,
+    )
+  } catch (error) {
+    if (/not found|404/i.test(String(error?.message || ''))) return null
+    throw error
+  }
+}
+
 async function removeDuplicateDriveItems(config, items, keepId = '') {
   const keep = trim(keepId)
   let removed = 0
@@ -358,7 +370,11 @@ async function createDriveFolder(config, parentId, name) {
 }
 
 async function ensureRootFolder(config) {
-  if (config.rootFolderId) return config.rootFolderId
+  if (config.rootFolderId) {
+    const existingById = await getDriveFileIfExists(config, config.rootFolderId)
+    if (existingById?.id) return existingById.id
+    writeSettingsMap({ [SETTINGS_KEYS.rootFolderId]: null })
+  }
   const existingItems = await findDriveItems(config, 'root', config.folderName, 'application/vnd.google-apps.folder')
   const existing = existingItems[0] || null
   if (existing?.id) {
@@ -504,9 +520,15 @@ async function updateDriveFile(config, remoteFileId, file) {
 }
 
 async function removeDriveFile(config, remoteFileId) {
-  await driveApiRequest(config, `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(remoteFileId)}?supportsAllDrives=true`, {
-    method: 'DELETE',
-  })
+  try {
+    await driveApiRequest(config, `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(remoteFileId)}?supportsAllDrives=true`, {
+      method: 'DELETE',
+    })
+    return true
+  } catch (error) {
+    if (/not found|404/i.test(String(error?.message || ''))) return false
+    throw error
+  }
 }
 
 async function runDriveSync(reason = 'manual') {

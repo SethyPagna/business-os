@@ -5,8 +5,9 @@ const express = require('express')
 const { db }  = require('../database')
 const { UPLOADS_PATH } = require('../config')
 const { ok, err, audit, broadcast, logOp, tryParse } = require('../helpers')
-const { authToken, upload, compressUpload, validateUploadedFile } = require('../middleware')
+const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit } = require('../middleware')
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
+const { isSafeExternalImageReference } = require('../netSecurity')
 
 const router = express.Router()
 
@@ -414,7 +415,7 @@ router.delete('/:id', authToken, (req, res) => {
 })
 
 // ── POST /api/products/upload-image ──────────────────────────────────────────
-router.post('/upload-image', authToken, upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
+router.post('/upload-image', authToken, routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   registerUploadFromRequest(req.file, req.body || {})
     .then((asset) => ok(res, { path: asset.public_path, asset }))
@@ -422,7 +423,7 @@ router.post('/upload-image', authToken, upload.single('image'), validateUploaded
 })
 
 // ── POST /api/products/bulk-import ───────────────────────────────────────────
-router.post('/bulk-import', authToken, async (req, res) => {
+router.post('/bulk-import', authToken, routeRateLimit({ name: 'products:bulk_import', max: 10, windowMs: 15 * 60 * 1000, message: 'Too many bulk imports.' }), async (req, res) => {
   const { products, imageFiles, imageOnly, userId, userName, deviceName, deviceTz, clientTime } = req.body || {}
   const errors = []
   let imported = 0, updated = 0, images_matched = 0
@@ -441,7 +442,7 @@ router.post('/bulk-import', authToken, async (req, res) => {
       if (!match) { errors.push(`No product matched for "${filename}"`); continue }
       try {
         const sourceValue = String(dataUrl || '').trim()
-        if (sourceValue.startsWith('/uploads/') || /^https?:\/\//i.test(sourceValue)) {
+        if (isSafeExternalImageReference(sourceValue) && !/^data:image\//i.test(sourceValue)) {
           resolved.push({ id: match.id, path: sourceValue })
           continue
         }
@@ -492,7 +493,7 @@ router.post('/bulk-import', authToken, async (req, res) => {
   const resolveImage = async (filename) => {
     if (!filename || !imageFiles?.[filename]) return null
     const sourceValue = String(imageFiles[filename] || '').trim()
-    if (sourceValue.startsWith('/uploads/') || /^https?:\/\//i.test(sourceValue)) return sourceValue
+    if (isSafeExternalImageReference(sourceValue) && !/^data:image\//i.test(sourceValue)) return sourceValue
     try {
       const asset = await storeDataUrlAsset({
         dataUrl: imageFiles[filename],

@@ -49,7 +49,7 @@ function loadCompressionMiddleware() {
 
 function applySecurityHeaders(_req, res, next) {
   // Apply tunnel/browser hardening headers before route handlers run.
-  setTunnelSecurityHeaders(res)
+  setTunnelSecurityHeaders(_req, res)
   next()
 }
 
@@ -71,8 +71,8 @@ function applyCoreMiddleware(target) {
   target.use(cors(CORS_OPTIONS))
   target.use(applySecurityHeaders)
   if (compression) target.use(compression({ threshold: 1024 }))
-  target.use(express.json({ limit: '50mb' }))
-  target.use(express.urlencoded({ extended: true, limit: '50mb' }))
+  target.use(express.json({ limit: '35mb' }))
+  target.use(express.urlencoded({ extended: true, limit: '10mb' }))
   target.use(applyRequestPolicy)
   target.use(requestContextMiddleware)
 }
@@ -233,6 +233,9 @@ function bootstrapServer() {
   } catch (_) {}
 
   const server = http.createServer(app)
+  server.requestTimeout = 60 * 1000
+  server.headersTimeout = 65 * 1000
+  server.keepAliveTimeout = 15 * 1000
   require('./src/websocket').attachWss(server)
 
   server.listen(PORT, '0.0.0.0', () => {
