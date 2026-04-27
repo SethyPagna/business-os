@@ -159,6 +159,20 @@ async function getProduct(baseUrl, authToken, productId) {
   return product
 }
 
+async function getSale(baseUrl, authToken, saleId) {
+  const sales = await fetchJson(baseUrl, '/api/sales?limit=100', { authToken })
+  const sale = Array.isArray(sales) ? sales.find((row) => row.id === saleId) : null
+  assert.ok(sale, `Expected sale ${saleId}`)
+  return sale
+}
+
+async function getInventoryMovements(baseUrl, authToken, branchId = null) {
+  const suffix = branchId ? `?branchId=${branchId}` : ''
+  const rows = await fetchJson(baseUrl, `/api/inventory/movements${suffix}`, { authToken })
+  assert.ok(Array.isArray(rows), 'Expected inventory movements list')
+  return rows
+}
+
 function sumBranchStock(product) {
   return (product.branch_stock || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
 }
@@ -249,9 +263,7 @@ runTest('customer return keeps aggregate stock equal to branch stock and marks s
     const branchRowAfterReturn = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
     assert.equal(Number(branchRowAfterReturn?.quantity || 0), 5)
 
-    const sales = await fetchJson(server.baseUrl, '/api/sales?limit=20', { authToken })
-    const saleDetails = Array.isArray(sales) ? sales.find((row) => row.id === sale.id) : null
-    assert.ok(saleDetails, 'Expected returned sale in sales list')
+    const saleDetails = await getSale(server.baseUrl, authToken, sale.id)
     assert.equal(saleDetails.sale_status, 'returned')
   } finally {
     await stopServer(server?.child)
@@ -301,6 +313,169 @@ runTest('supplier return keeps aggregate stock equal to branch stock after deduc
     assert.equal(sumBranchStock(product), 5)
     const branchRow = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
     assert.equal(Number(branchRow?.quantity || 0), 5)
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('sale status transitions deduct and restore stock only when business status requires it')
+runTest('sale status transitions deduct and restore stock only when business status requires it', async () => {
+  const runtimeDir = makeTempRoot('bos-stock-sale-status-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Awaiting Payment Status Product',
+      sku: 'APS-001',
+      stock_quantity: 7,
+      purchase_price_usd: 3,
+      selling_price_usd: 9,
+    })
+
+    const sale = await fetchJson(server.baseUrl, '/api/sales', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        branch_id: branch.id,
+        subtotal_usd: 18,
+        total_usd: 18,
+        amount_paid_usd: 0,
+        payment_method: 'Cash',
+        payment_currency: 'USD',
+        exchange_rate: 4100,
+        sale_status: 'awaiting_payment',
+        items: [
+          {
+            id: productId,
+            name: 'Awaiting Payment Status Product',
+            quantity: 2,
+            applied_price_usd: 9,
+            branch_id: branch.id,
+          },
+        ],
+      }),
+    })
+
+    let product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 7)
+    assert.equal(sumBranchStock(product), 7)
+
+    const awaitingPaymentUpdate = await fetchJson(server.baseUrl, `/api/sales/${sale.id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        sale_status: 'completed',
+      }),
+    })
+    assert.equal(awaitingPaymentUpdate.sale_status, 'completed')
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 5)
+    assert.equal(sumBranchStock(product), 5)
+
+    let movements = await getInventoryMovements(server.baseUrl, authToken, branch.id)
+    assert.ok(movements.some((row) => row.reference_id === sale.id && row.reason === 'Sale status changed from awaiting_payment to completed'))
+
+    const completedUpdate = await fetchJson(server.baseUrl, `/api/sales/${sale.id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        sale_status: 'cancelled',
+      }),
+    })
+    assert.equal(completedUpdate.sale_status, 'cancelled')
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 7)
+    assert.equal(sumBranchStock(product), 7)
+
+    movements = await getInventoryMovements(server.baseUrl, authToken, branch.id)
+    assert.ok(movements.some((row) => row.reference_id === sale.id && row.reason === 'Sale status changed from completed to cancelled'))
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('sales reset clears transactions and stock while keeping products and contacts')
+runTest('sales reset clears transactions and stock while keeping products and contacts', async () => {
+  const runtimeDir = makeTempRoot('bos-stock-reset-sales-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Reset Data Product',
+      sku: 'RST-001',
+      stock_quantity: 4,
+      purchase_price_usd: 2,
+      selling_price_usd: 8,
+    })
+
+    const customer = await fetchJson(server.baseUrl, '/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        name: 'Reset Customer',
+        membership_number: 'RESET-001',
+      }),
+    })
+
+    await fetchJson(server.baseUrl, '/api/sales', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        customer_id: customer.id,
+        customer_name: 'Reset Customer',
+        branch_id: branch.id,
+        subtotal_usd: 8,
+        total_usd: 8,
+        amount_paid_usd: 8,
+        payment_method: 'Cash',
+        payment_currency: 'USD',
+        exchange_rate: 4100,
+        items: [
+          {
+            id: productId,
+            name: 'Reset Data Product',
+            quantity: 1,
+            applied_price_usd: 8,
+            branch_id: branch.id,
+          },
+        ],
+      }),
+    })
+
+    await fetchJson(server.baseUrl, '/api/system/reset-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        mode: 'sales',
+      }),
+    })
+
+    const sales = await fetchJson(server.baseUrl, '/api/sales?limit=20', { authToken })
+    const returns = await fetchJson(server.baseUrl, '/api/returns?limit=20', { authToken })
+    const customers = await fetchJson(server.baseUrl, '/api/customers', { authToken })
+    const movements = await getInventoryMovements(server.baseUrl, authToken, branch.id)
+    const product = await getProduct(server.baseUrl, authToken, productId)
+
+    assert.equal(Array.isArray(sales) ? sales.length : -1, 0)
+    assert.equal(Array.isArray(returns) ? returns.length : -1, 0)
+    assert.ok(Array.isArray(customers) && customers.some((row) => row.id === customer.id))
+    assert.equal(movements.length, 0)
+    assert.equal(Number(product.stock_quantity), 0)
+    assert.equal(sumBranchStock(product), 0)
+    const branchRow = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
+    assert.equal(Number(branchRow?.quantity || 0), 0)
   } finally {
     await stopServer(server?.child)
   }
