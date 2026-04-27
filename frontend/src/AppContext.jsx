@@ -63,6 +63,14 @@ function writeDeviceSettings(value) {
   } catch (_) {}
 }
 
+function writeStoredSessionDuration(value) {
+  const normalized = String(value || '').trim() || 'session'
+  try {
+    localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, normalized)
+  } catch (_) {}
+  return normalized
+}
+
 function mergeSettingsWithDeviceOverrides(baseSettings = {}) {
   return { ...baseSettings, ...readDeviceSettings() }
 }
@@ -126,8 +134,6 @@ export function AppProvider({ children }) {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.USER)
       const expiry = localStorage.getItem(STORAGE_KEYS.USER_EXPIRY)
-      const serverStartTime = localStorage.getItem(STORAGE_KEYS.SERVER_START_TIME)
-      
       const authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
       if (stored && !authToken) {
         localStorage.removeItem(STORAGE_KEYS.USER)
@@ -147,12 +153,6 @@ export function AppProvider({ children }) {
         // Check if server was restarted (detect stale cache scenario)
         // If serverStartTime changed, server restarted, so clear user to force re-login
         // This prevents stale user data from old server session being used with new server instance
-        if (serverStartTime && localStorage.getItem(STORAGE_KEYS.SERVER_START_TIME) !== serverStartTime) {
-          localStorage.removeItem(STORAGE_KEYS.USER)
-          localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
-          return null
-        }
-        
         return JSON.parse(stored)
       }
     } catch (_) {}
@@ -196,6 +196,9 @@ export function AppProvider({ children }) {
       const serverSettings = await window.api.getSettings()
       const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
       setSettings(mergedSettings)
+      if (mergedSettings.login_session_duration) {
+        writeStoredSessionDuration(mergedSettings.login_session_duration)
+      }
       if (mergedSettings.language) setLanguage(mergedSettings.language)
       if (mergedSettings.theme)    setTheme(mergedSettings.theme)
       return mergedSettings
@@ -203,6 +206,9 @@ export function AppProvider({ children }) {
       console.warn('[AppContext] loadSettings failed:', e.message)
       const fallbackSettings = mergeSettingsWithDeviceOverrides({})
       setSettings(fallbackSettings)
+      if (fallbackSettings.login_session_duration) {
+        writeStoredSessionDuration(fallbackSettings.login_session_duration)
+      }
       if (fallbackSettings.language) setLanguage(fallbackSettings.language)
       if (fallbackSettings.theme) setTheme(fallbackSettings.theme)
       return fallbackSettings
@@ -515,9 +521,13 @@ export function AppProvider({ children }) {
   }, [])
 
   // ?? Auth ??????????????????????????????????????????????????????????????????
-  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', authToken = '') => {
+  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', authToken = '', sessionExpiresAt = '') => {
     let expiryTime = null
-    if (sessionDuration === '7d') {
+    const normalizedExpiry = String(sessionExpiresAt || '').trim()
+    const parsedExpiryMs = normalizedExpiry ? new Date(normalizedExpiry).getTime() : Number.NaN
+    if (Number.isFinite(parsedExpiryMs) && parsedExpiryMs > Date.now()) {
+      expiryTime = parsedExpiryMs
+    } else if (sessionDuration === '7d') {
       expiryTime = Date.now() + (7 * 24 * 60 * 60 * 1000)
     } else if (sessionDuration === '30d') {
       expiryTime = Date.now() + (30 * 24 * 60 * 60 * 1000)
@@ -543,7 +553,10 @@ export function AppProvider({ children }) {
       } else {
         localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
       }
-      localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
+      const knownServerStartTime = localStorage.getItem(STORAGE_KEYS.SERVER_START_TIME)
+      if (knownServerStartTime) {
+        localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, knownServerStartTime)
+      }
     } catch (_) {}
 
     window.api?.setAuthSessionToken?.(authToken || '')
@@ -565,7 +578,7 @@ export function AppProvider({ children }) {
         deviceName: device.deviceName,
       })
       if (result.success) {
-        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
+        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '', result.sessionExpiresAt || '')
       }
       return result
     } catch (e) {
@@ -703,12 +716,14 @@ export function AppProvider({ children }) {
     if (Object.keys(serverUpdates).length) {
       await window.api.saveSettings(serverUpdates)
     }
+    const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
     if (Object.keys(deviceUpdates).length) {
       const nextDeviceSettings = { ...readDeviceSettings(), ...deviceUpdates }
       writeDeviceSettings(nextDeviceSettings)
     }
-
-    const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
+    if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
+      writeStoredSessionDuration(mergedUpdates.login_session_duration)
+    }
     setSettings(prev => ({ ...prev, ...mergedUpdates }))
     if (mergedUpdates.language) setLanguage(mergedUpdates.language)
     if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)

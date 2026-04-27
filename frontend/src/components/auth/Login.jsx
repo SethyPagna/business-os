@@ -41,7 +41,7 @@ function ModeBackButton({ label, onClick }) {
 }
 
 export default function Login() {
-  const { login, persistAuthenticatedUser, t } = useApp()
+  const { login, persistAuthenticatedUser, settings, t } = useApp()
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -62,6 +62,7 @@ export default function Login() {
       return 'session'
     }
   })
+  const sessionDurationTouchedRef = useRef(false)
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -109,6 +110,16 @@ export default function Login() {
       localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, sessionDuration)
     } catch (_) {}
   }, [sessionDuration])
+
+  useEffect(() => {
+    if (sessionDurationTouchedRef.current) return
+    const preferredDuration = String(settings?.login_session_duration || '').trim()
+    if (!preferredDuration) return
+    setSessionDuration(preferredDuration)
+    try {
+      localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, preferredDuration)
+    } catch (_) {}
+  }, [settings?.login_session_duration])
 
   useEffect(() => {
     let active = true
@@ -248,7 +259,7 @@ export default function Login() {
           return
         }
         if (result?.success && result?.user) {
-          await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '')
+          await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '', result.sessionExpiresAt || '')
           return
         }
         setError(result?.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
@@ -308,7 +319,7 @@ export default function Login() {
       })
 
       if (verifyResult?.success && verifyResult?.user) {
-        await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.authToken || '')
+        await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.authToken || '', verifyResult.sessionExpiresAt || '')
       } else {
         setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
       }
@@ -566,7 +577,10 @@ export default function Login() {
                 <KeyRound className="h-4 w-4 text-gray-400" />
                 <span>{tr('keep_me_logged_in', 'Keep me logged in')}</span>
               </label>
-              <select id="session-duration" name="session-duration" value={sessionDuration} onChange={(event) => setSessionDuration(event.target.value)} className="input">
+                <select id="session-duration" name="session-duration" value={sessionDuration} onChange={(event) => {
+                  sessionDurationTouchedRef.current = true
+                  setSessionDuration(event.target.value)
+                }} className="input">
                 <option value="session">{tr('until_close_browser', 'Until I close the browser')}</option>
                 <option value="7d">{tr('for_7_days', 'For 7 days')}</option>
                 <option value="30d">{tr('for_30_days', 'For 30 days')}</option>

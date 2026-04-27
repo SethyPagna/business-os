@@ -35,7 +35,7 @@ function AvatarPreview({ name, avatarPath }) {
 }
 
 export default function UserProfileModal({ onClose }) {
-  const { user, notify, hasPermission, t } = useApp()
+  const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -113,6 +113,12 @@ export default function UserProfileModal({ onClose }) {
   }
 
   useEffect(() => { loadProfile() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const preferred = String(settings?.login_session_duration || '').trim()
+    if (!preferred) return
+    setSessionDuration(preferred)
+  }, [settings?.login_session_duration])
 
   const verificationHelp = useMemo(() => {
     return canAdminOverride
@@ -209,12 +215,10 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const handleSessionSave = () => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.SESSION_DURATION, sessionDuration)
-      notify(tr('login_duration_saved', 'Login duration preference saved. It will be used on the next login.'), 'success')
-    } catch (error) {
-      notify(error?.message || 'Failed to save login duration preference', 'error')
-    }
+    Promise.resolve(saveSettings?.({ login_session_duration: sessionDuration }))
+      .catch((error) => {
+        notify(error?.message || 'Failed to save login duration preference', 'error')
+      })
   }
 
   const refreshOtpState = async () => {

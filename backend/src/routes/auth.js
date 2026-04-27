@@ -101,6 +101,28 @@ function normalizeLookupText(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim())
+}
+
+function buildPublicBaseUrl(req) {
+  const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || 'http').split(',')[0].trim() || 'http'
+  const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').split(',')[0].trim()
+  if (!host) return ''
+  return `${proto}://${host}`
+}
+
+function resolvePasswordResetRedirect(req, redirectTo) {
+  const candidates = [
+    redirectTo,
+    process.env.SUPABASE_PASSWORD_RESET_REDIRECT_TO,
+    process.env.TAILSCALE_URL,
+    buildPublicBaseUrl(req),
+    'http://localhost:4000',
+  ]
+  return candidates.find((value) => isHttpUrl(value)) || ''
+}
+
 /**
  * 1.4 Redact a login identifier for audit trails.
  */
@@ -822,8 +844,16 @@ router.post('/password-reset/email', async (req, res) => {
       }
     }
 
-    const recovery = await sendSupabasePasswordRecoveryEmail(user.email, { redirectTo })
+    const recovery = await sendSupabasePasswordRecoveryEmail(user.email, {
+      redirectTo: resolvePasswordResetRedirect(req, redirectTo),
+    })
     if (!recovery.success) {
+      const providerCode = String(recovery.providerCode || '').trim().toUpperCase()
+      if (providerCode.includes('OVER_EMAIL_SEND_RATE_LIMIT')) {
+        return ok(res, {
+          message: 'A reset email was requested recently. Please wait about a minute, then check your inbox and spam folder.',
+        })
+      }
       return err(res, recovery.error || 'Failed to send password recovery email.', 400)
     }
   }
