@@ -10,6 +10,29 @@ const router = express.Router()
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 
+function refreshProductStockQuantity(productId) {
+  db.prepare(`
+    UPDATE products
+    SET stock_quantity = (
+      SELECT COALESCE(SUM(quantity), 0)
+      FROM branch_stock
+      WHERE product_id = ?
+    ),
+    updated_at = datetime('now')
+    WHERE id = ?
+  `).run(productId, productId)
+}
+
+function refreshProductStockQuantities(productIds = []) {
+  const seen = new Set()
+  for (const rawProductId of productIds) {
+    const productId = parseInt(rawProductId, 10)
+    if (!Number.isFinite(productId) || productId <= 0 || seen.has(productId)) continue
+    seen.add(productId)
+    refreshProductStockQuantity(productId)
+  }
+}
+
 function normalizeScope(value, fallback = CUSTOMER_SCOPE) {
   const scope = String(value || '').trim().toLowerCase()
   if (scope === 'all') return 'all'
@@ -223,10 +246,16 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         .forEach(p => productMap.set(p.id, p))
     }
 
+    const touchedProductIds = new Set()
+
     for (const item of d.items) {
       const totalUsd = (item.applied_price_usd || 0) * item.quantity
       const totalKhr = (item.applied_price_khr || 0) * item.quantity
       const returnToStock = item.return_to_stock !== false ? 1 : 0
+      const itemBranchId = item.branch_id || d.branch_id || saleMeta.branch_id || null
+      const itemBranchName = itemBranchId
+        ? db.prepare('SELECT name FROM branches WHERE id = ?').get(itemBranchId)?.name || branchName || saleMeta.branch_name || null
+        : branchName || saleMeta.branch_name || null
 
       // Use safe cost prices with fallback to product data
       let costUsd = item.cost_price_usd
@@ -252,21 +281,18 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         totalUsd,
         totalKhr,
         returnToStock,
-        item.branch_id || d.branch_id || null,
+        itemBranchId,
       )
 
       // Restore stock if return_to_stock is true
       if (returnToStock && item.product_id) {
-        db.prepare(`UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = datetime('now') WHERE id = ?`)
-          .run(item.quantity, item.product_id)
-
-        const bid = item.branch_id || d.branch_id
-        if (bid) {
+        if (itemBranchId) {
           db.prepare(`
             INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + ?
-          `).run(item.product_id, bid, item.quantity, item.quantity)
+          `).run(item.product_id, itemBranchId, item.quantity, item.quantity)
         }
+        touchedProductIds.add(item.product_id)
 
         // Log inventory movement
         db.prepare(`
@@ -277,12 +303,12 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
           item.product_id, item.product_name,
-          item.branch_id || d.branch_id || null,
-          branchName || null,
+          itemBranchId,
+          itemBranchName,
           'return',
           item.quantity,
-          item.cost_price_usd || 0, item.cost_price_khr || 0,
-          (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
+          costUsd || 0, costKhr || 0,
+          (costUsd || 0) * item.quantity, (costKhr || 0) * item.quantity,
           `Return: ${d.reason}`,
           rid,
           actor.userId,
@@ -290,6 +316,8 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         )
       }
     }
+
+    refreshProductStockQuantities(touchedProductIds)
 
     // If sale_id provided, update sale_status to partial_return or returned
     if (d.sale_id) {
@@ -314,7 +342,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       })
 
       const newStatus = fullyReturned ? 'returned' : 'partial_return'
-      db.prepare("UPDATE sales SET sale_status = ? WHERE id = ?").run(newStatus, d.sale_id)
+      db.prepare("UPDATE sales SET sale_status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, d.sale_id)
     }
 
     audit(actor.userId, actor.userName, 'create', 'return', rid,
@@ -455,6 +483,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         total_usd, total_khr, return_to_stock, branch_id
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `)
+    const touchedProductIds = new Set()
 
     for (const item of d.items) {
       const qty = toNumber(item.quantity, 0)
@@ -483,15 +512,13 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         itemBranchId,
       )
 
-      db.prepare(`UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?), updated_at = datetime('now') WHERE id = ?`)
-        .run(qty, item.product_id)
-
       if (itemBranchId) {
         db.prepare(`
           INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
           ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
         `).run(item.product_id, itemBranchId, qty, qty)
       }
+      touchedProductIds.add(item.product_id)
 
       db.prepare(`
         INSERT INTO inventory_movements
@@ -516,6 +543,8 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         actor.userName,
       )
     }
+
+    refreshProductStockQuantities(touchedProductIds)
 
     audit(actor.userId, actor.userName, 'create', 'supplier_return', rid,
       { returnNumber, settlement, supplierName: d.supplier_name || null }, {
@@ -577,19 +606,19 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
     const branchName = d.branch_id
       ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
       : existing.branch_name
+    const touchedProductIds = new Set()
 
     // Reverse previous stock effects
     for (const item of existingItems) {
       if (item.return_to_stock && item.product_id) {
         // Undo: remove from stock what was previously added back
-        db.prepare(`UPDATE products SET stock_quantity = MAX(0, stock_quantity - ?), updated_at = datetime('now') WHERE id = ?`)
-          .run(item.quantity, item.product_id)
         if (item.branch_id) {
           db.prepare(`
             INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
           `).run(item.product_id, item.branch_id, item.quantity, item.quantity)
         }
+        touchedProductIds.add(item.product_id)
         // Log reversal
         db.prepare(`
           INSERT INTO inventory_movements
@@ -600,8 +629,8 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
           item.product_id, item.product_name,
           item.branch_id, existing.branch_name,
           'return_reversal', item.quantity,
-          item.cost_price_usd || 0, 0,
-          (item.cost_price_usd || 0) * item.quantity, 0,
+          item.cost_price_usd || 0, item.cost_price_khr || 0,
+          (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
           `Return #${existing.return_number} updated — reversing previous restock`,
           parseInt(id), actor.userId, actor.userName,
         )
@@ -639,8 +668,6 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
 
       // Re-apply stock if return_to_stock
       if (returnToStock && item.product_id) {
-        db.prepare(`UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = datetime('now') WHERE id = ?`)
-          .run(item.quantity, item.product_id)
         const bid = item.branch_id || existing.branch_id
         if (bid) {
           db.prepare(`
@@ -648,6 +675,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + ?
           `).run(item.product_id, bid, item.quantity, item.quantity)
         }
+        touchedProductIds.add(item.product_id)
         db.prepare(`
           INSERT INTO inventory_movements
             (product_id, product_name, branch_id, branch_name, movement_type, quantity,
@@ -664,6 +692,8 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
         )
       }
     }
+
+    refreshProductStockQuantities(touchedProductIds)
 
     // Update return header
     db.prepare(`

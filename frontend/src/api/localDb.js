@@ -141,10 +141,36 @@ export async function replaceTableContents(tableName, rows) {
       .map((row) => ({ ...row }))
     : []
 
+  const primaryKeyPath = table.schema?.primKey?.keyPath
+  const canDiffReplace = typeof primaryKeyPath === 'string'
+    && safeRows.every((row) => row[primaryKeyPath] !== undefined && row[primaryKeyPath] !== null)
+
+  if (!canDiffReplace) {
+    await dexieDb.transaction('rw', table, async () => {
+      await table.clear()
+      if (safeRows.length) {
+        await table.bulkPut(safeRows)
+      }
+    })
+    return safeRows
+  }
+
+  const incomingMap = new Map()
+  for (const row of safeRows) {
+    incomingMap.set(row[primaryKeyPath], row)
+  }
+
+  const incomingRows = [...incomingMap.values()]
+  const incomingKeys = new Set(incomingMap.keys())
+  const existingKeys = await table.toCollection().primaryKeys()
+  const deleteKeys = existingKeys.filter((key) => !incomingKeys.has(key))
+
   await dexieDb.transaction('rw', table, async () => {
-    await table.clear()
-    if (safeRows.length) {
-      await table.bulkPut(safeRows)
+    if (deleteKeys.length) {
+      await table.bulkDelete(deleteKeys)
+    }
+    if (incomingRows.length) {
+      await table.bulkPut(incomingRows)
     }
   })
 

@@ -1152,6 +1152,55 @@ try {
 
 try {
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sales_created_at
+    ON sales(created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sales_status_created_at
+    ON sales(sale_status, created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sale_items_sale_product_branch
+    ON sale_items(sale_id, product_id, branch_id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_returns_sale_created_at
+    ON returns(sale_id, created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_return_items_return_product
+    ON return_items(return_id, product_id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_inventory_movements_branch_created_at
+    ON inventory_movements(branch_id, created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_inventory_movements_product_created_at
+    ON inventory_movements(product_id, created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_file_assets_created_at
     ON file_assets(created_at DESC, id DESC)
   `)

@@ -544,6 +544,7 @@ export function AppProvider({ children }) {
     window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
+      clearTimeout(quickCheck)
       clearInterval(pollTimer)
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
