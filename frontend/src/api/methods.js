@@ -37,14 +37,33 @@ function getCurrentUserContext() {
   }
 }
 
-function queueOfflineWrite(channel, payload) {
-  return dexieDb.sync_queue.add({
+function emitSyncQueueChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
+    detail: { ts: Date.now() },
+  }))
+}
+
+async function queueOfflineWrite(channel, payload, meta = {}) {
+  const savedAt = new Date().toISOString()
+  const seq = await dexieDb.sync_queue.add({
     channel,
     payload: JSON.stringify(payload || {}),
     runtime_scope: buildQueuedOperationScope(),
+    operation: meta.operation || null,
+    entity_table: meta.entity_table || null,
+    entity_id: meta.entity_id ?? null,
+    entity_name: meta.entity_name || null,
+    client_request_id: payload?.client_request_id || null,
     status: 'pending',
-    created_at: new Date().toISOString(),
-  }).catch(() => {})
+    created_at: savedAt,
+    updated_at: savedAt,
+    retry_count: 0,
+    retry_at: null,
+    error: null,
+  }).catch(() => null)
+  emitSyncQueueChanged()
+  return seq
 }
 
 function createClientRequestId(prefix = 'req') {
@@ -58,6 +77,112 @@ function ensureClientRequestId(payload, prefix) {
   const current = String(payload?.client_request_id || '').trim()
   if (current) return { ...(payload || {}), client_request_id: current.slice(0, 120) }
   return { ...(payload || {}), client_request_id: createClientRequestId(prefix) }
+}
+
+function getPendingSyncMeta(row = {}) {
+  return {
+    _local_pending: 1,
+    _pending_action: row._pending_action || 'update',
+    _pending_since: row._pending_since || new Date().toISOString(),
+    _sync_error: row._sync_error || null,
+  }
+}
+
+async function updateLocalPendingRecord(tableName, id, updates = {}, action = 'update') {
+  const table = dexieDb.table(tableName)
+  const existing = await table.get(id)
+  const pendingMeta = getPendingSyncMeta({
+    _pending_action: action,
+    _pending_since: existing?._pending_since || new Date().toISOString(),
+  })
+  await table.put({
+    ...(existing || {}),
+    ...updates,
+    id,
+    updated_at: updates.updated_at || new Date().toISOString(),
+    ...pendingMeta,
+  })
+  emitSyncQueueChanged()
+}
+
+async function createLocalPendingRecord(tableName, payload, action = 'create') {
+  const savedAt = new Date().toISOString()
+  const localId = await dexieDb.table(tableName).add({
+    ...payload,
+    id: undefined,
+    created_at: payload.created_at || savedAt,
+    updated_at: payload.updated_at || savedAt,
+    ...getPendingSyncMeta({
+      _pending_action: action,
+      _pending_since: savedAt,
+    }),
+  })
+  emitSyncQueueChanged()
+  return localId
+}
+
+async function removeLocalRecord(tableName, id) {
+  await dexieDb.table(tableName).delete(id).catch(() => {})
+  emitSyncQueueChanged()
+}
+
+function emitSyncRefresh(channel) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('sync:update', {
+    detail: { channel, ts: Date.now() },
+  }))
+}
+
+export async function getPendingSyncState() {
+  const items = await dexieDb.sync_queue
+    .orderBy('_seq')
+    .toArray()
+    .catch(() => [])
+  const sorted = [...items].sort((a, b) => {
+    const byCreated = String(a?.created_at || '').localeCompare(String(b?.created_at || ''))
+    if (byCreated !== 0) return byCreated
+    return Number(a?._seq || 0) - Number(b?._seq || 0)
+  })
+  const counts = sorted.reduce((acc, item) => {
+    const status = String(item?.status || 'pending')
+    acc.total += 1
+    if (status === 'syncing') acc.syncing += 1
+    else if (status === 'failed') acc.failed += 1
+    else acc.pending += 1
+    return acc
+  }, { total: 0, pending: 0, syncing: 0, failed: 0 })
+  const oldest = sorted[0]?.created_at || null
+  return {
+    ...counts,
+    oldest_created_at: oldest,
+    items: sorted.slice(0, 25).map((item) => ({
+      _seq: item._seq,
+      channel: item.channel,
+      operation: item.operation || null,
+      entity_table: item.entity_table || null,
+      entity_id: item.entity_id ?? null,
+      entity_name: item.entity_name || null,
+      status: item.status || 'pending',
+      created_at: item.created_at || null,
+      updated_at: item.updated_at || null,
+      retry_count: Number(item.retry_count || 0),
+      retry_at: item.retry_at || null,
+      error: item.error || null,
+    })),
+  }
+}
+
+export async function retryPendingSyncNow() {
+  await dexieDb.sync_queue
+    .toCollection()
+    .modify({
+      status: 'pending',
+      retry_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .catch(() => {})
+  emitSyncQueueChanged()
+  return flushPendingSyncQueue()
 }
 
 let flushPendingSyncPromise = null
@@ -147,7 +272,33 @@ function routeMirrored(channel, serverFn, localFn, mirrorFn) {
 }
 
 function mirrorTable(tableName) {
-  return async (rows) => replaceTableContents(tableName, rows)
+  return async (rows) => {
+    const incomingRows = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : []
+    const table = dexieDb.table(tableName)
+    const localPendingRows = await table
+      .filter((row) => !!row?._local_pending)
+      .toArray()
+      .catch(() => [])
+
+    if (!localPendingRows.length) return replaceTableContents(tableName, incomingRows)
+
+    const pendingById = new Map(localPendingRows.map((row) => [row.id, row]))
+    const merged = incomingRows
+      .filter((row) => !pendingById.has(row.id) || pendingById.get(row.id)?._pending_action !== 'delete')
+      .map((row) => {
+        const pending = pendingById.get(row.id)
+        return pending ? { ...row, ...pending } : row
+      })
+
+    localPendingRows.forEach((row) => {
+      if (row?._pending_action === 'delete') return
+      if (!merged.some((item) => item.id === row.id)) {
+        merged.push({ ...row })
+      }
+    })
+
+    return replaceTableContents(tableName, merged)
+  }
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -439,11 +590,16 @@ export async function createProduct(d) {
       id: undefined,  // Dexie auto-assigns
       stock_quantity: payload.stock_quantity || 0,
       created_at: new Date().toISOString(),
-      _local_pending: 1,
+      ...getPendingSyncMeta({ _pending_action: 'create' }),
     })
     cacheInvalidate('products')
     // Queue for sync when back online
-    await queueOfflineWrite('products:create', payload)
+    await queueOfflineWrite('products:create', payload, {
+      operation: 'create',
+      entity_table: 'products',
+      entity_id: localId,
+      entity_name: payload.name || '',
+    })
     return { success: true, id: localId, _offline: true }
   }
 }
@@ -644,9 +800,14 @@ export async function createSale(d) {
       id: undefined,
       receipt_number: receiptNum,
       created_at: payload.client_time || new Date().toISOString(),
-      _local_pending: 1,
+      ...getPendingSyncMeta({ _pending_action: 'create' }),
     })
-    await queueOfflineWrite('sales:create', { ...payload, receipt_number: receiptNum })
+    await queueOfflineWrite('sales:create', { ...payload, receipt_number: receiptNum }, {
+      operation: 'create',
+      entity_table: 'sales',
+      entity_id: localId,
+      entity_name: receiptNum,
+    })
     cacheInvalidate('sales')
     return { success: true, id: localId, receipt_number: receiptNum, receiptNumber: receiptNum, _offline: true }
   }
@@ -655,6 +816,8 @@ export async function createSale(d) {
 async function runFlushPendingSyncQueue() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl || !getAuthSessionToken()) return { processed: 0, failed: 0 }
+
+  const touchedChannels = new Set()
 
   const pending = (await dexieDb.sync_queue.toArray())
     .filter((item) => {
@@ -669,11 +832,12 @@ async function runFlushPendingSyncQueue() {
   let processed = 0
   let failed = 0
 
-  for (const item of pending) {
-    if (!doesQueuedScopeMatchCurrent(item?.runtime_scope)) {
-      await dexieDb.sync_queue.delete(item._seq).catch(() => {})
-      continue
-    }
+    for (const item of pending) {
+      if (!doesQueuedScopeMatchCurrent(item?.runtime_scope)) {
+        await dexieDb.sync_queue.delete(item._seq).catch(() => {})
+        emitSyncQueueChanged()
+        continue
+      }
 
     let payload = {}
     try {
@@ -682,52 +846,95 @@ async function runFlushPendingSyncQueue() {
       payload = {}
     }
 
-    try {
-      await dexieDb.sync_queue.update(item._seq, {
-        status: 'syncing',
-        updated_at: new Date().toISOString(),
-        error: null,
-      }).catch(() => {})
-      if (item.channel === 'products:create') {
-        await apiFetch('POST', '/api/products', payload)
-      } else if (item.channel === 'sales:create') {
-        await apiFetch('POST', '/api/sales', payload)
-      } else {
-        await dexieDb.sync_queue.delete(item._seq)
-        continue
-      }
-
-      await dexieDb.sync_queue.delete(item._seq)
-      processed += 1
-    } catch (error) {
-      if (isNetErr(error)) {
+      try {
         await dexieDb.sync_queue.update(item._seq, {
-          status: 'pending',
+          status: 'syncing',
           updated_at: new Date().toISOString(),
+          error: null,
         }).catch(() => {})
-        failed += 1
-        break
-      }
+        emitSyncQueueChanged()
+        if (item.channel === 'products:create') {
+          await apiFetch('POST', '/api/products', payload)
+          touchedChannels.add('products')
+          await removeLocalRecord('products', item.entity_id)
+        } else if (item.channel === 'sales:create') {
+          await apiFetch('POST', '/api/sales', payload)
+          touchedChannels.add('sales')
+          touchedChannels.add('products')
+          touchedChannels.add('inventory')
+          touchedChannels.add('dashboard')
+          await removeLocalRecord('sales', item.entity_id)
+        } else if (item.channel === 'customers:create') {
+          await apiFetch('POST', '/api/customers', payload)
+          touchedChannels.add('customers')
+          await removeLocalRecord('customers', item.entity_id)
+        } else if (item.channel === 'customers:update') {
+          await apiFetch('PUT', `/api/customers/${item.entity_id}`, payload)
+          touchedChannels.add('customers')
+        } else if (item.channel === 'customers:delete') {
+          await apiFetch('DELETE', `/api/customers/${item.entity_id}`, payload)
+          touchedChannels.add('customers')
+          await removeLocalRecord('customers', item.entity_id)
+        } else if (item.channel === 'suppliers:create') {
+          await apiFetch('POST', '/api/suppliers', payload)
+          touchedChannels.add('suppliers')
+          await removeLocalRecord('suppliers', item.entity_id)
+        } else if (item.channel === 'suppliers:update') {
+          await apiFetch('PUT', `/api/suppliers/${item.entity_id}`, payload)
+          touchedChannels.add('suppliers')
+        } else if (item.channel === 'suppliers:delete') {
+          await apiFetch('DELETE', `/api/suppliers/${item.entity_id}`, payload)
+          touchedChannels.add('suppliers')
+          await removeLocalRecord('suppliers', item.entity_id)
+        } else if (item.channel === 'deliveryContacts:create') {
+          await apiFetch('POST', '/api/delivery-contacts', payload)
+          touchedChannels.add('deliveryContacts')
+          await removeLocalRecord('delivery_contacts', item.entity_id)
+        } else if (item.channel === 'deliveryContacts:update') {
+          await apiFetch('PUT', `/api/delivery-contacts/${item.entity_id}`, payload)
+          touchedChannels.add('deliveryContacts')
+        } else if (item.channel === 'deliveryContacts:delete') {
+          await apiFetch('DELETE', `/api/delivery-contacts/${item.entity_id}`, payload)
+          touchedChannels.add('deliveryContacts')
+          await removeLocalRecord('delivery_contacts', item.entity_id)
+        } else {
+          await dexieDb.sync_queue.delete(item._seq)
+          emitSyncQueueChanged()
+          continue
+        }
+
+        await dexieDb.sync_queue.delete(item._seq)
+        emitSyncQueueChanged()
+        processed += 1
+      } catch (error) {
+        if (isNetErr(error)) {
+          await dexieDb.sync_queue.update(item._seq, {
+            status: 'pending',
+            updated_at: new Date().toISOString(),
+          }).catch(() => {})
+          emitSyncQueueChanged()
+          failed += 1
+          break
+        }
       failed += 1
       const retryCount = Number(item?.retry_count || 0) + 1
       const retryDelayMs = Math.min(5 * 60 * 1000, 10_000 * Math.pow(2, Math.min(retryCount, 5)))
-      await dexieDb.sync_queue.update(item._seq, {
-        status: 'failed',
-        error: error?.message || 'Sync failed',
-        retry_count: retryCount,
-        retry_at: new Date(Date.now() + retryDelayMs).toISOString(),
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
+        await dexieDb.sync_queue.update(item._seq, {
+          status: 'failed',
+          error: error?.message || 'Sync failed',
+          retry_count: retryCount,
+          retry_at: new Date(Date.now() + retryDelayMs).toISOString(),
+          updated_at: new Date().toISOString(),
+        }).catch(() => {})
+        emitSyncQueueChanged()
+      }
     }
-  }
 
   if (processed > 0) {
-    cacheInvalidate('products')
-    cacheInvalidate('sales')
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products', ts: Date.now() } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales', ts: Date.now() } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory', ts: Date.now() } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'dashboard', ts: Date.now() } }))
+    touchedChannels.forEach((channel) => {
+      cacheInvalidate(channel)
+      emitSyncRefresh(channel)
+    })
   }
 
   return { processed, failed }
@@ -759,43 +966,193 @@ export const getAnalytics = (params) => {
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray(), mirrorTable('customers'))
-export const createCustomer      = d        => route('customers:create',     () => apiFetch('POST', '/api/customers', d),                  null, true)
+export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('customers'))
+export async function createCustomer(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
+  try {
+    return await route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const localId = await createLocalPendingRecord('customers', payload, 'create')
+    cacheInvalidate('customers')
+    await queueOfflineWrite('customers:create', payload, {
+      operation: 'create',
+      entity_table: 'customers',
+      entity_id: localId,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('customers')
+    return { success: true, id: localId, _offline: true }
+  }
+}
 export const updateCustomer = async (id, d) => {
   const payload = await withExpectedUpdatedAt('customers', id, d)
-  return route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
+  try {
+    return await route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    await updateLocalPendingRecord('customers', id, payload, 'update')
+    cacheInvalidate('customers')
+    await queueOfflineWrite('customers:update', payload, {
+      operation: 'update',
+      entity_table: 'customers',
+      entity_id: id,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('customers')
+    return { success: true, id, _offline: true }
+  }
 }
 export const deleteCustomer = async (id) => {
   const payload = await withExpectedUpdatedAt('customers', id, {})
-  return route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
+  try {
+    return await route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const existing = await dexieDb.customers.get(id).catch(() => null)
+    await updateLocalPendingRecord('customers', id, {
+      ...(existing || {}),
+      _pending_action: 'delete',
+      _local_deleted: 1,
+    }, 'delete')
+    cacheInvalidate('customers')
+    await queueOfflineWrite('customers:delete', payload, {
+      operation: 'delete',
+      entity_table: 'customers',
+      entity_id: id,
+      entity_name: existing?.name || '',
+    })
+    emitSyncRefresh('customers')
+    return { success: true, id, _offline: true }
+  }
 }
 export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
 export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
-export const createSupplier      = d        => route('suppliers:create',     () => apiFetch('POST', '/api/suppliers', d),                  null, true)
+export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('suppliers'))
+export async function createSupplier(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
+  try {
+    return await route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const localId = await createLocalPendingRecord('suppliers', payload, 'create')
+    cacheInvalidate('suppliers')
+    await queueOfflineWrite('suppliers:create', payload, {
+      operation: 'create',
+      entity_table: 'suppliers',
+      entity_id: localId,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('suppliers')
+    return { success: true, id: localId, _offline: true }
+  }
+}
 export const updateSupplier = async (id, d) => {
   const payload = await withExpectedUpdatedAt('suppliers', id, d)
-  return route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
+  try {
+    return await route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    await updateLocalPendingRecord('suppliers', id, payload, 'update')
+    cacheInvalidate('suppliers')
+    await queueOfflineWrite('suppliers:update', payload, {
+      operation: 'update',
+      entity_table: 'suppliers',
+      entity_id: id,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('suppliers')
+    return { success: true, id, _offline: true }
+  }
 }
 export const deleteSupplier = async (id) => {
   const payload = await withExpectedUpdatedAt('suppliers', id, {})
-  return route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
+  try {
+    return await route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const existing = await dexieDb.suppliers.get(id).catch(() => null)
+    await updateLocalPendingRecord('suppliers', id, {
+      ...(existing || {}),
+      _pending_action: 'delete',
+      _local_deleted: 1,
+    }, 'delete')
+    cacheInvalidate('suppliers')
+    await queueOfflineWrite('suppliers:delete', payload, {
+      operation: 'delete',
+      entity_table: 'suppliers',
+      entity_id: id,
+      entity_name: existing?.name || '',
+    })
+    emitSyncRefresh('suppliers')
+    return { success: true, id, _offline: true }
+  }
 }
 export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
 export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
-export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
-export const createDeliveryContact = d        => route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', d),           null, true)
+export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('delivery_contacts'))
+export async function createDeliveryContact(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
+  try {
+    return await route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const localId = await createLocalPendingRecord('delivery_contacts', payload, 'create')
+    cacheInvalidate('deliveryContacts')
+    await queueOfflineWrite('deliveryContacts:create', payload, {
+      operation: 'create',
+      entity_table: 'delivery_contacts',
+      entity_id: localId,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('deliveryContacts')
+    return { success: true, id: localId, _offline: true }
+  }
+}
 export const updateDeliveryContact = async (id, d) => {
   const payload = await withExpectedUpdatedAt('delivery_contacts', id, d)
-  return route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
+  try {
+    return await route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    await updateLocalPendingRecord('delivery_contacts', id, payload, 'update')
+    cacheInvalidate('deliveryContacts')
+    await queueOfflineWrite('deliveryContacts:update', payload, {
+      operation: 'update',
+      entity_table: 'delivery_contacts',
+      entity_id: id,
+      entity_name: payload.name || '',
+    })
+    emitSyncRefresh('deliveryContacts')
+    return { success: true, id, _offline: true }
+  }
 }
 export const deleteDeliveryContact = async (id) => {
   const payload = await withExpectedUpdatedAt('delivery_contacts', id, {})
-  return route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
+  try {
+    return await route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const existing = await dexieDb.delivery_contacts.get(id).catch(() => null)
+    await updateLocalPendingRecord('delivery_contacts', id, {
+      ...(existing || {}),
+      _pending_action: 'delete',
+      _local_deleted: 1,
+    }, 'delete')
+    cacheInvalidate('deliveryContacts')
+    await queueOfflineWrite('deliveryContacts:delete', payload, {
+      operation: 'delete',
+      entity_table: 'delivery_contacts',
+      entity_id: id,
+      entity_name: existing?.name || '',
+    })
+    emitSyncRefresh('deliveryContacts')
+    return { success: true, id, _offline: true }
+  }
 }
 export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImport', () => apiFetch('POST', '/api/delivery-contacts/bulk-import', d), null, true)
 

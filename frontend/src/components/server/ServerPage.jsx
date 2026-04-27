@@ -171,6 +171,8 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
   const [serverLog, setServerLog] = useState([])
   const [serverInfo, setServerInfo] = useState(null)
   const [writeErrors, setWriteErrors] = useState([])
+  const [pendingSync, setPendingSync] = useState({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
+  const [retryingQueue, setRetryingQueue] = useState(false)
   const [tab, setTab] = useState('client')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const mounted = useRef(true)
@@ -178,14 +180,26 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
   useEffect(() => {
     mounted.current = true
     if (window.api?.getCallLog) setClientLog(window.api.getCallLog())
+    const loadQueueState = async () => {
+      try {
+        const state = await window.api?.getPendingSyncState?.()
+        if (mounted.current && state) setPendingSync(state)
+      } catch (_) {}
+    }
+    loadQueueState()
     const onErr = (event) => {
       if (!mounted.current) return
       setWriteErrors((prev) => [{ ...event.detail, _id: Date.now() }, ...prev].slice(0, 20))
     }
+    const onQueueChanged = () => {
+      loadQueueState()
+    }
     window.addEventListener('sync:error', onErr)
+    window.addEventListener('sync:queue-changed', onQueueChanged)
     return () => {
       mounted.current = false
       window.removeEventListener('sync:error', onErr)
+      window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
   }, [])
 
@@ -214,6 +228,16 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
     local: 'bg-gray-100 text-gray-600',
   }
 
+  async function handleRetryQueue() {
+    if (!window.api?.retryPendingSyncNow) return
+    setRetryingQueue(true)
+    try {
+      await window.api.retryPendingSyncNow()
+    } finally {
+      setRetryingQueue(false)
+    }
+  }
+
   return (
     <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800">
@@ -221,6 +245,11 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
           <span className="text-sm font-semibold text-gray-800 dark:text-white">Diagnostics</span>
           <span className={`h-2 w-2 rounded-full ${syncConnected ? 'bg-green-500' : syncUrl ? 'animate-pulse bg-yellow-400' : 'bg-gray-300'}`} />
           {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients} device(s) | {Math.round(serverInfo.uptime)}s uptime</span> : null}
+          {pendingSync.total > 0 ? (
+            <span className={`rounded-full px-2 py-0.5 text-xs ${pendingSync.failed > 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+              {pendingSync.pending} pending / {pendingSync.failed} failed
+            </span>
+          ) : null}
           {writeErrors.length > 0 ? (
             <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
               {writeErrors.length} write error{writeErrors.length > 1 ? 's' : ''}
@@ -260,6 +289,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
         {[
           { id: 'client', label: `Client (${clientLog.length})` },
           { id: 'server', label: `Server (${serverLog.length})`, disabled: !syncUrl },
+          { id: 'queue', label: `Queue (${pendingSync.total})` },
           { id: 'info', label: 'Info' },
         ].map(({ id, label, disabled }) => (
           <button
@@ -300,6 +330,41 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
                 <span className="flex-1 truncate text-gray-800 dark:text-gray-200">{entry.channel}</span>
                 <span className="text-gray-400">{entry.ms}ms</span>
                 <span className={entry.ok ? 'text-green-500' : 'text-red-500'}>{entry.ok ? 'ok' : 'x'}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {tab === 'queue' ? (
+          <div className="px-3 py-2">
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800">
+              <div className="flex flex-wrap gap-3 text-gray-600 dark:text-gray-300">
+                <span><strong>{pendingSync.pending}</strong> pending</span>
+                <span><strong>{pendingSync.syncing}</strong> syncing</span>
+                <span><strong>{pendingSync.failed}</strong> failed</span>
+              </div>
+              <button
+                onClick={handleRetryQueue}
+                disabled={retryingQueue || pendingSync.total === 0}
+                className="text-blue-600 hover:underline disabled:opacity-40"
+              >
+                {retryingQueue ? 'Retrying...' : 'Retry now'}
+              </button>
+            </div>
+            {pendingSync.total === 0 ? (
+              <p className="py-4 text-center text-xs text-gray-400">No pending client actions.</p>
+            ) : pendingSync.items.map((item) => (
+              <div key={item._seq} className="flex items-center gap-2 border-b border-gray-50 py-1 text-xs dark:border-gray-700/30">
+                <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
+                <span className={`flex-shrink-0 rounded px-1 ${item.status === 'failed' ? 'bg-red-100 text-red-700' : item.status === 'syncing' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
+                  {item.status}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">
+                  {item.channel}
+                  {item.entity_name ? ` - ${item.entity_name}` : ''}
+                </span>
+                {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
+                {item.error ? <span className="truncate text-red-500">{item.error}</span> : null}
               </div>
             ))}
           </div>
