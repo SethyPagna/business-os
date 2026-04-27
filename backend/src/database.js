@@ -20,7 +20,7 @@ const fs       = require('fs')
 const crypto   = require('crypto')
 const Database = require('better-sqlite3')
 const bcrypt   = require('bcryptjs')
-const { DB_PATH } = require('./config')
+const { DB_PATH, DEFAULT_ORGANIZATION_BOOTSTRAP } = require('./config')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
 
 // Ensure the DB directory exists before opening the file
@@ -827,8 +827,9 @@ seedIfEmpty('users', [
 })
 
 function ensureDefaultOrganizationAndGroup() {
-  const defaultName = 'LeangCosmetics'
-  const defaultSlug = 'leangcosmetics'
+  const defaultName = DEFAULT_ORGANIZATION_BOOTSTRAP.name
+  const defaultSlug = DEFAULT_ORGANIZATION_BOOTSTRAP.slug
+  const defaultPublicId = DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
 
   let organization = db.prepare(`
     SELECT id, name, slug, public_id
@@ -841,7 +842,7 @@ function ensureDefaultOrganizationAndGroup() {
     const inserted = db.prepare(`
       INSERT INTO organizations (name, slug, public_id, is_active, setup_enabled)
       VALUES (?, ?, ?, 1, 0)
-    `).run(defaultName, defaultSlug, generateOrgPublicId())
+    `).run(defaultName, defaultSlug, defaultPublicId || generateOrgPublicId())
     organization = {
       id: Number(inserted.lastInsertRowid),
       name: defaultName,
@@ -851,7 +852,7 @@ function ensureDefaultOrganizationAndGroup() {
   } else {
     const nextName = String(organization.name || '').trim() || defaultName
     const nextSlug = slugifyOrgName(organization.slug || organization.name || defaultSlug, defaultSlug)
-    const nextPublicId = String(organization.public_id || '').trim() || generateOrgPublicId()
+    const nextPublicId = String(organization.public_id || '').trim() || defaultPublicId || generateOrgPublicId()
     db.prepare(`
       UPDATE organizations
       SET name = ?, slug = ?, public_id = ?, is_active = 1, setup_enabled = 0

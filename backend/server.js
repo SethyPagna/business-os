@@ -33,7 +33,7 @@ const {
   setUploadStaticHeaders,
   mapServerError,
 } = require('./src/serverUtils')
-const { PORT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN } = require('./src/config')
+const { PORT, STORAGE_ROOT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN } = require('./src/config')
 
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
@@ -190,6 +190,7 @@ function getStartupBanner() {
 ==========================================
   Business OS  |  Port ${PORT}
   Node:     ${process.version}
+  Storage:  ${STORAGE_ROOT}
   DB:       ${DB_PATH}
   Uploads:  ${UPLOADS_PATH}
   Token:    ${SYNC_TOKEN ? '(legacy token set)' : '(signed browser sessions)'}

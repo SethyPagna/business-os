@@ -311,7 +311,7 @@ function DataFolderLocation({ t, notify }) {
 
       if (result) {
         setInfo(result)
-        setInputPath(result?.dataRootParent || result?.dataRoot || '')
+        setInputPath(result?.storageRootParent || result?.dataRootParent || result?.storageRoot || result?.dataRoot || '')
       }
       setSystemConfig(config)
 
@@ -337,7 +337,7 @@ function DataFolderLocation({ t, notify }) {
   const openBrowser = async (dir) => {
     try {
       setBusy(true)
-      const result = await window.api.browseDir(dir || inputPath || info?.dataRootParent || info?.dataRoot || '')
+      const result = await window.api.browseDir(dir || inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
       if (result) setBrowseState(result)
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -359,7 +359,7 @@ function DataFolderLocation({ t, notify }) {
     }
     try {
       setBusy(true)
-      const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.dataRootParent || info?.dataRoot || '')
+      const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
       if (selectedFolder && typeof selectedFolder === 'string') {
         setInputPath(selectedFolder)
         setBrowseState(null)
@@ -456,7 +456,7 @@ function DataFolderLocation({ t, notify }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         <SectionChip label={copy('active_path', 'Active live folder')} value={info?.dataRoot || '--'} tone="blue" />
-        <SectionChip label={copy('new_location_preview', 'Next live folder')} value={previewPath || '--'} tone="amber" />
+        <SectionChip label={copy('storage_home', 'Storage home')} value={info?.storageRoot || '--'} tone="amber" />
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -521,7 +521,7 @@ function DataFolderLocation({ t, notify }) {
 
       {showAdvancedBrowser ? (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.dataRootParent || info?.dataRoot)} disabled={busy}>
+          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot)} disabled={busy}>
             {copy('open_typed_path', 'Open typed path')}
           </button>
           <button className="btn-secondary w-full text-xs sm:w-auto" onClick={openDriveBrowser} disabled={busy}>

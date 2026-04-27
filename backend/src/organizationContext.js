@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { db } = require('./database')
-const { DATA_ROOT, DB_PATH, UPLOADS_PATH } = require('./config')
+const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH } = require('./config')
 const { isSamePath, isSubPath, summarizeDataRoot } = require('./dataPath')
 
 function trim(value) {
@@ -136,7 +136,7 @@ function getPortalPublicPath(organization) {
 
 function getOrganizationFilesystemLayout(organization) {
   if (!organization?.public_id) return null
-  const orgRoot = path.join(DATA_ROOT, 'organizations', organization.public_id)
+  const orgRoot = path.join(STORAGE_ROOT, 'organizations', organization.public_id)
   return {
     orgRoot,
     metaRoot: path.join(orgRoot, 'meta'),
@@ -169,7 +169,8 @@ function ensureOrganizationFilesystemLayout(organization) {
     generated_at: new Date().toISOString(),
     portal_public_path: getPortalPublicPath(organization),
     runtime_source_of_truth: {
-      data_root: DATA_ROOT,
+      storage_root: STORAGE_ROOT,
+      runtime_data_root: DATA_ROOT,
       db_path: DB_PATH,
       uploads_path: UPLOADS_PATH,
     },
@@ -223,13 +224,14 @@ function getOrganizationStorageStatus(organization) {
   if (!layout) return null
 
   const organizationDataRoot = path.dirname(layout.databaseRoot)
-  const runtimeInsideOrganization = isSubPath(layout.orgRoot, DATA_ROOT) || isSamePath(layout.orgRoot, DATA_ROOT)
+  const runtimeInsideOrganization = isSamePath(layout.orgRoot, DATA_ROOT)
   const databaseAligned = isSamePath(DB_PATH, path.join(layout.databaseRoot, path.basename(DB_PATH)))
   const uploadsAligned = isSamePath(UPLOADS_PATH, layout.uploadsRoot)
 
   return {
     organizationPublicId: organization.public_id,
     organizationRoot: layout.orgRoot,
+    storageRoot: STORAGE_ROOT,
     recommendedDataRoot: organizationDataRoot,
     runtimeDataRoot: DATA_ROOT,
     runtimeDbPath: DB_PATH,

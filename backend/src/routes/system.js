@@ -20,8 +20,9 @@ const { db }  = require('../database')
 const {
   UPLOADS_PATH,
   RUNTIME_DIR,
+  STORAGE_ROOT,
   DATA_ROOT,
-  DEFAULT_DATA_ROOT,
+  DEFAULT_STORAGE_ROOT,
   DATA_FOLDER_NAME,
   DATA_LOCATION_FILE,
   writeDataLocation,
@@ -947,10 +948,12 @@ router.get('/data-path', authToken, (req, res) => {
   const organizationStorageStatus = organization ? getOrganizationStorageStatus(organization) : null
   res.json({
     dataRoot: DATA_ROOT,
-    dataRootParent: path.dirname(DATA_ROOT),
+    dataRootParent: path.dirname(STORAGE_ROOT),
+    storageRoot: STORAGE_ROOT,
+    storageRootParent: path.dirname(STORAGE_ROOT),
     dataFolderName: DATA_FOLDER_NAME,
     isDefaultLocation: !hasOverride,
-    defaultDataRoot: DEFAULT_DATA_ROOT,
+    defaultDataRoot: DEFAULT_STORAGE_ROOT,
     hasOverride,
     locationFile: DATA_LOCATION_FILE,
     summary: summarizeDataRoot(DATA_ROOT),
@@ -974,25 +977,25 @@ router.post('/data-path', authToken, async (req, res) => {
   const rawTarget = dataDir.trim()
   if (rawTarget.toLowerCase() === '__default__' || rawTarget.toLowerCase() === 'default') {
     try {
-      const migration = isSamePath(DATA_ROOT, DEFAULT_DATA_ROOT)
+      const migration = isSamePath(STORAGE_ROOT, DEFAULT_STORAGE_ROOT)
         ? {
             sourceSummary: summarizeDataRoot(DATA_ROOT),
-            targetSummaryBefore: summarizeDataRoot(DEFAULT_DATA_ROOT),
-            targetSummaryAfter: summarizeDataRoot(DEFAULT_DATA_ROOT),
+            targetSummaryBefore: summarizeDataRoot(DEFAULT_STORAGE_ROOT),
+            targetSummaryAfter: summarizeDataRoot(DEFAULT_STORAGE_ROOT),
             copyStats: { copiedFileCount: 0, copiedBytes: 0 },
             skipped: true,
           }
         : await (async () => {
             try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
             return runFsWorker('relocate-data-root', {
-              sourceRoot: DATA_ROOT,
-              targetRoot: DEFAULT_DATA_ROOT,
+              sourceRoot: STORAGE_ROOT,
+              targetRoot: DEFAULT_STORAGE_ROOT,
             })
           })()
       if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)
       return ok(res, {
-        dataDir: DEFAULT_DATA_ROOT,
-        dataRootParent: path.dirname(DEFAULT_DATA_ROOT),
+        dataDir: DEFAULT_STORAGE_ROOT,
+        dataRootParent: path.dirname(DEFAULT_STORAGE_ROOT),
         dataFolderName: DATA_FOLDER_NAME,
         migration,
         message: 'Default data folder restored. Current live data was copied there and the previous folder was left untouched for safety. Restart the server to apply.',
@@ -1008,7 +1011,7 @@ router.post('/data-path', authToken, async (req, res) => {
   try {
     try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
     const migration = await runFsWorker('relocate-data-root', {
-      sourceRoot: DATA_ROOT,
+      sourceRoot: STORAGE_ROOT,
       targetRoot: target,
     })
     writeDataLocation(target)
@@ -1031,19 +1034,19 @@ router.post('/data-path', authToken, async (req, res) => {
 router.delete('/data-path', authToken, async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_delete', max: 20, windowMs: 10 * 60 * 1000 })) return
   try {
-    const migration = isSamePath(DATA_ROOT, DEFAULT_DATA_ROOT)
+    const migration = isSamePath(STORAGE_ROOT, DEFAULT_STORAGE_ROOT)
       ? {
           sourceSummary: summarizeDataRoot(DATA_ROOT),
-          targetSummaryBefore: summarizeDataRoot(DEFAULT_DATA_ROOT),
-          targetSummaryAfter: summarizeDataRoot(DEFAULT_DATA_ROOT),
+          targetSummaryBefore: summarizeDataRoot(DEFAULT_STORAGE_ROOT),
+          targetSummaryAfter: summarizeDataRoot(DEFAULT_STORAGE_ROOT),
           copyStats: { copiedFileCount: 0, copiedBytes: 0 },
           skipped: true,
         }
       : await (async () => {
           try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
           return runFsWorker('relocate-data-root', {
-            sourceRoot: DATA_ROOT,
-            targetRoot: DEFAULT_DATA_ROOT,
+            sourceRoot: STORAGE_ROOT,
+            targetRoot: DEFAULT_STORAGE_ROOT,
           })
         })()
     if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)

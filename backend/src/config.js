@@ -13,6 +13,7 @@
 
 const path = require('path')
 const fs   = require('fs')
+const Database = require('better-sqlite3')
 
 // ── Runtime base directory ────────────────────────────────────────────────────
 const IS_PKG      = typeof process.pkg !== 'undefined'
@@ -37,7 +38,12 @@ for (const envPath of ENV_CANDIDATES) {
 // Written by the frontend Settings page when the user picks a new folder.
 const DATA_LOCATION_FILE = path.join(RUNTIME_DIR, 'data-location.json')
 const DATA_FOLDER_NAME = 'business-os-data'
-const DEFAULT_DATA_ROOT = path.join(RUNTIME_DIR, DATA_FOLDER_NAME)
+const DEFAULT_STORAGE_ROOT = path.join(RUNTIME_DIR, DATA_FOLDER_NAME)
+const DEFAULT_ORGANIZATION_BOOTSTRAP = {
+  name: 'LeangCosmetics',
+  slug: 'leangcosmetics',
+  publicId: 'org_leangcosmetics',
+}
 
 function isDefaultDataMarker(value) {
   const marker = String(value || '').trim().toLowerCase()
@@ -96,9 +102,109 @@ function writeDataLocation(newDir) {
   fs.writeFileSync(DATA_LOCATION_FILE, JSON.stringify(payload, null, 2), 'utf8')
 }
 
-// ── Resolve data root ─────────────────────────────────────────────────────────
+function pathExists(targetPath) {
+  try { return !!targetPath && fs.existsSync(targetPath) } catch (_) { return false }
+}
+
+function readPrimaryOrganizationPublicId(dbPath) {
+  if (!pathExists(dbPath)) return null
+  let sqlite = null
+  try {
+    sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const table = sqlite.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'organizations'
+      LIMIT 1
+    `).get()
+    if (!table) return null
+    const row = sqlite.prepare(`
+      SELECT public_id
+      FROM organizations
+      WHERE public_id IS NOT NULL AND trim(public_id) != ''
+      ORDER BY id ASC
+      LIMIT 1
+    `).get()
+    return String(row?.public_id || '').trim() || null
+  } catch (_) {
+    return null
+  } finally {
+    try { sqlite?.close?.() } catch (_) {}
+  }
+}
+
+function ensureDirectory(targetPath) {
+  fs.mkdirSync(targetPath, { recursive: true })
+}
+
+function copyTree(sourcePath, targetPath) {
+  if (!pathExists(sourcePath)) return
+  const stats = fs.statSync(sourcePath)
+  if (stats.isDirectory()) {
+    ensureDirectory(targetPath)
+    for (const entry of fs.readdirSync(sourcePath, { withFileTypes: true })) {
+      copyTree(path.join(sourcePath, entry.name), path.join(targetPath, entry.name))
+    }
+    return
+  }
+  if (!stats.isFile()) return
+  ensureDirectory(path.dirname(targetPath))
+  fs.copyFileSync(sourcePath, targetPath)
+}
+
+function isOrganizationRuntimeRoot(root) {
+  const resolved = path.resolve(String(root || ''))
+  return path.basename(path.dirname(resolved)).toLowerCase() === 'organizations'
+}
+
+function ensureOrganizationRuntimeLayout(runtimeRoot) {
+  ;['db', 'uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta'].forEach((folder) => {
+    ensureDirectory(path.join(runtimeRoot, folder))
+  })
+}
+
+function migrateLegacySharedRootToOrganization(storageRoot, organizationPublicId) {
+  const sourceRoot = path.resolve(storageRoot)
+  const targetRoot = path.join(sourceRoot, 'organizations', organizationPublicId)
+  const targetDbPath = path.join(targetRoot, 'db', 'business.db')
+  const sourceDbPath = path.join(sourceRoot, 'db', 'business.db')
+
+  ensureOrganizationRuntimeLayout(targetRoot)
+  if (!pathExists(sourceDbPath) || pathExists(targetDbPath)) return targetRoot
+
+  const copyEntries = ['db', 'uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta']
+  for (const name of copyEntries) {
+    const sourcePath = path.join(sourceRoot, name)
+    const targetPath = path.join(targetRoot, name)
+    copyTree(sourcePath, targetPath)
+  }
+
+  const markerPath = path.join(targetRoot, 'meta', 'bootstrap-migration.json')
+  try {
+    fs.writeFileSync(markerPath, JSON.stringify({
+      migratedAt: new Date().toISOString(),
+      sourceRoot,
+      targetRoot,
+      note: 'Legacy shared runtime data was copied into the organization runtime root. The source folder was left untouched for safety.',
+    }, null, 2), 'utf8')
+  } catch (_) {}
+
+  return targetRoot
+}
+
+function detectExistingOrganizationRuntimeRoot(storageRoot) {
+  const organizationsRoot = path.join(storageRoot, 'organizations')
+  if (!pathExists(organizationsRoot)) return null
+  const candidates = fs.readdirSync(organizationsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(organizationsRoot, entry.name))
+    .filter((candidate) => pathExists(path.join(candidate, 'db', 'business.db')))
+  return candidates[0] || null
+}
+
+// ── Resolve storage root ──────────────────────────────────────────────────────
 //   Priority: data-location.json -> env override -> default business-os-data
-const DATA_ROOT = (function () {
+const STORAGE_ROOT = (function () {
   const located = readDataLocation()
   if (located) return located
 
@@ -107,7 +213,29 @@ const DATA_ROOT = (function () {
     return path.resolve(process.env.DATA_ROOT.trim())
 
   // Default: business-os-data/ beside the application
-  return DEFAULT_DATA_ROOT
+  return DEFAULT_STORAGE_ROOT
+})()
+
+const ORGANIZATION_PUBLIC_ID = (function () {
+  if (isOrganizationRuntimeRoot(STORAGE_ROOT)) {
+    return path.basename(path.resolve(STORAGE_ROOT)) || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
+  }
+
+  const legacyDbPath = path.join(STORAGE_ROOT, 'db', 'business.db')
+  return readPrimaryOrganizationPublicId(legacyDbPath)
+    || path.basename(detectExistingOrganizationRuntimeRoot(STORAGE_ROOT) || '')
+    || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
+})()
+
+const DATA_ROOT = (function () {
+  if (isOrganizationRuntimeRoot(STORAGE_ROOT)) {
+    ensureOrganizationRuntimeLayout(STORAGE_ROOT)
+    return STORAGE_ROOT
+  }
+
+  const targetRoot = migrateLegacySharedRootToOrganization(STORAGE_ROOT, ORGANIZATION_PUBLIC_ID)
+  ensureOrganizationRuntimeLayout(targetRoot)
+  return targetRoot
 })()
 
 // ── Derived paths ─────────────────────────────────────────────────────────────
@@ -134,6 +262,7 @@ const TAILSCALE_URL = (process.env.TAILSCALE_URL || '').trim()
 if (!process.env._BOS_CONFIG_LOGGED) {
   process.env._BOS_CONFIG_LOGGED = '1'
   console.log(`[config] RUNTIME_DIR  : ${RUNTIME_DIR}`)
+  console.log(`[config] STORAGE_ROOT : ${STORAGE_ROOT}`)
   console.log(`[config] DATA_ROOT    : ${DATA_ROOT}`)
   console.log(`[config] DB_PATH      : ${DB_PATH}`)
   console.log(`[config] UPLOADS_PATH : ${UPLOADS_PATH}`)
@@ -143,9 +272,12 @@ if (!process.env._BOS_CONFIG_LOGGED) {
 module.exports = {
   IS_PKG,
   RUNTIME_DIR,
+  STORAGE_ROOT,
   DATA_ROOT,
-  DEFAULT_DATA_ROOT,
+  DEFAULT_STORAGE_ROOT,
   DATA_FOLDER_NAME,
+  DEFAULT_ORGANIZATION_BOOTSTRAP,
+  ORGANIZATION_PUBLIC_ID,
   PORT,
   SYNC_TOKEN,
   TAILSCALE_URL,
