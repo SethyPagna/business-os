@@ -508,6 +508,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
             expectedUpdatedAt: e.expectedUpdatedAt || null,
             actualUpdatedAt: e.actualUpdatedAt || null,
             current: e.current || null,
+            attempted: e.attempted || null,
             refreshChannels,
             ts: new Date().toISOString(),
           },

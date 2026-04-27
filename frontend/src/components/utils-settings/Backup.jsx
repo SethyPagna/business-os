@@ -327,6 +327,7 @@ function DataFolderLocation({ t, notify }) {
 
   const folderName = info?.dataFolderName || 'business-os-data'
   const currentSummary = info?.summary || {}
+  const orgStorageStatus = info?.organizationStorageStatus || null
   const hostUiAvailable = !!systemConfig?.hostUiAvailable
   const previewPath = useMemo(
     () => buildFinalDataFolderPath(inputPath, folderName),
@@ -464,6 +465,27 @@ function DataFolderLocation({ t, notify }) {
         <SectionChip label={copy('uploads', 'Uploads')} value={currentSummary.uploadCount ?? 0} />
         <SectionChip label={copy('files_total', 'Files on disk')} value={currentSummary.totalFileCount ?? 0} />
       </div>
+
+      {orgStorageStatus ? (
+        <div className="mt-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <SectionChip
+              label={copy('organization_runtime_alignment', 'Organization runtime alignment')}
+              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('legacy_shared_runtime', 'Legacy shared runtime')}
+              tone={orgStorageStatus.fullyAligned ? 'blue' : 'amber'}
+            />
+            <SectionChip
+              label={copy('recommended_org_data_root', 'Recommended org data root')}
+              value={orgStorageStatus.recommendedDataRoot || '--'}
+            />
+          </div>
+          <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {orgStorageStatus.fullyAligned
+              ? copy('organization_runtime_alignment_desc_ok', 'The active runtime data, database, and uploads are all aligned with the organization storage layout.')
+              : copy('organization_runtime_alignment_desc_warn', 'The app is still running from the shared runtime data root. The organization layout exists, but the live database and uploads are not fully rooted there yet.')}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:flex-wrap">
         <input

@@ -203,12 +203,19 @@ export async function getSettings() {
 }
 export async function saveSettings(updates) {
   const payload = await withSettingsExpectedUpdatedAt(updates)
-  const result = await apiFetch('POST', '/api/settings', payload)
-  if (result?.updatedAt) {
-    await localSaveSettingsMeta(result.updatedAt).catch(() => {})
+  try {
+    const result = await apiFetch('POST', '/api/settings', payload)
+    if (result?.updatedAt) {
+      await localSaveSettingsMeta(result.updatedAt).catch(() => {})
+    }
+    await localSaveSettings(updates).catch(() => {})
+    return result
+  } catch (error) {
+    error.attempted = Object.fromEntries(
+      Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
+    )
+    throw error
   }
-  await localSaveSettings(updates).catch(() => {})
-  return result
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -864,26 +871,41 @@ export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', 
 // ─── Sale status update ───────────────────────────────────────────────────────
 export const updateSaleStatus = async (id, sale_status, notes) => {
   const payload = await withExpectedUpdatedAt('sales', id, { sale_status, notes })
-  const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
-  await dexieDb.sales.update(id, {
-    sale_status,
-    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-  }).catch(() => {})
-  return result
+  try {
+    const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
+    await dexieDb.sales.update(id, {
+      sale_status,
+      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    error.attempted = { sale_status, notes }
+    throw error
+  }
 }
 
 // ─── Sales export ─────────────────────────────────────────────────────────────
 export const attachSaleCustomer = async (id, payload) => {
   const body = await withExpectedUpdatedAt('sales', id, payload)
-  const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
-  await dexieDb.sales.update(id, {
-    customer_id: result?.customer?.id || null,
-    customer_name: result?.customer?.name || null,
-    customer_phone: result?.customer?.phone || null,
-    customer_address: result?.customer?.address || null,
-    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-  }).catch(() => {})
-  return result
+  try {
+    const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
+    await dexieDb.sales.update(id, {
+      customer_id: result?.customer?.id || null,
+      customer_name: result?.customer?.name || null,
+      customer_phone: result?.customer?.phone || null,
+      customer_address: result?.customer?.address || null,
+      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    error.attempted = {
+      customer_id: payload?.customer_id || null,
+      customer_name: payload?.customer_name || '',
+      customer_phone: payload?.customer_phone || '',
+      customer_address: payload?.customer_address || '',
+    }
+    throw error
+  }
 }
 
 export const getSalesExport = (params) => {
@@ -892,12 +914,30 @@ export const getSalesExport = (params) => {
 }
 export const updateReturn = async (id, d) => {
   const payload = await withExpectedUpdatedAt('returns', id, d)
-  const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
-  await dexieDb.returns.update(id, {
-    ...d,
-    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-  }).catch(() => {})
-  return result
+  try {
+    const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
+    await dexieDb.returns.update(id, {
+      ...d,
+      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    error.attempted = {
+      reason: d?.reason || '',
+      return_type: d?.return_type || '',
+      notes: d?.notes || '',
+      total_refund_usd: d?.total_refund_usd || 0,
+      total_refund_khr: d?.total_refund_khr || 0,
+      items: Array.isArray(d?.items)
+        ? d.items.map((item) => ({
+            product_name: item?.product_name || '',
+            quantity: item?.quantity || 0,
+            return_to_stock: item?.return_to_stock !== false,
+          }))
+        : [],
+    }
+    throw error
+  }
 }
 
 // ─── Sync server health test ──────────────────────────────────────────────────

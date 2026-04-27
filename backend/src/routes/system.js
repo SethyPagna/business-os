@@ -42,7 +42,7 @@ const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataInte
 const { authToken } = require('../middleware')
 const { checkRateLimit } = require('../security')
 const { classifyRequestAccess } = require('../accessControl')
-const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('../organizationContext')
+const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../organizationContext')
 const {
   GOOGLE_DRIVE_SCOPE,
   beginGoogleDriveOAuth,
@@ -944,6 +944,7 @@ router.get('/data-path', authToken, (req, res) => {
   const hasOverride = fs.existsSync(DATA_LOCATION_FILE)
   const organization = getDefaultOrganization()
   const organizationStorage = organization ? ensureOrganizationFilesystemLayout(organization) : null
+  const organizationStorageStatus = organization ? getOrganizationStorageStatus(organization) : null
   res.json({
     dataRoot: DATA_ROOT,
     dataRootParent: path.dirname(DATA_ROOT),
@@ -954,6 +955,7 @@ router.get('/data-path', authToken, (req, res) => {
     locationFile: DATA_LOCATION_FILE,
     summary: summarizeDataRoot(DATA_ROOT),
     organizationStorage,
+    organizationStorageStatus,
   })
 })
 

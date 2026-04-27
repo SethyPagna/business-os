@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const { db } = require('./database')
 const { DATA_ROOT, DB_PATH, UPLOADS_PATH } = require('./config')
+const { isSamePath, isSubPath, summarizeDataRoot } = require('./dataPath')
 
 function trim(value) {
   return String(value || '').trim()
@@ -217,6 +218,30 @@ function ensureOrganizationFilesystemLayout(organization) {
   }
 }
 
+function getOrganizationStorageStatus(organization) {
+  const layout = getOrganizationFilesystemLayout(organization)
+  if (!layout) return null
+
+  const organizationDataRoot = path.dirname(layout.databaseRoot)
+  const runtimeInsideOrganization = isSubPath(layout.orgRoot, DATA_ROOT) || isSamePath(layout.orgRoot, DATA_ROOT)
+  const databaseAligned = isSamePath(DB_PATH, path.join(layout.databaseRoot, path.basename(DB_PATH)))
+  const uploadsAligned = isSamePath(UPLOADS_PATH, layout.uploadsRoot)
+
+  return {
+    organizationPublicId: organization.public_id,
+    organizationRoot: layout.orgRoot,
+    recommendedDataRoot: organizationDataRoot,
+    runtimeDataRoot: DATA_ROOT,
+    runtimeDbPath: DB_PATH,
+    runtimeUploadsPath: UPLOADS_PATH,
+    runtimeInsideOrganization,
+    databaseAligned,
+    uploadsAligned,
+    fullyAligned: runtimeInsideOrganization && databaseAligned && uploadsAligned,
+    runtimeSummary: summarizeDataRoot(DATA_ROOT),
+  }
+}
+
 module.exports = {
   slugify,
   generateOrganizationPublicId,
@@ -230,4 +255,5 @@ module.exports = {
   getPortalPublicPath,
   getOrganizationFilesystemLayout,
   ensureOrganizationFilesystemLayout,
+  getOrganizationStorageStatus,
 }

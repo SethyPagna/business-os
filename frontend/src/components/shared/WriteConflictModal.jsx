@@ -46,11 +46,87 @@ function summarizeCurrentValue(entity, current) {
     }))
 }
 
+function formatValue(value) {
+  if (value == null || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'number') return String(value)
+  return String(value)
+}
+
+function getConflictFieldRows(conflict) {
+  const entity = String(conflict?.entity || '').trim().toLowerCase()
+  const attempted = conflict?.attempted || {}
+  const current = conflict?.current || {}
+
+  if (entity === 'settings') {
+    return Object.keys(attempted).map((key) => ({
+      label: key.replace(/_/g, ' '),
+      attempted: formatValue(attempted[key]),
+      current: formatValue(current[key]),
+    }))
+  }
+
+  if (entity === 'sale') {
+    const rows = []
+    if (Object.prototype.hasOwnProperty.call(attempted, 'sale_status')) {
+      rows.push({
+        label: 'Status',
+        attempted: formatValue(attempted.sale_status),
+        current: formatValue(current.sale_status),
+      })
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(attempted, 'customer_name')
+      || Object.prototype.hasOwnProperty.call(attempted, 'customer_id')
+    ) {
+      rows.push({
+        label: 'Customer',
+        attempted: formatValue(attempted.customer_name || attempted.customer_id),
+        current: formatValue(current.customer_name || current.customer_id),
+      })
+    }
+    if (Object.prototype.hasOwnProperty.call(attempted, 'notes')) {
+      rows.push({
+        label: 'Notes',
+        attempted: formatValue(attempted.notes),
+        current: formatValue(current.notes),
+      })
+    }
+    return rows
+  }
+
+  if (entity === 'return') {
+    const rows = [
+      { label: 'Reason', attempted: formatValue(attempted.reason), current: formatValue(current.reason) },
+      { label: 'Type', attempted: formatValue(attempted.return_type), current: formatValue(current.return_type) },
+      { label: 'Notes', attempted: formatValue(attempted.notes), current: formatValue(current.notes) },
+      { label: 'Refund (USD)', attempted: formatValue(attempted.total_refund_usd), current: formatValue(current.total_refund_usd) },
+    ]
+    const attemptedItems = Array.isArray(attempted.items)
+      ? attempted.items.map((item) => `${item.product_name || 'Item'} x${item.quantity}${item.return_to_stock === false ? ' (no restock)' : ''}`).join(', ')
+      : ''
+    const currentItems = Array.isArray(current.items)
+      ? current.items.map((item) => `${item.product_name || 'Item'} x${item.quantity}${item.return_to_stock === false ? ' (no restock)' : ''}`).join(', ')
+      : ''
+    if (attemptedItems || currentItems) {
+      rows.push({
+        label: 'Items',
+        attempted: formatValue(attemptedItems),
+        current: formatValue(currentItems),
+      })
+    }
+    return rows
+  }
+
+  return []
+}
+
 export default function WriteConflictModal({ conflict, onClose, onReload }) {
   if (!conflict) return null
 
   const entityLabel = conflict.entityLabel || 'Item'
   const currentSummary = summarizeCurrentValue(conflict.entity, conflict.current)
+  const fieldRows = getConflictFieldRows(conflict)
 
   return (
     <Modal title={`${entityLabel} changed on another device`} onClose={onClose} size="lg">
@@ -82,6 +158,31 @@ export default function WriteConflictModal({ conflict, onClose, onReload }) {
             </div>
           </div>
         </div>
+
+        {fieldRows.length > 0 && (
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900 dark:border-gray-700 dark:text-white">
+              Your edit vs current saved values
+            </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {fieldRows.map((row) => (
+                <div key={row.label} className="grid gap-3 px-4 py-3 sm:grid-cols-[140px_1fr_1fr]">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {row.label}
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-400">Your edit</div>
+                    <div className="mt-1 break-words text-gray-900 dark:text-white">{row.attempted}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-400">Current saved</div>
+                    <div className="mt-1 break-words text-gray-900 dark:text-white">{row.current}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {currentSummary.length > 0 && (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700">
