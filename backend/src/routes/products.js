@@ -1,4 +1,4 @@
-'use strict'
+ï»¿'use strict'
 const path    = require('path')
 const fs      = require('fs')
 const express = require('express')
@@ -128,9 +128,9 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
   throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
-// ?€?€ GET /api/products ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ GET /api/products ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.get('/', authToken, (req, res) => {
-  // Fetch all products with branch stock in a single optimized query (avoids O(nÂ²) filtering)
+  // Fetch all products with branch stock in a single optimized query (avoids O(nç°¡) filtering)
   const products = db.prepare(`
     SELECT 
       p.*,
@@ -155,7 +155,7 @@ router.get('/', authToken, (req, res) => {
   res.json(attachImageGallery(parsed))
 })
 
-// ?€?€ POST /api/products/variant ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ POST /api/products/variant ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.post('/variant', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
@@ -219,7 +219,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
   } catch (e) { err(res, e.message) }
 })
 
-// ?€?€ POST /api/products ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ POST /api/products ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.post('/', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
@@ -283,7 +283,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?€?€ PUT /api/products/:id ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ PUT /api/products/:id ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
@@ -412,7 +412,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?€?€ DELETE /api/products/:id ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ DELETE /api/products/:id ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   const { deviceName, deviceTz, clientTime } = req.body || req.query || {}
   const actor = getAuditActor(req, req.body || req.query || {})
@@ -440,7 +440,7 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?€?€ POST /api/products/upload-image ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ POST /api/products/upload-image ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   registerUploadFromRequest(req.file, req.body || {})
@@ -448,7 +448,7 @@ router.post('/upload-image', authToken, requirePermission('products'), routeRate
     .catch((error) => err(res, error.message || 'Image upload failed'))
 })
 
-// ?€?€ POST /api/products/bulk-import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?Â€?Â€ POST /api/products/bulk-import ?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€?Â€
 router.post('/bulk-import', authToken, requirePermission('products'), routeRateLimit({ name: 'products:bulk_import', max: 10, windowMs: 15 * 60 * 1000, message: 'Too many bulk imports.' }), async (req, res) => {
   const { products, imageFiles, imageOnly, deviceName, deviceTz, clientTime } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
@@ -553,6 +553,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
     if (!mb) {
       if (qty > 0) throw new Error('A branch is required to import stock')
+      if (replace) db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(pid)
       recalcProductStock(pid)
       return
     }
@@ -673,7 +674,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           incomingImageGallery.length > 0,
         )
 
-        // ?€?€ Auto-create supplier in contacts table if a supplier name is provided ?€?€
+        // ?Â€?Â€ Auto-create supplier in contacts table if a supplier name is provided ?Â€?Â€
         // Uses INSERT OR IGNORE so existing suppliers are never overwritten.
         if (p.supplier?.trim()) {
           db.prepare(
@@ -727,7 +728,6 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
           if (action === 'merge') {
             if (qty > 0) {
-              db.prepare("UPDATE products SET stock_quantity=stock_quantity+?, updated_at=datetime('now') WHERE id=?").run(qty, pid)
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, 'add', qty, ep.purchase_price_usd, ep.purchase_price_khr,
                 qty * ep.purchase_price_usd, qty * ep.purchase_price_khr, 'CSV Import ??merge (add stock)', actor.userId, actor.userName)
@@ -750,7 +750,6 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 purchase_price_khr=CASE WHEN ?!=0 THEN ? ELSE purchase_price_khr END,
                 cost_price_usd=CASE WHEN ?!=0 THEN ? ELSE cost_price_usd END,
                 cost_price_khr=CASE WHEN ?!=0 THEN ? ELSE cost_price_khr END,
-                stock_quantity=CASE WHEN ?=1 THEN ? ELSE stock_quantity+? END,
                 low_stock_threshold=CASE WHEN ?!=0 THEN ? ELSE low_stock_threshold END,
                 updated_at=datetime('now') WHERE id=?
             `).run(
@@ -758,11 +757,14 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               sellUsd, sellUsd, sellKhr, sellKhr,
               buyUsd, buyUsd, buyKhr, buyKhr,
               buyUsd, buyUsd, buyKhr, buyKhr,
-              replaceStock ? 1 : 0, qty, qty, thresh, thresh,
+              thresh, thresh,
               pid,
             )
             if (JSON.stringify(nextGallery) !== JSON.stringify(currentGallery)) {
               syncProductImageGallery(pid, nextGallery)
+            }
+            if (replaceStock) {
+              handleBranch(pid, p.branch, qty, true)
             }
             if (qty > 0) {
               const movType = replaceStock ? 'adjustment' : 'add'
@@ -772,7 +774,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 buyUsd || ep.purchase_price_usd, buyKhr || ep.purchase_price_khr,
                 qty * (buyUsd || ep.purchase_price_usd), qty * (buyKhr || ep.purchase_price_khr),
                 movReason, actor.userId, actor.userName)
-              handleBranch(pid, p.branch, qty, replaceStock)
+              if (!replaceStock) handleBranch(pid, p.branch, qty, false)
             }
           }
           updated++
@@ -791,4 +793,6 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 })
 
 module.exports = router
+
+
 
