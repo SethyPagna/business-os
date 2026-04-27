@@ -116,9 +116,9 @@ function setTunnelSecurityHeaders(req, res) {
       "media-src 'self' data: blob: https:",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' data: https://fonts.gstatic.com",
-      "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com",
+      "frame-src 'self' https://www.google.com https://maps.google.com",
       "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://*.supabase.co",
-      "script-src 'self' 'unsafe-inline' https://translate.google.com",
+      "script-src 'self' 'unsafe-inline'",
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()

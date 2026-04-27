@@ -55,7 +55,14 @@ function manualChunks(id) {
   // Keep the shared vendor graph stable while still letting route chunks stay
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
-  if (!id.includes('node_modules')) return undefined
+  if (!id.includes('node_modules')) {
+    const normalized = id.replace(/\\/g, '/')
+    if (normalized.includes('/src/lang/')) return 'app-lang'
+    if (normalized.includes('/src/api/')) return 'app-api'
+    if (normalized.includes('/src/app/')) return 'app-shell'
+    if (normalized.includes('/src/components/shared/')) return 'app-shared'
+    return undefined
+  }
   if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
   if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return 'vendor-lucide'

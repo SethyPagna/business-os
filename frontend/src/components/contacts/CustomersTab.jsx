@@ -280,12 +280,12 @@ function CustomersTab({ t, notify }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2">
           <input
             id="customer-search"
             name="customer_search"
-            className="input w-full min-w-0 flex-1 sm:max-w-xs"
+            className="input w-full min-w-0 flex-1"
             placeholder={tr(t, 'search_customers_placeholder', `${tr(t, 'search', 'Search')} customers`)}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -293,7 +293,7 @@ function CustomersTab({ t, notify }) {
           <span className="whitespace-nowrap text-sm text-gray-400">{filtered.length}</span>
         </div>
 
-        <div className="flex w-full flex-shrink-0 items-center gap-1.5 overflow-x-auto sm:w-auto sm:flex-nowrap">
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5 lg:w-auto lg:flex-shrink-0 lg:flex-nowrap">
           {selectedIds.size > 0 ? (
             <button className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleBulkDelete}>
               Delete {selectedIds.size}
@@ -301,7 +301,7 @@ function CustomersTab({ t, notify }) {
           ) : null}
           <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr(t, 'import_contacts', 'Import')}>
             <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'import_contacts', 'Import')}</span>
+            <span>{tr(t, 'import_contacts', 'Import')}</span>
           </button>
           <button
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
@@ -323,11 +323,11 @@ function CustomersTab({ t, notify }) {
             }}
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'export', 'Export')}</span>
+            <span>{tr(t, 'export', 'Export')}</span>
           </button>
           <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={tr(t, 'add_customer', 'Add Customer')}>
             <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'add_customer', 'Add Customer')}</span>
+            <span>{tr(t, 'add_customer', 'Add Customer')}</span>
           </button>
         </div>
       </div>

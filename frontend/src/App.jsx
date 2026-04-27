@@ -220,6 +220,46 @@ function getWarmupImporters() {
     .filter(Boolean)
 }
 
+function getDataWarmupLoaders(canAccessPage) {
+  const steps = [
+    () => window.api?.getSettings?.(),
+    () => window.api?.getDashboard?.(),
+    () => window.api?.getProducts?.(),
+    () => window.api?.getCategories?.(),
+    () => window.api?.getUnits?.(),
+    () => window.api?.getCustomFields?.(),
+    () => window.api?.getBranches?.(),
+    () => window.api?.getSales?.(),
+    () => window.api?.getReturns?.(),
+    () => window.api?.getCustomers?.(),
+    () => window.api?.getSuppliers?.(),
+    () => window.api?.getDeliveryContacts?.(),
+  ]
+
+  if (canAccessPage('users')) {
+    steps.push(() => window.api?.getUsers?.())
+    steps.push(() => window.api?.getRoles?.())
+  }
+  if (canAccessPage('audit_log')) {
+    steps.push(() => window.api?.getAuditLogs?.())
+  }
+  if (canAccessPage('backup')) {
+    steps.push(() => window.api?.getDataPath?.())
+    steps.push(() => window.api?.getGoogleDriveSyncStatus?.())
+  }
+  if (canAccessPage('files')) {
+    steps.push(() => window.api?.getFiles?.())
+  }
+  if (canAccessPage('server') || canAccessPage('settings')) {
+    steps.push(() => window.api?.getSystemConfig?.())
+  }
+  if (canAccessPage('server')) {
+    steps.push(() => window.api?.getSystemDebugLog?.())
+  }
+
+  return steps.filter(Boolean)
+}
+
 function useMountedPages(activePage) {
   // Keep only a bounded set of mounted screens alive to preserve local state
   // without letting the app accumulate every page forever.
@@ -328,6 +368,49 @@ function useChunkWarmup(user) {
       }
     }
   }, [user])
+}
+
+function useDataWarmup(user, canAccessPage) {
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return undefined
+
+    let cancelled = false
+    let idleId = null
+    let timeoutId = null
+    let followupId = null
+    let started = false
+    const loaders = getDataWarmupLoaders(canAccessPage)
+
+    const runWarmup = async () => {
+      if (cancelled || started) return
+      started = true
+      for (const load of loaders) {
+        if (cancelled) return
+        try {
+          await load()
+        } catch (_) {
+          // Background data warmup is intentionally best-effort.
+        }
+      }
+    }
+
+    timeoutId = window.setTimeout(runWarmup, 220)
+
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(runWarmup, { timeout: 1800 })
+    } else {
+      followupId = window.setTimeout(runWarmup, 1100)
+    }
+
+    return () => {
+      cancelled = true
+      if (idleId != null && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId)
+      }
+      if (timeoutId != null) window.clearTimeout(timeoutId)
+      if (followupId != null) window.clearTimeout(followupId)
+    }
+  }, [canAccessPage, user])
 }
 
 class PageErrorBoundary extends Component {
@@ -464,6 +547,7 @@ export default function App() {
 
   useVisibilityRecovery()
   useChunkWarmup(user)
+  useDataWarmup(user, canAccessPage)
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)

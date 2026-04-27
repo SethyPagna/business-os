@@ -147,17 +147,17 @@ export default function Returns() {
             aria-label="Export"
           >
             <Download className="h-4 w-4" />
-            <span className="hidden min-[420px]:inline">Export</span>
+            <span>Export</span>
           </button>
           {scope === SUPPLIER_SCOPE ? (
             <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
               <Undo2 className="h-4 w-4" />
-              <span className="hidden min-[420px]:inline">{tr('return_to_supplier', 'Return to Supplier')}</span>
+              <span>{tr('return_to_supplier', 'Return to Supplier')}</span>
             </button>
           ) : (
             <button onClick={() => setShowCustomerForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('new_return', 'New Return')}>
               <Undo2 className="h-4 w-4" />
-              <span className="hidden min-[420px]:inline">{tr('new_return', 'New Return')}</span>
+              <span>{tr('new_return', 'New Return')}</span>
             </button>
           )}
         </div>

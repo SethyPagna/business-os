@@ -31,6 +31,8 @@
         return (
           msg.indexOf('No Listener: tabs:outgoing.message.ready') !== -1 ||
           msg.indexOf('tabs:outgoing.message.ready') !== -1 ||
+          msg.indexOf('Could not establish connection. Receiving end does not exist.') !== -1 ||
+          msg.indexOf('Receiving end does not exist') !== -1 ||
           (msg.indexOf('cssRules') !== -1 && msg.indexOf('null') !== -1) ||
           msg.indexOf("The play() request was interrupted by a call to pause()") !== -1
         )
@@ -44,7 +46,8 @@
           msg.indexOf('tabs:outgoing') !== -1 ||
           msg.indexOf('capacitor') !== -1 ||
           msg.indexOf('plugin_not_implemented') !== -1 ||
-          msg.indexOf('Capacitor') !== -1
+          msg.indexOf('Capacitor') !== -1 ||
+          msg.indexOf('Receiving end does not exist') !== -1
         ) {
           e.preventDefault()
           if (e.stopImmediatePropagation) e.stopImmediatePropagation()

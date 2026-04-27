@@ -29,14 +29,22 @@ import { STORAGE_KEYS }            from './constants.js'
 // no longer exists in that error-path, which manifests as
 // "TypeError: r is not a function" in minified builds.
 if (typeof window !== 'undefined') {
+  const isSuppressedRuntimeMessage = (message) => {
+    const msg = String(message || '')
+    return (
+      msg.includes('No Listener:')
+      || msg.includes('tabs:outgoing')
+      || msg.includes('capacitor')
+      || msg.includes('plugin_not_implemented')
+      || msg.includes('Receiving end does not exist')
+      || msg.includes('Could not establish connection')
+      || msg.includes('cssRules')
+    )
+  }
+
   window.addEventListener('unhandledrejection', (e) => {
     const msg = e?.reason?.message || String(e?.reason || '')
-    if (
-      msg.includes('No Listener:') ||
-      msg.includes('tabs:outgoing') ||
-      msg.includes('capacitor') ||
-      msg.includes('plugin_not_implemented')
-    ) {
+    if (isSuppressedRuntimeMessage(msg)) {
       e.preventDefault()
       e.stopImmediatePropagation()
     }
@@ -53,7 +61,7 @@ if (typeof window !== 'undefined') {
       || stack.includes('vendor.js')
     )
     if (!isExtensionError) return
-    if (message.includes('No Listener:') || message.includes('cssRules')) {
+    if (isSuppressedRuntimeMessage(message)) {
       event.preventDefault()
       event.stopImmediatePropagation()
     }

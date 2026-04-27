@@ -374,15 +374,17 @@ export function AppProvider({ children }) {
         if (effectiveUrl) {
           window.api?.setSyncServerUrl?.(effectiveUrl)
 
-          // Fetch server config for restart-detection
-          fetch(`${effectiveUrl}/api/system/config`, { signal: AbortSignal.timeout?.(3000) })
-            .then(r => r.ok ? r.json() : null)
-            .then(config => {
-              if (config?.serverStartTime) {
-                try { localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, config.serverStartTime.toString()) } catch (_) {}
-              }
-            })
-            .catch(() => {})
+          const authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''
+          const storedUser = localStorage.getItem(STORAGE_KEYS.USER) || ''
+          if (authToken && storedUser && typeof window.api?.getSystemConfig === 'function') {
+            window.api.getSystemConfig()
+              .then((config) => {
+                if (config?.serverStartTime) {
+                  try { localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, config.serverStartTime.toString()) } catch (_) {}
+                }
+              })
+              .catch(() => {})
+          }
 
           fetch(`${effectiveUrl}/health`, { signal: AbortSignal.timeout?.(6000) })
             .then(r => setSyncServerUnreachable(!r.ok))
