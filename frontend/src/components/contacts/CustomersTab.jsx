@@ -53,12 +53,15 @@ function tr(t, key, fallback) {
 
 function OptionEditor({ option, index, total, onChange, onRemove }) {
   const setField = (key, value) => onChange({ ...option, [key]: value })
+  const fieldId = (suffix) => `customer-option-${index}-${suffix}`
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
       <div className="flex items-center gap-2">
         <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
         <input
+          id={fieldId('label')}
+          name={fieldId('label')}
           className="input flex-1 text-xs py-1"
           placeholder="Option label"
           value={option.label}
@@ -72,21 +75,21 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
-          <label className="mb-0.5 block text-xs text-gray-400">Name</label>
-          <input className="input text-xs py-1" placeholder="Contact name" value={option.name} onChange={(event) => setField('name', event.target.value)} />
+          <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
+          <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" placeholder="Contact name" value={option.name} onChange={(event) => setField('name', event.target.value)} />
         </div>
         <div>
-          <label className="mb-0.5 block text-xs text-gray-400">Phone</label>
-          <input className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
+          <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
+          <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={(event) => setField('phone', event.target.value)} />
         </div>
       </div>
       <div>
-        <label className="mb-0.5 block text-xs text-gray-400">Email</label>
-        <input className="input text-xs py-1" type="email" placeholder="Email address" value={option.email} onChange={(event) => setField('email', event.target.value)} />
+        <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
+        <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" type="email" placeholder="Email address" value={option.email} onChange={(event) => setField('email', event.target.value)} />
       </div>
       <div>
-        <label className="mb-0.5 block text-xs text-gray-400">Address</label>
-        <input className="input text-xs py-1" placeholder="Delivery or billing address" value={option.address} onChange={(event) => setField('address', event.target.value)} />
+        <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
+        <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" placeholder="Delivery or billing address" value={option.address} onChange={(event) => setField('address', event.target.value)} />
       </div>
     </div>
   )
@@ -119,34 +122,34 @@ function CustomerForm({ customer, onSave, onClose, t }) {
     <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose}>
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'name', 'Name')} *</label>
-          <input className="input" value={form.name} onChange={(event) => setField('name', event.target.value)} autoFocus />
+          <label htmlFor="customer-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'name', 'Name')} *</label>
+          <input id="customer-form-name" name="customer_name" className="input" value={form.name} onChange={(event) => setField('name', event.target.value)} autoFocus />
         </div>
 
         <div>
           <div className="mb-1 flex items-center justify-between gap-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Membership Number</label>
+            <label htmlFor="customer-form-membership" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Membership Number</label>
             <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => setField('membership_number', generateMembershipNumber())}>
               Generate
             </button>
           </div>
-          <input className="input" value={form.membership_number || ''} onChange={(event) => setField('membership_number', event.target.value.toUpperCase())} placeholder="MEM-00000000-ABCD" />
+          <input id="customer-form-membership" name="customer_membership_number" className="input" value={form.membership_number || ''} onChange={(event) => setField('membership_number', event.target.value.toUpperCase())} placeholder="MEM-00000000-ABCD" />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone', 'Phone')}</label>
-            <input className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
+            <label htmlFor="customer-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone', 'Phone')}</label>
+            <input id="customer-form-phone" name="customer_phone" className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>
-            <input className="input" type="email" value={form.email || ''} onChange={(event) => setField('email', event.target.value)} />
+            <label htmlFor="customer-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>
+            <input id="customer-form-email" name="customer_email" className="input" type="email" value={form.email || ''} onChange={(event) => setField('email', event.target.value)} />
           </div>
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'company', 'Company')}</label>
-          <input className="input" value={form.company || ''} onChange={(event) => setField('company', event.target.value)} />
+          <label htmlFor="customer-form-company" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'company', 'Company')}</label>
+          <input id="customer-form-company" name="customer_company" className="input" value={form.company || ''} onChange={(event) => setField('company', event.target.value)} />
         </div>
 
         <div>
@@ -174,8 +177,8 @@ function CustomerForm({ customer, onSave, onClose, t }) {
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'notes', 'Notes')}</label>
-          <textarea className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => setField('notes', event.target.value)} />
+          <label htmlFor="customer-form-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'notes', 'Notes')}</label>
+          <textarea id="customer-form-notes" name="customer_notes" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => setField('notes', event.target.value)} />
         </div>
 
         <div className="flex flex-col gap-3 pt-1 sm:flex-row">
@@ -280,6 +283,8 @@ function CustomersTab({ t, notify }) {
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2">
           <input
+            id="customer-search"
+            name="customer_search"
             className="input w-full min-w-0 flex-1 sm:max-w-xs"
             placeholder={tr(t, 'search_customers_placeholder', `${tr(t, 'search', 'Search')} customers`)}
             value={search}

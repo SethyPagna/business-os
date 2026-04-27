@@ -17,36 +17,36 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
     <Modal title={supplier ? `✏️ ${t('edit_supplier') || 'Edit Supplier'}` : `➕ ${t('add_supplier') || 'Add Supplier'}`} onClose={onClose}>
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
-          <input className="input" value={form.name} onChange={(event) => set('name', event.target.value)} autoFocus />
+          <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
+          <input id="supplier-form-name" name="supplier_name" className="input" value={form.name} onChange={(event) => set('name', event.target.value)} autoFocus />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('phone')}</label>
-            <input className="input" value={form.phone || ''} onChange={(event) => set('phone', event.target.value)} />
+            <label htmlFor="supplier-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('phone')}</label>
+            <input id="supplier-form-phone" name="supplier_phone" className="input" value={form.phone || ''} onChange={(event) => set('phone', event.target.value)} />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('email')}</label>
-            <input className="input" type="email" value={form.email || ''} onChange={(event) => set('email', event.target.value)} />
+            <label htmlFor="supplier-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('email')}</label>
+            <input id="supplier-form-email" name="supplier_email" className="input" type="email" value={form.email || ''} onChange={(event) => set('email', event.target.value)} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('company')}</label>
-            <input className="input" value={form.company || ''} onChange={(event) => set('company', event.target.value)} />
+            <label htmlFor="supplier-form-company" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('company')}</label>
+            <input id="supplier-form-company" name="supplier_company" className="input" value={form.company || ''} onChange={(event) => set('company', event.target.value)} />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('contact_person') || 'Contact Person'}</label>
-            <input className="input" value={form.contact_person || ''} onChange={(event) => set('contact_person', event.target.value)} />
+            <label htmlFor="supplier-form-contact-person" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('contact_person') || 'Contact Person'}</label>
+            <input id="supplier-form-contact-person" name="supplier_contact_person" className="input" value={form.contact_person || ''} onChange={(event) => set('contact_person', event.target.value)} />
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('address')}</label>
-          <input className="input" value={form.address || ''} onChange={(event) => set('address', event.target.value)} />
+          <label htmlFor="supplier-form-address" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('address')}</label>
+          <input id="supplier-form-address" name="supplier_address" className="input" value={form.address || ''} onChange={(event) => set('address', event.target.value)} />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('notes') || 'Notes'}</label>
-          <textarea className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => set('notes', event.target.value)} />
+          <label htmlFor="supplier-form-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('notes') || 'Notes'}</label>
+          <textarea id="supplier-form-notes" name="supplier_notes" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => set('notes', event.target.value)} />
         </div>
         <div className="flex gap-3 pt-1">
           <button className="btn-primary flex-1" onClick={() => onSave(form)}>{t('save')}</button>
@@ -147,6 +147,8 @@ function SuppliersTab({ t, notify }) {
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex flex-1 min-w-0 items-center gap-2">
           <input
+            id="supplier-search"
+            name="supplier_search"
             className="input flex-1 min-w-0 max-w-xs"
             placeholder={t('search_suppliers_placeholder') || `${t('search') || 'Search'} suppliers`}
             value={search}

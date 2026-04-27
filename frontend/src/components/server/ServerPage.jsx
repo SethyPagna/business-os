@@ -358,11 +358,7 @@ export default function ServerPage() {
   useEffect(() => {
     const loadSecurityConfig = async () => {
       try {
-        const res = await fetch(`${window.location.origin}/api/system/config`, {
-          headers: { 'bypass-tunnel-reminder': 'true' },
-        })
-        if (!res.ok) return
-        const config = await res.json().catch(() => null)
+        const config = await window.api.getSystemConfig?.()
         if (config) setSecurityConfig(config)
       } catch (_) {}
     }

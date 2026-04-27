@@ -1192,25 +1192,7 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
   { value: 'ta', label: 'Tamil' },
 ]
 
-/** Apply Google Translate language selection by cookie + widget combo sync. */
 function applyGoogleTranslateSelection(sourceLang, targetLang) {
-  if (typeof document === 'undefined') return false
-  const source = sourceLang === 'km' ? 'km' : 'en'
-  const target = targetLang === 'original' ? source : targetLang
-  const cookieValue = `googtrans=/${source}/${target}; path=/; max-age=31536000`
-  document.cookie = cookieValue
-  const host = window.location.hostname
-  if (host && host.includes('.')) {
-    document.cookie = `googtrans=/${source}/${target}; domain=.${host}; path=/; max-age=31536000`
-  }
-  const combo = document.querySelector('.goog-te-combo')
-  if (!combo) return false
-  combo.value = target
-  combo.dispatchEvent(new Event('change', { bubbles: true }))
-  window.setTimeout(() => {
-    combo.value = target
-    combo.dispatchEvent(new Event('change', { bubbles: true }))
-  }, 120)
   return true
 }
 
@@ -1580,49 +1562,8 @@ export default function CatalogPage({ publicView = false }) {
   ])
 
   useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled) return undefined
-    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
-
-    const initId = 'business-os-portal-translate'
     setTranslateReady(false)
-    window.businessOsPortalTranslateInit = () => {
-      const container = document.getElementById(initId)
-      if (!container || !window.google?.translate?.TranslateElement) return
-      try {
-        container.innerHTML = ''
-        new window.google.translate.TranslateElement(
-          {
-            pageLanguage: language,
-            includedLanguages: PUBLIC_TRANSLATE_LANG_OPTIONS
-              .map((option) => option.value)
-              .filter((value) => value !== 'original')
-              .join(','),
-            layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
-            autoDisplay: false,
-          },
-          initId
-        )
-        setTranslateReady(true)
-      } catch (_) {
-        setTranslateReady(false)
-      }
-    }
-
-    if (window.google?.translate?.TranslateElement) {
-      window.businessOsPortalTranslateInit()
-      return () => {}
-    }
-
-    let script = document.getElementById('business-os-portal-translate-script')
-    if (!script) {
-      script = document.createElement('script')
-      script.id = 'business-os-portal-translate-script'
-      script.src = 'https://translate.google.com/translate_a/element.js?cb=businessOsPortalTranslateInit'
-      script.async = true
-      document.body.appendChild(script)
-    }
-
-    return () => {}
+    return undefined
   }, [publicView, previewConfig.translateWidgetEnabled, language])
 
   useEffect(() => {
@@ -3867,7 +3808,7 @@ export default function CatalogPage({ publicView = false }) {
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const showHeroToolsPanel = false
-  const showPortalToolsBar = publicView && previewConfig.translateWidgetEnabled
+  const showPortalToolsBar = false
 
   return (
     <div

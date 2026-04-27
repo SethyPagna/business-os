@@ -73,6 +73,7 @@ export default function UserProfileModal({ onClose }) {
    * 2.1 Admins can bypass current-password checks for profile/password writes.
    */
   const canAdminOverride = hasPermission('all')
+  const needsSensitivePassword = !canAdminOverride || !!authMethods?.google_linked
   const title = tr('my_profile', 'My Profile')
 
   /**
@@ -287,6 +288,7 @@ export default function UserProfileModal({ onClose }) {
           setAuthMethods(authData)
         }
       }
+      setCurrentPassword('')
       notify(tr('identity_unlinked_success', 'Sign-in method disconnected.'), 'success')
     } catch (error) {
       notify(error?.message || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
@@ -425,10 +427,15 @@ export default function UserProfileModal({ onClose }) {
                   {profile.avatar_path || tr('no_avatar_uploaded', 'No avatar uploaded yet.')}
                 </div>
               </div>
-              {!canAdminOverride ? (
+              {needsSensitivePassword ? (
                 <div>
-                  <label htmlFor="profile-current-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('current_password', 'Current password')}</label>
+                  <label htmlFor="profile-current-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {tr('current_password_sensitive', 'Current password for sensitive actions')}
+                  </label>
                   <input id="profile-current-password" name="current_password" type="password" autoComplete="current-password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {tr('current_password_sensitive_note', 'Needed for password changes and disconnecting Google from this account.')}
+                  </p>
                 </div>
               ) : null}
               <div className="flex justify-end">

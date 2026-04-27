@@ -23,42 +23,42 @@ export default function ProductsHeaderActions({
 
   return (
     <>
-      <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-1 sm:hidden">
+      <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:hidden">
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
+          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium"
           title="Import CSV"
           aria-label="Import"
         >
           <Upload className="h-3.5 w-3.5" />
-          <span className="hidden min-[420px]:inline">Import</span>
+          <span>Import</span>
         </button>
         <button
           onClick={onExport}
-          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
+          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium"
           title="Export CSV"
           aria-label="Export"
         >
           <Download className="h-3.5 w-3.5" />
-          <span className="hidden min-[420px]:inline">Export</span>
+          <span>Export</span>
         </button>
         <PortalMenu
           align="right"
           trigger={
-            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium" aria-label={t('manage') || 'Manage'}>
+            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium" aria-label={t('manage') || 'Manage'}>
               <Settings2 className="h-3.5 w-3.5" />
-              <span className="hidden min-[420px]:inline">{t('manage') || 'Manage'}</span>
+              <span>{t('manage') || 'Manage'}</span>
             </button>
           }
           items={manageItems.slice(0, 5)}
         />
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
+          className="btn-primary inline-flex shrink-0 items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium"
           aria-label={t('add_product') || 'Add product'}
         >
           <PackagePlus className="h-3.5 w-3.5" />
-          <span className="hidden min-[420px]:inline">{t('product') || 'Product'}</span>
+          <span>{t('add_product') || 'Add Product'}</span>
         </button>
       </div>
 
