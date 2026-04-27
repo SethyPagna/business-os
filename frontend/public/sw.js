@@ -1,12 +1,23 @@
-const STATIC_CACHE = 'business-os-static-v2'
-const PAGE_CACHE = 'business-os-pages-v2'
-const MEDIA_CACHE = 'business-os-media-v2'
-const SHELL_URLS = ['/', '/manifest.json', '/icon.png']
+/**
+ * Minimal Business OS service worker.
+ *
+ * Intentional constraints:
+ * - Cache static same-origin build assets only.
+ * - Do not cache HTML navigations.
+ * - Do not cache API responses.
+ * - Do not cache uploads or user-generated media.
+ *
+ * This keeps the worker useful for repeat visits on slow links without turning
+ * it into an offline data layer that can serve stale business data after deploys.
+ */
+
+const STATIC_CACHE = 'business-os-static-v3'
+const PRECACHE_URLS = ['/manifest.json', '/icon.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
-      .then((cache) => cache.addAll(SHELL_URLS))
+      .then((cache) => cache.addAll(PRECACHE_URLS))
       .then(() => self.skipWaiting())
       .catch(() => {})
   )
@@ -17,7 +28,7 @@ self.addEventListener('activate', (event) => {
     const keys = await caches.keys()
     await Promise.all(
       keys
-        .filter((key) => ![STATIC_CACHE, PAGE_CACHE, MEDIA_CACHE].includes(key))
+        .filter((key) => key.startsWith('business-os-') && key !== STATIC_CACHE)
         .map((key) => caches.delete(key))
     )
     await self.clients.claim()
@@ -32,41 +43,23 @@ function isSameOrigin(requestUrl) {
   }
 }
 
-function isStaticAsset(pathname) {
+function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
     || pathname === '/manifest.json'
     || pathname === '/icon.png'
 }
 
-function isMediaAsset(pathname) {
-  return pathname.startsWith('/uploads/')
-}
-
-async function staleWhileRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName)
+async function networkFirstStatic(request) {
+  const cache = await caches.open(STATIC_CACHE)
   const cached = await cache.match(request)
-  const networkPromise = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => {})
-      }
-      return response
-    })
-    .catch(() => cached)
 
-  return cached || networkPromise
-}
-
-async function networkFirst(request, cacheName) {
-  const cache = await caches.open(cacheName)
   try {
     const response = await fetch(request)
-    if (response && response.ok) {
+    if (response && response.ok && response.type === 'basic') {
       cache.put(request, response.clone()).catch(() => {})
     }
     return response
   } catch (_) {
-    const cached = await cache.match(request)
     if (cached) return cached
     throw _
   }
@@ -74,25 +67,12 @@ async function networkFirst(request, cacheName) {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event
-  if (request.method !== 'GET' || !isSameOrigin(request.url)) return
+  if (request.method !== 'GET') return
+  if (!isSameOrigin(request.url)) return
+  if (request.mode === 'navigate') return
 
   const url = new URL(request.url)
+  if (!isCacheableStaticPath(url.pathname)) return
 
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      networkFirst(request, PAGE_CACHE).catch(async () => {
-        return caches.match('/') || Response.error()
-      })
-    )
-    return
-  }
-
-  if (isStaticAsset(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE))
-    return
-  }
-
-  if (isMediaAsset(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(request, MEDIA_CACHE))
-  }
+  event.respondWith(networkFirstStatic(request))
 })
