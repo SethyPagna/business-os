@@ -44,45 +44,9 @@ function emitSyncQueueChanged() {
   }))
 }
 
-const PENDING_LOCAL_TABLES = [
-  'products',
-  'sales',
-  'customers',
-  'suppliers',
-  'delivery_contacts',
-  'returns',
-]
-
-async function clearPendingMirrorState() {
-  await Promise.all(PENDING_LOCAL_TABLES.map(async (tableName) => {
-    const table = dexieDb.table(tableName)
-    const rows = await table
-      .filter((row) => !!row?._local_pending || !!row?._local_deleted)
-      .toArray()
-      .catch(() => [])
-
-    await Promise.all(rows.map(async (row) => {
-      const pendingAction = String(row?._pending_action || '').trim().toLowerCase()
-      if (pendingAction === 'create') {
-        await table.delete(row.id).catch(() => {})
-        return
-      }
-
-      const nextRow = { ...row }
-      delete nextRow._local_pending
-      delete nextRow._pending_action
-      delete nextRow._pending_since
-      delete nextRow._sync_error
-      delete nextRow._local_deleted
-      await table.put(nextRow).catch(() => {})
-    }))
-  }))
-}
-
 export async function discardPendingSyncQueue(reason = 'Offline changes were invalidated because Business OS now requires a live server for writes.') {
   const existing = await dexieDb.sync_queue.toArray().catch(() => [])
   await dexieDb.sync_queue.clear().catch(() => {})
-  await clearPendingMirrorState()
   emitSyncQueueChanged()
   if (typeof window !== 'undefined') {
     ;['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'].forEach((channel) => {
@@ -244,30 +208,7 @@ function routeMirrored(channel, serverFn, localFn, mirrorFn) {
 function mirrorTable(tableName) {
   return async (rows) => {
     const incomingRows = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : []
-    const table = dexieDb.table(tableName)
-    const localPendingRows = await table
-      .filter((row) => !!row?._local_pending)
-      .toArray()
-      .catch(() => [])
-
-    if (!localPendingRows.length) return replaceTableContents(tableName, incomingRows)
-
-    const pendingById = new Map(localPendingRows.map((row) => [row.id, row]))
-    const merged = incomingRows
-      .filter((row) => !pendingById.has(row.id) || pendingById.get(row.id)?._pending_action !== 'delete')
-      .map((row) => {
-        const pending = pendingById.get(row.id)
-        return pending ? { ...row, ...pending } : row
-      })
-
-    localPendingRows.forEach((row) => {
-      if (row?._pending_action === 'delete') return
-      if (!merged.some((item) => item.id === row.id)) {
-        merged.push({ ...row })
-      }
-    })
-
-    return replaceTableContents(tableName, merged)
+    return replaceTableContents(tableName, incomingRows)
   }
 }
 

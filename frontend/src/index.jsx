@@ -43,9 +43,26 @@ if (typeof window !== 'undefined') {
     'cssRules',
     'insertRule',
   ]
-  const isIgnoredRuntimeMessage = (value) => {
+  const extensionOrigins = [
+    'chrome-extension://',
+    'moz-extension://',
+    'safari-extension://',
+    'ms-browser-extension://',
+  ]
+  const valueIncludesExtensionSource = (value) => {
+    const text = String(value || '')
+    return extensionOrigins.some((origin) => text.includes(origin))
+  }
+  const shouldIgnoreRuntimeValue = (value) => {
     const message = String(value?.message || value || '')
-    return ignoredRuntimePatterns.some((pattern) => message.includes(pattern))
+    if (!ignoredRuntimePatterns.some((pattern) => message.includes(pattern))) return false
+    const stack = String(value?.stack || '')
+    return valueIncludesExtensionSource(message)
+      || valueIncludesExtensionSource(stack)
+      || /content\.js/i.test(stack)
+  }
+  const isIgnoredRuntimeMessage = (value) => {
+    return shouldIgnoreRuntimeValue(value)
   }
 
   const sheetPrototype = window.CSSStyleSheet?.prototype
@@ -85,7 +102,10 @@ if (typeof window !== 'undefined') {
   }
 
   const stopKnownStartupNoise = (event, value) => {
-    if (!isIgnoredRuntimeMessage(value)) return false
+    const filename = String(event?.filename || '')
+    const source = String(event?.target?.src || event?.target?.href || '')
+    const stackSource = valueIncludesExtensionSource(filename) || valueIncludesExtensionSource(source)
+    if (!isIgnoredRuntimeMessage(value) && !stackSource) return false
     event.preventDefault()
     event.stopImmediatePropagation()
     return true
