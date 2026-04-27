@@ -119,8 +119,6 @@ export async function retryPendingSyncNow() {
   return discardPendingSyncQueue()
 }
 
-let flushPendingSyncPromise = null
-
 async function invalidateClientRuntimeState(reason = 'server-mutation') {
   await resetClientRuntimeState({
     clearAuth: false,
@@ -691,24 +689,6 @@ export async function createSale(d) {
   return route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
 }
 
-async function runFlushPendingSyncQueue() {
-  const pendingCount = await dexieDb.sync_queue.count().catch(() => 0)
-  return {
-    processed: 0,
-    failed: pendingCount,
-    blocked: true,
-  }
-}
-
-export async function flushPendingSyncQueue() {
-  if (flushPendingSyncPromise) return flushPendingSyncPromise
-  flushPendingSyncPromise = runFlushPendingSyncQueue()
-    .finally(() => {
-      flushPendingSyncPromise = null
-    })
-  return flushPendingSyncPromise
-}
-
 export const getSales   = (params) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
   const mirror = q ? null : mirrorTable('sales')
@@ -726,7 +706,7 @@ export const getAnalytics = (params) => {
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('customers'))
+export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray(), mirrorTable('customers'))
 export async function createCustomer(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
   return route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
@@ -743,7 +723,7 @@ export const bulkImportCustomers = d        => route('customers:bulkImport', () 
 export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('suppliers'))
+export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
 export async function createSupplier(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
   return route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
@@ -760,7 +740,7 @@ export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () 
 export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
-export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').filter((row) => row?._pending_action !== 'delete').toArray(), mirrorTable('delivery_contacts'))
+export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
 export async function createDeliveryContact(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
   return route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)
