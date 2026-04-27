@@ -487,6 +487,7 @@ export default function Login() {
                 <Building2 className="h-4 w-4 text-gray-400" />
                 <span>{tr('organization', 'Organization')}</span>
               </div>
+              <label htmlFor="organization-search" className="sr-only">{tr('organization_search', 'Search organization')}</label>
               <input
                 id="organization-search"
                 name="organization_search"
@@ -497,6 +498,7 @@ export default function Login() {
                 placeholder="LeangCosmetics"
                 autoComplete="organization"
               />
+              <label htmlFor="organization-id" className="sr-only">{tr('organization_id', 'Organization ID')}</label>
               <input
                 id="organization-id"
                 name="organization_id"

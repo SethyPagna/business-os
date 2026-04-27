@@ -21,10 +21,30 @@
           msg.indexOf('tabs:outgoing.message.ready') !== -1 ||
           msg.indexOf('Could not establish connection. Receiving end does not exist.') !== -1 ||
           msg.indexOf('Receiving end does not exist') !== -1 ||
+          msg.indexOf("Content Security Policy of your site blocks the use of 'eval' in JavaScript") !== -1 ||
+          msg.indexOf("Evaluating a string as JavaScript violates the following Content Security Policy directive") !== -1 ||
+          msg.indexOf("'unsafe-eval' is not an allowed source of script") !== -1 ||
           (msg.indexOf('cssRules') !== -1 && msg.indexOf('null') !== -1) ||
           msg.indexOf("The play() request was interrupted by a call to pause()") !== -1
         )
       }
+
+      ;(function patchConsoleRuntimeNoise() {
+        var consoleMethods = ['error', 'warn']
+        for (var i = 0; i < consoleMethods.length; i += 1) {
+          var method = consoleMethods[i]
+          var original = window.console && window.console[method]
+          if (typeof original !== 'function') continue
+          window.console[method] = (function(fn) {
+            return function() {
+              var firstArg = arguments.length ? arguments[0] : ''
+              var text = String(firstArg && firstArg.message ? firstArg.message : firstArg || '')
+              if (suppressInjectedRuntimeNoise(text)) return
+              return fn.apply(this, arguments)
+            }
+          })(original)
+        }
+      })()
 
       window.addEventListener('unhandledrejection', function(e) {
         var msg = (e && e.reason && e.reason.message) ? e.reason.message : String((e && e.reason) || '')

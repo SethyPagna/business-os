@@ -354,17 +354,23 @@ export default function FilesPage() {
           <div className="card p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid gap-3 sm:grid-cols-[1fr_180px] lg:flex-1">
-                <input className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />
-                <select className="input" value={mediaType} onChange={(event) => setMediaType(event.target.value)}>
+                <div>
+                  <label htmlFor="library-search" className="sr-only">{tr('search_files', 'Search files')}</label>
+                  <input id="library-search" name="library_search" className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />
+                </div>
+                <div>
+                  <label htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
+                  <select id="library-media-type" name="library_media_type" className="input" value={mediaType} onChange={(event) => setMediaType(event.target.value)}>
                   <option value="all">{tr('all', 'All')}</option>
                   <option value="image">{tr('images', 'Images')}</option>
                   <option value="video">{tr('videos', 'Videos')}</option>
                   <option value="document">{tr('documents', 'Documents')}</option>
-                </select>
+                  </select>
+                </div>
               </div>
-              <label className="btn-primary cursor-pointer text-sm">
+              <label htmlFor="library-upload-file" className="btn-primary cursor-pointer text-sm">
                 {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                <input type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} />
+                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} />
               </label>
             </div>
           </div>
@@ -475,6 +481,8 @@ export default function FilesPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700">Provider</label>
                 <select
+                  id="provider-form-provider"
+                  name="provider_form_provider"
                   className="input mt-1"
                   value={providerForm.provider}
                   onChange={(event) => setProviderForm((current) => ({
@@ -497,12 +505,12 @@ export default function FilesPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Entry name</label>
-                  <input className="input mt-1" value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Groq main account" />
+                  <label htmlFor="provider-form-name" className="block text-sm font-medium text-slate-700">Entry name</label>
+                  <input id="provider-form-name" name="provider_form_name" className="input mt-1" value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Groq main account" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Type</label>
-                  <select className="input mt-1" value={providerForm.provider_type} onChange={(event) => setProviderForm((current) => ({ ...current, provider_type: event.target.value }))}>
+                  <label htmlFor="provider-form-type" className="block text-sm font-medium text-slate-700">Type</label>
+                  <select id="provider-form-type" name="provider_form_type" className="input mt-1" value={providerForm.provider_type} onChange={(event) => setProviderForm((current) => ({ ...current, provider_type: event.target.value }))}>
                     {(selectedProviderMeta?.supportedTypes || ['chat']).map((type) => (
                       <option key={type} value={type}>{type}</option>
                     ))}
@@ -511,67 +519,67 @@ export default function FilesPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Account email</label>
-                  <input className="input mt-1" value={providerForm.account_email} onChange={(event) => setProviderForm((current) => ({ ...current, account_email: event.target.value }))} />
+                  <label htmlFor="provider-form-email" className="block text-sm font-medium text-slate-700">Account email</label>
+                  <input id="provider-form-email" name="provider_form_email" className="input mt-1" value={providerForm.account_email} onChange={(event) => setProviderForm((current) => ({ ...current, account_email: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Project / workspace</label>
-                  <input className="input mt-1" value={providerForm.project_name} onChange={(event) => setProviderForm((current) => ({ ...current, project_name: event.target.value }))} />
+                  <label htmlFor="provider-form-project" className="block text-sm font-medium text-slate-700">Project / workspace</label>
+                  <input id="provider-form-project" name="provider_form_project" className="input mt-1" value={providerForm.project_name} onChange={(event) => setProviderForm((current) => ({ ...current, project_name: event.target.value }))} />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">API key</label>
-                <input className="input mt-1" value={providerForm.api_key} onChange={(event) => setProviderForm((current) => ({ ...current, api_key: event.target.value }))} placeholder={providerForm.id ? 'Leave blank to keep the current key' : 'Paste API key'} />
+                <label htmlFor="provider-form-api-key" className="block text-sm font-medium text-slate-700">API key</label>
+                <input id="provider-form-api-key" name="provider_form_api_key" className="input mt-1" value={providerForm.api_key} onChange={(event) => setProviderForm((current) => ({ ...current, api_key: event.target.value }))} placeholder={providerForm.id ? 'Leave blank to keep the current key' : 'Paste API key'} />
                 <p className="mt-1 text-xs text-slate-500">Keys are encrypted before they are stored and only shown later in masked form.</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Default model</label>
-                  <input className="input mt-1" value={providerForm.default_model} onChange={(event) => setProviderForm((current) => ({ ...current, default_model: event.target.value }))} placeholder={selectedProviderMeta?.defaultModel || ''} />
+                  <label htmlFor="provider-form-model" className="block text-sm font-medium text-slate-700">Default model</label>
+                  <input id="provider-form-model" name="provider_form_model" className="input mt-1" value={providerForm.default_model} onChange={(event) => setProviderForm((current) => ({ ...current, default_model: event.target.value }))} placeholder={selectedProviderMeta?.defaultModel || ''} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Endpoint override</label>
-                  <input className="input mt-1" value={providerForm.endpoint_override} onChange={(event) => setProviderForm((current) => ({ ...current, endpoint_override: event.target.value }))} placeholder={selectedProviderMeta?.defaultEndpoint || ''} />
+                  <label htmlFor="provider-form-endpoint" className="block text-sm font-medium text-slate-700">Endpoint override</label>
+                  <input id="provider-form-endpoint" name="provider_form_endpoint" className="input mt-1" value={providerForm.endpoint_override} onChange={(event) => setProviderForm((current) => ({ ...current, endpoint_override: event.target.value }))} placeholder={selectedProviderMeta?.defaultEndpoint || ''} />
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Priority</label>
-                  <input className="input mt-1" type="number" min="1" max="999" value={providerForm.priority} onChange={(event) => setProviderForm((current) => ({ ...current, priority: event.target.value }))} />
+                  <label htmlFor="provider-form-priority" className="block text-sm font-medium text-slate-700">Priority</label>
+                  <input id="provider-form-priority" name="provider_form_priority" className="input mt-1" type="number" min="1" max="999" value={providerForm.priority} onChange={(event) => setProviderForm((current) => ({ ...current, priority: event.target.value }))} />
                   <p className="mt-1 text-xs text-slate-500">Lower numbers are tried first.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Requests / minute</label>
-                  <input className="input mt-1" type="number" min="1" max="120" value={providerForm.requests_per_minute} onChange={(event) => setProviderForm((current) => ({ ...current, requests_per_minute: event.target.value }))} />
+                  <label htmlFor="provider-form-rpm" className="block text-sm font-medium text-slate-700">Requests / minute</label>
+                  <input id="provider-form-rpm" name="provider_form_requests_per_minute" className="input mt-1" type="number" min="1" max="120" value={providerForm.requests_per_minute} onChange={(event) => setProviderForm((current) => ({ ...current, requests_per_minute: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Max input chars</label>
-                  <input className="input mt-1" type="number" min="200" max="4000" value={providerForm.max_input_chars} onChange={(event) => setProviderForm((current) => ({ ...current, max_input_chars: event.target.value }))} />
+                  <label htmlFor="provider-form-max-input" className="block text-sm font-medium text-slate-700">Max input chars</label>
+                  <input id="provider-form-max-input" name="provider_form_max_input_chars" className="input mt-1" type="number" min="200" max="4000" value={providerForm.max_input_chars} onChange={(event) => setProviderForm((current) => ({ ...current, max_input_chars: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Max completion tokens</label>
-                  <input className="input mt-1" type="number" min="128" max="8192" value={providerForm.max_completion_tokens} onChange={(event) => setProviderForm((current) => ({ ...current, max_completion_tokens: event.target.value }))} />
+                  <label htmlFor="provider-form-max-output" className="block text-sm font-medium text-slate-700">Max completion tokens</label>
+                  <input id="provider-form-max-output" name="provider_form_max_completion_tokens" className="input mt-1" type="number" min="128" max="8192" value={providerForm.max_completion_tokens} onChange={(event) => setProviderForm((current) => ({ ...current, max_completion_tokens: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Timeout (ms)</label>
-                  <input className="input mt-1" type="number" min="3000" max="60000" step="500" value={providerForm.timeout_ms} onChange={(event) => setProviderForm((current) => ({ ...current, timeout_ms: event.target.value }))} />
+                  <label htmlFor="provider-form-timeout" className="block text-sm font-medium text-slate-700">Timeout (ms)</label>
+                  <input id="provider-form-timeout" name="provider_form_timeout_ms" className="input mt-1" type="number" min="3000" max="60000" step="500" value={providerForm.timeout_ms} onChange={(event) => setProviderForm((current) => ({ ...current, timeout_ms: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Cooldown (seconds)</label>
-                  <input className="input mt-1" type="number" min="5" max="300" value={providerForm.cooldown_seconds} onChange={(event) => setProviderForm((current) => ({ ...current, cooldown_seconds: event.target.value }))} />
+                  <label htmlFor="provider-form-cooldown" className="block text-sm font-medium text-slate-700">Cooldown (seconds)</label>
+                  <input id="provider-form-cooldown" name="provider_form_cooldown_seconds" className="input mt-1" type="number" min="5" max="300" value={providerForm.cooldown_seconds} onChange={(event) => setProviderForm((current) => ({ ...current, cooldown_seconds: event.target.value }))} />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Supported models</label>
-                <textarea className="input mt-1 resize-none" rows={4} value={providerForm.supported_models_text} onChange={(event) => setProviderForm((current) => ({ ...current, supported_models_text: event.target.value }))} placeholder="One model per line" />
+                <label htmlFor="provider-form-supported-models" className="block text-sm font-medium text-slate-700">Supported models</label>
+                <textarea id="provider-form-supported-models" name="provider_form_supported_models" className="input mt-1 resize-none" rows={4} value={providerForm.supported_models_text} onChange={(event) => setProviderForm((current) => ({ ...current, supported_models_text: event.target.value }))} placeholder="One model per line" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Notes</label>
-                <textarea className="input mt-1 resize-none" rows={4} value={providerForm.notes} onChange={(event) => setProviderForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Purpose, monthly budget, or when to use this provider" />
+                <label htmlFor="provider-form-notes" className="block text-sm font-medium text-slate-700">Notes</label>
+                <textarea id="provider-form-notes" name="provider_form_notes" className="input mt-1 resize-none" rows={4} value={providerForm.notes} onChange={(event) => setProviderForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Purpose, monthly budget, or when to use this provider" />
               </div>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <label htmlFor="provider-form-enabled" className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">Enabled</span>
-                <input type="checkbox" checked={providerForm.enabled} onChange={(event) => setProviderForm((current) => ({ ...current, enabled: event.target.checked }))} />
+                <input id="provider-form-enabled" name="provider_form_enabled" type="checkbox" checked={providerForm.enabled} onChange={(event) => setProviderForm((current) => ({ ...current, enabled: event.target.checked }))} />
               </label>
               <button type="button" className="btn-primary text-sm" onClick={saveProvider} disabled={savingProvider}>
                 <Save className="mr-2 inline h-4 w-4" />

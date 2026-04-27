@@ -99,10 +99,10 @@ export async function getVerificationCapabilities() {
   return apiFetch('GET', '/api/auth/verification-capabilities')
 }
 export async function getSystemConfig() {
-  return apiFetch('GET', '/api/system/config')
+  return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
 export async function getSystemDebugLog() {
-  return apiFetch('GET', '/api/system/debug/log')
+  return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }
 export async function startSupabaseOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/start', payload || {})

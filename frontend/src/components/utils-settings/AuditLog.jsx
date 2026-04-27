@@ -243,7 +243,10 @@ export default function AuditLog() {
       <div className="mb-3">
         <div className="relative max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <label htmlFor="audit-log-search" className="sr-only">{t('search_audit_placeholder') || 'Search logs'}</label>
           <input
+            id="audit-log-search"
+            name="audit_log_search"
             className="input w-full pl-9 text-sm"
             placeholder={t('search_audit_placeholder') || 'Search logs'}
             value={search}

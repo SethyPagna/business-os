@@ -56,6 +56,17 @@ function hydrateAuthTokenFromStorage() {
   return authSessionToken
 }
 
+function readAuthTokenFromStorage() {
+  if (typeof window === 'undefined') return ''
+  try {
+    return sessionStorage.getItem('businessos_auth_token')
+      || localStorage.getItem('businessos_auth_token')
+      || ''
+  } catch (_) {
+    return ''
+  }
+}
+
 // ─── In-memory read cache with request deduplication ────────────────────────
 const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
@@ -104,6 +115,27 @@ function dispatchGlobalDataRefresh(channels = RECONNECT_REFRESH_CHANNELS) {
   })
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function tryServerReadWithRetry(serverFn) {
+  try {
+    return await serverFn()
+  } catch (error) {
+    if (!isConnectivityError(error)) throw error
+    await sleep(SYNC.READ_SERVER_RETRY_DELAY_MS)
+    return serverFn()
+  }
+}
+
+async function resolveLocalRead(channel, localFn, source = 'local') {
+  const localResult = await localFn()
+  cacheSet(channel, localResult)
+  logCall(channel, source, 0)
+  return localResult
+}
+
 // HTTP helpers ─────────────────────────────────────────────────────────────
 export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS) {
   const base    = syncServerUrl.replace(/\/$/, '')
@@ -132,6 +164,12 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       const msg  = parsed?.error || text
       if (res.status === 401 && parsed?.code === 'invalid_session' && authSessionToken && typeof window !== 'undefined') {
+        const storedToken = readAuthTokenFromStorage()
+        const canRetryWithStoredToken = storedToken && storedToken !== authSessionToken
+        if (canRetryWithStoredToken) {
+          authSessionToken = storedToken
+          return apiFetch(method, path, body, timeoutMs)
+        }
         authSessionToken = ''
         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
           detail: { code: parsed.code, error: parsed.error || 'Please sign in again to continue.' },
@@ -188,37 +226,53 @@ function setServerHealth(online) {
   }
 }
 
+async function pingServerHealth() {
+  if (!syncServerUrl) return
+  try {
+    const res = await fetch(`${syncServerUrl}/health`, {
+      signal: AbortSignal.timeout(4000),
+      headers: { 'bypass-tunnel-reminder': 'true' },
+    })
+    if (res.ok) {
+      if (!_serverOnline) {
+        cacheClearAll()
+      }
+      setServerHealth(true)
+      return
+    }
+    setServerHealth(false)
+  } catch {
+    setServerHealth(false)
+  }
+}
+
 // Active health check — runs every 12 s when a server is configured.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck() {
   if (_healthTimer) return
   _healthTimer = setInterval(async () => {
-    if (!syncServerUrl) return
-    try {
-      const res = await fetch(`${syncServerUrl}/health`, {
-        signal: AbortSignal.timeout(4000),
-        headers: { 'bypass-tunnel-reminder': 'true' },
-      })
-      if (res.ok) {
-        // Server is reachable — if it was previously offline, flush the cache
-        // so components immediately get fresh data rather than stale Dexie fallbacks
-        if (!_serverOnline) {
-          cacheClearAll()
-        }
-        setServerHealth(true)
-      } else {
-        setServerHealth(false)
-      }
-    } catch {
-      setServerHealth(false)
-    }
+    await pingServerHealth()
   }, 12_000)
+  pingServerHealth().catch(() => {})
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('online',  () => { if (syncServerUrl) setServerHealth(true)  })
+  window.addEventListener('online',  () => {
+    if (syncServerUrl) {
+      setServerHealth(true)
+      pingServerHealth().catch(() => {})
+    }
+  })
   window.addEventListener('offline', () => setServerHealth(false))
+  window.addEventListener('focus', () => {
+    if (syncServerUrl) pingServerHealth().catch(() => {})
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && syncServerUrl) {
+      pingServerHealth().catch(() => {})
+    }
+  })
 }
 
 // ─── Stale-while-revalidate cache (extended TTL for offline resilience) ────
@@ -273,7 +327,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
       if (cached !== null && stale) {
         // Stale-while-revalidate: return stale now, refresh in background
         logCall(channel, 'cache-stale', 0)
-        serverFn().then(result => {
+        tryServerReadWithRetry(serverFn).then(result => {
           cacheSet(channel, result)
           emitCacheRefresh(channel)
         }).catch(() => {})
@@ -288,7 +342,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           return _inflight[channel]
         }
 
-        const promise = serverFn().then(result => {
+        const promise = tryServerReadWithRetry(serverFn).then(result => {
           cacheSet(channel, result)
           setServerHealth(true)
           logCall(channel, 'server', Date.now() - t0)
@@ -307,6 +361,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
             fallbackTimer = window.setTimeout(async () => {
               try {
                 const localResult = await localFn()
+                cacheSet(channel, localResult)
                 resolve({ source: 'local', data: localResult })
               } catch (_) {
                 resolve({ source: 'local', data: null })
@@ -352,10 +407,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
 
     // Local fallback
     if (localFn) {
-      const t1 = Date.now()
-      const result = await localFn()
-      logCall(channel, 'local', Date.now() - t1)
-      return result
+      return resolveLocalRead(channel, localFn)
     }
 
     return null

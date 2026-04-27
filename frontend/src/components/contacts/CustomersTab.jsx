@@ -282,6 +282,7 @@ function CustomersTab({ t, notify }) {
     <div className="flex flex-col gap-3">
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          <label htmlFor="customer-search" className="sr-only">{tr(t, 'search_customers_placeholder', 'Search customers')}</label>
           <input
             id="customer-search"
             name="customer_search"
@@ -346,7 +347,8 @@ function CustomersTab({ t, notify }) {
           return (
             <tr key={customer.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(customer.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
               <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
-                <input type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
+                <label htmlFor={`customer-select-${customer.id}`} className="sr-only">{`Select ${customer.name}`}</label>
+                <input id={`customer-select-${customer.id}`} name={`customer_select_${customer.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
               </td>
               <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.name}</td>
               <td className="px-4 py-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.membership_number || '--'}</td>
@@ -379,7 +381,8 @@ function CustomersTab({ t, notify }) {
           return (
             <div key={customer.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(customer.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
               <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customer.id) }}>
-                <input type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
+                <label htmlFor={`customer-card-select-${customer.id}`} className="sr-only">{`Select ${customer.name}`}</label>
+                <input id={`customer-card-select-${customer.id}`} name={`customer_card_select_${customer.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(customer.id)} onChange={() => toggleOne(customer.id)} />
               </div>
               <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40">{customer.name?.[0]?.toUpperCase()}</div>
               <div className="min-w-0 flex-1 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>

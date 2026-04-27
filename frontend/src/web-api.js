@@ -49,6 +49,9 @@ if (typeof window !== 'undefined') {
       || msg.includes('Receiving end does not exist')
       || msg.includes('Could not establish connection')
       || msg.includes('cssRules')
+      || msg.includes("Content Security Policy of your site blocks the use of 'eval' in JavaScript")
+      || msg.includes("Evaluating a string as JavaScript violates the following Content Security Policy directive")
+      || msg.includes("'unsafe-eval' is not an allowed source of script")
     )
   }
 
