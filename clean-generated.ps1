@@ -1,5 +1,6 @@
 param(
-  [switch]$Preview
+  [switch]$Preview,
+  [switch]$IncludeLockfiles
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,11 @@ $targets = @(
   '_img_tmp',
   '_sharp_tmp',
   'business-os-server.exe'
+) | ForEach-Object { Join-Path $root $_ }
+
+$lockfileTargets = @(
+  'frontend\package-lock.json',
+  'backend\package-lock.json'
 ) | ForEach-Object { Join-Path $root $_ }
 
 function Get-ProjectListenerProcesses {
@@ -129,6 +135,9 @@ Write-Host 'It does NOT remove source code, .env, or business-os-data.'
 if ($Preview) {
   Write-Host 'Preview mode is ON. No files will be removed.'
 }
+if ($IncludeLockfiles) {
+  Write-Host 'Deep cleanup mode: package-lock files will also be removed.'
+}
 Write-Host ''
 
 Stop-ProjectProcesses -PreviewOnly:$Preview
@@ -148,6 +157,26 @@ foreach ($target in $targets) {
     Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
   } catch {
     throw "Failed to remove $resolved. Make sure Business OS is not still using this path. Inner error: $($_.Exception.Message)"
+  }
+}
+
+if ($IncludeLockfiles) {
+  foreach ($target in $lockfileTargets) {
+    if (-not (Test-Path -LiteralPath $target)) { continue }
+    $resolved = (Resolve-Path -LiteralPath $target).Path
+    if (-not $resolved.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to remove path outside workspace: $resolved"
+    }
+    if ($Preview) {
+      Write-Host "Would remove $resolved"
+      continue
+    }
+    Write-Host "Removing $resolved"
+    try {
+      Remove-Item -LiteralPath $resolved -Force -ErrorAction Stop
+    } catch {
+      throw "Failed to remove $resolved. Inner error: $($_.Exception.Message)"
+    }
   }
 }
 

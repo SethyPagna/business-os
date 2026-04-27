@@ -19,7 +19,15 @@ REM ============================================================
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "MODE="
-if /i "%~1"=="preview" set "MODE=-Preview"
+set "PREVIEW_ARG="
+set "LOCK_ARG="
+if /i "%~1"=="preview" (
+    set "PREVIEW_ARG=-Preview"
+) else if /i "%~1"=="deep" (
+    set "LOCK_ARG=-IncludeLockfiles"
+)
+if /i "%~2"=="deep" set "LOCK_ARG=-IncludeLockfiles"
+if /i "%~2"=="preview" set "PREVIEW_ARG=-Preview"
 
 echo.
 echo ========================================================================
@@ -28,10 +36,11 @@ echo ========================================================================
 echo.
 echo   This removes generated/rebuildable files only.
 echo   Source code, .env, and business-os-data are preserved.
-if defined MODE echo   Preview mode: only lists what would be removed.
+if defined PREVIEW_ARG echo   Preview mode: only lists what would be removed.
+if defined LOCK_ARG echo   Deep mode: package-lock files will also be removed.
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%ROOT%\clean-generated.ps1" %MODE%
+powershell -ExecutionPolicy Bypass -File "%ROOT%\clean-generated.ps1" %PREVIEW_ARG% %LOCK_ARG%
 if errorlevel 1 (
     echo.
     echo [ERROR] Cleanup failed.
