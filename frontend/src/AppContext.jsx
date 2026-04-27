@@ -298,6 +298,49 @@ export function AppProvider({ children }) {
     }
   }, [])
 
+  const applyBootstrapPayload = useCallback((payload, options = {}) => {
+    const fallbackUser = options.fallbackUser || null
+    const nextUser = payload?.user || fallbackUser || null
+    const mergedSettings = mergeSettingsWithDeviceOverrides(payload?.settings || {})
+
+    setSettings(mergedSettings)
+    if (mergedSettings.login_session_duration) {
+      writeStoredSessionDuration(mergedSettings.login_session_duration)
+    }
+    if (mergedSettings.language) setLanguage(mergedSettings.language)
+    if (mergedSettings.theme) setTheme(mergedSettings.theme)
+
+    if (nextUser) {
+      setUser(nextUser)
+    }
+
+    const organization = payload?.organization
+    const group = payload?.group
+    if (organization?.slug || organization?.public_id || organization?.name) {
+      safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+        id: organization.id || null,
+        name: organization.name || '',
+        slug: organization.slug || '',
+        public_id: organization.public_id || '',
+        group_id: group?.id || null,
+        group_name: group?.name || '',
+        group_slug: group?.slug || '',
+      }))
+    }
+
+    if (payload?.system?.serverStartTime) {
+      safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, String(payload.system.serverStartTime))
+    }
+
+    return {
+      user: nextUser,
+      settings: mergedSettings,
+      system: payload?.system || null,
+      organization: organization || null,
+      group: group || null,
+    }
+  }, [])
+
   // ?? Sync event listeners (loadSettings is now defined above) ?????????????
   const debounceRef = useRef({})
   useEffect(() => {
@@ -399,13 +442,18 @@ export function AppProvider({ children }) {
       } catch (_) {}
 
       window.api?.setAuthSessionToken?.(authToken || '')
-      setUser(safeUser)
-      await loadSettings()
+      const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
+      if (bootstrap) {
+        applyBootstrapPayload(bootstrap, { fallbackUser: safeUser })
+      } else {
+        setUser(safeUser)
+        await loadSettings()
+      }
       setPage('dashboard')
     }
     window.addEventListener('otp:login', handleOtpLogin)
     return () => window.removeEventListener('otp:login', handleOtpLogin)
-  }, [loadSettings])
+  }, [applyBootstrapPayload, loadSettings])
 
   useEffect(() => {
     const handleUserUpdated = (e) => {
@@ -439,14 +487,19 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (startupDone.current) return
     startupDone.current = true
-    
-    // Load app settings from server/cache (parallel, doesn't block UI)
-    loadSettings()
-    
+
     // Non-blocking async sync URL discovery ??activates the sync server
     // connection without blocking the initial render.
     const discoverSyncUrl = async () => {
       try {
+        const authToken = getStoredAuthToken()
+        const storedUser = getStoredUserPayload()
+        const hasStoredSession = !!(authToken && storedUser)
+
+        if (!hasStoredSession) {
+          loadSettings()
+        }
+
         const isViteDev = window.location.hostname === 'localhost' &&
           (window.location.port === '5173' || window.location.port === '5174')
 
@@ -459,14 +512,10 @@ export function AppProvider({ children }) {
         if (effectiveUrl) {
           window.api?.setSyncServerUrl?.(effectiveUrl)
 
-          const authToken = getStoredAuthToken()
-          const storedUser = getStoredUserPayload()
-          if (authToken && storedUser && typeof window.api?.getSystemConfig === 'function') {
-            window.api.getSystemConfig()
-              .then((config) => {
-                if (config?.serverStartTime) {
-                  safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, config.serverStartTime.toString())
-                }
+          if (hasStoredSession && typeof window.api?.getAppBootstrap === 'function') {
+            window.api.getAppBootstrap()
+              .then((bootstrap) => {
+                if (bootstrap) applyBootstrapPayload(bootstrap)
               })
               .catch(() => {})
           }
@@ -484,7 +533,7 @@ export function AppProvider({ children }) {
     
     // Start discovery in background (no await, doesn't block UI render)
     discoverSyncUrl()
-  }, [syncUrl, loadSettings])
+  }, [applyBootstrapPayload, syncUrl, loadSettings])
 
   // ?? Theme and CSS variables ???????????????????????????????????????????????
   useEffect(() => {
@@ -653,9 +702,14 @@ export function AppProvider({ children }) {
     cacheClearAll()
     startHealthCheck()
     setUser(nextUser)
-    await loadSettings()
+    const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
+    if (bootstrap) {
+      applyBootstrapPayload(bootstrap, { fallbackUser: nextUser })
+    } else {
+      await loadSettings()
+    }
     setPage('dashboard')
-  }, [loadSettings])
+  }, [applyBootstrapPayload, loadSettings])
 
   const login = useCallback(async (username, password, sessionDuration = 'session', organization = '') => {
     try {

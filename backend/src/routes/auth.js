@@ -57,7 +57,10 @@ const {
   findOrganizationByLookup,
   getDefaultOrganization,
   getOrganizationContextForUser,
+  ensureOrganizationFilesystemLayout,
 } = require('../organizationContext')
+const { classifyRequestAccess } = require('../accessControl')
+const { TAILSCALE_URL } = require('../config')
 
 const router = express.Router()
 
@@ -68,6 +71,7 @@ const OTP_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_OTP_WINDOW_MS
 const LOGIN_LOCK_THRESHOLD = Math.max(1, Number(process.env.AUTH_LOGIN_LOCK_THRESHOLD || 12))
 const LOGIN_LOCK_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_WINDOW_MS || 15 * 60 * 1000))
 const LOGIN_LOCK_DURATION_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_DURATION_MS || 15 * 60 * 1000))
+const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 
 /**
  * 1. Shared Helpers
@@ -311,6 +315,71 @@ function getUserById(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
 }
 
+function getSettingsSnapshot() {
+  const rows = db.prepare('SELECT key, value FROM settings').all()
+  const settings = {}
+  rows.forEach((row) => {
+    settings[row.key] = row.value
+  })
+  return settings
+}
+
+function getBootstrapSystemSnapshot(req) {
+  const access = classifyRequestAccess(req)
+  const hostUiAvailable = process.platform === 'win32' && !!req?.user?.id
+  return {
+    syncServerUrl: TAILSCALE_URL || null,
+    requiresToken: access.tokenRequired,
+    hasConfiguredToken: access.hasConfiguredToken,
+    accessMode: access.mode,
+    trustedTailscale: access.trustedTailscale,
+    tokenAccepted: access.tokenValid,
+    hostUiAvailable,
+    serverStartTime: SERVER_START_TIME,
+    security: {
+      configuredTailscaleHost: access.configuredTailscaleHost || null,
+      host: access.host || null,
+      remoteAddress: access.remoteAddress || null,
+      mode: access.mode,
+      publicRemote: access.publicRemote,
+      tokenRequired: access.tokenRequired,
+      hasConfiguredToken: access.hasConfiguredToken,
+      tokenProvided: access.tokenProvided,
+      trustedTailscale: access.trustedTailscale,
+      hostUiAvailable,
+    },
+  }
+}
+
+function buildAuthenticatedBootstrap(req, userId) {
+  const actor = getUserById(userId)
+  if (!actor) return null
+
+  const user = buildUserPayload(actor)
+  const organizationContext = getOrganizationContextForUser(actor.id)
+  const organization = organizationContext?.organization_id ? {
+    id: organizationContext.organization_id,
+    name: organizationContext.organization_name,
+    slug: organizationContext.organization_slug,
+    public_id: organizationContext.organization_public_id,
+  } : null
+  const group = organizationContext?.organization_group_id ? {
+    id: organizationContext.organization_group_id,
+    name: organizationContext.organization_group_name,
+    slug: organizationContext.organization_group_slug,
+  } : null
+
+  return {
+    user,
+    settings: getSettingsSnapshot(),
+    organizationCreationEnabled: false,
+    organization,
+    group,
+    storage: organization ? ensureOrganizationFilesystemLayout(organization) : null,
+    system: getBootstrapSystemSnapshot(req),
+  }
+}
+
 function generateTemporaryAuthPassword() {
   return crypto.randomBytes(18).toString('base64url')
 }
@@ -366,6 +435,14 @@ router.get('/verification-capabilities', (_req, res) => {
     supabase_invite: supabase.inviteEnabled,
     supabase_mfa_totp: supabase.mfaTotpEnabled,
   })
+})
+
+router.get('/bootstrap', authToken, (req, res) => {
+  const actorId = Number(req.user?.id || 0)
+  if (!actorId) return err(res, 'Please sign in again to continue.', 401)
+  const payload = buildAuthenticatedBootstrap(req, actorId)
+  if (!payload) return err(res, 'Unable to build session bootstrap.', 404)
+  return ok(res, payload)
 })
 
 // POST /api/auth/login

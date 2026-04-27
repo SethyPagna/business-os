@@ -141,6 +141,29 @@ export async function startSupabaseOauth(payload) {
 export async function completeSupabaseOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/complete', payload || {})
 }
+export async function getAppBootstrap() {
+  const buildLocalBootstrap = async () => {
+    let user = null
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER)
+        user = raw ? JSON.parse(raw) : null
+      } catch (_) {
+        user = null
+      }
+    }
+    return {
+      user,
+      settings: await localGetSettings(),
+      organizationCreationEnabled: false,
+      organization: null,
+      group: null,
+      storage: null,
+      system: null,
+    }
+  }
+  return route('auth:bootstrap', () => apiFetch('GET', '/api/auth/bootstrap'), buildLocalBootstrap)
+}
 export async function getOrganizationBootstrap() {
   return apiFetch('GET', '/api/organizations/bootstrap')
 }
