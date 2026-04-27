@@ -73,6 +73,10 @@ function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }) {
       onSuccess()
       onClose()
     } catch (e) {
+      if (e?.conflict || e?.code === 'write_conflict') {
+        onSuccess?.()
+        return
+      }
       notify((T('error','Error') || 'Error') + ': ' + (e.message || e), 'error')
     } finally {
       setSubmitting(false)

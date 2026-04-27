@@ -386,6 +386,20 @@ export function AppProvider({ children }) {
       console.error('[sync:error]', e.detail)
       // The SyncErrorBanner in App.jsx picks this up via its own listener
     }
+    const onConflict = (e) => {
+      const detail = e?.detail || {}
+      const entity = String(detail.entity || '').trim().toLowerCase()
+      let message = detail.message || 'This item changed on another device. Refresh and try again.'
+      if (entity === 'settings') {
+        message = 'Settings changed on another device. Latest values have been reloaded.'
+        loadSettings().catch(() => {})
+      } else if (entity === 'sale') {
+        message = 'This sale changed on another device. Latest data is loading now.'
+      } else if (entity === 'return') {
+        message = 'This return changed on another device. Latest data is loading now.'
+      }
+      setNotification({ message, type: 'error', id: Date.now() })
+    }
     const onUnauthorized = (e) => {
       const eventToken = String(e?.detail?.token || '').trim()
       const currentToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
@@ -405,12 +419,14 @@ export function AppProvider({ children }) {
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
     window.addEventListener('sync:error',  onError)
+    window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
       clearInterval(pollTimer)
       window.removeEventListener('sync:update', onUpdate)
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
+      window.removeEventListener('sync:conflict', onConflict)
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
@@ -844,55 +860,65 @@ export function AppProvider({ children }) {
 
   // ?? Settings save ?????????????????????????????????????????????????????????
   const saveSettings = useCallback(async (newSettings) => {
-    const nextSettings = newSettings || {}
-    const serverUpdates = {}
-    const deviceUpdates = {}
-    Object.entries(nextSettings).forEach(([key, value]) => {
-      if (DEVICE_LOCAL_SETTING_KEYS.has(key)) deviceUpdates[key] = value
-      else serverUpdates[key] = value
-    })
+    try {
+      const nextSettings = newSettings || {}
+      const serverUpdates = {}
+      const deviceUpdates = {}
+      Object.entries(nextSettings).forEach(([key, value]) => {
+        if (DEVICE_LOCAL_SETTING_KEYS.has(key)) deviceUpdates[key] = value
+        else serverUpdates[key] = value
+      })
 
-    if (Object.keys(serverUpdates).length) {
-      await window.api.saveSettings(serverUpdates)
-    }
-    const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
-    if (Object.keys(deviceUpdates).length) {
-      const nextDeviceSettings = { ...readDeviceSettings(), ...deviceUpdates }
-      writeDeviceSettings(nextDeviceSettings)
-    }
-    if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
-      const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
-      const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
-      if (user?.id && authToken && typeof window.api?.updateSessionDuration === 'function') {
-        const device = getClientDeviceInfo()
-        const refreshed = await window.api.updateSessionDuration({
-          sessionDuration: normalizedSessionDuration,
-          clientTime: new Date().toISOString(),
-          deviceTz: device.deviceTz,
-          deviceName: device.deviceName,
-        })
-        if (refreshed?.success === false) {
-          throw new Error(refreshed.error || 'Failed to refresh login session duration')
-        }
-        const nextAuthToken = String(refreshed?.authToken || '').trim() || authToken
-        const nextExpiryTime = computeSessionExpiryMs(
-          normalizedSessionDuration,
-          refreshed?.sessionExpiresAt || '',
-        )
-        persistAuthState({
-          user,
-          authToken: nextAuthToken,
-          expiryTime: nextExpiryTime,
-          sessionDuration: normalizedSessionDuration,
-        })
-        window.api?.setAuthSessionToken?.(nextAuthToken)
+      if (Object.keys(serverUpdates).length) {
+        await window.api.saveSettings(serverUpdates)
       }
+      const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
+      if (Object.keys(deviceUpdates).length) {
+        const nextDeviceSettings = { ...readDeviceSettings(), ...deviceUpdates }
+        writeDeviceSettings(nextDeviceSettings)
+      }
+      if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
+        const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
+        const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
+        if (user?.id && authToken && typeof window.api?.updateSessionDuration === 'function') {
+          const device = getClientDeviceInfo()
+          const refreshed = await window.api.updateSessionDuration({
+            sessionDuration: normalizedSessionDuration,
+            clientTime: new Date().toISOString(),
+            deviceTz: device.deviceTz,
+            deviceName: device.deviceName,
+          })
+          if (refreshed?.success === false) {
+            throw new Error(refreshed.error || 'Failed to refresh login session duration')
+          }
+          const nextAuthToken = String(refreshed?.authToken || '').trim() || authToken
+          const nextExpiryTime = computeSessionExpiryMs(
+            normalizedSessionDuration,
+            refreshed?.sessionExpiresAt || '',
+          )
+          persistAuthState({
+            user,
+            authToken: nextAuthToken,
+            expiryTime: nextExpiryTime,
+            sessionDuration: normalizedSessionDuration,
+          })
+          window.api?.setAuthSessionToken?.(nextAuthToken)
+        }
+      }
+      setSettings(prev => ({ ...prev, ...mergedUpdates }))
+      if (mergedUpdates.language) setLanguage(mergedUpdates.language)
+      if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)
+      notify(t('settings_saved'))
+      return { success: true }
+    } catch (error) {
+      if (error?.conflict || error?.code === 'write_conflict') {
+        await loadSettings().catch(() => {})
+        return { success: false, conflict: true }
+      }
+      notify(error?.message || 'Failed to save settings', 'error')
+      return { success: false, error }
     }
-    setSettings(prev => ({ ...prev, ...mergedUpdates }))
-    if (mergedUpdates.language) setLanguage(mergedUpdates.language)
-    if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)
-    notify(t('settings_saved'))
-  }, [notify, user]) // eslint-disable-line
+  }, [loadSettings, notify, user]) // eslint-disable-line
 
   // ?? Permissions ???????????????????????????????????????????????????????????
   const getPermissions = useCallback(() => {

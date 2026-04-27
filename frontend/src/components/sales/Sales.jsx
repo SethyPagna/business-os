@@ -73,6 +73,10 @@ export default function Sales() {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
     } catch (error) {
+      if (error?.conflict || error?.code === 'write_conflict') {
+        await loadSales()
+        return
+      }
       notify(`Failed to update status: ${error.message || error}`, 'error')
     }
   }
@@ -93,6 +97,10 @@ export default function Sales() {
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       return true
     } catch (error) {
+      if (error?.conflict || error?.code === 'write_conflict') {
+        await loadSales()
+        return false
+      }
       notify(error?.message || translateOr('failed_to_attach_membership', 'Failed to link membership'), 'error')
       return false
     }

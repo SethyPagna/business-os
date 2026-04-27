@@ -106,6 +106,31 @@ function getClientMetaHeaders() {
   return sharedGetClientMetaHeaders()
 }
 
+function createApiError(status, parsed, text) {
+  const error = new Error(parsed?.error || text || `HTTP ${status}`)
+  error.status = status
+  error.code = parsed?.code || null
+  error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
+  error.entity = parsed?.entity || null
+  error.reason = parsed?.reason || null
+  error.current = parsed?.current || null
+  error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
+  error.actualUpdatedAt = parsed?.actualUpdatedAt || null
+  return error
+}
+
+export function isWriteConflictError(error) {
+  return !!(error && (error.conflict || error.code === 'write_conflict'))
+}
+
+function getConflictRefreshChannels(error, fallbackChannel) {
+  const entity = String(error?.entity || '').trim().toLowerCase()
+  if (entity === 'settings') return ['settings']
+  if (entity === 'sale') return ['sales', 'returns', 'inventory', 'dashboard']
+  if (entity === 'return') return ['returns', 'sales', 'inventory', 'dashboard']
+  return [getChannelRefreshKey(fallbackChannel)]
+}
+
 function dispatchGlobalDataRefresh(channels = RECONNECT_REFRESH_CHANNELS) {
   if (typeof window === 'undefined') return
   ;(Array.isArray(channels) ? channels : RECONNECT_REFRESH_CHANNELS).forEach((channel) => {
@@ -171,6 +196,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       const text = await res.text().catch(() => '')
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
       const msg  = parsed?.error || text
+      const apiError = createApiError(res.status, parsed, text)
       if (res.status === 401 && parsed?.code === 'invalid_session' && requestAuthSessionToken && typeof window !== 'undefined') {
         const latestInMemoryToken = authSessionToken
         const storedToken = readAuthTokenFromStorage()
@@ -194,7 +220,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
           },
         }))
       }
-      throw new Error(msg || `HTTP ${res.status}`)
+      throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
     return res.json()
   } catch (e) {
@@ -468,6 +494,27 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     const ms = Date.now() - t0
     if (isConnectivityError(e)) setServerHealth(false)
     logCall(channel, 'server', ms, false)
+    if (isWriteConflictError(e)) {
+      const refreshChannels = getConflictRefreshChannels(e, channel)
+      refreshChannels.forEach((refreshChannel) => cacheInvalidate(refreshChannel))
+      dispatchGlobalDataRefresh(refreshChannels)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sync:conflict', {
+          detail: {
+            channel,
+            entity: e.entity || null,
+            reason: e.reason || null,
+            message: e.message || 'This item changed on another device. Refresh and try again.',
+            expectedUpdatedAt: e.expectedUpdatedAt || null,
+            actualUpdatedAt: e.actualUpdatedAt || null,
+            current: e.current || null,
+            refreshChannels,
+            ts: new Date().toISOString(),
+          },
+        }))
+      }
+      throw e
+    }
     window.dispatchEvent(new CustomEvent('sync:error', {
       detail: { channel, error: e.message, ts: new Date().toISOString() },
     }))
