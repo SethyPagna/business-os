@@ -7,6 +7,15 @@ const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendWriteC
 
 const router = express.Router()
 
+function settingsHasUpdatedAt() {
+  try {
+    const columns = db.prepare(`PRAGMA table_info(settings)`).all()
+    return columns.some((column) => String(column?.name || '').toLowerCase() === 'updated_at')
+  } catch (_) {
+    return false
+  }
+}
+
 function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const obj  = {}
@@ -15,6 +24,9 @@ function getSettingsSnapshot() {
 }
 
 function getSettingsUpdatedAt() {
+  if (!settingsHasUpdatedAt()) {
+    return normalizeUpdatedAt(new Date().toISOString()) || null
+  }
   const row = db.prepare(`
     SELECT MAX(COALESCE(updated_at, datetime('now'))) AS updated_at
     FROM settings
@@ -39,10 +51,16 @@ router.post('/', authToken, (req, res) => {
   const t0      = Date.now()
   const updates = req.body || {}
   const expectedUpdatedAt = getExpectedUpdatedAt(updates)
-  const upsert  = db.prepare(
-    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-  )
+  const hasUpdatedAt = settingsHasUpdatedAt()
+  const upsert  = hasUpdatedAt
+    ? db.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+    )
+    : db.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
   try {
     db.transaction(() => {
       const currentUpdatedAt = getSettingsUpdatedAt()

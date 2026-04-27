@@ -84,7 +84,14 @@ export default function Login() {
   const [organizationMatches, setOrganizationMatches] = useState([])
   const [organizationLoading, setOrganizationLoading] = useState(false)
   const [organizationLocked, setOrganizationLocked] = useState(false)
-  const [organizationExpanded, setOrganizationExpanded] = useState(true)
+  const [organizationExpanded, setOrganizationExpanded] = useState(() => {
+    try {
+      const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+      return !(remembered?.name || remembered?.slug || remembered?.public_id)
+    } catch (_) {
+      return true
+    }
+  })
 
   const usernameRef = useRef()
   const otpRef = useRef()

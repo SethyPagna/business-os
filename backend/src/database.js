@@ -681,6 +681,15 @@ function ensureColumn(tableName, columnName, sqlType = 'TEXT') {
     db.exec(`ALTER TABLE "${safeTable}" ADD COLUMN "${safeColumn}" ${sqlType}`)
     return true
   } catch (_) {
+    const normalizedType = String(sqlType || '').trim()
+    const defaultExpressionMatch = normalizedType.match(/^(.*)\s+DEFAULT\s+\(datetime\('now'\)\)\s*$/i)
+    if (defaultExpressionMatch) {
+      try {
+        const safeTable = String(tableName || '').replace(/"/g, '""')
+        const safeColumn = String(columnName || '').replace(/"/g, '""')
+        db.exec(`ALTER TABLE "${safeTable}" ADD COLUMN "${safeColumn}" ${defaultExpressionMatch[1].trim()}`)
+      } catch (_) {}
+    }
     return tableHasColumn(tableName, columnName)
   }
 }

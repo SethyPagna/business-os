@@ -236,6 +236,8 @@ export function AppProvider({ children }) {
   const [notification,        setNotification]        = useState(null)
   const [writeConflict,       setWriteConflict]       = useState(null)
   const [langRevision,        setLangRevision]        = useState(0)
+  const authRecoveryRef = useRef(false)
+  const authEstablishedAtRef = useRef(0)
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
@@ -411,13 +413,7 @@ export function AppProvider({ children }) {
         id: Date.now(),
       })
     }
-    const onUnauthorized = (e) => {
-      const eventToken = String(e?.detail?.token || '').trim()
-      const currentToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
-      if (eventToken && currentToken && eventToken !== currentToken) {
-        return
-      }
-      const message = e?.detail?.error || 'Please sign in again to continue.'
+    const finalizeUnauthorized = (message) => {
       setUser(null)
       setPage('dashboard')
       cacheClearAll()
@@ -426,6 +422,33 @@ export function AppProvider({ children }) {
       setSyncConnected(false)
       setSyncServerUnreachable(false)
       setNotification({ message, type: 'error', id: Date.now() })
+    }
+    const onUnauthorized = (e) => {
+      const eventToken = String(e?.detail?.token || '').trim()
+      const currentToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
+      if (eventToken && currentToken && eventToken !== currentToken) {
+        return
+      }
+      const message = e?.detail?.error || 'Please sign in again to continue.'
+      const recentAuthEstablished = Date.now() - authEstablishedAtRef.current < 8000
+      const hasRecoverableSession = !!currentToken && !!(user?.id || getStoredUserPayload())
+      if (hasRecoverableSession && !authRecoveryRef.current && recentAuthEstablished) {
+        authRecoveryRef.current = true
+        window.setTimeout(async () => {
+          try {
+            const bootstrap = await window.api?.getAppBootstrap?.()
+            if (bootstrap?.user) {
+              applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
+              authRecoveryRef.current = false
+              return
+            }
+          } catch (_) {}
+          authRecoveryRef.current = false
+          finalizeUnauthorized(message)
+        }, 180)
+        return
+      }
+      finalizeUnauthorized(message)
     }
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
@@ -441,7 +464,7 @@ export function AppProvider({ children }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
-  }, [loadSettings])
+  }, [applyBootstrapPayload, loadSettings, user])
 
   // ?? OTP login event listener ?????????????????????????????????????????????
   useEffect(() => {
@@ -468,6 +491,7 @@ export function AppProvider({ children }) {
         safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
       } catch (_) {}
 
+      authEstablishedAtRef.current = Date.now()
       window.api?.setAuthSessionToken?.(authToken || '')
       const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
       if (bootstrap) {
@@ -728,6 +752,7 @@ export function AppProvider({ children }) {
     window.api?.setAuthSessionToken?.(authToken || '')
     cacheClearAll()
     startHealthCheck()
+    authEstablishedAtRef.current = Date.now()
     setUser(nextUser)
     const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
     if (bootstrap) {
