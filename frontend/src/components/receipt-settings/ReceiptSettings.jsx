@@ -148,12 +148,12 @@ export default function ReceiptSettings() {
           <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0 lg:justify-end">
             <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:hidden">
               <Eye className="h-4 w-4" />
-              {t('live_preview') || 'Preview'}
+              {t('preview') || 'Preview'}
             </button>
             <button onClick={handleSave} disabled={saving}
               className="btn-primary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">
               <Save className="h-4 w-4" />
-              {saving ? 'Saving...' : (t('save_template') || 'Save template')}
+              {saving ? 'Saving...' : (t('save') || 'Save')}
             </button>
           </div>
         </div>

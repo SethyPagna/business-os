@@ -132,10 +132,9 @@ export default function Returns() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{tr('returns_scope_hint', 'Customer refunds and supplier returns are tracked separately.')}</p>
         </div>
         <div className="flex w-full flex-row flex-nowrap gap-2 sm:w-auto sm:items-center">
           <button

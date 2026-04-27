@@ -160,22 +160,28 @@ export default function Sales() {
       </div>
 
       {filtered.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-blue-50 px-4 py-2.5 text-sm dark:bg-blue-900/20">
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
+          <span className="font-semibold text-blue-700 dark:text-blue-300">{filtered.length} {t('sales') || 'sales'}</span>
+          <span className="text-gray-400">·</span>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
-          {pendingRevenue > 0 ? (
-            <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>
-              {fmtUSD(pendingRevenue)} {t('summary_on_hold') || 'on hold'}
-            </span>
-          ) : null}
           {statusFilter === 'all' ? (
             <>
+              <span className="text-gray-400">·</span>
               <span className="text-green-600 dark:text-green-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'completed').length} {t('summary_completed') || 'completed'}</span>
-              {filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment').length > 0 ? (
-                <span className="text-yellow-600 dark:text-yellow-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment').length} {t('summary_awaiting_payment') || 'awaiting payment'}</span>
-              ) : null}
-              {filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_delivery').length > 0 ? (
-                <span className="text-blue-600 dark:text-blue-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_delivery').length} {t('summary_in_delivery') || 'in delivery'}</span>
-              ) : null}
+            </>
+          ) : null}
+          {pendingRevenue > 0 ? (
+            <>
+              <span className="text-gray-400">·</span>
+              <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>
+                {fmtUSD(pendingRevenue)} {t('summary_on_hold') || 'on hold'}
+              </span>
+            </>
+          ) : null}
+          {statusFilter === 'all' && filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_delivery').length > 0 ? (
+            <>
+              <span className="text-gray-400">·</span>
+              <span className="text-blue-600 dark:text-blue-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'awaiting_delivery').length} {t('summary_in_delivery') || 'in delivery'}</span>
             </>
           ) : null}
         </div>

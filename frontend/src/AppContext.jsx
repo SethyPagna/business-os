@@ -24,6 +24,48 @@ const langs = { en, km }
 const AppContext = createContext(null)
 const SyncContext = createContext(null)
 const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
+const DEVICE_SETTINGS_STORAGE_KEY = 'businessos_device_settings'
+const DEVICE_LOCAL_SETTING_KEYS = new Set([
+  'theme',
+  'language',
+  'login_session_duration',
+  'ui_font_size',
+  'ui_font_weight',
+  'ui_accent_color',
+  'ui_border_radius',
+  'ui_font_family',
+  'ui_sidebar_color',
+  'ui_page_bg',
+  'ui_density',
+  'ui_sidebar_font_size',
+  'ui_title_font_size',
+  'ui_section_font_size',
+  'ui_table_font_size',
+  'ui_chip_font_size',
+  'ui_sidebar_text_color',
+  'ui_custom_accent_colors',
+  'ui_custom_sidebar_colors',
+  'ui_custom_page_bg_colors',
+  'ui_custom_sidebar_text_colors',
+])
+
+function readDeviceSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(DEVICE_SETTINGS_STORAGE_KEY) || '{}') || {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function writeDeviceSettings(value) {
+  try {
+    localStorage.setItem(DEVICE_SETTINGS_STORAGE_KEY, JSON.stringify(value || {}))
+  } catch (_) {}
+}
+
+function mergeSettingsWithDeviceOverrides(baseSettings = {}) {
+  return { ...baseSettings, ...readDeviceSettings() }
+}
 
 function normalizeDateInput(value) {
   if (!value) return null
@@ -45,7 +87,7 @@ export const PAGE_PERMISSIONS = {
   audit_log:        'audit_log',
   backup:           'backup',
   settings:         'settings',
-  receipt_settings: 'settings',
+  receipt_settings: 'all',
   returns:          'sales',
   server:           'settings',
 }
@@ -151,14 +193,19 @@ export function AppProvider({ children }) {
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async () => {
     try {
-      const s = await window.api.getSettings()
-      setSettings(s)
-      if (s.language) setLanguage(s.language)
-      if (s.theme)    setTheme(s.theme)
-      return s
+      const serverSettings = await window.api.getSettings()
+      const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
+      setSettings(mergedSettings)
+      if (mergedSettings.language) setLanguage(mergedSettings.language)
+      if (mergedSettings.theme)    setTheme(mergedSettings.theme)
+      return mergedSettings
     } catch (e) {
       console.warn('[AppContext] loadSettings failed:', e.message)
-      return {}
+      const fallbackSettings = mergeSettingsWithDeviceOverrides({})
+      setSettings(fallbackSettings)
+      if (fallbackSettings.language) setLanguage(fallbackSettings.language)
+      if (fallbackSettings.theme) setTheme(fallbackSettings.theme)
+      return fallbackSettings
     }
   }, [])
 
@@ -645,10 +692,26 @@ export function AppProvider({ children }) {
 
   // ?? Settings save ?????????????????????????????????????????????????????????
   const saveSettings = useCallback(async (newSettings) => {
-    await window.api.saveSettings(newSettings)
-    setSettings(prev => ({ ...prev, ...newSettings }))
-    if (newSettings.language) setLanguage(newSettings.language)
-    if (newSettings.theme)    setTheme(newSettings.theme)
+    const nextSettings = newSettings || {}
+    const serverUpdates = {}
+    const deviceUpdates = {}
+    Object.entries(nextSettings).forEach(([key, value]) => {
+      if (DEVICE_LOCAL_SETTING_KEYS.has(key)) deviceUpdates[key] = value
+      else serverUpdates[key] = value
+    })
+
+    if (Object.keys(serverUpdates).length) {
+      await window.api.saveSettings(serverUpdates)
+    }
+    if (Object.keys(deviceUpdates).length) {
+      const nextDeviceSettings = { ...readDeviceSettings(), ...deviceUpdates }
+      writeDeviceSettings(nextDeviceSettings)
+    }
+
+    const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
+    setSettings(prev => ({ ...prev, ...mergedUpdates }))
+    if (mergedUpdates.language) setLanguage(mergedUpdates.language)
+    if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)
     notify(t('settings_saved'))
   }, [notify]) // eslint-disable-line
 

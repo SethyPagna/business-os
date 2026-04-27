@@ -37,6 +37,11 @@ const PAGE_IMPORTERS = {
 }
 
 const WARMUP_PAGE_IDS = [
+  'dashboard',
+  'products',
+  'sales',
+  'returns',
+  'inventory',
   'catalog',
   'pos',
   'branches',
@@ -50,8 +55,8 @@ const WARMUP_PAGE_IDS = [
   'server',
 ]
 
-const CHUNK_IMPORT_TIMEOUT_MS = 12000
-const CHUNK_IMPORT_MAX_ATTEMPTS = 2
+const CHUNK_IMPORT_TIMEOUT_MS = 8000
+const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 
 function getChunkErrorMessage(error) {
   // Normalize unknown thrown values before chunk retry logic inspects them.

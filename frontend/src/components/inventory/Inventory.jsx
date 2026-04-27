@@ -414,7 +414,7 @@ export default function Inventory() {
           >
             <span className="inline-flex items-center gap-2">
               <Download className="h-4 w-4" />
-              {t('export_csv')||'CSV'}
+              {t('export_csv')||'Export'}
             </span>
           </button>
           {/* Export movements CSV */}

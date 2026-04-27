@@ -8,7 +8,6 @@ import {
   Loader2,
   LockKeyhole,
   Mail,
-  ScanLine,
   ShieldCheck,
 } from 'lucide-react'
 import { useApp } from '../../AppContext'
@@ -86,6 +85,17 @@ export default function Login() {
   const usernameRef = useRef()
   const otpRef = useRef()
 
+  const rememberOrganization = (item) => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+        id: item?.id || null,
+        name: item?.name || organizationSearch || '',
+        slug: item?.slug || '',
+        public_id: item?.public_id || organizationId || '',
+      }))
+    } catch (_) {}
+  }
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (otpRequired) otpRef.current?.focus()
@@ -130,6 +140,7 @@ export default function Login() {
           setOrganizationSearch(fallbackOrg.name || fallbackOrg.slug || '')
           setOrganizationId(fallbackOrg.public_id || '')
           setOrganizationMatches(fallbackOrg ? [fallbackOrg] : [])
+          rememberOrganization(fallbackOrg)
           if (boot?.organization && !boot.organizationCreationEnabled) {
             setOrganizationLocked(true)
           }
@@ -340,13 +351,8 @@ export default function Login() {
     setOauthLoading(provider)
     try {
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=login&auth_provider=${encodeURIComponent(provider)}`
-      try {
-        localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
-          name: organizationSearch,
-          public_id: organizationId,
-          slug: organizationSearch,
-        }))
-      } catch (_) {}
+      const rememberedMatch = organizationMatches.find((item) => String(item.public_id || '') === String(organizationId || ''))
+      rememberOrganization(rememberedMatch || { name: organizationSearch, public_id: organizationId })
       const result = await window.api.startSupabaseOauth({
         provider,
         mode: 'login',
@@ -429,6 +435,7 @@ export default function Login() {
                       onClick={() => {
                         setOrganizationSearch(item.name || item.slug || '')
                         setOrganizationId(item.public_id || '')
+                        rememberOrganization(item)
                       }}
                     >
                       {item.name} · {item.public_id}
@@ -514,19 +521,19 @@ export default function Login() {
             {(verificationCaps.googleOauth || verificationCaps.facebookOauth) ? (
               <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
                 <div className="text-center text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {tr('or_continue_with', 'Or continue with')}
+                  {tr('login_with', 'Login with')}
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <OauthButton
                     icon={Chrome}
-                    label={tr('continue_with_google', 'Google')}
+                    label={tr('login_with_google', 'Google')}
                     disabled={!verificationCaps.googleOauth || !!oauthLoading || loading}
                     loading={oauthLoading === 'google'}
                     onClick={() => handleStartOauth('google')}
                   />
                   <OauthButton
                     icon={Facebook}
-                    label={tr('continue_with_facebook', 'Facebook')}
+                    label={tr('login_with_facebook', 'Facebook')}
                     disabled={!verificationCaps.facebookOauth || !!oauthLoading || loading}
                     loading={oauthLoading === 'facebook'}
                     onClick={() => handleStartOauth('facebook')}
@@ -551,28 +558,6 @@ export default function Login() {
               {tr('reset_password_with_otp', 'Reset password with OTP')}
             </button>
 
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-gray-300">
-              <div className="mb-2 flex items-center gap-2 font-semibold">
-                <ScanLine className="h-4 w-4 text-gray-400" />
-                <span>{tr('signin_methods', 'Sign-in methods')}</span>
-              </div>
-              <div>{tr('signin_method_org', 'Organization remembered on this device')}</div>
-              <div>{tr('signin_method_password', 'Password login')}</div>
-              <div>{tr('signin_method_otp', 'OTP (required for users who enabled 2FA)')}</div>
-              {verificationCaps.googleOauth ? <div>{tr('signin_method_google', 'Google sign-in')}</div> : null}
-              {verificationCaps.facebookOauth ? <div>{tr('signin_method_facebook', 'Facebook sign-in')}</div> : null}
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.supabaseEmailAuth ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300'}`}>
-                  {tr('email_login', 'Email login')}: {verificationCaps.supabaseEmailAuth ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 ${verificationCaps.supabaseAuth ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300'}`}>
-                  {tr('supabase_auth', 'Supabase Auth')}: {verificationCaps.supabaseAuth ? tr('provider_ready_short', 'ready') : tr('provider_not_configured_short', 'not configured')}
-                </span>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                  {tr('otp_recovery', 'OTP recovery')}
-                </span>
-              </div>
-            </div>
           </form>
         ) : null}
 

@@ -88,6 +88,39 @@ const ACCENT_COLORS = [
   ['#1f2937', 'Dark'],
 ]
 
+function parseStoredColors(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value
+    return Array.isArray(parsed)
+      ? parsed.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function buildColorChoices(baseColors, customColors = []) {
+  const seen = new Set()
+  const presets = Array.isArray(baseColors) ? baseColors : []
+  const extras = Array.isArray(customColors) ? customColors : []
+  const next = []
+  for (const [color, label, border] of presets) {
+    const key = `${color || ''}|${label || ''}|${border || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    next.push([color, label, border])
+  }
+  for (const color of extras) {
+    const normalized = String(color || '').trim()
+    if (!normalized) continue
+    const key = `${normalized}|custom`
+    if (seen.has(key)) continue
+    seen.add(key)
+    next.push([normalized, 'Custom', normalized])
+  }
+  return next
+}
+
 const TIMEZONE_OPTIONS = [
   'Asia/Phnom_Penh',
   'Asia/Bangkok',
@@ -182,7 +215,21 @@ function getSettingsNavLabel(item, t) {
   return label && label !== item.key ? label : item.id
 }
 
-function SwatchPicker({ colors, value, onChange, fallbackValue, title, hint, resetLabel, autoLabel, customColorTitle, fieldId }) {
+function SwatchPicker({
+  colors,
+  value,
+  onChange,
+  fallbackValue,
+  title,
+  hint,
+  resetLabel,
+  autoLabel,
+  customColorTitle,
+  fieldId,
+  customColors = [],
+  onAddCustomColor,
+  onRemoveCustomColor,
+}) {
   return (
     <div className="sm:col-span-2">
       <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -213,8 +260,35 @@ function SwatchPicker({ colors, value, onChange, fallbackValue, title, hint, res
           title={customColorTitle}
           className="w-8 h-8 rounded-lg border border-gray-300 cursor-pointer"
           style={{ padding: '1px' }}
+          onBlur={(event) => onAddCustomColor?.(event.target.value)}
         />
       </div>
+      {customColors.length ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {customColors.map((color) => (
+            <div key={`${fieldId}-${color}`} className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] dark:border-gray-700 dark:bg-gray-800">
+              <button
+                type="button"
+                onClick={() => onChange(color)}
+                className="flex items-center gap-1"
+                title={color}
+              >
+                <span className="h-3 w-3 rounded-full border border-gray-200" style={{ background: color }} />
+                <span className="font-medium text-gray-600 dark:text-gray-300">{color}</span>
+              </button>
+              <button
+                type="button"
+                className="text-gray-400 hover:text-red-500"
+                onClick={() => onRemoveCustomColor?.(color)}
+                aria-label={`Remove ${color}`}
+                title={resetLabel}
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {value ? (
         <button type="button" className="mt-1.5 text-xs text-gray-400 hover:text-gray-600 underline" onClick={() => onChange('')}>
           {resetLabel}
@@ -245,6 +319,14 @@ export default function Settings() {
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
   const selectedDisplayTimezone = form.display_timezone || settings.display_timezone || deviceTimezone
   const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'
+  const customAccentColors = useMemo(() => parseStoredColors(form.ui_custom_accent_colors), [form.ui_custom_accent_colors])
+  const customSidebarColors = useMemo(() => parseStoredColors(form.ui_custom_sidebar_colors), [form.ui_custom_sidebar_colors])
+  const customPageBgColors = useMemo(() => parseStoredColors(form.ui_custom_page_bg_colors), [form.ui_custom_page_bg_colors])
+  const customSidebarTextColors = useMemo(() => parseStoredColors(form.ui_custom_sidebar_text_colors), [form.ui_custom_sidebar_text_colors])
+  const accentChoices = useMemo(() => buildColorChoices(ACCENT_COLORS.map(([color, label]) => [color, label, color]), customAccentColors), [customAccentColors])
+  const sidebarColorChoices = useMemo(() => buildColorChoices(SIDEBAR_COLORS, customSidebarColors), [customSidebarColors])
+  const pageBgChoices = useMemo(() => buildColorChoices(PAGE_BG_COLORS, customPageBgColors), [customPageBgColors])
+  const sidebarTextChoices = useMemo(() => buildColorChoices(SIDEBAR_TEXT_COLORS, customSidebarTextColors), [customSidebarTextColors])
   const typographyPreview = previewLanguage === 'km'
     ? {
         eyebrow: 'Khmer',
@@ -321,6 +403,24 @@ export default function Settings() {
   }, [mobilePinned, navItems])
 
   const setValue = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const updateStoredColorList = useCallback((key, updater) => {
+    setForm((current) => {
+      const currentList = parseStoredColors(current[key])
+      const nextList = updater(currentList)
+      return { ...current, [key]: JSON.stringify(nextList) }
+    })
+  }, [])
+  const addStoredColor = useCallback((key, color) => {
+    const normalized = String(color || '').trim().toLowerCase()
+    if (!/^#[0-9a-f]{6}$/i.test(normalized)) return
+    updateStoredColorList(key, (currentList) => (
+      currentList.includes(normalized) ? currentList : [...currentList, normalized]
+    ))
+  }, [updateStoredColorList])
+  const removeStoredColor = useCallback((key, color) => {
+    const normalized = String(color || '').trim().toLowerCase()
+    updateStoredColorList(key, (currentList) => currentList.filter((entry) => entry !== normalized))
+  }, [updateStoredColorList])
   const formatPreviewDateTime = (value) => {
     const date = value instanceof Date ? value : new Date(value)
     if (Number.isNaN(date.getTime())) return '--'
@@ -436,6 +536,7 @@ export default function Settings() {
       <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-6">{t('settings')}</h1>
 
       <div className="max-w-5xl space-y-5">
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('business_info')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -446,7 +547,9 @@ export default function Settings() {
             {field('tax_id', t('tax_id'), 'text', 'TAX-000')}
           </div>
         </div>
+        ) : null}
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -492,7 +595,9 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        ) : null}
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('currency_settings')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -509,7 +614,9 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        ) : null}
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('receipt_settings')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -529,13 +636,14 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        ) : null}
 
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('appearance')}</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('theme')}</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {THEME_OPTION_KEYS.map(([themeValue, copyKey, defaultLabel]) => (
                   <button
                     key={themeValue}
@@ -551,7 +659,7 @@ export default function Settings() {
 
             <div>
               <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('language')}</div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {LANGUAGE_OPTION_KEYS.map(([langCode, copyKey, defaultLabel]) => (
                   <button
                     key={langCode}
@@ -708,8 +816,8 @@ export default function Settings() {
               </div>
             </div>
 
-            <div className="sm:col-span-2 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-zinc-900/40">
-              <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Typography preview</div>
+            <div className="sm:col-span-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-zinc-900/40">
+              <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{t('preview') || 'Preview'}</div>
               <div className="rounded-2xl bg-white p-3 shadow-sm dark:bg-zinc-800" style={{ fontFamily: previewFontFamily }}>
                 <div className="mt-1 truncate font-semibold text-gray-900 dark:text-white" style={{ fontSize: `${previewTitleSize}px`, lineHeight: 1.05 }}>
                   {typographyPreview.title}
@@ -725,9 +833,9 @@ export default function Settings() {
                 {t('accent_color')} <span className="text-xs font-normal text-gray-400">{copy('appearanceHintAccent', 'Buttons, active links, and highlights')}</span>
               </label>
               <div className="flex flex-wrap gap-2">
-                {ACCENT_COLORS.map(([color, name]) => (
+                {accentChoices.map(([color, name]) => (
                   <button
-                    key={color}
+                    key={`${color}-${name}`}
                     type="button"
                     onClick={() => setValue('ui_accent_color', color)}
                     title={name}
@@ -741,16 +849,34 @@ export default function Settings() {
                   type="color"
                   value={form.ui_accent_color || '#2563eb'}
                   onChange={(event) => setValue('ui_accent_color', event.target.value)}
+                  onBlur={(event) => addStoredColor('ui_custom_accent_colors', event.target.value)}
                   title={copy('customColor', 'Custom color')}
                   className="w-7 h-7 rounded-full border border-gray-300 cursor-pointer p-0"
                   style={{ padding: 0 }}
                 />
               </div>
+              {customAccentColors.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {customAccentColors.map((color) => (
+                    <button
+                      key={`accent-${color}`}
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                      onClick={() => removeStoredColor('ui_custom_accent_colors', color)}
+                      title={`Remove ${color}`}
+                    >
+                      <span className="h-3 w-3 rounded-full border border-gray-200" style={{ background: color }} />
+                      <span>{color}</span>
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <SwatchPicker
               fieldId="settings-ui-sidebar-color"
-              colors={SIDEBAR_COLORS}
+              colors={sidebarColorChoices}
               value={form.ui_sidebar_color || ''}
               onChange={(value) => setValue('ui_sidebar_color', value)}
               fallbackValue={form.theme === 'dark' ? '#0f172a' : '#ffffff'}
@@ -759,11 +885,14 @@ export default function Settings() {
               resetLabel={copy('resetToDefault', 'Reset to default')}
               autoLabel={copy('autoLabel', 'auto')}
               customColorTitle={copy('customColor', 'Custom color')}
+              customColors={customSidebarColors}
+              onAddCustomColor={(value) => addStoredColor('ui_custom_sidebar_colors', value)}
+              onRemoveCustomColor={(value) => removeStoredColor('ui_custom_sidebar_colors', value)}
             />
 
             <SwatchPicker
               fieldId="settings-ui-page-bg"
-              colors={PAGE_BG_COLORS}
+              colors={pageBgChoices}
               value={form.ui_page_bg || ''}
               onChange={(value) => setValue('ui_page_bg', value)}
               fallbackValue={form.theme === 'dark' ? '#0f172a' : '#f9fafb'}
@@ -772,11 +901,14 @@ export default function Settings() {
               resetLabel={copy('resetToDefault', 'Reset to default')}
               autoLabel={copy('autoLabel', 'auto')}
               customColorTitle={copy('customColor', 'Custom color')}
+              customColors={customPageBgColors}
+              onAddCustomColor={(value) => addStoredColor('ui_custom_page_bg_colors', value)}
+              onRemoveCustomColor={(value) => removeStoredColor('ui_custom_page_bg_colors', value)}
             />
 
             <SwatchPicker
               fieldId="settings-ui-sidebar-text-color"
-              colors={SIDEBAR_TEXT_COLORS}
+              colors={sidebarTextChoices}
               value={form.ui_sidebar_text_color || ''}
               onChange={(value) => setValue('ui_sidebar_text_color', value)}
               fallbackValue={form.theme === 'dark' ? '#f8fafc' : '#111827'}
@@ -785,10 +917,14 @@ export default function Settings() {
               resetLabel={copy('resetToDefault', 'Reset to default')}
               autoLabel={copy('autoLabel', 'auto')}
               customColorTitle={copy('customColor', 'Custom color')}
+              customColors={customSidebarTextColors}
+              onAddCustomColor={(value) => addStoredColor('ui_custom_sidebar_text_colors', value)}
+              onRemoveCustomColor={(value) => removeStoredColor('ui_custom_sidebar_text_colors', value)}
             />
           </div>
         </div>
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('timezone')}</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">{t('timezone_desc')}</p>
@@ -818,7 +954,9 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        ) : null}
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{copy('navigationTitle', 'Navigation Layout')}</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}</p>
@@ -937,7 +1075,9 @@ export default function Settings() {
           </div>
 
         </div>
+        ) : null}
 
+        {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('manage_payment_methods')}</h2>
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{t('configure_payment_desc')}</p>
@@ -987,10 +1127,11 @@ export default function Settings() {
             </button>
           </div>
         </div>
+        ) : null}
 
         <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('security') || 'Security'}</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{t('configure_security_desc')}</p>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('session_duration') || 'Session duration'}</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{t('session_duration_hint')}</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

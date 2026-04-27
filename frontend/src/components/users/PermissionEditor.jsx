@@ -8,7 +8,7 @@ export const PERMISSION_DEFS = [
   { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Customer Portal' },
   { key: 'users', tKey: 'perm_users', label: 'User Management' },
   { key: 'audit_log', tKey: 'perm_audit_log', label: 'Audit Log' },
-  { key: 'settings', tKey: 'perm_settings', label: 'Settings & Receipt' },
+  { key: 'settings', tKey: 'perm_settings', label: 'Settings (personal device)' },
   { key: 'backup', tKey: 'perm_backup', label: 'Backup' },
 ]
 

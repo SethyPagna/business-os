@@ -254,6 +254,21 @@ function findUserByIdentifier(identifier, options = {}) {
   return null
 }
 
+function getExactActiveUserById(userId, organizationId = 0) {
+  const id = Number(userId || 0)
+  const orgId = Number(organizationId || 0) || 0
+  if (!id) return null
+  return db.prepare(`
+    SELECT *
+    FROM users
+    WHERE id = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
+    LIMIT 1
+  `).get(id, orgId, orgId)
+}
+
 function normalizeOauthMode(mode) {
   const value = String(mode || 'login').trim().toLowerCase()
   return value === 'link' ? 'link' : 'login'
@@ -351,19 +366,20 @@ router.post('/login', async (req, res) => {
     return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username))
   }
 
+  const localPasswordMatches = bcrypt.compareSync(password, user.password)
   const useSupabasePassword = !!(
     isSupabaseAuthConfigured()
     && isEmailIdentifier(username)
     && user.email
   )
-  if (useSupabasePassword) {
+  if (useSupabasePassword && !localPasswordMatches) {
     const supabaseAuth = await verifyPasswordWithSupabase(user, password)
     if (!supabaseAuth.success) {
       const availabilityError = /unavailable|failed|timed out|request|network/i.test(String(supabaseAuth.error || ''))
       if (availabilityError) return err(res, 'Authentication provider unavailable. Please try again shortly.', 503)
       return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username), 'provider_invalid_credentials')
     }
-  } else if (!bcrypt.compareSync(password, user.password)) {
+  } else if (!localPasswordMatches) {
     return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username))
   }
 
@@ -434,7 +450,7 @@ router.post('/oauth/complete', async (req, res) => {
   const authUser = authResult.user
   const authEmail = normalizeEmail(authUser.email || '')
   const oauthIdentityConflict = db.prepare(`
-    SELECT id, username, is_active, deleted_at
+    SELECT id, username, organization_id, is_active, deleted_at
     FROM users
     WHERE supabase_user_id = ?
       AND (? = 0 OR id != ?)
@@ -499,23 +515,31 @@ router.post('/oauth/complete', async (req, res) => {
     })
   }
 
+  let localUser = null
   if (oauthIdentityConflict && Number(oauthIdentityConflict.is_active || 0) === 1 && !oauthIdentityConflict.deleted_at) {
-    return err(res, 'This Google or Facebook account is already linked to another user.', 409)
+    const conflictOrgId = Number(oauthIdentityConflict.organization_id || 0) || 0
+    const requestedOrgId = Number(organizationRecord?.id || 0) || 0
+    if (requestedOrgId && conflictOrgId && requestedOrgId !== conflictOrgId) {
+      return err(res, 'This Google or Facebook account belongs to a different organization.', 409)
+    }
+    localUser = getExactActiveUserById(oauthIdentityConflict.id, requestedOrgId)
   }
 
-  let localUser = db.prepare(`
-    SELECT *
-    FROM users
-    WHERE is_active = 1
-      AND deleted_at IS NULL
-      AND (? = 0 OR organization_id = ?)
-      AND (
-        supabase_user_id = ?
-        OR (? != '' AND lower(trim(email)) = ?)
-      )
-    ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
-    LIMIT 1
-  `).get(Number(organizationRecord?.id || 0), Number(organizationRecord?.id || 0), authUser.id, authEmail, authEmail, authUser.id)
+  if (!localUser) {
+    localUser = db.prepare(`
+      SELECT *
+      FROM users
+      WHERE is_active = 1
+        AND deleted_at IS NULL
+        AND (? = 0 OR organization_id = ?)
+        AND (
+          supabase_user_id = ?
+          OR (? != '' AND lower(trim(email)) = ?)
+        )
+      ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
+      LIMIT 1
+    `).get(Number(organizationRecord?.id || 0), Number(organizationRecord?.id || 0), authUser.id, authEmail, authEmail, authUser.id)
+  }
 
   if (!localUser) {
     if (!authEmail) {

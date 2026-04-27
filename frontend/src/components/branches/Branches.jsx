@@ -195,13 +195,13 @@ export default function Branches() {
               <span>{(t('delete') || 'Delete')} ({selectedCount})</span>
             </button>
           ) : null}
-          <button className="btn-secondary flex-shrink-0 text-sm" onClick={() => setModal('transfer')}>
+          <button className="btn-secondary flex-shrink-0 px-3 py-1.5 text-xs sm:text-sm" onClick={() => setModal('transfer')}>
             <ArrowRightLeft className="h-4 w-4" />
-            <span>{t('transfer_stock') || 'Transfer Stock'}</span>
+            <span>{t('transfer') || 'Transfer'}</span>
           </button>
-          <button className="btn-primary flex-shrink-0 text-sm" onClick={() => { setSelected(null); setModal('form') }}>
+          <button className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs sm:text-sm" onClick={() => { setSelected(null); setModal('form') }}>
             <Plus className="h-4 w-4" />
-            <span>{t('add_branch') || 'Add Branch'}</span>
+            <span>{t('branch') || 'Branch'}</span>
           </button>
         </div>
       </div>
