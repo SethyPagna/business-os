@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import PortalMenu from '../shared/PortalMenu'
-import { Download, RefreshCw } from 'lucide-react'
+import { Download, LayoutDashboard, RefreshCw } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
 import { downloadCSV } from '../../utils/csv'
@@ -265,7 +265,10 @@ export default function Dashboard() {
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <h1 className="min-w-0 flex-1 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('dashboard')}</h1>
+        <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+          <LayoutDashboard className="h-5 w-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+          <span className="truncate">{t('dashboard')}</span>
+        </h1>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {silentRefresh && <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>}
           <button onClick={() => { window.api.getDashboard().then(d => setSummary(d)); loadAnalytics() }} className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm">

@@ -467,13 +467,13 @@ function DataFolderLocation({ t, notify }) {
           onChange={(event) => setInputPath(event.target.value)}
           spellCheck={false}
         />
-        <PathActionButton onClick={openInlinePicker} disabled={busy}>
-          <FolderOutput className="h-4 w-4" />
-          {showAdvancedBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Browse')}
-        </PathActionButton>
         <PathActionButton onClick={pickFolderNatively} disabled={busy}>
           <FolderOutput className="h-4 w-4" />
           {copy('browse_folder', 'Choose Folder')}
+        </PathActionButton>
+        <PathActionButton onClick={openInlinePicker} disabled={busy}>
+          <FolderOutput className="h-4 w-4" />
+          {showAdvancedBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
         </PathActionButton>
         <PathActionButton onClick={openInExplorer} disabled={!hostUiAvailable || !String(info?.dataRoot || previewPath || '').trim()}>
           <FolderOutput className="h-4 w-4" />
@@ -973,16 +973,16 @@ export default function Backup() {
                 onChange={(event) => setFolderExportPath(event.target.value)}
                 placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
               />
-              <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
-                <FolderOutput className="h-4 w-4" />
-                {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Browse')}
-              </PathActionButton>
               {hostUiAvailable ? (
                 <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
                   <FolderOutput className="h-4 w-4" />
                   {copy('browse_folder', 'Choose Folder')}
                 </PathActionButton>
               ) : null}
+              <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
+                <FolderOutput className="h-4 w-4" />
+                {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
+              </PathActionButton>
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {copy('server_folder_note', 'Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.')}
@@ -1036,16 +1036,16 @@ export default function Backup() {
                 onChange={(event) => setFolderImportPath(event.target.value)}
                 placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
               />
-              <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
-                <FolderInput className="h-4 w-4" />
-                {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Browse')}
-              </PathActionButton>
               {hostUiAvailable ? (
                 <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
                   <FolderInput className="h-4 w-4" />
                   {copy('browse_folder', 'Choose Folder')}
                 </PathActionButton>
               ) : null}
+              <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
+                <FolderInput className="h-4 w-4" />
+                {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
+              </PathActionButton>
             </div>
             <p className="text-xs text-amber-700 dark:text-amber-300">
               {copy('server_restore_note', 'Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.')}

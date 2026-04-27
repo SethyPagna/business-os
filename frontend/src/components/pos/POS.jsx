@@ -907,8 +907,8 @@ export default function POS() {
                 return (
                   <button key={p.id} onClick={() => inStock && addToCart(p)} disabled={!inStock}
                     className={`card p-3 text-left transition-all active:scale-95 relative ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
-                    <button className="absolute top-1.5 right-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-white/80 text-gray-400 shadow-sm hover:text-blue-600 dark:bg-gray-900/60" onClick={e => { e.stopPropagation(); setDetailProduct(p) }} title="Details">
-                      <Info className="h-3.5 w-3.5" />
+                    <button className="absolute top-1.5 right-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-500 shadow-sm hover:text-blue-600 dark:bg-gray-900/70" onClick={e => { e.stopPropagation(); setDetailProduct(p) }} title="Details">
+                      <Info className="h-4 w-4" />
                     </button>
                     <button
                       type="button"

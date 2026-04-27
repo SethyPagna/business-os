@@ -28,24 +28,26 @@ export default function ProductsHeaderActions({
           onClick={onImport}
           className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
           title="Import CSV"
+          aria-label="Import"
         >
           <Upload className="h-3.5 w-3.5" />
-          Import
+          <span className="hidden min-[420px]:inline">Import</span>
         </button>
         <button
           onClick={onExport}
           className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
           title="Export CSV"
+          aria-label="Export"
         >
           <Download className="h-3.5 w-3.5" />
-          Export
+          <span className="hidden min-[420px]:inline">Export</span>
         </button>
         <PortalMenu
           align="right"
           trigger={
-            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium">
+            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium" aria-label={t('manage') || 'Manage'}>
               <Settings2 className="h-3.5 w-3.5" />
-              {t('manage') || 'Manage'}
+              <span className="hidden min-[420px]:inline">{t('manage') || 'Manage'}</span>
             </button>
           }
           items={manageItems.slice(0, 5)}
@@ -53,9 +55,10 @@ export default function ProductsHeaderActions({
         <button
           onClick={onAdd}
           className="btn-primary inline-flex shrink-0 items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium"
+          aria-label={t('add_product') || 'Add product'}
         >
           <PackagePlus className="h-3.5 w-3.5" />
-          {t('product') || 'Product'}
+          <span className="hidden min-[420px]:inline">{t('product') || 'Product'}</span>
         </button>
       </div>
 

@@ -540,9 +540,9 @@ router.get('/debug/log', authToken, (req, res) => {
 const { TAILSCALE_URL } = require('../config')
 const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 
-router.get('/config', (req, res) => {
+router.get('/config', authToken, (req, res) => {
   const access = classifyRequestAccess(req)
-  const hostUiAvailable = process.platform === 'win32'
+  const { hostUiAvailable } = getHostUiAvailability(req)
   res.json({
     syncServerUrl: TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,

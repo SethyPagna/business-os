@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Download, Search as SearchIcon } from 'lucide-react'
+import { Download, Search as SearchIcon, ShoppingBag } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Receipt from '../receipt/Receipt'
 import { fmtTime } from '../../utils/formatters'
@@ -120,7 +120,10 @@ export default function Sales() {
     <div className="page-scroll flex flex-col p-3 sm:p-6">
       <div className="mb-3 flex min-w-0 items-center justify-between gap-2 sm:mb-4">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('sales')}</h1>
+          <h1 className="flex items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+            <ShoppingBag className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            {t('sales')}
+          </h1>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           <button onClick={() => setShowExport(true)} className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs">

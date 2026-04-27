@@ -140,17 +140,19 @@ export default function Contacts() {
             className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={openImportPicker}
             title={t('import_all_contacts_title') || 'Import contacts'}
+            aria-label={t('import_contacts') || 'Import'}
           >
             <Upload className="h-4 w-4" />
-            <span>{t('import_contacts') || 'Import'}</span>
+            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
           </button>
           <button
             className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={handleExportAll}
             title={t('export_all_contacts') || 'Export all contacts as CSVs'}
+            aria-label={t('export') || 'Export'}
           >
             <Download className="h-4 w-4" />
-            <span>Export</span>
+            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>

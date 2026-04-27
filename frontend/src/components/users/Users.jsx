@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CircleUserRound, UserPlus } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
 import { fmtDate } from '../../utils/formatters'
@@ -335,11 +336,17 @@ export default function Users() {
     <div className="page-scroll flex flex-col p-3 sm:p-6">
       <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('users') || 'Users'}</h1>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
+            <CircleUserRound className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            {t('users') || 'Users'}
+          </h1>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <button type="button" className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>{tr('my_profile', 'My Profile')}</button>
-          {tab === 'users' && canManage ? <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateUser}>{t('add_user') || 'Add user'}</button> : null}
+          <button type="button" className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>
+            <CircleUserRound className="h-4 w-4" />
+            <span className="hidden min-[420px]:inline">{tr('my_profile', 'My Profile')}</span>
+          </button>
+          {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4" /><span className="hidden min-[420px]:inline">{t('add_user') || 'Add user'}</span></button> : null}
           {tab === 'roles' && canManage ? <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateRole}>{t('create_role') || 'Create role'}</button> : null}
         </div>
       </div>

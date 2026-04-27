@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Download, RotateCcw, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
@@ -134,19 +135,30 @@ export default function Returns() {
     <div className="page-scroll flex flex-col p-3 sm:p-6">
       <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
+          <h1 className="flex items-center gap-2 truncate text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">
+            <RotateCcw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            {tr('returns', 'Returns')}
+          </h1>
         </div>
         <div className="flex flex-shrink-0 flex-row flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:items-center sm:pb-0">
           <button
             onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
-            className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
+            className="btn-secondary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
+            aria-label="Export"
           >
-            Export
+            <Download className="h-4 w-4" />
+            <span className="hidden min-[420px]:inline">Export</span>
           </button>
           {scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">{tr('return_to_supplier', 'Return to Supplier')}</button>
+            <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
+              <Undo2 className="h-4 w-4" />
+              <span className="hidden min-[420px]:inline">{tr('return_to_supplier', 'Return to Supplier')}</span>
+            </button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">{tr('new_return', 'New Return')}</button>
+            <button onClick={() => setShowCustomerForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('new_return', 'New Return')}>
+              <Undo2 className="h-4 w-4" />
+              <span className="hidden min-[420px]:inline">{tr('new_return', 'New Return')}</span>
+            </button>
           )}
         </div>
       </div>
