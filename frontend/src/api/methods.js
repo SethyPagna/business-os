@@ -897,6 +897,21 @@ async function runFlushPendingSyncQueue() {
           await apiFetch('DELETE', `/api/delivery-contacts/${item.entity_id}`, payload)
           touchedChannels.add('deliveryContacts')
           await removeLocalRecord('delivery_contacts', item.entity_id)
+        } else if (item.channel === 'returns:create') {
+          await apiFetch('POST', '/api/returns', payload)
+          touchedChannels.add('returns')
+          touchedChannels.add('sales')
+          touchedChannels.add('products')
+          touchedChannels.add('inventory')
+          touchedChannels.add('dashboard')
+          await removeLocalRecord('returns', item.entity_id)
+        } else if (item.channel === 'returns:createSupplier') {
+          await apiFetch('POST', '/api/returns/supplier', payload)
+          touchedChannels.add('returns')
+          touchedChannels.add('products')
+          touchedChannels.add('inventory')
+          touchedChannels.add('dashboard')
+          await removeLocalRecord('returns', item.entity_id)
         } else {
           await dexieDb.sync_queue.delete(item._seq)
           emitSyncQueueChanged()
@@ -1319,8 +1334,53 @@ export const getReturns  = (params) => {
   const mirror = q ? null : mirrorTable('returns')
   return routeMirrored(cacheKey, () => apiFetch('GET', `/api/returns${q ? '?' + q : ''}`), () => dexieDb.returns.orderBy('created_at').reverse().toArray(), mirror)
 }
-export const createReturn = d => route('returns:create', () => apiFetch('POST', '/api/returns', d), null, true)
-export const createSupplierReturn = d => route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', d), null, true)
+export async function createReturn(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'return')
+  const returnNumber = String(payload.return_number || '').trim() || `RET-${Date.now()}`
+  const finalPayload = { ...payload, return_number: returnNumber }
+  try {
+    return await route('returns:create', () => apiFetch('POST', '/api/returns', finalPayload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const localId = await createLocalPendingRecord('returns', finalPayload, 'create')
+    cacheInvalidate('returns')
+    await queueOfflineWrite('returns:create', finalPayload, {
+      operation: 'create',
+      entity_table: 'returns',
+      entity_id: localId,
+      entity_name: returnNumber,
+    })
+    emitSyncRefresh('returns')
+    emitSyncRefresh('sales')
+    emitSyncRefresh('products')
+    emitSyncRefresh('inventory')
+    emitSyncRefresh('dashboard')
+    return { success: true, id: localId, returnNumber, _offline: true }
+  }
+}
+export async function createSupplierReturn(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier_return')
+  const returnNumber = String(payload.return_number || '').trim() || `SRET-${Date.now()}`
+  const finalPayload = { ...payload, return_number: returnNumber }
+  try {
+    return await route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', finalPayload), null, true)
+  } catch (e) {
+    if (!isNetErr(e)) throw e
+    const localId = await createLocalPendingRecord('returns', finalPayload, 'create')
+    cacheInvalidate('returns')
+    await queueOfflineWrite('returns:createSupplier', finalPayload, {
+      operation: 'create',
+      entity_table: 'returns',
+      entity_id: localId,
+      entity_name: returnNumber,
+    })
+    emitSyncRefresh('returns')
+    emitSyncRefresh('products')
+    emitSyncRefresh('inventory')
+    emitSyncRefresh('dashboard')
+    return { success: true, id: localId, returnNumber, _offline: true }
+  }
+}
 export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', `/api/returns/${id}`), () => null)
 
 // ─── Sale status update ───────────────────────────────────────────────────────

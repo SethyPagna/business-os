@@ -353,6 +353,7 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
 CREATE TABLE IF NOT EXISTS returns (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   return_number    TEXT UNIQUE,
+  client_request_id TEXT,
   sale_id          INTEGER,
   receipt_number   TEXT,
   cashier_id       INTEGER,
@@ -641,6 +642,7 @@ const migrations = [
   `ALTER TABLE returns ADD COLUMN supplier_compensation_khr REAL DEFAULT 0`,
   `ALTER TABLE returns ADD COLUMN supplier_loss_usd REAL DEFAULT 0`,
   `ALTER TABLE returns ADD COLUMN supplier_loss_khr REAL DEFAULT 0`,
+  `ALTER TABLE returns ADD COLUMN client_request_id TEXT`,
 
   // audit_logs
   `ALTER TABLE audit_logs ADD COLUMN old_value TEXT`,
@@ -1136,6 +1138,14 @@ try {
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_request_id
     ON sales(client_request_id)
+    WHERE client_request_id IS NOT NULL AND trim(client_request_id) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_returns_client_request_id
+    ON returns(client_request_id)
     WHERE client_request_id IS NOT NULL AND trim(client_request_id) != ''
   `)
 } catch (_) {}

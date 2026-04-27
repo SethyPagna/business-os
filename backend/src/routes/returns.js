@@ -4,6 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 const CUSTOMER_SCOPE = 'customer'
@@ -20,6 +21,16 @@ function normalizeScope(value, fallback = CUSTOMER_SCOPE) {
 function toNumber(value, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+function findReturnByClientRequestId(clientRequestId) {
+  if (!clientRequestId) return null
+  return db.prepare(`
+    SELECT id, return_number
+    FROM returns
+    WHERE client_request_id = ?
+    LIMIT 1
+  `).get(clientRequestId)
 }
 
 function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
@@ -125,8 +136,14 @@ router.get('/returns/:id', authToken, requirePermission('sales'), (req, res) => 
 router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
   const actor = getAuditActor(req)
+  const clientRequestId = normalizeClientRequestId(d.client_request_id)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
+
+  const existingReturn = findReturnByClientRequestId(clientRequestId)
+  if (existingReturn) {
+    return ok(res, { id: existingReturn.id, returnNumber: existingReturn.return_number, duplicate: true })
+  }
 
   try {
     assertReturnableItems(d.sale_id || null, d.items)
@@ -134,59 +151,62 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
     return err(res, e.message)
   }
 
-  const returnNumber = `RET-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
+  const returnNumber = String(d.return_number || '').trim()
+    || `RET-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
 
-  const returnId = db.transaction(() => {
-    const branchName = d.branch_id
-      ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
-      : null
+  try {
+    const returnId = db.transaction(() => {
+      const branchName = d.branch_id
+        ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
+        : null
 
-    // Look up sale if provided
-    let saleMeta = {}
-    if (d.sale_id) {
-      const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(d.sale_id)
-      if (sale) {
-        saleMeta = {
-          receipt_number: sale.receipt_number,
-          customer_id:    sale.customer_id,
-          customer_name:  sale.customer_name,
-          branch_id:      sale.branch_id,
-          branch_name:    sale.branch_name,
-          exchange_rate:  sale.exchange_rate,
+      // Look up sale if provided
+      let saleMeta = {}
+      if (d.sale_id) {
+        const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(d.sale_id)
+        if (sale) {
+          saleMeta = {
+            receipt_number: sale.receipt_number,
+            customer_id:    sale.customer_id,
+            customer_name:  sale.customer_name,
+            branch_id:      sale.branch_id,
+            branch_name:    sale.branch_name,
+            exchange_rate:  sale.exchange_rate,
+          }
         }
       }
-    }
 
-    const rid = db.prepare(`
-      INSERT INTO returns (
-        return_number, sale_id, receipt_number, cashier_id, cashier_name,
-        customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
-        notes, total_refund_usd, total_refund_khr, exchange_rate,
-        status, device_name, device_tz
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      returnNumber,
-      d.sale_id || null,
-      d.receipt_number || saleMeta.receipt_number || null,
-      actor.userId,
-      actor.userName,
-      d.customer_id || saleMeta.customer_id || null,
-      d.customer_name || saleMeta.customer_name || null,
-      d.branch_id || saleMeta.branch_id || null,
-      branchName || saleMeta.branch_name || null,
-      CUSTOMER_SCOPE,
-      d.reason,
-      d.return_type || 'restock',
-      d.notes || null,
-      d.total_refund_usd || 0,
-      d.total_refund_khr || 0,
-      d.exchange_rate || saleMeta.exchange_rate || 4100,
-      'completed',
-      d.device_name || null,
-      d.device_tz || null,
-    ).lastInsertRowid
+      const rid = db.prepare(`
+        INSERT INTO returns (
+          return_number, client_request_id, sale_id, receipt_number, cashier_id, cashier_name,
+          customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
+          notes, total_refund_usd, total_refund_khr, exchange_rate,
+          status, device_name, device_tz
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        returnNumber,
+        clientRequestId,
+        d.sale_id || null,
+        d.receipt_number || saleMeta.receipt_number || null,
+        actor.userId,
+        actor.userName,
+        d.customer_id || saleMeta.customer_id || null,
+        d.customer_name || saleMeta.customer_name || null,
+        d.branch_id || saleMeta.branch_id || null,
+        branchName || saleMeta.branch_name || null,
+        CUSTOMER_SCOPE,
+        d.reason,
+        d.return_type || 'restock',
+        d.notes || null,
+        d.total_refund_usd || 0,
+        d.total_refund_khr || 0,
+        d.exchange_rate || saleMeta.exchange_rate || 4100,
+        'completed',
+        d.device_name || null,
+        d.device_tz || null,
+      ).lastInsertRowid
 
-    const insertItem = db.prepare(`
+      const insertItem = db.prepare(`
       INSERT INTO return_items (
         return_id, sale_item_id, product_id, product_name, quantity,
         applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr,
@@ -305,13 +325,22 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         deviceTz:   d.device_tz   || null,
       })
 
-    return rid
-  })()
+      return rid
+    })()
 
-  broadcast('returns')
-  broadcast('products')
-  broadcast('sales')
-  ok(res, { id: returnId, returnNumber })
+    broadcast('returns')
+    broadcast('products')
+    broadcast('sales')
+    ok(res, { id: returnId, returnNumber })
+  } catch (e) {
+    if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
+      const duplicateReturn = findReturnByClientRequestId(clientRequestId)
+      if (duplicateReturn) {
+        return ok(res, { id: duplicateReturn.id, returnNumber: duplicateReturn.return_number, duplicate: true })
+      }
+    }
+    return err(res, e.message)
+  }
 })
 
 function assertSupplierReturnableStock(items = [], fallbackBranchId = null) {
@@ -338,8 +367,14 @@ function assertSupplierReturnableStock(items = [], fallbackBranchId = null) {
 router.post('/returns/supplier', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
   const actor = getAuditActor(req)
+  const clientRequestId = normalizeClientRequestId(d.client_request_id)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
+
+  const existingReturn = findReturnByClientRequestId(clientRequestId)
+  if (existingReturn) {
+    return ok(res, { id: existingReturn.id, returnNumber: existingReturn.return_number, duplicate: true })
+  }
 
   const settlement = ['refund', 'credit', 'replacement', 'writeoff'].includes(String(d.settlement || '').toLowerCase())
     ? String(d.settlement).toLowerCase()
@@ -351,9 +386,11 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
     return err(res, e.message)
   }
 
-  const returnNumber = `SRET-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+  const returnNumber = String(d.return_number || '').trim()
+    || `SRET-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
 
-  const returnId = db.transaction(() => {
+  try {
+    const returnId = db.transaction(() => {
     const branchName = d.branch_id
       ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
       : null
@@ -372,20 +409,21 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
     const supplierLossUsd = Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
     const supplierLossKhr = Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
-    const rid = db.prepare(`
-      INSERT INTO returns (
-        return_number, sale_id, receipt_number, cashier_id, cashier_name,
-        customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
-        notes, total_refund_usd, total_refund_khr, exchange_rate,
-        supplier_id, supplier_name, supplier_settlement,
-        supplier_compensation_usd, supplier_compensation_khr, supplier_loss_usd, supplier_loss_khr,
-        status, device_name, device_tz
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      returnNumber,
-      null,
-      null,
-      actor.userId,
+      const rid = db.prepare(`
+        INSERT INTO returns (
+          return_number, client_request_id, sale_id, receipt_number, cashier_id, cashier_name,
+          customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
+          notes, total_refund_usd, total_refund_khr, exchange_rate,
+          supplier_id, supplier_name, supplier_settlement,
+          supplier_compensation_usd, supplier_compensation_khr, supplier_loss_usd, supplier_loss_khr,
+          status, device_name, device_tz
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        returnNumber,
+        clientRequestId,
+        null,
+        null,
+        actor.userId,
       actor.userName,
       null,
       null,
@@ -493,13 +531,22 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         deviceTz: d.device_tz || null,
       })
 
-    return rid
-  })()
+      return rid
+    })()
 
-  broadcast('returns')
-  broadcast('products')
-  broadcast('inventory')
-  ok(res, { id: returnId, returnNumber })
+    broadcast('returns')
+    broadcast('products')
+    broadcast('inventory')
+    ok(res, { id: returnId, returnNumber })
+  } catch (e) {
+    if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
+      const duplicateReturn = findReturnByClientRequestId(clientRequestId)
+      if (duplicateReturn) {
+        return ok(res, { id: duplicateReturn.id, returnNumber: duplicateReturn.return_number, duplicate: true })
+      }
+    }
+    return err(res, e.message)
+  }
 })
 
 // PATCH /api/returns/:id  — update a return (e.g. customer changed mind)
