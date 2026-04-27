@@ -5,13 +5,6 @@ import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import PageHelpButton from './components/shared/PageHelpButton'
 import { createCircularFaviconDataUrl } from './utils/favicon'
-import Users from './components/users/Users'
-import AuditLog from './components/utils-settings/AuditLog'
-import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
-import Backup from './components/utils-settings/Backup'
-import Settings from './components/utils-settings/Settings'
-import FilesPage from './components/files/FilesPage'
-import ServerPage from './components/server/ServerPage'
 
 /**
  * Frontend application shell.
@@ -34,6 +27,13 @@ const PAGE_IMPORTERS = {
   contacts: () => import('./components/contacts/Contacts'),
   catalog: () => import('./components/catalog/CatalogPage'),
   loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
+  users: () => import('./components/users/Users'),
+  audit_log: () => import('./components/utils-settings/AuditLog'),
+  receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
+  backup: () => import('./components/utils-settings/Backup'),
+  settings: () => import('./components/utils-settings/Settings'),
+  files: () => import('./components/files/FilesPage'),
+  server: () => import('./components/server/ServerPage'),
 }
 
 const WARMUP_PAGE_IDS = [
@@ -46,6 +46,13 @@ const WARMUP_PAGE_IDS = [
   'pos',
   'branches',
   'contacts',
+  'users',
+  'settings',
+  'receipt_settings',
+  'backup',
+  'files',
+  'server',
+  'audit_log',
 ]
 
 const CHUNK_IMPORT_TIMEOUT_MS = 8000
@@ -175,6 +182,13 @@ const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
+const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
+const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
+const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
+const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
+const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
+const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
+const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const PAGE_COMPONENTS = {
   dashboard: Dashboard,
   products: Products,
