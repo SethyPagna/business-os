@@ -1,4 +1,4 @@
-
+﻿
 // ─── Device info helper ───────────────────────────────────────────────────────
 function getDeviceInfo() {
   return getClientDeviceInfo()
@@ -45,6 +45,19 @@ function queueOfflineWrite(channel, payload) {
     status: 'pending',
     created_at: new Date().toISOString(),
   }).catch(() => {})
+}
+
+function createClientRequestId(prefix = 'req') {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function ensureClientRequestId(payload, prefix) {
+  const current = String(payload?.client_request_id || '').trim()
+  if (current) return { ...(payload || {}), client_request_id: current.slice(0, 120) }
+  return { ...(payload || {}), client_request_id: createClientRequestId(prefix) }
 }
 
 let flushPendingSyncPromise = null
@@ -403,33 +416,34 @@ export const testAiProvider = (id, payload) =>
 export const getAiResponses = (limit = 80) =>
   route(`ai:responses:${limit}`, () => apiFetch('GET', appendActorQuery(`/api/ai/responses?limit=${limit}`)), () => ({ items: [] }))
 export async function createProduct(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'product')
   // Auto-create supplier if new
-  if (d.supplier?.trim()) {
+  if (payload.supplier?.trim()) {
     try {
-      const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(d.supplier.trim()).first()
+      const existing = await dexieDb.suppliers.where('name').equalsIgnoreCase(payload.supplier.trim()).first()
       if (!existing) {
-        try { await apiFetch('POST', '/api/suppliers', { name: d.supplier.trim(), ...getDeviceInfo() }) }
-        catch (_) { await dexieDb.suppliers.add({ name: d.supplier.trim(), created_at: new Date().toISOString() }) }
+        try { await apiFetch('POST', '/api/suppliers', { name: payload.supplier.trim(), ...getDeviceInfo() }) }
+        catch (_) { await dexieDb.suppliers.add({ name: payload.supplier.trim(), created_at: new Date().toISOString() }) }
         cacheInvalidate('suppliers')
       }
     } catch (_) {}
   }
   // Try server; if offline, save to local Dexie + queue for later sync
   try {
-    return await route('products:create', () => apiFetch('POST', '/api/products', { ...getDeviceInfo(), ...d }), null, true)
+    return await route('products:create', () => apiFetch('POST', '/api/products', payload), null, true)
   } catch (e) {
-    if (!isNetErr(e)) throw e  // real server error, not connectivity — rethrow
+    if (!isNetErr(e)) throw e  // real server error, not connectivity ??rethrow
     // Offline: save locally
     const localId = await dexieDb.products.add({
-      ...d,
+      ...payload,
       id: undefined,  // Dexie auto-assigns
-      stock_quantity: d.stock_quantity || 0,
+      stock_quantity: payload.stock_quantity || 0,
       created_at: new Date().toISOString(),
       _local_pending: 1,
     })
     cacheInvalidate('products')
     // Queue for sync when back online
-    await queueOfflineWrite('products:create', { ...getDeviceInfo(), ...d })
+    await queueOfflineWrite('products:create', payload)
     return { success: true, id: localId, _offline: true }
   }
 }
@@ -618,20 +632,21 @@ export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchI
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
+  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
   try {
-    return await route('sales:create', () => apiFetch('POST', '/api/sales', d), null, true)
+    return await route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
   } catch (e) {
     if (!isNetErr(e)) throw e
     // Offline: store sale locally so it isn't lost
-    const receiptNum = d.receipt_number || `OFFLINE-${Date.now()}`
+    const receiptNum = payload.receipt_number || `OFFLINE-${Date.now()}`
     const localId = await dexieDb.sales.add({
-      ...d,
+      ...payload,
       id: undefined,
       receipt_number: receiptNum,
-      created_at: d.client_time || new Date().toISOString(),
+      created_at: payload.client_time || new Date().toISOString(),
       _local_pending: 1,
     })
-    await queueOfflineWrite('sales:create', { ...d, receipt_number: receiptNum })
+    await queueOfflineWrite('sales:create', { ...payload, receipt_number: receiptNum })
     cacheInvalidate('sales')
     return { success: true, id: localId, receipt_number: receiptNum, receiptNumber: receiptNum, _offline: true }
   }

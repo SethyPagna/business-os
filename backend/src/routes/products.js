@@ -10,6 +10,7 @@ const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets'
 const { isSafeExternalImageReference } = require('../netSecurity')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { sanitizeMediaList } = require('../settingsSnapshot')
+const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 
@@ -88,6 +89,16 @@ function attachImageGallery(products = []) {
       image_path: gallery[0] || null,
     }
   })
+}
+
+function findProductByClientRequestId(clientRequestId) {
+  if (!clientRequestId) return null
+  return db.prepare(`
+    SELECT id
+    FROM products
+    WHERE client_request_id = ?
+    LIMIT 1
+  `).get(clientRequestId)
 }
 
 function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
@@ -213,7 +224,12 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req, d)
+  const clientRequestId = normalizeClientRequestId(d.client_request_id)
   if (!d.name?.trim()) return err(res, 'Product name required')
+
+  const existingProduct = findProductByClientRequestId(clientRequestId)
+  if (existingProduct) return ok(res, { id: existingProduct.id, duplicate: true })
+
   try {
     const activeBranches = getActiveBranches()
     const defaultBranch = getDefaultBranch(activeBranches)
@@ -226,12 +242,12 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
 
     const r = db.prepare(`
       INSERT INTO products
-        (name, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr,
+        (name, client_request_id, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr,
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
          stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active, supplier, custom_fields, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      d.name.trim(), d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
+      d.name.trim(), clientRequestId, d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
       d.selling_price_usd || 0, d.selling_price_khr || 0,
       d.purchase_price_usd || 0, d.purchase_price_khr || 0,
       d.cost_price_usd || d.purchase_price_usd || 0,
@@ -258,7 +274,13 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     logOp('products:create', Date.now() - t0)
     broadcast('products')
     ok(res, { id: pid })
-  } catch (e) { err(res, e.message) }
+  } catch (e) {
+    if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
+      const duplicateProduct = findProductByClientRequestId(clientRequestId)
+      if (duplicateProduct) return ok(res, { id: duplicateProduct.id, duplicate: true })
+    }
+    err(res, e.message)
+  }
 })
 
 // ?€?€ PUT /api/products/:id ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€

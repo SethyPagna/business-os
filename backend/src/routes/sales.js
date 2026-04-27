@@ -4,6 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 
@@ -204,14 +205,35 @@ function fetchSaleItemsWithBranches(saleId) {
   `).all(saleId)
 }
 
+function findSaleByClientRequestId(clientRequestId) {
+  if (!clientRequestId) return null
+  return db.prepare(`
+    SELECT id, receipt_number
+    FROM sales
+    WHERE client_request_id = ?
+    LIMIT 1
+  `).get(clientRequestId)
+}
+
 // POST /api/sales
 router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Sale items required')
+  const clientRequestId = normalizeClientRequestId(d.client_request_id)
 
-  const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
+  const existingSale = findSaleByClientRequestId(clientRequestId)
+  if (existingSale) {
+    return ok(res, {
+      id: existingSale.id,
+      receiptNumber: existingSale.receipt_number,
+      duplicate: true,
+    })
+  }
+
+  const receiptNumber = String(d.receipt_number || '').trim()
+    || `RCP-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
 
   let saleId
   try {
@@ -226,7 +248,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
 
       const sid = db.prepare(`
         INSERT INTO sales (
-          receipt_number, cashier_id, cashier_name, customer_name, customer_phone, customer_address,
+          receipt_number, client_request_id, cashier_id, cashier_name, customer_name, customer_phone, customer_address,
           customer_id,
           branch_id, branch_name, subtotal_usd, subtotal_khr, discount_usd, discount_khr,
           membership_discount_usd, membership_discount_khr, membership_points_redeemed,
@@ -235,9 +257,9 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone,
           delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
           sale_status, notes, device_tz, device_name
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
-        receiptNumber, actor.userId, actor.userName,
+        receiptNumber, clientRequestId, actor.userId, actor.userName,
         d.customer_name || null, d.customer_phone || null, d.customer_address || null,
         d.customer_id || null,
         saleBranch.branchId, saleBranch.branchName,
@@ -340,6 +362,16 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
       return sid
     })()
   } catch (e) {
+    if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
+      const duplicateSale = findSaleByClientRequestId(clientRequestId)
+      if (duplicateSale) {
+        return ok(res, {
+          id: duplicateSale.id,
+          receiptNumber: duplicateSale.receipt_number,
+          duplicate: true,
+        })
+      }
+    }
     return err(res, e.message)
   }
 

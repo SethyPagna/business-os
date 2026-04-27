@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS branches (
 CREATE TABLE IF NOT EXISTS products (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
   name                    TEXT NOT NULL,
+  client_request_id       TEXT,
   sku                     TEXT,
   barcode                 TEXT,
   category                TEXT,
@@ -245,6 +246,7 @@ CREATE TABLE IF NOT EXISTS delivery_contacts (
 CREATE TABLE IF NOT EXISTS sales (
   id                       INTEGER PRIMARY KEY AUTOINCREMENT,
   receipt_number           TEXT UNIQUE,
+  client_request_id        TEXT,
   cashier_id               INTEGER,
   cashier_name             TEXT,
   branch_id                INTEGER,
@@ -567,6 +569,7 @@ const migrations = [
   `ALTER TABLE products ADD COLUMN out_of_stock_threshold REAL DEFAULT 0`,
   `ALTER TABLE products ADD COLUMN parent_id INTEGER`,
   `ALTER TABLE products ADD COLUMN brand TEXT`,
+  `ALTER TABLE products ADD COLUMN client_request_id TEXT`,
 
   // customers
   `ALTER TABLE customers ADD COLUMN membership_number TEXT`,
@@ -580,6 +583,7 @@ const migrations = [
   `ALTER TABLE sales ADD COLUMN membership_discount_usd REAL DEFAULT 0`,
   `ALTER TABLE sales ADD COLUMN membership_discount_khr REAL DEFAULT 0`,
   `ALTER TABLE sales ADD COLUMN membership_points_redeemed REAL DEFAULT 0`,
+  `ALTER TABLE sales ADD COLUMN client_request_id TEXT`,
 
   // sale_items — columns required by routes/sales.js INSERT and inventory queries
   `ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL DEFAULT 0`,
@@ -1117,6 +1121,22 @@ try {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_product_images_product_sort
     ON product_images(product_id, sort_order, id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_products_client_request_id
+    ON products(client_request_id)
+    WHERE client_request_id IS NOT NULL AND trim(client_request_id) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_request_id
+    ON sales(client_request_id)
+    WHERE client_request_id IS NOT NULL AND trim(client_request_id) != ''
   `)
 } catch (_) {}
 
