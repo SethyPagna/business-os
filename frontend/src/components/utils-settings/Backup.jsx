@@ -301,13 +301,23 @@ function DataFolderLocation({ t, notify }) {
 
   const load = async () => {
     try {
-      const [result, config] = await Promise.all([
+      const [resultState, configState] = await Promise.allSettled([
         window.api.getDataPath(),
         window.api.getSystemConfig?.().catch(() => null),
       ])
-      setInfo(result)
+
+      const result = resultState.status === 'fulfilled' ? resultState.value : null
+      const config = configState.status === 'fulfilled' ? configState.value : null
+
+      if (result) {
+        setInfo(result)
+        setInputPath(result?.dataRootParent || result?.dataRoot || '')
+      }
       setSystemConfig(config)
-      setInputPath(result?.dataRootParent || result?.dataRoot || '')
+
+      if (!result && resultState.status === 'rejected') {
+        throw resultState.reason || new Error('Failed to load data folder information')
+      }
     } catch (error) {
       notify(`${copy('data_folder_load_failed', 'Failed to load data folder information')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     }

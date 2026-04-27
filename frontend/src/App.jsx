@@ -55,6 +55,16 @@ const WARMUP_PAGE_IDS = [
   'audit_log',
 ]
 
+const ADMIN_PAGE_SEQUENCE = [
+  'users',
+  'audit_log',
+  'receipt_settings',
+  'settings',
+  'files',
+  'server',
+  'backup',
+]
+
 const CHUNK_IMPORT_TIMEOUT_MS = 8000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 
@@ -210,8 +220,11 @@ const PAGE_COMPONENTS = {
 }
 
 function getWarmupImporters() {
-  // Warm up the heaviest next-likely pages after login to hide first-open cost.
-  return WARMUP_PAGE_IDS
+  // Warm up the most failure-prone admin pages first, then the rest of the
+  // shell, so cold starts are less likely to show up only when a user reaches
+  // the later settings stack.
+  const orderedIds = [...ADMIN_PAGE_SEQUENCE, ...WARMUP_PAGE_IDS.filter((pageId) => !ADMIN_PAGE_SEQUENCE.includes(pageId))]
+  return orderedIds
     .map((pageId) => {
       const importer = PAGE_IMPORTERS[pageId]
       if (!importer) return null
@@ -224,6 +237,35 @@ function getDataWarmupLoaders(canAccessPage) {
   const steps = [
     () => window.api?.getSettings?.(),
     () => window.api?.getDashboard?.(),
+  ]
+
+  // Prioritize the pages that have historically been slow on their first visit.
+  // These warmups happen early so late-navigation admin screens have data and
+  // auth-derived config ready before the user reaches them.
+  if (canAccessPage('users')) {
+    steps.push(() => window.api?.getUsers?.())
+    steps.push(() => window.api?.getRoles?.())
+  }
+  if (canAccessPage('audit_log')) {
+    steps.push(() => window.api?.getAuditLogs?.())
+  }
+  if (canAccessPage('server') || canAccessPage('settings') || canAccessPage('backup')) {
+    steps.push(() => window.api?.getSystemConfig?.())
+  }
+  if (canAccessPage('files')) {
+    steps.push(() => window.api?.getFiles?.())
+    steps.push(() => window.api?.getAiProviders?.())
+    steps.push(() => window.api?.getAiResponses?.(40))
+  }
+  if (canAccessPage('server')) {
+    steps.push(() => window.api?.getSystemDebugLog?.())
+  }
+  if (canAccessPage('backup')) {
+    steps.push(() => window.api?.getDataPath?.())
+    steps.push(() => window.api?.getGoogleDriveSyncStatus?.())
+  }
+
+  steps.push(
     () => window.api?.getProducts?.(),
     () => window.api?.getCategories?.(),
     () => window.api?.getUnits?.(),
@@ -234,30 +276,56 @@ function getDataWarmupLoaders(canAccessPage) {
     () => window.api?.getCustomers?.(),
     () => window.api?.getSuppliers?.(),
     () => window.api?.getDeliveryContacts?.(),
-  ]
-
-  if (canAccessPage('users')) {
-    steps.push(() => window.api?.getUsers?.())
-    steps.push(() => window.api?.getRoles?.())
-  }
-  if (canAccessPage('audit_log')) {
-    steps.push(() => window.api?.getAuditLogs?.())
-  }
-  if (canAccessPage('backup')) {
-    steps.push(() => window.api?.getDataPath?.())
-    steps.push(() => window.api?.getGoogleDriveSyncStatus?.())
-  }
-  if (canAccessPage('files')) {
-    steps.push(() => window.api?.getFiles?.())
-  }
-  if (canAccessPage('server') || canAccessPage('settings')) {
-    steps.push(() => window.api?.getSystemConfig?.())
-  }
-  if (canAccessPage('server')) {
-    steps.push(() => window.api?.getSystemDebugLog?.())
-  }
+  )
 
   return steps.filter(Boolean)
+}
+
+function runWarmupBatches(loaders, batchSize = 3) {
+  return (async () => {
+    for (let index = 0; index < loaders.length; index += batchSize) {
+      const batch = loaders.slice(index, index + batchSize)
+      await Promise.allSettled(batch.map((load) => load()))
+    }
+  })()
+}
+
+function getPageEntryWarmupLoaders(pageId, canAccessPage) {
+  const loaders = []
+  const add = (fn) => {
+    if (typeof fn === 'function') loaders.push(fn)
+  }
+
+  if (pageId === 'users' && canAccessPage('users')) {
+    add(() => window.api?.getUsers?.())
+    add(() => window.api?.getRoles?.())
+  }
+  if (pageId === 'audit_log' && canAccessPage('audit_log')) {
+    add(() => window.api?.getAuditLogs?.())
+  }
+  if (pageId === 'receipt_settings') {
+    add(() => window.api?.getSettings?.())
+  }
+  if (pageId === 'settings' && canAccessPage('settings')) {
+    add(() => window.api?.getSettings?.())
+    add(() => window.api?.getSystemConfig?.())
+  }
+  if (pageId === 'files' && canAccessPage('files')) {
+    add(() => window.api?.getFiles?.())
+    add(() => window.api?.getAiProviders?.())
+    add(() => window.api?.getAiResponses?.(40))
+  }
+  if (pageId === 'server' && canAccessPage('server')) {
+    add(() => window.api?.getSystemConfig?.())
+    add(() => window.api?.getSystemDebugLog?.())
+  }
+  if (pageId === 'backup' && canAccessPage('backup')) {
+    add(() => window.api?.getSystemConfig?.())
+    add(() => window.api?.getDataPath?.())
+    add(() => window.api?.getGoogleDriveSyncStatus?.())
+  }
+
+  return loaders
 }
 
 function useMountedPages(activePage) {
@@ -337,14 +405,7 @@ function useChunkWarmup(user) {
     const runWarmup = async () => {
       if (cancelled || started) return
       started = true
-      for (const load of importers) {
-        if (cancelled) return
-        try {
-          await load()
-        } catch (_) {
-          // Warmup is best-effort only; real navigation still has page-level retry.
-        }
-      }
+      await runWarmupBatches(importers, 2)
     }
 
     timeoutId = window.setTimeout(runWarmup, 120)
@@ -384,14 +445,7 @@ function useDataWarmup(user, canAccessPage) {
     const runWarmup = async () => {
       if (cancelled || started) return
       started = true
-      for (const load of loaders) {
-        if (cancelled) return
-        try {
-          await load()
-        } catch (_) {
-          // Background data warmup is intentionally best-effort.
-        }
-      }
+      await runWarmupBatches(loaders, 3)
     }
 
     timeoutId = window.setTimeout(runWarmup, 220)
@@ -411,6 +465,41 @@ function useDataWarmup(user, canAccessPage) {
       if (followupId != null) window.clearTimeout(followupId)
     }
   }, [canAccessPage, user])
+}
+
+function usePageEntryWarmup(user, activePageId, canAccessPage) {
+  // When the user enters the later admin stack, immediately warm the current
+  // page and the remaining pages in that sequence. This closes the gap between
+  // "first app login" warmup and "I navigated here much later" cold starts.
+  useEffect(() => {
+    if (!user || !ADMIN_PAGE_SEQUENCE.includes(activePageId) || typeof window === 'undefined') return undefined
+
+    let cancelled = false
+    const currentIndex = ADMIN_PAGE_SEQUENCE.indexOf(activePageId)
+    const remainingPageIds = ADMIN_PAGE_SEQUENCE.slice(currentIndex)
+    const importerLoaders = remainingPageIds
+      .map((pageId) => {
+        const importer = PAGE_IMPORTERS[pageId]
+        if (!importer) return null
+        return () => importWithTimeout(importer, pageId).catch(() => null)
+      })
+      .filter(Boolean)
+    const dataLoaders = remainingPageIds.flatMap((pageId) => getPageEntryWarmupLoaders(pageId, canAccessPage))
+
+    const run = async () => {
+      if (cancelled) return
+      await Promise.allSettled([
+        runWarmupBatches(importerLoaders, 2),
+        runWarmupBatches(dataLoaders, 3),
+      ])
+    }
+
+    const timer = window.setTimeout(run, 80)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [activePageId, canAccessPage, user])
 }
 
 class PageErrorBoundary extends Component {
@@ -548,6 +637,7 @@ export default function App() {
   useVisibilityRecovery()
   useChunkWarmup(user)
   useDataWarmup(user, canAccessPage)
+  usePageEntryWarmup(user, page, canAccessPage)
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)

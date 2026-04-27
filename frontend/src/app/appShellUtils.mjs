@@ -2,7 +2,9 @@ const API_PREFIX = '/api/'
 const UPLOADS_PREFIX = '/uploads/'
 const STATIC_ASSET_RE = /\.[a-z0-9]+$/i
 
-export const MAX_MOUNTED_PAGES = 14
+// Keep enough visited pages mounted to cover the full private shell plus the
+// heavier admin stack, reducing remount churn after users step through the app.
+export const MAX_MOUNTED_PAGES = 20
 
 export function isPublicCatalogPath(pathname) {
   const value = String(pathname || '/')

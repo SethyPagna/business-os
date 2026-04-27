@@ -79,6 +79,7 @@ export default function Users() {
   const [newPw, setNewPw] = useState('')
   const [saving, setSaving] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   /**
    * 2. Authorization Guards
@@ -98,12 +99,33 @@ export default function Users() {
       setRoles([])
       return
     }
+    setLoading(true)
     try {
-      const [userRows, roleRows] = await Promise.all([window.api.getUsers(), window.api.getRoles()])
-      setUsers(Array.isArray(userRows) ? userRows : [])
-      setRoles(Array.isArray(roleRows) ? roleRows : [])
+      const [usersResult, rolesResult] = await Promise.allSettled([
+        window.api.getUsers(),
+        window.api.getRoles(),
+      ])
+
+      if (usersResult.status === 'fulfilled') {
+        setUsers(Array.isArray(usersResult.value) ? usersResult.value : [])
+      }
+      if (rolesResult.status === 'fulfilled') {
+        setRoles(Array.isArray(rolesResult.value) ? rolesResult.value : [])
+      }
+
+      if (usersResult.status === 'rejected' && rolesResult.status === 'rejected') {
+        throw usersResult.reason || rolesResult.reason || new Error('Failed to load users')
+      }
+
+      if (usersResult.status === 'rejected') {
+        notify(usersResult.reason?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
+      } else if (rolesResult.status === 'rejected') {
+        notify(rolesResult.reason?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
+      }
     } catch (error) {
       notify(error?.message || 'Failed to load users', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -340,6 +362,9 @@ export default function Users() {
             <CircleUserRound className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('users') || 'Users'}
           </h1>
+          {loading ? (
+            <div className="mt-1 text-xs text-blue-600 dark:text-blue-300">{tr('loading', 'Loading...')}</div>
+          ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           <button type="button" className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>
