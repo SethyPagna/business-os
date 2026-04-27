@@ -35,7 +35,7 @@ function ProductImg({ src, alt, className, onClick }) {
   }, [src])
 
   if (!url) return null
-  return <img src={url} alt={alt} className={className} onClick={onClick} />
+  return <img src={url} alt={alt} className={className} onClick={onClick} loading="lazy" decoding="async" />
 }
 
 function ProductImagePlaceholder({ className = '', compact = false }) {

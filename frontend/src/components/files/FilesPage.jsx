@@ -20,10 +20,10 @@ import { useApp } from '../../AppContext'
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
-    return <img src={asset.public_path} alt={asset.original_name} className="h-32 w-full rounded-2xl object-cover" />
+    return <img src={asset.public_path} alt={asset.original_name} className="h-32 w-full rounded-2xl object-cover" loading="lazy" decoding="async" />
   }
   if (asset?.media_type === 'video') {
-    return <video src={asset.public_path} className="h-32 w-full rounded-2xl object-cover" controls />
+    return <video src={asset.public_path} className="h-32 w-full rounded-2xl object-cover" controls preload="none" />
   }
   return (
     <div className="flex h-32 w-full items-center justify-center rounded-2xl bg-slate-100 text-xs text-slate-500">

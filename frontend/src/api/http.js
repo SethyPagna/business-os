@@ -119,6 +119,13 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+function hasUsableLocalData(value) {
+  if (value == null) return false
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  return true
+}
+
 async function tryServerReadWithRetry(serverFn) {
   try {
     return await serverFn()
@@ -368,16 +375,24 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         _inflight[channel] = promise
         
         if (localFn) {
+          const localPromise = Promise.resolve()
+            .then(() => localFn())
+            .then((result) => {
+              if (hasUsableLocalData(result)) {
+                cacheSet(channel, result)
+              }
+              return result
+            })
+            .catch(() => null)
           let fallbackTimer = null
           const localFallbackPromise = new Promise((resolve) => {
             fallbackTimer = window.setTimeout(async () => {
-              try {
-                const localResult = await localFn()
-                cacheSet(channel, localResult)
+              const localResult = await localPromise
+              if (hasUsableLocalData(localResult)) {
                 resolve({ source: 'local', data: localResult })
-              } catch (_) {
-                resolve({ source: 'local', data: null })
+                return
               }
+              resolve({ source: 'local', data: null })
             }, SYNC.READ_LOCAL_FALLBACK_MS)
           })
 
@@ -402,6 +417,14 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           } catch (e) {
             if (fallbackTimer != null) {
               window.clearTimeout(fallbackTimer)
+            }
+            const localResult = await localPromise
+            if (hasUsableLocalData(localResult)) {
+              logCall(channel, 'local-recovery', Date.now() - t0)
+              promise
+                .then(() => emitCacheRefresh(channel))
+                .catch(() => {})
+              return localResult
             }
             if (isConnectivityError(e)) setServerHealth(false)
             logCall(channel, 'local-fallback', Date.now() - t0, false)

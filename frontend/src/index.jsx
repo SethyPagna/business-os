@@ -4,6 +4,34 @@ import App from './App'
 import { AppProvider } from './AppContext'
 import './styles/main.css'
 
+function registerServiceWorker() {
+  if (!import.meta.env.PROD) return
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
+
+  const install = () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  }
+
+  if (document.readyState === 'complete') {
+    install()
+  } else {
+    window.addEventListener('load', install, { once: true })
+  }
+
+  const refreshRegistration = () => {
+    navigator.serviceWorker.getRegistration('/').then((registration) => {
+      registration?.update?.().catch?.(() => {})
+    }).catch(() => {})
+  }
+
+  window.addEventListener('focus', refreshRegistration)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshRegistration()
+    }
+  })
+}
+
 // Keep known browser-extension and CSS-injection noise away from React startup.
 if (typeof window !== 'undefined') {
   const ignoredRuntimePatterns = [
@@ -70,6 +98,8 @@ if (typeof window !== 'undefined') {
     stopKnownStartupNoise(event, event?.error || event?.message)
   }, true)
 }
+
+registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

@@ -12,7 +12,7 @@ function getDeviceInfo() {
  */
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
-import { dexieDb, localGetSettings, localSaveSettings, buildCSVTemplate } from './localDb.js'
+import { dexieDb, localGetSettings, localSaveSettings, buildCSVTemplate, replaceTableContents } from './localDb.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 
@@ -76,6 +76,23 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
   }
 }
 
+function mirrorReadResult(mirrorFn, result) {
+  if (typeof mirrorFn === 'function') {
+    Promise.resolve()
+      .then(() => mirrorFn(result))
+      .catch(() => {})
+  }
+  return result
+}
+
+function routeMirrored(channel, serverFn, localFn, mirrorFn) {
+  return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
+}
+
+function mirrorTable(tableName) {
+  return async (rows) => replaceTableContents(tableName, rows)
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
   return apiFetch('POST', '/api/auth/login', { username, password, organization, sessionDuration, clientTime, deviceTz, deviceName })
@@ -123,7 +140,7 @@ export async function getCurrentOrganization() {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export async function getSettings() {
-  return route('settings:get', () => apiFetch('GET', '/api/settings'), localGetSettings)
+  return routeMirrored('settings:get', () => apiFetch('GET', '/api/settings'), localGetSettings, localSaveSettings)
 }
 export async function saveSettings(updates) {
   await apiFetch('POST', '/api/settings', updates)
@@ -131,24 +148,24 @@ export async function saveSettings(updates) {
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
-export const getCategories  = ()       => route('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray())
+export const getCategories  = ()       => routeMirrored('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray(), mirrorTable('categories'))
 export const createCategory = d        => route('categories:create', () => apiFetch('POST', '/api/categories', d),           null, true)
 export const updateCategory = (id, d)  => route('categories:update', () => apiFetch('PUT', `/api/categories/${id}`, d),      null, true)
 export const deleteCategory = id       => route('categories:delete', () => apiFetch('DELETE', `/api/categories/${id}`),      null, true)
 
 // ─── Units ────────────────────────────────────────────────────────────────────
-export const getUnits   = ()  => route('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray())
+export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
 export const createUnit = d   => route('units:create', () => apiFetch('POST', '/api/units', d),       null, true)
 export const deleteUnit = id  => route('units:delete', () => apiFetch('DELETE', `/api/units/${id}`),  null, true)
 
 // ─── Custom fields ────────────────────────────────────────────────────────────
-export const getCustomFields   = ()       => route('customFields:get',    () => apiFetch('GET', '/api/custom-fields'),              () => dexieDb.custom_fields.toArray())
+export const getCustomFields   = ()       => routeMirrored('customFields:get',    () => apiFetch('GET', '/api/custom-fields'),              () => dexieDb.custom_fields.toArray(), mirrorTable('custom_fields'))
 export const createCustomField = d        => route('customFields:create', () => apiFetch('POST', '/api/custom-fields', d),           null, true)
 export const updateCustomField = (id, d)  => route('customFields:update', () => apiFetch('PUT', `/api/custom-fields/${id}`, d),      null, true)
 export const deleteCustomField = id       => route('customFields:delete', () => apiFetch('DELETE', `/api/custom-fields/${id}`),      null, true)
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
-export const getBranches    = ()       => route('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray())
+export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))
 export const createBranch   = d        => route('branches:create', () => apiFetch('POST', '/api/branches', { ...getDeviceInfo(), ...d }),           null, true)
 export const updateBranch   = (id, d)  => route('branches:update', () => apiFetch('PUT', `/api/branches/${id}`, { ...getDeviceInfo(), ...d }),      null, true)
 export const deleteBranch   = (id, userId, userName) => route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, { userId, userName }),      null, true)
@@ -157,7 +174,7 @@ export const getTransfers   = ()       => route('transfers:get',   () => apiFetc
 export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', d), null, true)
 
 // ─── Products ─────────────────────────────────────────────────────────────────
-export const getProducts        = ()       => route('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray())
+export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
 export async function getCatalogMeta() {
   const base = getPortalBaseUrl()
   const res = await fetchJsonWithTimeout(`${base}/api/catalog/meta`, {
@@ -552,7 +569,8 @@ export async function flushPendingSyncQueue() {
 
 export const getSales   = (params) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
-  return route('sales:get', () => apiFetch('GET', `/api/sales${q ? '?' + q : ''}`), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray())
+  const mirror = q ? null : mirrorTable('sales')
+  return routeMirrored(`sales:get:${q}`, () => apiFetch('GET', `/api/sales${q ? '?' + q : ''}`), () => dexieDb.sales.orderBy('created_at').reverse().limit(1000).toArray(), mirror)
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
@@ -566,7 +584,7 @@ export const getAnalytics = (params) => {
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-export const getCustomers        = ()       => route('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray())
+export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray(), mirrorTable('customers'))
 export const createCustomer      = d        => route('customers:create',     () => apiFetch('POST', '/api/customers', d),                  null, true)
 export const updateCustomer      = (id, d)  => route('customers:update',     () => apiFetch('PUT', `/api/customers/${id}`, d),             null, true)
 export const deleteCustomer      = id       => route('customers:delete',     () => apiFetch('DELETE', `/api/customers/${id}`),             null, true)
@@ -574,7 +592,7 @@ export const bulkImportCustomers = d        => route('customers:bulkImport', () 
 export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-export const getSuppliers        = ()       => route('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray())
+export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
 export const createSupplier      = d        => route('suppliers:create',     () => apiFetch('POST', '/api/suppliers', d),                  null, true)
 export const updateSupplier      = (id, d)  => route('suppliers:update',     () => apiFetch('PUT', `/api/suppliers/${id}`, d),             null, true)
 export const deleteSupplier      = id       => route('suppliers:delete',     () => apiFetch('DELETE', `/api/suppliers/${id}`),             null, true)
@@ -582,14 +600,14 @@ export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () 
 export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
-export const getDeliveryContacts   = ()       => route('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray())
+export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
 export const createDeliveryContact = d        => route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', d),           null, true)
 export const updateDeliveryContact = (id, d)  => route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, d),      null, true)
 export const deleteDeliveryContact = id       => route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`),      null, true)
 export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImport', () => apiFetch('POST', '/api/delivery-contacts/bulk-import', d), null, true)
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-export const getUsers      = ()       => route('users:get',           () => apiFetch('GET', appendActorQuery('/api/users')),        () => dexieDb.users.toArray())
+export const getUsers      = ()       => routeMirrored('users:get',           () => apiFetch('GET', appendActorQuery('/api/users')),        () => dexieDb.users.toArray(), mirrorTable('users'))
 export const createUser    = d        => route('users:create',        () => apiFetch('POST', '/api/users', d),                      null, true)
 export const updateUser    = (id, d)  => route('users:update',        () => apiFetch('PUT', `/api/users/${id}`, d),                 null, true)
 export const getUserProfile = (id)    => route(`users:profile:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/profile`)), () => null)
@@ -604,7 +622,7 @@ export const changeUserPassword = (id, d) =>
 export const resetPassword = (id, d)  => route('users:resetPassword', () => apiFetch('POST', `/api/users/${id}/reset-password`, d), null, true)
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export const getRoles   = ()       => route('roles:get',    () => apiFetch('GET', appendActorQuery('/api/roles')), () => dexieDb.roles.toArray())
+export const getRoles   = ()       => routeMirrored('roles:get',    () => apiFetch('GET', appendActorQuery('/api/roles')), () => dexieDb.roles.toArray(), mirrorTable('roles'))
 export const createRole = d        => route('roles:create', () => apiFetch('POST', '/api/roles', d),           null, true)
 export const updateRole = (id, d)  => route('roles:update', () => apiFetch('PUT', `/api/roles/${id}`, d),      null, true)
 export const deleteRole = (id, payload) => route('roles:delete', () => apiFetch('DELETE', `/api/roles/${id}`, payload), null, true)
@@ -618,7 +636,7 @@ export const updateCustomRow    = ({ tableName, id, data }) => route('customTabl
 export const deleteCustomRow    = ({ tableName, id })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`),                  null, true)
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = () => route('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray())
+export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray(), mirrorTable('audit_logs'))
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 export async function exportBackup() {
@@ -744,7 +762,8 @@ export async function openPath(targetPath) {
 export const getReturns  = (params) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
   const cacheKey = q ? `returns:get:${q}` : 'returns:get'
-  return route(cacheKey, () => apiFetch('GET', `/api/returns${q ? '?' + q : ''}`), () => [])
+  const mirror = q ? null : mirrorTable('returns')
+  return routeMirrored(cacheKey, () => apiFetch('GET', `/api/returns${q ? '?' + q : ''}`), () => dexieDb.returns.orderBy('created_at').reverse().toArray(), mirror)
 }
 export const createReturn = d => route('returns:create', () => apiFetch('POST', '/api/returns', d), null, true)
 export const createSupplierReturn = d => route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', d), null, true)
