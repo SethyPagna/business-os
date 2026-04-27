@@ -51,6 +51,81 @@ const DEVICE_LOCAL_SETTING_KEYS = new Set([
   'ui_custom_page_bg_colors',
   'ui_custom_sidebar_text_colors',
 ])
+const SESSION_ONLY_STORAGE_KEYS = [
+  STORAGE_KEYS.AUTH_TOKEN,
+  STORAGE_KEYS.USER,
+  STORAGE_KEYS.USER_EXPIRY,
+]
+
+function safeStorageGet(storage, key) {
+  try {
+    return storage?.getItem?.(key) || ''
+  } catch (_) {
+    return ''
+  }
+}
+
+function safeStorageSet(storage, key, value) {
+  try {
+    storage?.setItem?.(key, value)
+  } catch (_) {}
+}
+
+function safeStorageRemove(storage, key) {
+  try {
+    storage?.removeItem?.(key)
+  } catch (_) {}
+}
+
+function getStoredAuthToken() {
+  return safeStorageGet(sessionStorage, STORAGE_KEYS.AUTH_TOKEN) || safeStorageGet(localStorage, STORAGE_KEYS.AUTH_TOKEN)
+}
+
+function getStoredUserPayload() {
+  return safeStorageGet(sessionStorage, STORAGE_KEYS.USER) || safeStorageGet(localStorage, STORAGE_KEYS.USER)
+}
+
+function getStoredUserExpiry() {
+  return safeStorageGet(sessionStorage, STORAGE_KEYS.USER_EXPIRY) || safeStorageGet(localStorage, STORAGE_KEYS.USER_EXPIRY)
+}
+
+function clearPersistedAuthState() {
+  SESSION_ONLY_STORAGE_KEYS.forEach((key) => {
+    safeStorageRemove(localStorage, key)
+    safeStorageRemove(sessionStorage, key)
+  })
+  safeStorageRemove(localStorage, STORAGE_KEYS.SERVER_START_TIME)
+}
+
+function persistAuthState({ user, authToken, expiryTime, sessionDuration }) {
+  const mode = String(sessionDuration || 'session').trim().toLowerCase() || 'session'
+  const primaryStorage = mode === 'session' ? sessionStorage : localStorage
+  const secondaryStorage = mode === 'session' ? localStorage : sessionStorage
+
+  SESSION_ONLY_STORAGE_KEYS.forEach((key) => safeStorageRemove(secondaryStorage, key))
+
+  safeStorageSet(primaryStorage, STORAGE_KEYS.USER, JSON.stringify(user))
+  if (authToken) safeStorageSet(primaryStorage, STORAGE_KEYS.AUTH_TOKEN, authToken)
+  else safeStorageRemove(primaryStorage, STORAGE_KEYS.AUTH_TOKEN)
+  if (expiryTime) safeStorageSet(primaryStorage, STORAGE_KEYS.USER_EXPIRY, String(expiryTime))
+  else safeStorageRemove(primaryStorage, STORAGE_KEYS.USER_EXPIRY)
+}
+
+function computeSessionExpiryMs(sessionDuration, sessionExpiresAt = '') {
+  const normalizedExpiry = String(sessionExpiresAt || '').trim()
+  const parsedExpiryMs = normalizedExpiry ? new Date(normalizedExpiry).getTime() : Number.NaN
+  if (Number.isFinite(parsedExpiryMs) && parsedExpiryMs > Date.now()) {
+    return parsedExpiryMs
+  }
+
+  const mode = String(sessionDuration || 'session').trim().toLowerCase()
+  if (mode === '30d') return Date.now() + (30 * 24 * 60 * 60 * 1000)
+  if (mode === '14d') return Date.now() + (14 * 24 * 60 * 60 * 1000)
+  if (mode === '7d') return Date.now() + (7 * 24 * 60 * 60 * 1000)
+  if (mode === '3d') return Date.now() + (3 * 24 * 60 * 60 * 1000)
+  if (mode === '1d') return Date.now() + (24 * 60 * 60 * 1000)
+  return null
+}
 
 function readDeviceSettings() {
   try {
@@ -132,32 +207,25 @@ export function AppProvider({ children }) {
   // The provider owns the app session lifecycle and hands lightweight helpers
   // to page components so business workflows do not duplicate global state.
   const [user,                setUser]                = useState(() => {
-    // Recover user from localStorage on initial load (no re-login after reload)
-    // BUT check expiration and detect server restarts
+    // Recover the signed-in user from sessionStorage/localStorage depending on
+    // the last chosen login duration.
     try {
-      const stored = localStorage.getItem(STORAGE_KEYS.USER)
-      const expiry = localStorage.getItem(STORAGE_KEYS.USER_EXPIRY)
-      const authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
+      const stored = getStoredUserPayload()
+      const expiry = getStoredUserExpiry()
+      const authToken = getStoredAuthToken()
       if (stored && !authToken) {
-        localStorage.removeItem(STORAGE_KEYS.USER)
-        localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
+        clearPersistedAuthState()
         return null
       }
 
       if (stored && expiry) {
-        // Check if session expired
         if (Date.now() > parseInt(expiry, 10)) {
-          // Session expired ??clear it
-          localStorage.removeItem(STORAGE_KEYS.USER)
-          localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
+          clearPersistedAuthState()
           return null
         }
-        
-        // Check if server was restarted (detect stale cache scenario)
-        // If serverStartTime changed, server restarted, so clear user to force re-login
-        // This prevents stale user data from old server session being used with new server instance
         return JSON.parse(stored)
       }
+      if (stored && authToken) return JSON.parse(stored)
     } catch (_) {}
     return null
   })
@@ -197,6 +265,17 @@ export function AppProvider({ children }) {
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async () => {
     try {
+      const hasAuthSession = !!(window.api?.getAuthSessionToken?.() || getStoredAuthToken())
+      if (!hasAuthSession) {
+        const fallbackSettings = mergeSettingsWithDeviceOverrides({})
+        setSettings(fallbackSettings)
+        if (fallbackSettings.login_session_duration) {
+          writeStoredSessionDuration(fallbackSettings.login_session_duration)
+        }
+        if (fallbackSettings.language) setLanguage(fallbackSettings.language)
+        if (fallbackSettings.theme) setTheme(fallbackSettings.theme)
+        return fallbackSettings
+      }
       const serverSettings = await window.api.getSettings()
       const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
       setSettings(mergedSettings)
@@ -269,12 +348,7 @@ export function AppProvider({ children }) {
       setUser(null)
       setPage('dashboard')
       cacheClearAll()
-      try {
-        localStorage.removeItem(STORAGE_KEYS.USER)
-        localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
-        localStorage.removeItem(STORAGE_KEYS.SERVER_START_TIME)
-        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
-      } catch (_) {}
+      clearPersistedAuthState()
       window.api?.setAuthSessionToken?.('')
       setSyncConnected(false)
       setSyncServerUnreachable(false)
@@ -301,16 +375,12 @@ export function AppProvider({ children }) {
       if (!otpUser) return
       const { password: _pw, otp_secret: _sec, authToken = '', sessionDuration = 'session', ...safeUser } = otpUser
 
-      let expiryTime = null
-      try {
-        if (sessionDuration === '7d') expiryTime = Date.now() + (7 * 24 * 60 * 60 * 1000)
-        if (sessionDuration === '30d') expiryTime = Date.now() + (30 * 24 * 60 * 60 * 1000)
-      } catch (_) {}
+      const expiryTime = computeSessionExpiryMs(sessionDuration, otpUser.sessionExpiresAt || '')
 
       try {
-        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(safeUser))
+        persistAuthState({ user: safeUser, authToken, expiryTime, sessionDuration })
         if (safeUser?.organization_slug || safeUser?.organization_public_id || safeUser?.organization_name) {
-          localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+          safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
             id: safeUser.organization_id || null,
             name: safeUser.organization_name || '',
             slug: safeUser.organization_slug || '',
@@ -320,10 +390,7 @@ export function AppProvider({ children }) {
             group_slug: safeUser.organization_group_slug || '',
           }))
         }
-        if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
-        if (expiryTime) localStorage.setItem(STORAGE_KEYS.USER_EXPIRY, expiryTime.toString())
-        else localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
-        localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
+        safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, Date.now().toString())
       } catch (_) {}
 
       window.api?.setAuthSessionToken?.(authToken || '')
@@ -342,9 +409,18 @@ export function AppProvider({ children }) {
       setUser((prev) => {
         if (!prev || Number(prev.id) !== Number(nextUser.id)) return prev
         const merged = { ...prev, ...nextUser }
-        try {
-          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(merged))
-        } catch (_) {}
+        const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
+        const expiry = getStoredUserExpiry()
+        const expiryTime = expiry ? Number(expiry) : null
+        const currentMode = authToken && safeStorageGet(sessionStorage, STORAGE_KEYS.AUTH_TOKEN)
+          ? 'session'
+          : (safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION) || '30d')
+        persistAuthState({
+          user: merged,
+          authToken,
+          expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
+          sessionDuration: currentMode,
+        })
         return merged
       })
     }
@@ -378,13 +454,13 @@ export function AppProvider({ children }) {
         if (effectiveUrl) {
           window.api?.setSyncServerUrl?.(effectiveUrl)
 
-          const authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''
-          const storedUser = localStorage.getItem(STORAGE_KEYS.USER) || ''
+          const authToken = getStoredAuthToken()
+          const storedUser = getStoredUserPayload()
           if (authToken && storedUser && typeof window.api?.getSystemConfig === 'function') {
             window.api.getSystemConfig()
               .then((config) => {
                 if (config?.serverStartTime) {
-                  try { localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, config.serverStartTime.toString()) } catch (_) {}
+                  safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, config.serverStartTime.toString())
                 }
               })
               .catch(() => {})
@@ -547,21 +623,12 @@ export function AppProvider({ children }) {
 
   // ?? Auth ??????????????????????????????????????????????????????????????????
   const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', authToken = '', sessionExpiresAt = '') => {
-    let expiryTime = null
-    const normalizedExpiry = String(sessionExpiresAt || '').trim()
-    const parsedExpiryMs = normalizedExpiry ? new Date(normalizedExpiry).getTime() : Number.NaN
-    if (Number.isFinite(parsedExpiryMs) && parsedExpiryMs > Date.now()) {
-      expiryTime = parsedExpiryMs
-    } else if (sessionDuration === '7d') {
-      expiryTime = Date.now() + (7 * 24 * 60 * 60 * 1000)
-    } else if (sessionDuration === '30d') {
-      expiryTime = Date.now() + (30 * 24 * 60 * 60 * 1000)
-    }
+    const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
     try {
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(nextUser))
+      persistAuthState({ user: nextUser, authToken, expiryTime, sessionDuration })
       if (nextUser?.organization_slug || nextUser?.organization_public_id || nextUser?.organization_name) {
-        localStorage.setItem(STORAGE_KEYS.ORGANIZATION, JSON.stringify({
+        safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
           id: nextUser.organization_id || null,
           name: nextUser.organization_name || '',
           slug: nextUser.organization_slug || '',
@@ -571,16 +638,9 @@ export function AppProvider({ children }) {
           group_slug: nextUser.organization_group_slug || '',
         }))
       }
-      if (authToken) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, authToken)
-      else localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
-      if (expiryTime) {
-        localStorage.setItem(STORAGE_KEYS.USER_EXPIRY, expiryTime.toString())
-      } else {
-        localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
-      }
-      const knownServerStartTime = localStorage.getItem(STORAGE_KEYS.SERVER_START_TIME)
+      const knownServerStartTime = safeStorageGet(localStorage, STORAGE_KEYS.SERVER_START_TIME)
       if (knownServerStartTime) {
-        localStorage.setItem(STORAGE_KEYS.SERVER_START_TIME, knownServerStartTime)
+        safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, knownServerStartTime)
       }
     } catch (_) {}
 
@@ -625,12 +685,7 @@ export function AppProvider({ children }) {
     window.api?.setAuthSessionToken?.('')
     setUser(null)
     setPage('dashboard')
-    try {
-      localStorage.removeItem(STORAGE_KEYS.USER)
-      localStorage.removeItem(STORAGE_KEYS.USER_EXPIRY)
-      localStorage.removeItem(STORAGE_KEYS.SERVER_START_TIME)
-      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
-    } catch (_) {}
+    clearPersistedAuthState()
   }, [])
 
   // ?? Notifications ?????????????????????????????????????????????????????????

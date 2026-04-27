@@ -5,8 +5,11 @@ const { db } = require('./database')
 
 const SESSION_COOKIE_NAME = 'bos_session'
 const DEFAULT_SESSION_MS = Math.max(5 * 60 * 1000, Number(process.env.AUTH_SESSION_DEFAULT_MS || 24 * 60 * 60 * 1000))
+const SESSION_1D_MS = Math.max(DEFAULT_SESSION_MS, Number(process.env.AUTH_SESSION_1D_MS || 24 * 60 * 60 * 1000))
+const SESSION_3D_MS = Math.max(SESSION_1D_MS, Number(process.env.AUTH_SESSION_3D_MS || 3 * 24 * 60 * 60 * 1000))
+const SESSION_14D_MS = Math.max(SESSION_3D_MS, Number(process.env.AUTH_SESSION_14D_MS || 14 * 24 * 60 * 60 * 1000))
 const SESSION_7D_MS = Math.max(DEFAULT_SESSION_MS, Number(process.env.AUTH_SESSION_7D_MS || 7 * 24 * 60 * 60 * 1000))
-const SESSION_30D_MS = Math.max(SESSION_7D_MS, Number(process.env.AUTH_SESSION_30D_MS || 30 * 24 * 60 * 60 * 1000))
+const SESSION_30D_MS = Math.max(SESSION_14D_MS, Number(process.env.AUTH_SESSION_30D_MS || 30 * 24 * 60 * 60 * 1000))
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex')
@@ -16,9 +19,15 @@ function buildSessionExpiry(sessionDuration) {
   const mode = String(sessionDuration || 'session').trim().toLowerCase()
   const ttlMs = mode === '30d'
     ? SESSION_30D_MS
-    : mode === '7d'
-      ? SESSION_7D_MS
-      : DEFAULT_SESSION_MS
+    : mode === '14d'
+      ? SESSION_14D_MS
+      : mode === '7d'
+        ? SESSION_7D_MS
+        : mode === '3d'
+          ? SESSION_3D_MS
+          : mode === '1d'
+            ? SESSION_1D_MS
+            : DEFAULT_SESSION_MS
   return new Date(Date.now() + ttlMs).toISOString()
 }
 

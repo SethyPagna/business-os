@@ -577,12 +577,15 @@ export default function Login() {
                 <KeyRound className="h-4 w-4 text-gray-400" />
                 <span>{tr('keep_me_logged_in', 'Keep me logged in')}</span>
               </label>
-                <select id="session-duration" name="session-duration" value={sessionDuration} onChange={(event) => {
+              <select id="session-duration" name="session-duration" value={sessionDuration} onChange={(event) => {
                   sessionDurationTouchedRef.current = true
                   setSessionDuration(event.target.value)
                 }} className="input">
                 <option value="session">{tr('until_close_browser', 'Until I close the browser')}</option>
+                <option value="1d">{tr('for_1_day', 'For 1 day')}</option>
+                <option value="3d">{tr('for_3_days', 'For 3 days')}</option>
                 <option value="7d">{tr('for_7_days', 'For 7 days')}</option>
+                <option value="14d">{tr('for_14_days', 'For 14 days')}</option>
                 <option value="30d">{tr('for_30_days', 'For 30 days')}</option>
               </select>
               <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">

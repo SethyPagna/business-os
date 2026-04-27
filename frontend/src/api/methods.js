@@ -24,7 +24,7 @@ function getPortalBaseUrl() {
 function getCurrentUserContext() {
   if (typeof window === 'undefined') return { userId: null, userName: '' }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.USER)
+    const raw = window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER)
     if (!raw) return { userId: null, userName: '' }
     const parsed = JSON.parse(raw)
     return {

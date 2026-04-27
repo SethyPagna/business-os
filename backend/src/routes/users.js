@@ -303,7 +303,24 @@ function isValidEmail(value) {
 }
 
 function getAuthIdentityList(authUser) {
-  return Array.isArray(authUser?.raw?.identities) ? authUser.raw.identities : []
+  if (Array.isArray(authUser?.raw?.identities)) return authUser.raw.identities
+  if (Array.isArray(authUser?.identities)) return authUser.identities
+  return []
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim())
+}
+
+function resolveAuthIdentityUuid(identity) {
+  const candidates = [
+    identity?.identity_id,
+    identity?.id,
+    identity?.identity_data?.identity_id,
+    identity?.identity_data?.id,
+  ]
+  const match = candidates.find((value) => isUuid(value))
+  return match ? String(match).trim() : ''
 }
 
 function buildAuthMethodsPayload(user, authUser, providerConfig) {
@@ -464,14 +481,15 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
 
   const identitiesBefore = getAuthIdentityList(authResult.user)
   const providerIdentity = identitiesBefore.find((identity) => String(identity?.provider || identity?.identity_data?.provider || '').trim().toLowerCase() === provider)
-  if (!providerIdentity?.id) {
+  const providerIdentityId = resolveAuthIdentityUuid(providerIdentity)
+  if (!providerIdentityId) {
     return err(res, 'That provider is not currently linked to this account.', 400)
   }
   if (identitiesBefore.length < 2) {
     return err(res, 'Add another sign-in method before disconnecting this provider.', 400)
   }
 
-  const unlinkResult = await unlinkAuthIdentity(signInResult.accessToken, providerIdentity.id)
+  const unlinkResult = await unlinkAuthIdentity(signInResult.accessToken, providerIdentityId)
   if (!unlinkResult.success) {
     return err(res, unlinkResult.error || 'Failed to disconnect the selected sign-in provider.', 400)
   }

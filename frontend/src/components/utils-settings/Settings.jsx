@@ -1144,7 +1144,10 @@ export default function Settings() {
                 onChange={(event) => setValue('login_session_duration', event.target.value)}
               >
                 <option value="session">{t('until_browser_closes')}</option>
+                <option value="1d">{t('for_1_day') || '1 day'}</option>
+                <option value="3d">{t('for_3_days') || '3 days'}</option>
                 <option value="7d">{t('days_7')}</option>
+                <option value="14d">{t('for_14_days') || '14 days'}</option>
                 <option value="30d">{t('days_30')}</option>
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{t('session_duration_hint')}</p>

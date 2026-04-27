@@ -44,6 +44,18 @@ export function setSyncServerUrl(url) { syncServerUrl = (url || '').trim().repla
 export function setSyncToken(token)   { syncToken = (token || '').trim() }
 export function setAuthSessionToken(token) { authSessionToken = (token || '').trim() }
 
+function hydrateAuthTokenFromStorage() {
+  if (authSessionToken || typeof window === 'undefined') return authSessionToken
+  try {
+    authSessionToken = sessionStorage.getItem('businessos_auth_token')
+      || localStorage.getItem('businessos_auth_token')
+      || ''
+  } catch (_) {
+    authSessionToken = ''
+  }
+  return authSessionToken
+}
+
 // ─── In-memory read cache with request deduplication ────────────────────────
 const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
@@ -97,6 +109,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   const base    = syncServerUrl.replace(/\/$/, '')
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
   if (syncToken) headers['x-sync-token'] = syncToken
+  hydrateAuthTokenFromStorage()
   if (authSessionToken) headers['x-auth-session'] = authSessionToken
 
   const ctrl  = new AbortController()

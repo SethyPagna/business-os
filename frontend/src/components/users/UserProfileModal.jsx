@@ -443,17 +443,6 @@ export default function UserProfileModal({ onClose }) {
                   {profile.avatar_path || tr('no_avatar_uploaded', 'No avatar uploaded yet.')}
                 </div>
               </div>
-              {needsSensitivePassword ? (
-                <div>
-                  <label htmlFor="profile-current-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('current_password_sensitive', 'Current password for sensitive actions')}
-                  </label>
-                  <input id="profile-current-password" name="current_password" type="password" autoComplete="current-password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {tr('current_password_sensitive_note', 'Needed for password changes and disconnecting Google from this account.')}
-                  </p>
-                </div>
-              ) : null}
               <div className="flex justify-end">
                 <button className="btn-primary" onClick={handleProfileSave} disabled={savingProfile}>
                   {savingProfile ? tr('saving', 'Saving...') : tr('save_profile', 'Save profile')}
@@ -507,6 +496,11 @@ export default function UserProfileModal({ onClose }) {
                         : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.'))
                       : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
                   </p>
+                  {authMethods?.google_linked && needsSensitivePassword ? (
+                    <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
+                      {tr('disconnect_google_password_hint', 'Disconnecting Google uses the current password from the Security section below.')}
+                    </p>
+                  ) : null}
                   {verificationCaps.googleOauth && authMethods?.google_ready ? (
                     authMethods?.google_linked ? (
                       <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'google'} onClick={() => handleDisconnectOauthProvider('google')}>
@@ -545,6 +539,25 @@ export default function UserProfileModal({ onClose }) {
                   </span>
                 </div>
               </div>
+              {needsSensitivePassword ? (
+                <div>
+                  <label htmlFor="security-current-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {tr('current_password', 'Current password')}
+                  </label>
+                  <input
+                    id="security-current-password"
+                    name="current_password"
+                    type="password"
+                    autoComplete="current-password"
+                    className="input"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {tr('current_password_sensitive_note', 'Needed before changing your password or disconnecting Google from this account.')}
+                  </p>
+                </div>
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label htmlFor="new-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
@@ -569,8 +582,11 @@ export default function UserProfileModal({ onClose }) {
                   <label htmlFor="session-duration-profile" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('session_duration', 'Default login duration')}</label>
                   <select id="session-duration-profile" name="session_duration" className="input" value={sessionDuration} onChange={(e) => setSessionDuration(e.target.value)}>
                     <option value="session">{tr('until_browser_closes', 'Until browser closes')}</option>
-                    <option value="7d">7 days</option>
-                    <option value="30d">30 days</option>
+                    <option value="1d">{tr('for_1_day', 'For 1 day')}</option>
+                    <option value="3d">{tr('for_3_days', 'For 3 days')}</option>
+                    <option value="7d">{tr('for_7_days', 'For 7 days')}</option>
+                    <option value="14d">{tr('for_14_days', 'For 14 days')}</option>
+                    <option value="30d">{tr('for_30_days', 'For 30 days')}</option>
                   </select>
                 </div>
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>

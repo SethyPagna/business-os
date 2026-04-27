@@ -19,6 +19,16 @@ import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
 import { STORAGE_KEYS }            from './constants.js'
 
+function getStoredAuthToken() {
+  try {
+    return sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
+      || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
+      || ''
+  } catch (_) {
+    return ''
+  }
+}
+
 // ── Silence Capacitor/vendor bridge noise that fires in plain web context ──────
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
 // rejection when Capacitor's tab-messaging bridge can't find a native listener.
@@ -102,10 +112,6 @@ window.api = {
   setAuthSessionToken(token) {
     const clean = (token || '').trim()
     setAuthSessionToken(clean)
-    try {
-      if (clean) localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, clean)
-      else localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
-    } catch (_) {}
     disconnectWS()
     if (clean) connectWS()
   },
@@ -138,13 +144,13 @@ if (typeof window !== 'undefined') {
       (location.port === '5173' || location.port === '5174')
 
     // Retrieve auth token from storage
-    let authToken = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''
+    let authToken = getStoredAuthToken()
+    if (authToken) setAuthSessionToken(authToken)
     try {
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
       await dexieDb.settings.delete('sync_token')
     } catch (_) {}
-    if (authToken) setAuthSessionToken(authToken)
 
     // Determine the correct sync server URL
     let url
