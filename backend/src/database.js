@@ -21,6 +21,7 @@ const crypto   = require('crypto')
 const Database = require('better-sqlite3')
 const bcrypt   = require('bcryptjs')
 const { DB_PATH, DEFAULT_ORGANIZATION_BOOTSTRAP } = require('./config')
+const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
 
 // Ensure the DB directory exists before opening the file
@@ -958,11 +959,8 @@ function ensurePrimaryAdminRoleAndUser() {
   `).run(adminRole.id, adminPermissions, primaryAdmin.id)
 }
 
-try { ensurePrimaryAdminRoleAndUser() } catch (_) {}
-let defaultOrganizationContext = null
-try { defaultOrganizationContext = ensureDefaultOrganizationAndGroup() } catch (_) {}
-
-seedIfEmpty('settings', [
+function buildDefaultSettingsSeed(defaultOrganizationContext = null) {
+  return [
   { key: 'business_name',    value: 'My Business' },
   { key: 'business_phone',   value: '' },
   { key: 'business_address', value: '' },
@@ -1030,11 +1028,10 @@ seedIfEmpty('settings', [
   { key: 'customer_portal_facebook_label', value: 'Facebook' },
   { key: 'customer_portal_instagram_label', value: 'Instagram' },
   { key: 'customer_portal_telegram_label', value: 'Telegram' },
-], (s) => {
-  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)`).run(s.key, s.value)
-})
+  ]
+}
 
-;[
+const SUPPLEMENTAL_SETTINGS_DEFAULTS = [
   ['customer_portal_show_logo', 'true'],
   ['customer_portal_logo_size', '80'],
   ['customer_portal_logo_fit', 'contain'],
@@ -1068,24 +1065,53 @@ seedIfEmpty('settings', [
   ['customer_portal_facebook_label', 'Facebook'],
   ['customer_portal_instagram_label', 'Instagram'],
   ['customer_portal_telegram_label', 'Telegram'],
-].forEach(([key, value]) => {
-  try {
-    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value)
-  } catch (_) {}
-})
+]
 
-seedIfEmpty('branches', [
+const DEFAULT_BRANCH_SEED = [
   { name: 'Main Store', is_default: 1 },
-], (b) => {
-  db.prepare(`INSERT OR IGNORE INTO branches (name, is_default) VALUES (?,?)`).run(b.name, b.is_default)
-})
+]
 
-seedIfEmpty('units', [
+const DEFAULT_UNIT_SEED = [
   { name: 'pcs' }, { name: 'kg' }, { name: 'g' },
   { name: 'L' }, { name: 'mL' }, { name: 'box' }, { name: 'bag' },
-], (u) => {
-  db.prepare(`INSERT OR IGNORE INTO units (name) VALUES (?)`).run(u.name)
-})
+]
+
+function ensureDefaultSettings(defaultOrganizationContext = null) {
+  seedIfEmpty('settings', buildDefaultSettingsSeed(defaultOrganizationContext), (setting) => {
+    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(setting.key, setting.value)
+  })
+  SUPPLEMENTAL_SETTINGS_DEFAULTS.forEach(([key, value]) => {
+    try {
+      db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value)
+    } catch (_) {}
+  })
+}
+
+function ensureDefaultBranches() {
+  seedIfEmpty('branches', DEFAULT_BRANCH_SEED, (branch) => {
+    db.prepare(`INSERT OR IGNORE INTO branches (name, is_default) VALUES (?, ?)`).run(branch.name, branch.is_default)
+  })
+}
+
+function ensureDefaultUnits() {
+  seedIfEmpty('units', DEFAULT_UNIT_SEED, (unit) => {
+    db.prepare(`INSERT OR IGNORE INTO units (name) VALUES (?)`).run(unit.name)
+  })
+}
+
+function ensureCoreDataInvariants(options = {}) {
+  const repairUploads = options.repairUploads !== false
+  ensurePrimaryAdminRoleAndUser()
+  const organizationContext = ensureDefaultOrganizationAndGroup()
+  ensureDefaultSettings(organizationContext)
+  ensureDefaultBranches()
+  ensureDefaultUnits()
+  if (repairUploads) repairMissingUploadReferences(db)
+  return organizationContext
+}
+
+let defaultOrganizationContext = null
+try { defaultOrganizationContext = ensureCoreDataInvariants() } catch (_) {}
 
 try {
   db.exec(`
@@ -1129,4 +1155,9 @@ try {
   `)
 } catch (_) {}
 
-module.exports = { db }
+module.exports = {
+  db,
+  ensureCoreDataInvariants,
+  ensureDefaultOrganizationAndGroup,
+  ensurePrimaryAdminRoleAndUser,
+}

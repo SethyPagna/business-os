@@ -251,7 +251,7 @@ if not "!CUSTOMER_PUBLIC_URL!"=="" (
     if not "!TAILSCALE_URL_FOUND!"=="" echo   Customer URL: !TAILSCALE_URL_FOUND!!CUSTOMER_PORTAL_PATH!
 )
 echo.
-echo   Default login: admin / admin
+echo   Factory-reset default login: admin / admin
 echo   Data folder:   %DATA_DIR%
 echo.
 if "!USING_PM2!"=="1" (

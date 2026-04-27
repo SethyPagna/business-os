@@ -2,8 +2,9 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, broadcast, logOp } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 
 const router = express.Router()
 
@@ -20,7 +21,7 @@ function getSettingsSnapshot() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const obj  = {}
   rows.forEach(r => { obj[r.key] = r.value })
-  return obj
+  return sanitizeSettingsSnapshot(obj)
 }
 
 function getSettingsUpdatedAt() {
@@ -47,7 +48,7 @@ router.get('/meta', authToken, (req, res) => {
 })
 
 // POST /api/settings
-router.post('/', authToken, (req, res) => {
+router.post('/', authToken, requirePermission('settings'), (req, res) => {
   const t0      = Date.now()
   const updates = req.body || {}
   const expectedUpdatedAt = getExpectedUpdatedAt(updates)

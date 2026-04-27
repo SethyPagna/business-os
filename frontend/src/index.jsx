@@ -4,32 +4,33 @@ import App from './App'
 import { AppProvider } from './AppContext'
 import './styles/main.css'
 
-function registerServiceWorker() {
-  if (!import.meta.env.PROD) return
+function disableServiceWorkerCaching() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
-  const install = () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  const cleanup = async () => {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)))
+    } catch (_) {}
+
+    if (typeof caches === 'undefined') return
+    try {
+      const keys = await caches.keys()
+      await Promise.all(
+        keys
+          .filter((key) => key.startsWith('business-os-'))
+          .map((key) => caches.delete(key).catch(() => false)),
+      )
+    } catch (_) {}
   }
 
   if (document.readyState === 'complete') {
-    install()
+    cleanup().catch(() => {})
   } else {
-    window.addEventListener('load', install, { once: true })
+    window.addEventListener('load', () => {
+      cleanup().catch(() => {})
+    }, { once: true })
   }
-
-  const refreshRegistration = () => {
-    navigator.serviceWorker.getRegistration('/').then((registration) => {
-      registration?.update?.().catch?.(() => {})
-    }).catch(() => {})
-  }
-
-  window.addEventListener('focus', refreshRegistration)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      refreshRegistration()
-    }
-  })
 }
 
 // Keep known browser-extension and CSS-injection noise away from React startup.
@@ -99,7 +100,7 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
-registerServiceWorker()
+disableServiceWorkerCaching()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

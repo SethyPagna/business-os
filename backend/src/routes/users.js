@@ -973,7 +973,7 @@ router.get('/roles', authToken, (req, res) => {
 })
 
 router.post('/roles', authToken, (req, res) => {
-  const { name, permissions, userId, userName } = req.body || {}
+  const { name, permissions } = req.body || {}
   const actor = requireAdminControl(req, res)
   if (!actor) return
   const normalizedName = String(name || '').trim()
@@ -982,7 +982,7 @@ router.post('/roles', authToken, (req, res) => {
   try {
     const result = db.prepare('INSERT INTO roles (name, code, is_system, permissions) VALUES (?,?,?,?)')
       .run(normalizedName, null, 0, JSON.stringify(permissions || {}))
-    audit(userId || actor.id, userName || actor.name, 'create', 'role', result.lastInsertRowid, { name: normalizedName })
+    audit(actor.id, actor.name, 'create', 'role', result.lastInsertRowid, { name: normalizedName })
     broadcast('roles')
     ok(res, { id: result.lastInsertRowid })
   } catch (_) {
@@ -991,7 +991,7 @@ router.post('/roles', authToken, (req, res) => {
 })
 
 router.put('/roles/:id', authToken, (req, res) => {
-  const { name, permissions, userId, userName } = req.body || {}
+  const { name, permissions } = req.body || {}
   const actor = requireAdminControl(req, res)
   if (!actor) return
   const existingRole = db.prepare('SELECT id, code, is_system FROM roles WHERE id = ?').get(req.params.id)
@@ -1004,14 +1004,12 @@ router.put('/roles/:id', authToken, (req, res) => {
   if (normalizedName.toLowerCase() === 'admin') return err(res, 'Admin role is reserved', 400)
   db.prepare('UPDATE roles SET name = ?, permissions = ? WHERE id = ?')
     .run(normalizedName, JSON.stringify(permissions || {}), req.params.id)
-  audit(userId || actor.id, userName || actor.name, 'update', 'role', req.params.id, { name: normalizedName })
+  audit(actor.id, actor.name, 'update', 'role', req.params.id, { name: normalizedName })
   broadcast('roles')
   ok(res, {})
 })
 
 router.delete('/roles/:id', authToken, (req, res) => {
-  const userId = req.body?.userId || req.query?.userId
-  const userName = req.body?.userName || req.query?.userName
   const actor = requireAdminControl(req, res)
   if (!actor) return
   const existingRole = db.prepare('SELECT id, code, is_system FROM roles WHERE id = ?').get(req.params.id)
@@ -1022,7 +1020,7 @@ router.delete('/roles/:id', authToken, (req, res) => {
   const assignedUsers = db.prepare('SELECT COUNT(*) AS n FROM users WHERE role_id = ? AND deleted_at IS NULL').get(req.params.id)
   if (Number(assignedUsers?.n || 0) > 0) return err(res, 'Role still has assigned users', 400)
   db.prepare('DELETE FROM roles WHERE id = ?').run(req.params.id)
-  audit(userId || actor.id, userName || actor.name, 'delete', 'role', req.params.id)
+  audit(actor.id, actor.name, 'delete', 'role', req.params.id)
   broadcast('roles')
   ok(res, {})
 })

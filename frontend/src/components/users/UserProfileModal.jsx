@@ -7,8 +7,6 @@ import { STORAGE_KEYS } from '../../constants'
 import { useApp } from '../../AppContext'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
-const OAUTH_LINK_PENDING_KEY = 'business_os_oauth_link_pending'
-
 /**
  * 1. User Profile Modal
  * 1.1 Purpose
@@ -252,7 +250,7 @@ export default function UserProfileModal({ onClose }) {
     setOauthConnecting(normalizedProvider)
     try {
       try {
-        localStorage.setItem(OAUTH_LINK_PENDING_KEY, JSON.stringify({
+        localStorage.setItem(STORAGE_KEYS.OAUTH_LINK_PENDING, JSON.stringify({
           userId: user?.id || null,
           provider: normalizedProvider,
           email: String(profile?.email || '').trim().toLowerCase(),

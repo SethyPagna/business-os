@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
@@ -21,8 +21,9 @@ router.get('/', authToken, (req, res) => {
 })
 
 // POST /api/branches
-router.post('/', authToken, (req, res) => {
-  const { name, location, phone, manager, notes, is_default, is_active, userId, userName, deviceName, deviceTz, clientTime } = req.body || {}
+router.post('/', authToken, requirePermission('inventory'), (req, res) => {
+  const { name, location, phone, manager, notes, is_default, is_active, deviceName, deviceTz, clientTime } = req.body || {}
+  const actor = getAuditActor(req, req.body || {})
   if (!name?.trim()) return err(res, 'Name required')
   const id = db.transaction(() => {
     const defaultFlag = toDbBool(is_default, 0)
@@ -31,7 +32,7 @@ router.post('/', authToken, (req, res) => {
     const r = db.prepare(
       'INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
     ).run(name.trim(), location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag)
-    audit(userId, userName, 'create', 'branch', r.lastInsertRowid, { name }, {
+    audit(actor.userId, actor.userName, 'create', 'branch', r.lastInsertRowid, { name }, {
       tableName: 'branches', recordId: r.lastInsertRowid,
       deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
     })
@@ -42,8 +43,9 @@ router.post('/', authToken, (req, res) => {
 })
 
 // PUT /api/branches/:id
-router.put('/:id', authToken, (req, res) => {
-  const { name, location, phone, manager, notes, is_default, is_active, userId, userName, deviceName, deviceTz, clientTime } = req.body || {}
+router.put('/:id', authToken, requirePermission('inventory'), (req, res) => {
+  const { name, location, phone, manager, notes, is_default, is_active, deviceName, deviceTz, clientTime } = req.body || {}
+  const actor = getAuditActor(req, req.body || {})
   try {
     db.transaction(() => {
       const current = db.prepare('SELECT id, updated_at FROM branches WHERE id = ?').get(req.params.id)
@@ -55,7 +57,7 @@ router.put('/:id', authToken, (req, res) => {
       db.prepare(
         'UPDATE branches SET name=?, location=?, phone=?, manager=?, notes=?, is_default=?, is_active=?, updated_at=datetime(\'now\') WHERE id=?'
       ).run(name, location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag, req.params.id)
-      audit(userId, userName, 'update', 'branch', req.params.id, { name }, {
+      audit(actor.userId, actor.userName, 'update', 'branch', req.params.id, { name }, {
         tableName: 'branches', recordId: req.params.id,
         deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
       })
@@ -69,8 +71,8 @@ router.put('/:id', authToken, (req, res) => {
 })
 
 // DELETE /api/branches/:id
-router.delete('/:id', authToken, (req, res) => {
-  const { userId, userName } = req.body || req.query
+router.delete('/:id', authToken, requirePermission('inventory'), (req, res) => {
+  const actor = getAuditActor(req, req.body || req.query || {})
   try {
     const branch = db.prepare('SELECT * FROM branches WHERE id = ?').get(req.params.id)
     if (!branch) return err(res, 'Branch not found')
@@ -86,7 +88,7 @@ router.delete('/:id', authToken, (req, res) => {
 
     db.prepare('DELETE FROM branch_stock WHERE branch_id = ?').run(req.params.id)
     db.prepare('DELETE FROM branches WHERE id = ?').run(req.params.id)
-    audit(userId, userName, 'delete', 'branch', req.params.id, { name: branch.name })
+    audit(actor.userId, actor.userName, 'delete', 'branch', req.params.id, { name: branch.name })
     broadcast('branches')
     ok(res, {})
   } catch (e) {
@@ -122,8 +124,9 @@ router.get('/transfers/list', authToken, (req, res) => {
 })
 
 // POST /api/branches/transfer
-router.post('/transfer', authToken, (req, res) => {
-  const { fromBranchId, toBranchId, productId, productName, quantity, note, userId, userName, deviceName, deviceTz, clientTime } = req.body || {}
+router.post('/transfer', authToken, requirePermission('inventory'), (req, res) => {
+  const { fromBranchId, toBranchId, productId, productName, quantity, note, deviceName, deviceTz, clientTime } = req.body || {}
+  const actor = getAuditActor(req, req.body || {})
   if (!fromBranchId || !toBranchId || !productId || !quantity) return err(res, 'Missing required fields')
   if (parseInt(fromBranchId, 10) === parseInt(toBranchId, 10)) return err(res, 'Source and destination cannot be the same')
 
@@ -152,7 +155,7 @@ router.post('/transfer', authToken, (req, res) => {
 
       const r = db.prepare(
         'INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, note, user_id, user_name) VALUES (?,?,?,?,?,?,?,?)'
-      ).run(productId, productName, fromBranchId, toBranchId, qty, note || null, userId || null, userName || null)
+      ).run(productId, productName, fromBranchId, toBranchId, qty, note || null, actor.userId, actor.userName)
 
       const transferId = r.lastInsertRowid
       const insertMovement = db.prepare(`
@@ -175,8 +178,8 @@ router.post('/transfer', authToken, (req, res) => {
         unitCostKhr * qty,
         `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`,
         transferId,
-        userId || null,
-        userName || null,
+        actor.userId,
+        actor.userName,
       )
       insertMovement.run(
         productId,
@@ -191,11 +194,11 @@ router.post('/transfer', authToken, (req, res) => {
         unitCostKhr * qty,
         `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}`,
         transferId,
-        userId || null,
-        userName || null,
+        actor.userId,
+        actor.userName,
       )
 
-      audit(userId, userName, 'transfer', 'stock', transferId, { productName, quantity: qty, fromBranchId, toBranchId }, {
+      audit(actor.userId, actor.userName, 'transfer', 'stock', transferId, { productName, quantity: qty, fromBranchId, toBranchId }, {
         deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
       })
     })()

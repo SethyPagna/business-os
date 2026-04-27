@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
@@ -205,9 +205,10 @@ function fetchSaleItemsWithBranches(saleId) {
 }
 
 // POST /api/sales
-router.post('/sales', authToken, (req, res) => {
+router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
+  const actor = getAuditActor(req)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Sale items required')
 
   const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
@@ -236,7 +237,7 @@ router.post('/sales', authToken, (req, res) => {
           sale_status, notes, device_tz, device_name
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
-        receiptNumber, d.cashier_id || null, d.cashier_name || null,
+        receiptNumber, actor.userId, actor.userName,
         d.customer_name || null, d.customer_phone || null, d.customer_address || null,
         d.customer_id || null,
         saleBranch.branchId, saleBranch.branchName,
@@ -318,8 +319,8 @@ router.post('/sales', authToken, (req, res) => {
             totalCostKhr,
             `Sale ${receiptNumber} (${saleStatus})`,
             sid,
-            d.cashier_id || null,
-            d.cashier_name || null,
+            actor.userId,
+            actor.userName,
           )
         }
       }
@@ -328,7 +329,7 @@ router.post('/sales', authToken, (req, res) => {
         refreshProductStockQuantities(touchedProductIds)
       }
 
-      audit(d.cashier_id, d.cashier_name, 'create', 'sale', sid,
+      audit(actor.userId, actor.userName, 'create', 'sale', sid,
         { receiptNumber, total: d.total_usd, status: saleStatus, branch: saleBranch.branchName }, {
           tableName: 'sales', recordId: sid,
           newValue: { receiptNumber, total: d.total_usd, status: saleStatus, branch: saleBranch.branchName },
@@ -350,10 +351,11 @@ router.post('/sales', authToken, (req, res) => {
 })
 
 // PATCH /api/sales/:id/status  — update sale status
-router.patch('/sales/:id/status', authToken, (req, res) => {
+router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const payload = req.body || {}
-  const { sale_status, notes, cashier_id, cashier_name, device_name, device_tz, client_time } = payload
+  const actor = getAuditActor(req)
+  const { sale_status, notes, device_name, device_tz, client_time } = payload
 
   const validStatuses = ['completed', 'awaiting_payment', 'awaiting_delivery', 'cancelled', 'partial_return', 'returned']
   if (!sale_status || !validStatuses.includes(sale_status)) {
@@ -422,8 +424,8 @@ router.patch('/sales/:id/status', authToken, (req, res) => {
             (item.cost_price_khr || 0) * item.quantity,
             `Sale status changed from awaiting_payment to ${sale_status}`,
             id,
-            cashier_id || null,
-            cashier_name || null,
+            actor.userId,
+            actor.userName,
           )
         }
         refreshProductStockQuantities(touchedProductIds)
@@ -458,14 +460,14 @@ router.patch('/sales/:id/status', authToken, (req, res) => {
             (item.cost_price_khr || 0) * item.quantity,
             `Sale status changed from ${oldStatus} to ${sale_status}`,
             id,
-            cashier_id || null,
-            cashier_name || null,
+            actor.userId,
+            actor.userName,
           )
         }
         refreshProductStockQuantities(touchedProductIds)
       }
 
-      audit(cashier_id, cashier_name, 'update', 'sale', parseInt(id),
+      audit(actor.userId, actor.userName, 'update', 'sale', parseInt(id),
         { oldStatus, newStatus: sale_status }, {
           tableName: 'sales', recordId: parseInt(id),
           oldValue: { sale_status: oldStatus },
@@ -488,16 +490,13 @@ router.patch('/sales/:id/status', authToken, (req, res) => {
 })
 
 // PATCH /api/sales/:id/customer  -- attach a customer or membership to an existing sale
-router.patch('/sales/:id/customer', authToken, (req, res) => {
+router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req, res) => {
   const saleId = parseInt(req.params.id, 10)
   const payload = req.body || {}
+  const actor = getAuditActor(req)
   const {
     customerId,
     membershipNumber,
-    userId,
-    userName,
-    cashier_id,
-    cashier_name,
     device_name,
     device_tz,
   } = payload
@@ -537,8 +536,8 @@ router.patch('/sales/:id/customer', authToken, (req, res) => {
       )
 
       audit(
-        userId || cashier_id || null,
-        userName || cashier_name || null,
+        actor.userId,
+        actor.userName,
         'update',
         'sale',
         saleId,
@@ -581,7 +580,7 @@ router.patch('/sales/:id/customer', authToken, (req, res) => {
 })
 
 // GET /api/sales
-router.get('/sales', authToken, (req, res) => {
+router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, cashier, branchId, status, limit = 100 } = req.query
   // Fetch sales with all items in a single query (avoids N+1 problem)
   let q = `SELECT s.*,
@@ -647,7 +646,7 @@ router.get('/sales', authToken, (req, res) => {
 })
 
 // GET /api/sales/export  — enriched export with accounting summary
-router.get('/sales/export', authToken, (req, res) => {
+router.get('/sales/export', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, period, format = 'json' } = req.query
 
   let start = startDate
@@ -815,7 +814,7 @@ router.get('/sales/export', authToken, (req, res) => {
 })
 
 // GET /api/dashboard
-router.get('/dashboard', authToken, (req, res) => {
+router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
   const todayStr = new Date().toISOString().split('T')[0]
 
   const todaySales = db.prepare(
@@ -912,7 +911,7 @@ router.get('/dashboard', authToken, (req, res) => {
 })
 
 // GET /api/analytics
-router.get('/analytics', authToken, (req, res) => {
+router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, granularity = 'day' } = req.query
   if (!startDate || !endDate) return err(res, 'startDate and endDate required')
 

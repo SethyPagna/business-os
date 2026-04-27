@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database')
-const { authToken, routeRateLimit } = require('../middleware')
+const { authToken, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { ok, err, audit } = require('../helpers')
 const {
   PROVIDER_META,
@@ -14,13 +14,6 @@ const {
 } = require('../services/aiGateway')
 
 const router = express.Router()
-
-function getActor(req) {
-  return {
-    userId: Number(req?.user?.id || 0) || null,
-    userName: String(req?.user?.name || req?.user?.username || '').trim() || null,
-  }
-}
 
 function listProviders() {
   const rows = db.prepare(`
@@ -35,16 +28,16 @@ function getProviderRow(id) {
   return db.prepare('SELECT * FROM ai_provider_configs WHERE id = ?').get(Number(id))
 }
 
-router.get('/providers', authToken, (_req, res) => {
+router.get('/providers', authToken, requirePermission('settings'), (_req, res) => {
   ok(res, {
     items: listProviders(),
     providerMeta: PROVIDER_META,
   })
 })
 
-router.post('/providers', authToken, async (req, res) => {
+router.post('/providers', authToken, requirePermission('settings'), async (req, res) => {
   try {
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const payload = normalizeProviderPayload(req.body || {})
     if (!payload.provider || !PROVIDER_META[payload.provider]) {
       return err(res, 'Choose a supported AI provider')
@@ -96,9 +89,9 @@ router.post('/providers', authToken, async (req, res) => {
   }
 })
 
-router.put('/providers/:id', authToken, async (req, res) => {
+router.put('/providers/:id', authToken, requirePermission('settings'), async (req, res) => {
   try {
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const existing = getProviderRow(req.params.id)
     if (!existing) return err(res, 'AI provider not found', 404)
 
@@ -160,9 +153,9 @@ router.put('/providers/:id', authToken, async (req, res) => {
   }
 })
 
-router.post('/providers/:id/test', authToken, routeRateLimit({ name: 'ai:provider_test', max: 20, windowMs: 10 * 60 * 1000, message: 'Too many AI provider tests.' }), async (req, res) => {
+router.post('/providers/:id/test', authToken, requirePermission('settings'), routeRateLimit({ name: 'ai:provider_test', max: 20, windowMs: 10 * 60 * 1000, message: 'Too many AI provider tests.' }), async (req, res) => {
   try {
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const row = getProviderRow(req.params.id)
     if (!row) return err(res, 'AI provider not found', 404)
 
@@ -196,9 +189,9 @@ router.post('/providers/:id/test', authToken, routeRateLimit({ name: 'ai:provide
   }
 })
 
-router.delete('/providers/:id', authToken, (req, res) => {
+router.delete('/providers/:id', authToken, requirePermission('settings'), (req, res) => {
   try {
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const row = getProviderRow(req.params.id)
     if (!row) return err(res, 'AI provider not found', 404)
 
@@ -214,7 +207,7 @@ router.delete('/providers/:id', authToken, (req, res) => {
   }
 })
 
-router.get('/responses', authToken, (req, res) => {
+router.get('/responses', authToken, requirePermission('settings'), (req, res) => {
   const limit = Math.min(200, Math.max(20, Number(req.query?.limit || 80) || 80))
   const rows = db.prepare(`
     SELECT *

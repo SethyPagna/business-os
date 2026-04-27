@@ -14,10 +14,11 @@
  */
 
 import { setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
-import { connectWS, disconnectWS } from './api/websocket.js'
+import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
 import { STORAGE_KEYS }            from './constants.js'
+import { sanitizeSyncServerUrl }   from './api/clientRuntime.js'
 
 function getStoredAuthToken() {
   try {
@@ -85,7 +86,7 @@ if (typeof window !== 'undefined') {
 window.api = {
 
   setSyncServerUrl(url) {
-    const clean = (url || '').trim().replace(/\/$/, '')
+    const clean = sanitizeSyncServerUrl(url)
     setSyncServerUrl(clean)
     if (clean) {
       dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
@@ -116,7 +117,10 @@ window.api = {
     const clean = (token || '').trim()
     setAuthSessionToken(clean)
     disconnectWS()
-    if (clean) connectWS()
+    if (clean) {
+      connectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
+    }
   },
 
   useSessionSyncToken(token) {
@@ -132,6 +136,28 @@ window.api = {
 if (typeof window !== 'undefined') {
   window.addEventListener('sync:reconnected', () => {
     methods.flushPendingSyncQueue?.().catch(() => {})
+  })
+  window.addEventListener('online', () => {
+    if (getAuthSessionToken()) {
+      reconnectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
+    } else {
+      connectWS()
+    }
+    startHealthCheck()
+  })
+  window.addEventListener('focus', () => {
+    if (getAuthSessionToken()) {
+      connectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
+    }
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    if (getAuthSessionToken()) {
+      connectWS()
+      methods.flushPendingSyncQueue?.().catch(() => {})
+    }
   })
 }
 
@@ -159,15 +185,15 @@ if (typeof window !== 'undefined') {
     let url
     if (!isViteDev) {
       // Served by the Node backend — current origin IS the server. Always use it.
-      url = location.origin
+      url = sanitizeSyncServerUrl(location.origin)
       try { localStorage.setItem('businessos_sync_server', url) } catch (_) {}
       try { await dexieDb.settings.put({ key: 'sync_server_url', value: url }) } catch (_) {}
     } else {
       // Vite dev — use stored value (normally points to localhost:4000 backend)
-      url = localStorage.getItem('businessos_sync_server') || ''
+      url = sanitizeSyncServerUrl(localStorage.getItem('businessos_sync_server') || '')
       try {
         const stored = await dexieDb.settings.bulkGet(['sync_server_url'])
-        if (!url && stored[0]?.value) url = stored[0].value
+        if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
       } catch (_) {}
     }
 

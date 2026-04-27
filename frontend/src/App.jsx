@@ -633,6 +633,7 @@ function PublicCatalogView() {
 export default function App() {
   const {
     user,
+    authReady,
     page,
     notification,
     canAccessPage,
@@ -647,9 +648,9 @@ export default function App() {
   const mountedPages = useMountedPages(page)
 
   useVisibilityRecovery()
-  useChunkWarmup(user)
-  useDataWarmup(user, canAccessPage)
-  usePageEntryWarmup(user, page, canAccessPage)
+  useChunkWarmup(authReady ? user : null)
+  useDataWarmup(authReady ? user : null, canAccessPage)
+  usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
@@ -712,6 +713,17 @@ export default function App() {
 
   if (!user) {
     return <Login />
+  }
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center text-gray-500 dark:text-gray-400">
+          <div className="text-3xl mb-2 animate-pulse">...</div>
+          <p className="text-sm">Signing you in...</p>
+        </div>
+      </div>
+    )
   }
 
   return (

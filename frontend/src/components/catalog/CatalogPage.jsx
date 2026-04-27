@@ -19,6 +19,7 @@ import {
   RotateCcw,
   Save,
   Send,
+  ShoppingBag,
   Sparkles,
   Store,
   Ticket,
@@ -35,6 +36,7 @@ import {
   serializeAboutBlocks,
 } from './portalEditorUtils.mjs'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
+import { ProductImg } from '../products/primitives'
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
 const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))

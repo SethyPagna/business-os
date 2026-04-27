@@ -8,13 +8,14 @@
 const express = require('express')
 const { db } = require('../database')
 const { tryParse, broadcast } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { storeDataUrlAsset } = require('../fileAssets')
 const { normalizeAboutBlocks, normalizeGoogleMapsEmbed } = require('../portalUtils')
 const { generatePortalAiResponse, getPortalAiUsageStatus } = require('../services/portalAi')
 const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
+const { sanitizeMediaList, sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 
 const router = express.Router()
 
@@ -101,7 +102,7 @@ function loadSettingsMap() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const map = {}
   rows.forEach((row) => { map[row.key] = row.value })
-  return map
+  return sanitizeSettingsSnapshot(map)
 }
 
 /** Build full portal configuration object from persisted settings. */
@@ -317,8 +318,9 @@ function getPortalProducts() {
   })
 
   return products.map((product) => {
-    const gallery = (imageMap.get(product.id) || []).filter(Boolean).slice(0, 5)
-    if (!gallery.length && product.image_path) gallery.push(product.image_path)
+    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
+    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
     return {
       ...product,
       image_path: gallery[0] || null,
@@ -762,8 +764,9 @@ router.get('/submissions/review', authToken, (_req, res) => {
   res.json(rows)
 })
 
-router.patch('/submissions/:id/review', authToken, (req, res) => {
+router.patch('/submissions/:id/review', authToken, requirePermission('settings'), (req, res) => {
   const { id } = req.params
+  const actor = getAuditActor(req)
   const status = String(req.body?.status || '').trim().toLowerCase()
   if (!['pending', 'approved', 'rejected'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' })
@@ -789,8 +792,8 @@ router.patch('/submissions/:id/review', authToken, (req, res) => {
     status,
     status === 'approved' ? rewardPoints : 0,
     reviewNote || null,
-    req.body?.userId || null,
-    req.body?.userName || null,
+    actor.userId,
+    actor.userName,
     id,
   )
 

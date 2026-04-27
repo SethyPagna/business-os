@@ -22,7 +22,7 @@ const speakeasy = require('speakeasy')
 const qrcode = require('qrcode')
 const { db } = require('../database')
 const { ok, err, audit, logOp, tryParse } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, isAdminControlUser } = require('../middleware')
 const {
   encryptSecret,
   decryptSecret,
@@ -59,8 +59,10 @@ const {
   getOrganizationContextForUser,
   ensureOrganizationFilesystemLayout,
 } = require('../organizationContext')
+const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
 const { TAILSCALE_URL } = require('../config')
+const { buildRuntimeDescriptor } = require('../runtimeState')
 
 const router = express.Router()
 
@@ -173,6 +175,19 @@ function rejectLogin(res, t0, lockKey, identifierPreview, reason = 'invalid_cred
  */
 function getOtpSecret(user, field = 'otp_secret') {
   return decryptSecret(user?.[field] || '')
+}
+
+function requireOtpActor(req, res) {
+  if (req?.user?.id) return req.user
+  err(res, 'Please sign in again to continue.', 401)
+  return null
+}
+
+function canManageOtpTarget(actor, targetUserId) {
+  const targetId = Number(targetUserId || 0) || 0
+  if (!actor?.id || !targetId) return false
+  if (Number(actor.id) === targetId) return true
+  return isAdminControlUser(actor)
 }
 
 /**
@@ -321,12 +336,16 @@ function getSettingsSnapshot() {
   rows.forEach((row) => {
     settings[row.key] = row.value
   })
-  return settings
+  return sanitizeSettingsSnapshot(settings)
 }
 
-function getBootstrapSystemSnapshot(req) {
+function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
   const access = classifyRequestAccess(req)
   const hostUiAvailable = process.platform === 'win32' && !!req?.user?.id
+  const runtime = {
+    ...buildRuntimeDescriptor(organizationPublicId),
+    serverStartTime: String(SERVER_START_TIME),
+  }
   return {
     syncServerUrl: TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,
@@ -336,6 +355,7 @@ function getBootstrapSystemSnapshot(req) {
     tokenAccepted: access.tokenValid,
     hostUiAvailable,
     serverStartTime: SERVER_START_TIME,
+    runtime,
     security: {
       configuredTailscaleHost: access.configuredTailscaleHost || null,
       host: access.host || null,
@@ -376,7 +396,7 @@ function buildAuthenticatedBootstrap(req, userId) {
     organization,
     group,
     storage: organization ? ensureOrganizationFilesystemLayout(organization) : null,
-    system: getBootstrapSystemSnapshot(req),
+    system: getBootstrapSystemSnapshot(req, organization?.public_id || ''),
   }
 }
 
@@ -790,7 +810,10 @@ router.post('/session-duration', authToken, (req, res) => {
 
 // POST /api/auth/otp/setup
 router.post('/otp/setup', authToken, async (req, res) => {
+  const actor = requireOtpActor(req, res)
+  if (!actor) return
   const { userId } = req.body || {}
+  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
   if (!user) return err(res, 'User not found')
 
@@ -811,8 +834,11 @@ router.post('/otp/setup', authToken, async (req, res) => {
 
 // POST /api/auth/otp/confirm
 router.post('/otp/confirm', authToken, (req, res) => {
+  const actor = requireOtpActor(req, res)
+  if (!actor) return
   const { userId, token } = req.body || {}
   if (!userId || !token) return err(res, 'userId and token required')
+  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
   if (!user || !user.otp_pending_secret) return err(res, 'OTP not set up')
   const otpSecret = getOtpSecret(user, 'otp_pending_secret')
@@ -834,17 +860,24 @@ router.post('/otp/confirm', authToken, (req, res) => {
         otp_enabled = 1
     WHERE id = ?
   `).run(userId)
-  audit(userId, user.username, 'update', 'user', userId, { action: 'otp_enabled' })
+  audit(actor.id, actor.username || actor.name, 'update', 'user', userId, {
+    action: 'otp_enabled',
+    target_user: user.username,
+  })
   ok(res, {})
 })
 
 // POST /api/auth/otp/disable
 router.post('/otp/disable', authToken, (req, res) => {
+  const actor = requireOtpActor(req, res)
+  if (!actor) return
   const { userId, password } = req.body || {}
   if (!userId) return err(res, 'userId required')
+  if (!canManageOtpTarget(actor, userId)) return err(res, 'No permission', 403)
   const user = db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
   if (!user) return err(res, 'User not found')
-  if (password && !bcrypt.compareSync(password, user.password)) return err(res, 'Incorrect password', 401)
+  const isSelf = Number(actor.id) === Number(userId)
+  if (isSelf && password && !bcrypt.compareSync(password, user.password)) return err(res, 'Incorrect password', 401)
   db.prepare(`
     UPDATE users
     SET otp_enabled = 0,
@@ -853,12 +886,18 @@ router.post('/otp/disable', authToken, (req, res) => {
         otp_pending_created_at = NULL
     WHERE id = ?
   `).run(userId)
-  audit(userId, user.username, 'update', 'user', userId, { action: 'otp_disabled' })
+  audit(actor.id, actor.username || actor.name, 'update', 'user', userId, {
+    action: 'otp_disabled',
+    target_user: user.username,
+  })
   ok(res, {})
 })
 
 // GET /api/auth/otp/status/:userId
 router.get('/otp/status/:userId', authToken, (req, res) => {
+  const actor = requireOtpActor(req, res)
+  if (!actor) return
+  if (!canManageOtpTarget(actor, req.params.userId)) return err(res, 'No permission', 403)
   const user = db.prepare('SELECT id, otp_enabled FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.userId)
   if (!user) return err(res, 'User not found')
   ok(res, { otpEnabled: !!user.otp_enabled })

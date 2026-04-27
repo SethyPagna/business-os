@@ -56,8 +56,12 @@ export function connectWS() {
 
   ws.onopen = () => {
     logWs('debug', 'connected')
+    const reconnected = reconnectAttempts > 0
     reconnectAttempts = 0
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: true } }))
+    if (reconnected) {
+      window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: Date.now() } }))
+    }
     // Send a ping every 25 s to prevent idle-timeout drops on reverse proxies
     // (Tailscale, Nginx, AWS ALB, etc. typically close idle WS after ~60 s).
     // The backend already handles { type:'ping' } and replies { type:'pong' }.
@@ -127,6 +131,11 @@ export function disconnectWS() {
   wsAuthToken = ''
   if (ws) { ws.onclose = null; ws.close(); ws = null }
   window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
+}
+
+export function reconnectWS() {
+  disconnectWS()
+  connectWS()
 }
 
 function scheduleReconnect() {

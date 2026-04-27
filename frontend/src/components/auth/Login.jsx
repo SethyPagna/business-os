@@ -15,6 +15,28 @@ import { useApp } from '../../AppContext'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.js'
 
+const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
+
+function readPendingOauthLogin() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.OAUTH_LOGIN_PENDING) || ''
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const startedAt = Number(parsed.startedAt || 0)
+    if (!startedAt || (Date.now() - startedAt) > OAUTH_PENDING_TTL_MS) return null
+    return parsed
+  } catch (_) {
+    return null
+  }
+}
+
+function clearPendingOauthLogin() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.OAUTH_LOGIN_PENDING)
+  } catch (_) {}
+}
+
 function OauthButton({ icon: Icon, label, onClick, disabled, loading }) {
   return (
     <button
@@ -217,6 +239,7 @@ export default function Login() {
 
     const run = async () => {
       if (tokenType === 'recovery' && accessToken) {
+        clearPendingOauthLogin()
         clearCallbackUrl()
         if (!cancelled) {
           setRecoveryAccessToken(accessToken)
@@ -229,11 +252,13 @@ export default function Login() {
       }
 
       if (mode !== 'login') {
+        clearPendingOauthLogin()
         clearCallbackUrl()
         return
       }
 
       if (errorDescription) {
+        clearPendingOauthLogin()
         clearCallbackUrl()
         if (!cancelled) setError(errorDescription)
         return
@@ -243,7 +268,11 @@ export default function Login() {
       setError('')
       try {
         const device = getClientDeviceInfo()
+        const pendingOauth = readPendingOauthLogin()
         const rememberedOrg = (() => {
+          if (pendingOauth?.organization?.public_id || pendingOauth?.organization?.slug) {
+            return pendingOauth.organization.public_id || pendingOauth.organization.slug || ''
+          }
           try {
             const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
             return stored?.public_id || stored?.slug || ''
@@ -253,7 +282,7 @@ export default function Login() {
         })()
         const result = await window.api.completeSupabaseOauth({
           accessToken,
-          provider,
+          provider: pendingOauth?.provider || provider,
           mode: 'login',
           organization: rememberedOrg,
           sessionDuration,
@@ -262,6 +291,7 @@ export default function Login() {
           deviceName: device.deviceName,
         })
         clearCallbackUrl()
+        clearPendingOauthLogin()
         if (cancelled) return
 
         if (result?.otpRequired) {
@@ -276,6 +306,7 @@ export default function Login() {
         setError(result?.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
       } catch (oauthError) {
         clearCallbackUrl()
+        clearPendingOauthLogin()
         if (!cancelled) {
           setError(oauthError?.message || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
         }
@@ -447,6 +478,19 @@ export default function Login() {
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=login&auth_provider=${encodeURIComponent(provider)}`
       const rememberedMatch = organizationMatches.find((item) => String(item.public_id || '') === String(organizationId || ''))
       rememberOrganization(rememberedMatch || { name: organizationSearch, public_id: organizationId })
+      try {
+        localStorage.setItem(STORAGE_KEYS.OAUTH_LOGIN_PENDING, JSON.stringify({
+          mode: 'login',
+          provider,
+          organization: {
+            id: rememberedMatch?.id || null,
+            name: rememberedMatch?.name || organizationSearch || '',
+            slug: rememberedMatch?.slug || '',
+            public_id: rememberedMatch?.public_id || organizationId || '',
+          },
+          startedAt: Date.now(),
+        }))
+      } catch (_) {}
       const result = await window.api.startSupabaseOauth({
         provider,
         mode: 'login',
@@ -454,11 +498,13 @@ export default function Login() {
         redirectTo,
       })
       if (result?.success === false || !result?.url) {
+        clearPendingOauthLogin()
         setError(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'))
         return
       }
       window.location.assign(result.url)
     } catch (oauthError) {
+      clearPendingOauthLogin()
       setError(oauthError?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'))
     } finally {
       setOauthLoading('')

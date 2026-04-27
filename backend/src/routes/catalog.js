@@ -3,6 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { tryParse } = require('../helpers')
+const { sanitizeMediaList } = require('../settingsSnapshot')
 
 const router = express.Router()
 
@@ -67,8 +68,9 @@ router.get('/products', (_req, res) => {
   })
 
   res.json(products.map((product) => {
-    const gallery = (imageMap.get(product.id) || []).filter(Boolean).slice(0, 5)
-    if (!gallery.length && product.image_path) gallery.push(product.image_path)
+    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
+    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
     return {
       ...product,
       image_path: gallery[0] || null,

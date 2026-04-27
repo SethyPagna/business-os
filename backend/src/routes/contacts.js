@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, bulkImportCSV } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
@@ -68,7 +68,7 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
 }
 
 // ── Customers ─────────────────────────────────────────────────────────────────
-router.get('/customers', authToken, (req, res) => {
+router.get('/customers', authToken, requirePermission('contacts'), (req, res) => {
   const customers = db.prepare('SELECT * FROM customers ORDER BY name').all()
   if (!customers.length) return res.json([])
 
@@ -136,21 +136,23 @@ router.get('/customers', authToken, (req, res) => {
   res.json(enriched)
 })
 
-router.post('/customers', authToken, (req, res) => {
+router.post('/customers', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
   try {
     const membershipNumber = assertUniqueMembershipNumber(d.membership_number)
     const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
       .run(d.name.trim(), membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null)
-    audit(d.userId, d.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
+    audit(actor.userId, actor.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
     broadcast('customers')
     ok(res, { id: r.lastInsertRowid })
   } catch (e) { err(res, e.message) }
 })
 
-router.put('/customers/:id', authToken, (req, res) => {
+router.put('/customers/:id', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   try {
     const current = db.prepare('SELECT id, updated_at FROM customers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Customer not found', 404)
@@ -158,7 +160,7 @@ router.put('/customers/:id', authToken, (req, res) => {
     const membershipNumber = assertUniqueMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
     db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(d.name, membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null, req.params.id)
-    audit(d.userId, d.userName, 'update', 'customer', req.params.id)
+    audit(actor.userId, actor.userName, 'update', 'customer', req.params.id)
     broadcast('customers')
     ok(res, {})
   } catch (e) {
@@ -167,12 +169,14 @@ router.put('/customers/:id', authToken, (req, res) => {
   }
 })
 
-router.delete('/customers/:id', authToken, (req, res) => {
+router.delete('/customers/:id', authToken, requirePermission('contacts'), (req, res) => {
   try {
+    const actor = getAuditActor(req)
     const current = db.prepare('SELECT id, name, updated_at FROM customers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Customer not found', 404)
     assertUpdatedAtMatch('customer', current, getExpectedUpdatedAt(req.body || req.query || {}))
     db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'customer', req.params.id, { name: current.name || null })
     broadcast('customers')
     ok(res, {})
   } catch (e) {
@@ -181,8 +185,9 @@ router.delete('/customers/:id', authToken, (req, res) => {
   }
 })
 
-router.post('/customers/bulk-import', authToken, (req, res) => {
-  const { csvText, userId, userName } = req.body || {}
+router.post('/customers/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
+  const { csvText } = req.body || {}
+  const actor = getAuditActor(req)
   const conflictMode = normalizeConflictMode(req.body?.conflictMode)
   const findByMembership = db.prepare(`
     SELECT *
@@ -305,34 +310,37 @@ router.post('/customers/bulk-import', authToken, (req, res) => {
       )
     }
   )
-  audit(userId, userName, 'bulk_import', 'customer', null, { count: imported, conflictMode })
+  audit(actor.userId, actor.userName, 'bulk_import', 'customer', null, { count: imported, conflictMode })
   broadcast('customers')
   ok(res, { imported, errors })
 })
 
 // ── Suppliers ─────────────────────────────────────────────────────────────────
-router.get('/suppliers', authToken, (req, res) => {
+router.get('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
   res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all())
 })
 
-router.post('/suppliers', authToken, (req, res) => {
+router.post('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
   const r = db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
     .run(d.name.trim(), d.phone || null, d.email || null, d.address || null, d.company || null, d.contact_person || null, d.notes || null)
-  audit(d.userId, d.userName, 'create', 'supplier', r.lastInsertRowid, { name: d.name })
+  audit(actor.userId, actor.userName, 'create', 'supplier', r.lastInsertRowid, { name: d.name })
   broadcast('suppliers')
   ok(res, { id: r.lastInsertRowid })
 })
 
-router.put('/suppliers/:id', authToken, (req, res) => {
+router.put('/suppliers/:id', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   try {
     const current = db.prepare('SELECT id, updated_at FROM suppliers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Supplier not found', 404)
     assertUpdatedAtMatch('supplier', current, getExpectedUpdatedAt(d))
     db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(d.name, d.phone || null, d.email || null, d.address || null, d.company || null, d.contact_person || null, d.notes || null, req.params.id)
+    audit(actor.userId, actor.userName, 'update', 'supplier', req.params.id, { name: d.name || null })
     broadcast('suppliers')
     ok(res, {})
   } catch (e) {
@@ -341,12 +349,14 @@ router.put('/suppliers/:id', authToken, (req, res) => {
   }
 })
 
-router.delete('/suppliers/:id', authToken, (req, res) => {
+router.delete('/suppliers/:id', authToken, requirePermission('contacts'), (req, res) => {
   try {
+    const actor = getAuditActor(req)
     const current = db.prepare('SELECT id, name, updated_at FROM suppliers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Supplier not found', 404)
     assertUpdatedAtMatch('supplier', current, getExpectedUpdatedAt(req.body || req.query || {}))
     db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'supplier', req.params.id, { name: current.name || null })
     broadcast('suppliers')
     ok(res, {})
   } catch (e) {
@@ -355,8 +365,9 @@ router.delete('/suppliers/:id', authToken, (req, res) => {
   }
 })
 
-router.post('/suppliers/bulk-import', authToken, (req, res) => {
-  const { csvText, userId, userName } = req.body || {}
+router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
+  const { csvText } = req.body || {}
+  const actor = getAuditActor(req)
   const conflictMode = normalizeConflictMode(req.body?.conflictMode)
   const findByName = db.prepare(`
     SELECT *
@@ -464,30 +475,33 @@ router.post('/suppliers/bulk-import', authToken, (req, res) => {
       )
     }
   )
-  audit(userId, userName, 'bulk_import', 'supplier', null, { count: imported, conflictMode })
+  audit(actor.userId, actor.userName, 'bulk_import', 'supplier', null, { count: imported, conflictMode })
   broadcast('suppliers')
   ok(res, { imported, errors })
 })
 
 // ── Delivery contacts ─────────────────────────────────────────────────────────
-router.get('/delivery-contacts', authToken, (req, res) => {
+router.get('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {
   res.json(db.prepare('SELECT * FROM delivery_contacts ORDER BY name').all())
 })
 
-router.post('/delivery-contacts', authToken, (req, res) => {
+router.post('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   const name = String(d.name || '').trim()
   const phone = String(d.phone || '').trim()
   if (!name && !phone) return err(res, 'Driver name or phone is required')
   const finalName = name || `Driver ${phone}`
   const r = db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
     .run(finalName, phone || null, d.area || null, d.address || null, d.notes || null)
+  audit(actor.userId, actor.userName, 'create', 'delivery_contact', r.lastInsertRowid, { name: finalName })
   broadcast('deliveryContacts')
   ok(res, { id: r.lastInsertRowid })
 })
 
-router.put('/delivery-contacts/:id', authToken, (req, res) => {
+router.put('/delivery-contacts/:id', authToken, requirePermission('contacts'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   const name = String(d.name || '').trim()
   const phone = String(d.phone || '').trim()
   if (!name && !phone) return err(res, 'Driver name or phone is required')
@@ -498,6 +512,7 @@ router.put('/delivery-contacts/:id', authToken, (req, res) => {
     assertUpdatedAtMatch('delivery contact', current, getExpectedUpdatedAt(d))
     db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(finalName, phone || null, d.area || null, d.address || null, d.notes || null, req.params.id)
+    audit(actor.userId, actor.userName, 'update', 'delivery_contact', req.params.id, { name: finalName })
     broadcast('deliveryContacts')
     ok(res, {})
   } catch (e) {
@@ -506,12 +521,14 @@ router.put('/delivery-contacts/:id', authToken, (req, res) => {
   }
 })
 
-router.delete('/delivery-contacts/:id', authToken, (req, res) => {
+router.delete('/delivery-contacts/:id', authToken, requirePermission('contacts'), (req, res) => {
   try {
+    const actor = getAuditActor(req)
     const current = db.prepare('SELECT id, name, updated_at FROM delivery_contacts WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Delivery contact not found', 404)
     assertUpdatedAtMatch('delivery contact', current, getExpectedUpdatedAt(req.body || req.query || {}))
     db.prepare('DELETE FROM delivery_contacts WHERE id = ?').run(req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'delivery_contact', req.params.id, { name: current.name || null })
     broadcast('deliveryContacts')
     ok(res, {})
   } catch (e) {
@@ -520,8 +537,9 @@ router.delete('/delivery-contacts/:id', authToken, (req, res) => {
   }
 })
 
-router.post('/delivery-contacts/bulk-import', authToken, (req, res) => {
-  const { csvText, userId, userName } = req.body || {}
+router.post('/delivery-contacts/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
+  const { csvText } = req.body || {}
+  const actor = getAuditActor(req)
   const conflictMode = normalizeConflictMode(req.body?.conflictMode)
   const findByName = db.prepare(`
     SELECT *
@@ -623,7 +641,7 @@ router.post('/delivery-contacts/bulk-import', authToken, (req, res) => {
       )
     }
   )
-  audit(userId, userName, 'bulk_import', 'delivery_contact', null, { count: imported, conflictMode })
+  audit(actor.userId, actor.userName, 'bulk_import', 'delivery_contact', null, { count: imported, conflictMode })
   broadcast('deliveryContacts')
   ok(res, { imported, errors })
 })

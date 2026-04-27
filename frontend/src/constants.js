@@ -24,6 +24,10 @@ export const STORAGE_KEYS = {
   USER_EXPIRY: 'businessos_user_expiry',
   SERVER_START_TIME: 'businessos_server_start_time',
   SESSION_DURATION: 'businessos_session_duration',
+  DEVICE_SETTINGS: 'businessos_device_settings',
+  CLIENT_RUNTIME: 'businessos_client_runtime',
+  OAUTH_LOGIN_PENDING: 'businessos_oauth_login_pending',
+  OAUTH_LINK_PENDING: 'businessos_oauth_link_pending',
 }
 
 // ─── Currency defaults ────────────────────────────────────────────────────────

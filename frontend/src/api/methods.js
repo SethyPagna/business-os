@@ -13,6 +13,7 @@ function getDeviceInfo() {
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
+import { buildQueuedOperationScope, doesQueuedScopeMatchCurrent, resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 
@@ -40,9 +41,26 @@ function queueOfflineWrite(channel, payload) {
   return dexieDb.sync_queue.add({
     channel,
     payload: JSON.stringify(payload || {}),
+    runtime_scope: buildQueuedOperationScope(),
     status: 'pending',
     created_at: new Date().toISOString(),
   }).catch(() => {})
+}
+
+async function invalidateClientRuntimeState(reason = 'server-mutation') {
+  await resetClientRuntimeState({
+    clearAuth: false,
+    preserveDeviceSettings: true,
+    preserveSyncServer: true,
+    preserveSessionDuration: true,
+    preserveRuntimeMeta: false,
+  }).catch(() => {})
+  cacheClearAll()
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sync:update', {
+      detail: { channel: 'runtime', reason, ts: Date.now() },
+    }))
+  }
 }
 
 async function withExpectedUpdatedAt(tableName, id, payload = {}) {
@@ -172,7 +190,34 @@ export async function getAppBootstrap() {
       system: null,
     }
   }
-  return route('auth:bootstrap', () => apiFetch('GET', '/api/auth/bootstrap'), buildLocalBootstrap)
+
+  const hasServer = !!getSyncServerUrl()
+  const hasSession = !!getAuthSessionToken()
+
+  if (!hasServer) {
+    return buildLocalBootstrap()
+  }
+
+  if (!hasSession) {
+    const localBootstrap = await buildLocalBootstrap()
+    return {
+      ...localBootstrap,
+      user: null,
+    }
+  }
+
+  try {
+    return await apiFetch('GET', '/api/auth/bootstrap')
+  } catch (error) {
+    if (isNetErr(error)) {
+      const localBootstrap = await buildLocalBootstrap()
+      return {
+        ...localBootstrap,
+        offline: true,
+      }
+    }
+    throw error
+  }
 }
 export async function getOrganizationBootstrap() {
   return apiFetch('GET', '/api/organizations/bootstrap')
@@ -594,15 +639,25 @@ export async function flushPendingSyncQueue() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl || !getAuthSessionToken()) return { processed: 0, failed: 0 }
 
-  const pending = await dexieDb.sync_queue
-    .where('status')
-    .equals('pending')
-    .sortBy('created_at')
+  const pending = (await dexieDb.sync_queue.toArray())
+    .filter((item) => {
+      const status = String(item?.status || 'pending')
+      if (status === 'pending') return true
+      if (status !== 'failed') return false
+      const retryAt = Date.parse(item?.retry_at || '')
+      return !Number.isFinite(retryAt) || retryAt <= Date.now()
+    })
+    .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
 
   let processed = 0
   let failed = 0
 
   for (const item of pending) {
+    if (!doesQueuedScopeMatchCurrent(item?.runtime_scope)) {
+      await dexieDb.sync_queue.delete(item._seq).catch(() => {})
+      continue
+    }
+
     let payload = {}
     try {
       payload = item?.payload ? JSON.parse(item.payload) : {}
@@ -611,6 +666,11 @@ export async function flushPendingSyncQueue() {
     }
 
     try {
+      await dexieDb.sync_queue.update(item._seq, {
+        status: 'syncing',
+        updated_at: new Date().toISOString(),
+        error: null,
+      }).catch(() => {})
       if (item.channel === 'products:create') {
         await apiFetch('POST', '/api/products', payload)
       } else if (item.channel === 'sales:create') {
@@ -624,13 +684,21 @@ export async function flushPendingSyncQueue() {
       processed += 1
     } catch (error) {
       if (isNetErr(error)) {
+        await dexieDb.sync_queue.update(item._seq, {
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        }).catch(() => {})
         failed += 1
         break
       }
       failed += 1
+      const retryCount = Number(item?.retry_count || 0) + 1
+      const retryDelayMs = Math.min(5 * 60 * 1000, 10_000 * Math.pow(2, Math.min(retryCount, 5)))
       await dexieDb.sync_queue.update(item._seq, {
         status: 'failed',
         error: error?.message || 'Sync failed',
+        retry_count: retryCount,
+        retry_at: new Date(Date.now() + retryDelayMs).toISOString(),
         updated_at: new Date().toISOString(),
       }).catch(() => {})
     }
@@ -776,12 +844,14 @@ export function pickBackupFile() {
 
 export async function importBackupData(data) {
   const result = await apiFetch('POST', '/api/system/backup/import', data)
+  await invalidateClientRuntimeState('backup-import')
   cacheClearAll()
   return result
 }
 
 export async function importBackupFolder(sourceDir) {
   const result = await apiFetch('POST', '/api/system/backup/import-folder', { sourceDir }, LONG_SYSTEM_ACTION_TIMEOUT_MS)
+  await invalidateClientRuntimeState('backup-import-folder')
   cacheClearAll()
   return result
 }
@@ -818,12 +888,14 @@ export const syncGoogleDriveNow = () =>
 
 export async function resetData(mode = 'sales') {
   const result = await route('data:reset', () => apiFetch('POST', '/api/system/reset-data', { mode }), null, true)
+  await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
   cacheClearAll()
   return result
 }
 
 export async function factoryReset() {
   const result = await route('data:factoryReset', () => apiFetch('POST', '/api/system/factory-reset'), null, true)
+  await invalidateClientRuntimeState('factory-reset')
   cacheClearAll()
   return result
 }
@@ -973,6 +1045,14 @@ export async function openFolderDialog(initialPath = '') {
 
 // ─── Data folder location ─────────────────────────────────────────────────────
 export const getDataPath   = ()    => route('system:dataPath',   () => apiFetch('GET',    '/api/system/data-path'),       () => ({}))
-export const setDataPath   = (dir) => route('system:setDataPath',() => apiFetch('POST',   '/api/system/data-path', { dataDir: dir }, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
-export const resetDataPath = ()    => route('system:resetDataPath',()=> apiFetch('DELETE', '/api/system/data-path', undefined, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+export async function setDataPath(dir) {
+  const result = await route('system:setDataPath', () => apiFetch('POST', '/api/system/data-path', { dataDir: dir }, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+  await invalidateClientRuntimeState('data-path-update')
+  return result
+}
+export async function resetDataPath() {
+  const result = await route('system:resetDataPath', () => apiFetch('DELETE', '/api/system/data-path', undefined, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+  await invalidateClientRuntimeState('data-path-reset')
+  return result
+}
 export const browseDir     = (dir) => route('system:browseDir',  () => apiFetch('POST',   '/api/system/browse-dir', { dir }), () => ({ dirs: [] }))

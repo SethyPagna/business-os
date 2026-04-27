@@ -196,7 +196,7 @@ function getStartupBanner() {
   Token:    ${SYNC_TOKEN ? '(legacy token set)' : '(signed browser sessions)'}
   Frontend: ${frontendLine}
 ==========================================
-  Default login: admin / admin
+  Factory-reset default login: admin / admin
 `
 }
 

@@ -14,9 +14,8 @@ const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
 const Database = require('better-sqlite3')
-const bcrypt = require('bcryptjs')
 const express = require('express')
-const { db }  = require('../database')
+const { db, ensureCoreDataInvariants }  = require('../database')
 const {
   UPLOADS_PATH,
   RUNTIME_DIR,
@@ -40,7 +39,7 @@ const {
   buildBackupSummary,
 } = require('../backupSchema')
 const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, requireAnyPermission, getAuditActor } = require('../middleware')
 const { checkRateLimit } = require('../security')
 const { classifyRequestAccess } = require('../accessControl')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../organizationContext')
@@ -54,6 +53,7 @@ const {
   runDriveSync,
   saveDriveSyncPreferences,
 } = require('../services/googleDriveSync')
+const { buildRuntimeDescriptor, bumpStorageVersion } = require('../runtimeState')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../systemFsWorker.js')
@@ -322,73 +322,12 @@ function restoreSnapshotTables({ tables, customTableRows, uploads, uploadSourceR
       `).run()
     }
     repairRelationalConsistency()
-    ensurePrimaryAdminRoleAndUser()
+    ensureCoreDataInvariants({ repairUploads: false })
   })()
 
   if (uploadSourceRoot) restoreUploadsFromDataRoot(uploadSourceRoot)
   else restoreBackupUploads(uploads)
-}
-
-function ensurePrimaryAdminRoleAndUser(adminSnapshot = null) {
-  // Re-assert admin role/user invariants after destructive operations
-  // (factory reset, backup import) so access cannot be lost.
-  const adminPermissions = JSON.stringify({ all: true })
-  let adminRole = db.prepare(`SELECT id FROM roles WHERE lower(trim(code)) = 'admin' LIMIT 1`).get()
-  if (!adminRole) {
-    adminRole = db.prepare(`SELECT id FROM roles WHERE lower(trim(name)) = 'admin' ORDER BY id LIMIT 1`).get()
-    if (adminRole) {
-      db.prepare(`
-        UPDATE roles
-        SET name = 'Admin', code = 'admin', is_system = 1, permissions = ?
-        WHERE id = ?
-      `).run(adminPermissions, adminRole.id)
-    } else {
-      const insertedRole = db.prepare(`
-        INSERT INTO roles (name, code, is_system, permissions)
-        VALUES ('Admin', 'admin', 1, ?)
-      `).run(adminPermissions)
-      adminRole = { id: Number(insertedRole.lastInsertRowid) }
-    }
-  } else {
-    db.prepare(`
-      UPDATE roles
-      SET name = 'Admin', code = 'admin', is_system = 1, permissions = ?
-      WHERE id = ?
-    `).run(adminPermissions, adminRole.id)
-  }
-
-  const roleId = Number(adminRole?.id || 0)
-  let adminUser = adminSnapshot
-  if (!adminUser) {
-    adminUser = db.prepare(`SELECT * FROM users WHERE username = 'admin' ORDER BY id LIMIT 1`).get()
-  }
-
-  if (!adminUser) {
-    db.prepare(`
-      INSERT INTO users (username, name, password, role_id, permissions, is_active, deleted_at)
-      VALUES ('admin', 'Administrator', ?, ?, ?, 1, NULL)
-    `).run(bcrypt.hashSync('admin', 10), roleId || null, adminPermissions)
-    adminUser = db.prepare(`SELECT * FROM users WHERE username = 'admin' ORDER BY id LIMIT 1`).get()
-  }
-
-  if (!adminUser) return
-  db.prepare(`
-    INSERT OR IGNORE INTO users (id, username, name, password, role_id, permissions, is_active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(
-    adminUser.id,
-    'admin',
-    adminUser.name || 'Administrator',
-    adminUser.password || bcrypt.hashSync('admin', 10),
-    roleId || null,
-    adminPermissions,
-    adminUser.created_at || new Date().toISOString(),
-  )
-  db.prepare(`
-    UPDATE users
-    SET role_id = ?, permissions = ?, is_active = 1, deleted_at = NULL, username = 'admin'
-    WHERE id = ?
-  `).run(roleId || null, adminPermissions, adminUser.id)
+  ensureCoreDataInvariants()
 }
 
 // Bulk-insert using chunked multi-value INSERT (500 rows/stmt) for speed.
@@ -530,7 +469,7 @@ function recreateCustomTable(tableName, columns = []) {
   db.exec(sql)
 }
 
-// â”€â”€ Audit log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.get('/audit-logs', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all())
 })
@@ -545,6 +484,7 @@ const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 router.get('/config', authToken, (req, res) => {
   const access = classifyRequestAccess(req)
   const { hostUiAvailable } = getHostUiAvailability(req)
+  const organization = getDefaultOrganization()
   res.json({
     syncServerUrl: TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,
@@ -554,6 +494,10 @@ router.get('/config', authToken, (req, res) => {
     tokenAccepted: access.tokenValid,
     hostUiAvailable,
     serverStartTime: SERVER_START_TIME,
+    runtime: {
+      ...buildRuntimeDescriptor(organization?.public_id || ''),
+      serverStartTime: String(SERVER_START_TIME),
+    },
     security: {
       configuredTailscaleHost: access.configuredTailscaleHost || null,
       host: access.host || null,
@@ -569,7 +513,7 @@ router.get('/config', authToken, (req, res) => {
   })
 })
 
-// â”€â”€ Backup export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Backup export ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.get('/drive-sync/status', authToken, (req, res) => {
   const baseUrl = buildRequestBaseUrl(req)
   ok(res, {
@@ -577,7 +521,7 @@ router.get('/drive-sync/status', authToken, (req, res) => {
   })
 })
 
-router.post('/drive-sync/preferences', authToken, (req, res) => {
+router.post('/drive-sync/preferences', authToken, requirePermission('settings'), (req, res) => {
   try {
     saveDriveSyncPreferences(req.body || {})
     const baseUrl = buildRequestBaseUrl(req)
@@ -589,7 +533,7 @@ router.post('/drive-sync/preferences', authToken, (req, res) => {
   }
 })
 
-router.post('/drive-sync/oauth/start', authToken, (req, res) => {
+router.post('/drive-sync/oauth/start', authToken, requirePermission('settings'), (req, res) => {
   try {
     const existing = getDriveSyncConfig()
     const clientId = String(req.body?.clientId || existing.clientId || '').trim()
@@ -660,7 +604,7 @@ router.get('/drive-sync/oauth/callback', async (req, res) => {
   }
 })
 
-router.post('/drive-sync/disconnect', authToken, (req, res) => {
+router.post('/drive-sync/disconnect', authToken, requirePermission('settings'), (req, res) => {
   try {
     disconnectDriveSync()
     ok(res, { success: true })
@@ -681,7 +625,7 @@ router.post('/drive-sync/sync-now', authToken, async (req, res) => {
   }
 })
 
-router.get('/backup/export', authToken, (req, res) => {
+router.get('/backup/export', authToken, requirePermission('backup'), (req, res) => {
   const customTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
   const tables = Object.fromEntries(
     BACKUP_TABLES.map(table => [table, db.prepare(`SELECT * FROM ${q(table)}`).all()])
@@ -746,12 +690,12 @@ router.post('/backup/export-folder', authToken, async (req, res) => {
   }
 })
 
-// â”€â”€ Backup import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Backup import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // Accepts any version >= 1. Unknown columns are dropped, missing columns default to NULL.
-router.post('/backup/import', authToken, (req, res) => {
+router.post('/backup/import', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import', max: 6, windowMs: 10 * 60 * 1000 })) return
   const backup = req.body
-  if (!backup || typeof backup !== 'object') return err(res, 'Invalid backup â€” expected a JSON object')
+  if (!backup || typeof backup !== 'object') return err(res, 'Invalid backup ??expected a JSON object')
   const ver = backup.version
   if (typeof ver !== 'number' || ver < 1) {
     return err(res, `Unsupported backup version: ${ver}. File must be a Business OS backup (v1 or higher).`)
@@ -762,15 +706,16 @@ router.post('/backup/import', authToken, (req, res) => {
 
   try {
     restoreSnapshotTables({ tables, customTableRows, uploads: backup.uploads })
+    bumpStorageVersion('backup-import')
   } catch (e) {
     return err(res, e.message)
   }
 
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions'].forEach(broadcast)
+  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'runtime'].forEach(broadcast)
   ok(res, { message: 'Backup imported successfully' })
 })
 
-router.post('/backup/import-folder', authToken, (req, res) => {
+router.post('/backup/import-folder', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import_folder', max: 6, windowMs: 10 * 60 * 1000 })) return
   const sourceDir = String(req.body?.sourceDir || '').trim()
   if (!sourceDir) return err(res, 'sourceDir is required')
@@ -791,6 +736,7 @@ router.post('/backup/import-folder', authToken, (req, res) => {
       customTableRows: snapshot.customTableRows,
       uploadSourceRoot: snapshot.root,
     })
+    bumpStorageVersion('backup-import-folder')
   } catch (e) {
     return err(res, `Failed to restore folder backup: ${e.message}`)
   }
@@ -800,7 +746,7 @@ router.post('/backup/import-folder', authToken, (req, res) => {
     tableRows: snapshot.summary?.totals?.tableRowCount || 0,
   })
 
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions'].forEach(broadcast)
+  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'runtime'].forEach(broadcast)
   ok(res, {
     message: 'Folder backup restored successfully',
     sourceRoot: snapshot.root,
@@ -808,12 +754,13 @@ router.post('/backup/import-folder', authToken, (req, res) => {
   })
 })
 
-// â”€â”€ Reset business data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// mode='sales' â†’ clear all transactional data (sales, RETURNS, stock movements); zero stock
-// mode='all'   â†’ also remove products, contacts, custom_fields; keep settings/users/branches
-router.post('/reset-data', authToken, (req, res) => {
+// ?€?€ Reset business data ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// mode='sales' ??clear all transactional data (sales, RETURNS, stock movements); zero stock
+// mode='all'   ??also remove products, contacts, custom_fields; keep settings/users/branches
+router.post('/reset-data', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:reset_data', max: 5, windowMs: 10 * 60 * 1000 })) return
-  const { userId, userName, mode = 'sales' } = req.body || {}
+  const { mode = 'sales' } = req.body || {}
+  const actor = getAuditActor(req, req.body || {})
   try {
     db.transaction(() => {
       // Always clear transactional data (sales AND returns)
@@ -839,80 +786,98 @@ router.post('/reset-data', authToken, (req, res) => {
     })()
 
     const label = mode === 'all'
-      ? 'Full data reset â€” sales, returns, products, contacts cleared'
-      : 'Sales reset â€” sales, returns, and stock cleared'
-    audit(userId, userName, 'reset_data', 'system', null, label)
-    ;['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard'].forEach(broadcast)
+      ? 'Full data reset ??sales, returns, products, contacts cleared'
+      : 'Sales reset ??sales, returns, and stock cleared'
+    bumpStorageVersion(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
+    audit(actor.userId, actor.userName, 'reset_data', 'system', null, label)
+    ;['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard', 'runtime'].forEach(broadcast)
     ok(res, {
       message: mode === 'all'
-        ? 'Reset complete â€” sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
-        : 'Sales reset â€” sales, returns, and stock cleared. Products and contacts kept.',
+        ? 'Reset complete ??sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
+        : 'Sales reset ??sales, returns, and stock cleared. Products and contacts kept.',
     })
   } catch (e) { err(res, e.message) }
 })
 
-// â”€â”€ Factory reset (wipe everything; keep admin + rebuild defaults) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-router.post('/factory-reset', authToken, (req, res) => {
+// ?€?€ Factory reset (wipe everything; keep admin + rebuild defaults) ?€?€?€?€?€?€?€?€?€?€?€?€
+router.post('/factory-reset', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:factory_reset', max: 2, windowMs: 30 * 60 * 1000 })) return
-  const { userId, userName } = req.body || {}
+  const actor = getAuditActor(req, req.body || {})
   try {
-    const adminUser = db.prepare("SELECT * FROM users WHERE username = 'admin'").get()
     db.transaction(() => {
-      // FK-safe deletion order â€” returns and return_items included
+      // FK-safe deletion order ??returns and return_items included
+      const existingCustomTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
+      getCustomTableNames(existingCustomTables).forEach((tableName) => {
+        try { db.exec(`DROP TABLE IF EXISTS "${tableName}"`) } catch (_) {}
+      })
+
       const tables = [
+        'verification_codes', 'user_sessions',
+        'customer_share_submissions',
+        'product_images',
         'return_items', 'returns',
         'sale_items', 'sales',
         'inventory_movements', 'branch_stock', 'stock_transfers',
         'products', 'categories', 'units',
         'suppliers', 'customers', 'delivery_contacts',
-        'branches', 'custom_fields', 'roles', 'audit_logs', 'settings', 'users',
+        'branches', 'custom_fields', 'custom_tables',
+        'file_assets', 'ai_response_logs', 'ai_provider_configs', 'google_drive_sync_entries',
+        'roles', 'audit_logs', 'settings', 'users',
       ]
       tables.forEach(t => { try { db.prepare(`DELETE FROM "${t}"`).run() } catch (_) {} })
-      ensurePrimaryAdminRoleAndUser(adminUser)
-      db.prepare("INSERT OR IGNORE INTO branches (name, is_default, is_active) VALUES ('Main Store', 1, 1)").run()
-      const insertUnit = db.prepare('INSERT OR IGNORE INTO units (name) VALUES (?)')
-      ;['pcs','kg','g','l','ml','box','bag','set','pair','bottle'].forEach(u => insertUnit.run(u))
+      ensureCoreDataInvariants()
     })()
 
-    // Remove all uploaded images â€” factory reset = clean slate
+    // Remove all uploaded images ??factory reset = clean slate
     deleteAllUploads()
+    ensureCoreDataInvariants()
+    bumpStorageVersion('factory-reset')
+    audit(actor.userId, actor.userName, 'factory_reset', 'system', null, 'Factory reset completed')
 
-    ;['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard'].forEach(broadcast)
+    ;['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard', 'settings', 'users', 'roles', 'files', 'customTables', 'runtime'].forEach(broadcast)
     ok(res, { message: 'Factory reset complete. All data and images wiped. Admin account and defaults restored.' })
   } catch (e) { err(res, e.message) }
 })
 
-// â”€â”€ Offline sync push â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Offline sync push ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/sync/push', authToken, (req, res) => {
   const { operations = [] } = req.body || {}
   res.json({ applied: operations.map(op => op.id).filter(Boolean) })
 })
 
-// â”€â”€ Data Integrity Check & Repair â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Data Integrity Check & Repair ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 /**
- * GET /api/system/verify-integrity â€” Run data integrity checks without repairs.
+ * GET /api/system/verify-integrity ??Run data integrity checks without repairs.
  * Read-only operation to detect inconsistencies.
  */
-router.get('/verify-integrity', authToken, (req, res) => {
+router.get('/verify-integrity', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
+  let result = null
+  const rollbackMarker = Symbol('verify-integrity')
   try {
-    // Run checks in read-only mode by wrapping in a transaction that we don't commit
-    // Actually, let's just run the checks and return results
-    const result = runDataIntegrityCheck()
+    const verifyTx = db.transaction(() => {
+      result = runDataIntegrityCheck()
+      throw rollbackMarker
+    })
+    try {
+      verifyTx()
+    } catch (error) {
+      if (error !== rollbackMarker) { throw error }
+    }
     res.json({
       success: true,
-      ...result,
+      ...(result || {}),
       action: 'verify-only'
     })
   } catch (e) {
-    err(res, `Integrity check failed: ${e.message}`)
+    err(res, 'Integrity check failed: ' + e.message)
   }
 })
 
 /**
- * POST /api/system/repair-integrity â€” Run data integrity checks AND repair.
+ * POST /api/system/repair-integrity ??Run data integrity checks AND repair.
  * This modifies the database. Should be used carefully.
  */
-router.post('/repair-integrity', authToken, (req, res) => {
+router.post('/repair-integrity', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   try {
     const result = runDataIntegrityCheck()
     
@@ -936,7 +901,7 @@ router.post('/repair-integrity', authToken, (req, res) => {
   }
 })
 
-// â”€â”€ Data folder location â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ?€?€ Data folder location ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 /**
  * GET /api/system/data-path
  * Returns the current data folder path and whether data-location.json exists.
@@ -968,7 +933,7 @@ router.get('/data-path', authToken, (req, res) => {
  * Validates the path is accessible then writes data-location.json.
  * The server must be restarted for the new path to take effect.
  */
-router.post('/data-path', authToken, async (req, res) => {
+router.post('/data-path', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_update', max: 20, windowMs: 10 * 60 * 1000 })) return
   const { dataDir } = req.body || {}
   if (!dataDir || typeof dataDir !== 'string' || !dataDir.trim()) {
@@ -1029,7 +994,7 @@ router.post('/data-path', authToken, async (req, res) => {
 
 /**
  * DELETE /api/system/data-path
- * Removes data-location.json â€” reverts to the default business-os-data folder.
+ * Removes data-location.json ??reverts to the default business-os-data folder.
  */
 router.delete('/data-path', authToken, async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_delete', max: 20, windowMs: 10 * 60 * 1000 })) return
@@ -1061,10 +1026,10 @@ router.delete('/data-path', authToken, async (req, res) => {
 
 /**
  * POST /api/system/browse-dir
- * Body: { dir: "C:\\some\\path" }  â€” lists subdirectories one level deep.
+ * Body: { dir: "C:\\some\\path" }  ??lists subdirectories one level deep.
  * Used by the frontend folder-picker.
  */
-router.post('/browse-dir', authToken, (req, res) => {
+router.post('/browse-dir', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   const { dir } = req.body || {}
   const requested = dir && dir.trim() ? dir.trim() : ''
   const listWindowsFsRoots = () => {
@@ -1131,7 +1096,7 @@ router.post('/browse-dir', authToken, (req, res) => {
   }
 })
 
-router.post('/open-path', authToken, (req, res) => {
+router.post('/open-path', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:open_path', max: 30, windowMs: 60 * 1000 })) return
   const { hostUiAvailable } = getHostUiAvailability(req)
   if (!hostUiAvailable) {
@@ -1160,7 +1125,7 @@ router.post('/open-path', authToken, (req, res) => {
   }
 })
 
-router.post('/pick-folder', authToken, (req, res) => {
+router.post('/pick-folder', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:pick_folder', max: 20, windowMs: 10 * 60 * 1000 })) return
   const { hostUiAvailable } = getHostUiAvailability(req)
   if (!hostUiAvailable) {
@@ -1229,3 +1194,7 @@ router.post('/pick-folder', authToken, (req, res) => {
 })
 
 module.exports = router
+
+
+
+

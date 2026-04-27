@@ -2,18 +2,19 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 
 const router = express.Router()
 
 // POST /api/inventory/adjust
-router.post('/adjust', authToken, (req, res) => {
+router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => {
   const t0 = Date.now()
   const body = req.body || {}
   const {
     productId, productName, type, quantity, reason, branchId,
-    userId, userName, deviceName, deviceTz, clientTime,
+    deviceName, deviceTz, clientTime,
   } = body
+  const actor = getAuditActor(req, body)
   const unitCostUsd = parseFloat(body.unitCostUsd ?? body.unit_cost_usd ?? 0) || 0
   const unitCostKhr = parseFloat(body.unitCostKhr ?? body.unit_cost_khr ?? 0) || 0
 
@@ -134,13 +135,13 @@ router.post('/adjust', authToken, (req, res) => {
           movementQty * unitCostUsd,
           movementQty * unitCostKhr,
           reason || null,
-          userId || null,
-          userName || null,
+          actor.userId,
+          actor.userName,
         )
       }
     })()
 
-    audit(userId, userName, type === 'remove' ? 'stock_remove' : type === 'set' ? 'stock_set' : 'stock_add', 'product', productId,
+    audit(actor.userId, actor.userName, type === 'remove' ? 'stock_remove' : type === 'set' ? 'stock_set' : 'stock_add', 'product', productId,
       { type, quantity: qty, reason, branchId: requestedBranchId }, {
         deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
       })
@@ -154,7 +155,7 @@ router.post('/adjust', authToken, (req, res) => {
 })
 
 // GET /api/inventory/summary
-router.get('/summary', authToken, (req, res) => {
+router.get('/summary', authToken, requirePermission('inventory'), (req, res) => {
   try {
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   let products
@@ -323,7 +324,7 @@ router.get('/summary', authToken, (req, res) => {
 })
 
 // GET /api/inventory/movements
-router.get('/movements', authToken, (req, res) => {
+router.get('/movements', authToken, requirePermission('inventory'), (req, res) => {
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   let rows
   if (branchId) {

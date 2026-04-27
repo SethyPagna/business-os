@@ -6,8 +6,10 @@ import { AlertTriangle, ImageOff } from 'lucide-react'
 
 function ProductImg({ src, alt, className, onClick }) {
   const [url, setUrl] = useState(null)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
+    setFailed(false)
     if (!src) {
       setUrl(null)
       return
@@ -34,8 +36,18 @@ function ProductImg({ src, alt, className, onClick }) {
     }
   }, [src])
 
-  if (!url) return null
-  return <img src={url} alt={alt} className={className} onClick={onClick} loading="lazy" decoding="async" />
+  if (!url || failed) return null
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className={className}
+      onClick={onClick}
+      onError={() => setFailed(true)}
+      loading="lazy"
+      decoding="async"
+    />
+  )
 }
 
 function ProductImagePlaceholder({ className = '', compact = false }) {

@@ -190,6 +190,76 @@ function buildUpload({ fileSize, allowAssets }) {
 const upload = buildUpload({ fileSize: 25 * 1024 * 1024, allowAssets: false })
 const assetUpload = buildUpload({ fileSize: 100 * 1024 * 1024, allowAssets: true })
 
+function parsePermissionsValue(value) {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value || '{}'))
+  } catch (_) {
+    return {}
+  }
+}
+
+function getMergedPermissions(user) {
+  if (!user) return {}
+  const rolePermissions = parsePermissionsValue(user.role_permissions)
+  const userPermissions = parsePermissionsValue(user.permissions)
+  return { ...rolePermissions, ...userPermissions }
+}
+
+function isAdminControlUser(user) {
+  if (!user) return false
+  const username = String(user.username || '').trim().toLowerCase()
+  const roleCode = String(user.role_code || '').trim().toLowerCase()
+  const permissions = getMergedPermissions(user)
+  return username === 'admin' || roleCode === 'admin' || !!permissions.all
+}
+
+function hasPermission(user, key) {
+  if (!key) return !!user
+  if (isAdminControlUser(user)) return true
+  const permissions = getMergedPermissions(user)
+  return !!permissions[String(key || '').trim()]
+}
+
+function requirePermission(key) {
+  return (req, res, next) => {
+    if (hasPermission(req.user, key)) return next()
+    return res.status(403).json({
+      success: false,
+      error: 'No permission',
+      code: 'forbidden',
+      permission: key,
+    })
+  }
+}
+
+function requireAnyPermission(keys = []) {
+  const requiredKeys = Array.isArray(keys) ? keys.filter(Boolean) : [keys].filter(Boolean)
+  return (req, res, next) => {
+    if (requiredKeys.some((key) => hasPermission(req.user, key))) return next()
+    return res.status(403).json({
+      success: false,
+      error: 'No permission',
+      code: 'forbidden',
+      permissions: requiredKeys,
+    })
+  }
+}
+
+function getAuditActor(req, fallback = {}) {
+  if (req?.user?.id) {
+    return {
+      userId: req.user.id,
+      userName: req.user.name || req.user.username || null,
+    }
+  }
+  return {
+    userId: fallback.userId || null,
+    userName: fallback.userName || null,
+  }
+}
+
 async function compressUpload(req, _res, next) {
   if (req.file) await compressImageFile(req.file.path, req.file).catch(() => {})
   next()
@@ -210,4 +280,21 @@ async function validateUploadBufferPayload(buffer, file = {}) {
   await validateUploadedBuffer(buffer, file)
 }
 
-module.exports = { authToken, networkAccessGuard, upload, assetUpload, compressUpload, validateUploadedFile, sanitiseFilename, compressImageBuffer, routeRateLimit, validateUploadBufferPayload }
+module.exports = {
+  authToken,
+  networkAccessGuard,
+  upload,
+  assetUpload,
+  compressUpload,
+  validateUploadedFile,
+  sanitiseFilename,
+  compressImageBuffer,
+  routeRateLimit,
+  validateUploadBufferPayload,
+  getMergedPermissions,
+  isAdminControlUser,
+  hasPermission,
+  requirePermission,
+  requireAnyPermission,
+  getAuditActor,
+}

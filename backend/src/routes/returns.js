@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, getSafeCostPrice } = require('../helpers')
-const { authToken } = require('../middleware')
+const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
@@ -96,7 +96,7 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
 }
 
 // GET /api/returns
-router.get('/returns', authToken, (req, res) => {
+router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, saleId, limit = 500 } = req.query
   const scope = normalizeScope(req.query.scope, CUSTOMER_SCOPE)
   let q = `SELECT r.* FROM returns r WHERE 1=1`
@@ -114,7 +114,7 @@ router.get('/returns', authToken, (req, res) => {
 })
 
 // GET /api/returns/:id
-router.get('/returns/:id', authToken, (req, res) => {
+router.get('/returns/:id', authToken, requirePermission('sales'), (req, res) => {
   const ret = db.prepare('SELECT * FROM returns WHERE id = ?').get(req.params.id)
   if (!ret) return err(res, 'Return not found', 404)
   const items = db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(ret.id)
@@ -122,8 +122,9 @@ router.get('/returns/:id', authToken, (req, res) => {
 })
 
 // POST /api/returns
-router.post('/returns', authToken, (req, res) => {
+router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
 
@@ -167,8 +168,8 @@ router.post('/returns', authToken, (req, res) => {
       returnNumber,
       d.sale_id || null,
       d.receipt_number || saleMeta.receipt_number || null,
-      d.cashier_id || null,
-      d.cashier_name || null,
+      actor.userId,
+      actor.userName,
       d.customer_id || saleMeta.customer_id || null,
       d.customer_name || saleMeta.customer_name || null,
       d.branch_id || saleMeta.branch_id || null,
@@ -264,8 +265,8 @@ router.post('/returns', authToken, (req, res) => {
           (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
           `Return: ${d.reason}`,
           rid,
-          d.cashier_id || null,
-          d.cashier_name || null,
+          actor.userId,
+          actor.userName,
         )
       }
     }
@@ -296,7 +297,7 @@ router.post('/returns', authToken, (req, res) => {
       db.prepare("UPDATE sales SET sale_status = ? WHERE id = ?").run(newStatus, d.sale_id)
     }
 
-    audit(d.cashier_id, d.cashier_name, 'create', 'return', rid,
+    audit(actor.userId, actor.userName, 'create', 'return', rid,
       { returnNumber, total: d.total_refund_usd }, {
         tableName: 'returns', recordId: rid,
         newValue: { returnNumber, saleId: d.sale_id, reason: d.reason },
@@ -334,8 +335,9 @@ function assertSupplierReturnableStock(items = [], fallbackBranchId = null) {
 }
 
 // POST /api/returns/supplier
-router.post('/returns/supplier', authToken, (req, res) => {
+router.post('/returns/supplier', authToken, requirePermission('sales'), (req, res) => {
   const d = req.body || {}
+  const actor = getAuditActor(req)
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Return items required')
   if (!d.reason) return err(res, 'Reason is required')
 
@@ -383,8 +385,8 @@ router.post('/returns/supplier', authToken, (req, res) => {
       returnNumber,
       null,
       null,
-      d.cashier_id || null,
-      d.cashier_name || null,
+      actor.userId,
+      actor.userName,
       null,
       null,
       d.branch_id || null,
@@ -472,12 +474,12 @@ router.post('/returns/supplier', authToken, (req, res) => {
         totalKhr,
         `Supplier return (${settlement}): ${d.reason}`,
         rid,
-        d.cashier_id || null,
-        d.cashier_name || null,
+        actor.userId,
+        actor.userName,
       )
     }
 
-    audit(d.cashier_id, d.cashier_name, 'create', 'supplier_return', rid,
+    audit(actor.userId, actor.userName, 'create', 'supplier_return', rid,
       { returnNumber, settlement, supplierName: d.supplier_name || null }, {
         tableName: 'returns',
         recordId: rid,
@@ -501,9 +503,10 @@ router.post('/returns/supplier', authToken, (req, res) => {
 })
 
 // PATCH /api/returns/:id  — update a return (e.g. customer changed mind)
-router.patch('/returns/:id', authToken, (req, res) => {
+router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const d = req.body || {}
+  const actor = getAuditActor(req)
 
   const existing = db.prepare('SELECT * FROM returns WHERE id = ?').get(id)
   if (!existing) return err(res, 'Return not found', 404)
@@ -553,7 +556,7 @@ router.patch('/returns/:id', authToken, (req, res) => {
           item.cost_price_usd || 0, 0,
           (item.cost_price_usd || 0) * item.quantity, 0,
           `Return #${existing.return_number} updated — reversing previous restock`,
-          parseInt(id), d.cashier_id || null, d.cashier_name || null,
+          parseInt(id), actor.userId, actor.userName,
         )
       }
     }
@@ -610,7 +613,7 @@ router.patch('/returns/:id', authToken, (req, res) => {
           item.cost_price_usd || 0, item.cost_price_khr || 0,
           (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
           `Return #${existing.return_number} updated: ${d.reason || existing.reason}`,
-          parseInt(id), d.cashier_id || null, d.cashier_name || null,
+          parseInt(id), actor.userId, actor.userName,
         )
       }
     }
@@ -652,7 +655,7 @@ router.patch('/returns/:id', authToken, (req, res) => {
       db.prepare("UPDATE sales SET sale_status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, existing.sale_id)
     }
 
-    audit(d.cashier_id, d.cashier_name, 'update', 'return', parseInt(id),
+    audit(actor.userId, actor.userName, 'update', 'return', parseInt(id),
       { reason: d.reason }, {
         tableName: 'returns', recordId: parseInt(id),
         oldValue: { reason: existing.reason, return_type: existing.return_type },

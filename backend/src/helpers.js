@@ -206,50 +206,39 @@ function verifyAndRepairStockQuantities() {
 
   try {
     db.transaction(() => {
-      // Get all products and recalculate their stock based on movements
-      const products = db.prepare('SELECT id FROM products').all()
-
-      for (const prod of products) {
-        const movementsSql = `
-          SELECT COALESCE(SUM(CASE WHEN movement_type IN ('return', 'stock_adjustment', 'opening')
-                                   THEN quantity
-                                   ELSE -quantity END), 0) AS calculated_stock
-          FROM inventory_movements
-          WHERE product_id = ?
-        `
-        const calculated = db.prepare(movementsSql).get(prod.id)?.calculated_stock || 0
-        const actual = db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(prod.id)?.stock_quantity || 0
-
-        if (Math.abs(actual - calculated) > 0.01) {
-          db.prepare('UPDATE products SET stock_quantity = ?, updated_at = datetime("now") WHERE id = ?')
-            .run(Math.max(0, calculated), prod.id)
-          repairs++
-          errors.push(`Product ${prod.id}: stock corrected from ${actual} to ${calculated}`)
-        }
-      }
-
-      // Verify branch_stock quantities
-      const branches = db.prepare(`
-        SELECT DISTINCT product_id, branch_id FROM branch_stock
+      // Inventory movements do not encode enough directionality to safely rebuild
+      // stock from history alone (for example transfer-in vs transfer-out share the
+      // same movement_type). Use branch_stock as the canonical operational ledger
+      // and only repair product totals / negative branch rows from that source.
+      const negativeRows = db.prepare(`
+        SELECT product_id, branch_id, quantity
+        FROM branch_stock
+        WHERE quantity < 0
       `).all()
 
-      for (const {product_id, branch_id} of branches) {
-        const movementsSql = `
-          SELECT COALESCE(SUM(CASE WHEN movement_type IN ('return', 'stock_adjustment')
-                                   THEN quantity
-                                   ELSE -quantity END), 0) AS calculated_stock
-          FROM inventory_movements
-          WHERE product_id = ? AND branch_id = ?
-        `
-        const calculated = db.prepare(movementsSql).get(product_id, branch_id)?.calculated_stock || 0
-        const actual = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?')
-          .get(product_id, branch_id)?.quantity || 0
+      for (const row of negativeRows) {
+        db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ? AND branch_id = ?')
+          .run(row.product_id, row.branch_id)
+        repairs++
+        errors.push(`Branch ${row.branch_id}, Product ${row.product_id}: negative branch stock clamped from ${row.quantity} to 0`)
+      }
 
-        if (Math.abs(actual - calculated) > 0.01) {
-          db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?')
-            .run(Math.max(0, calculated), product_id, branch_id)
+      const products = db.prepare(`
+        SELECT p.id, COALESCE(p.stock_quantity, 0) AS stock_quantity,
+               COALESCE(SUM(bs.quantity), 0) AS branch_total
+        FROM products p
+        LEFT JOIN branch_stock bs ON bs.product_id = p.id
+        GROUP BY p.id
+      `).all()
+
+      for (const prod of products) {
+        const branchTotal = Math.max(0, Number(prod.branch_total || 0))
+        const actual = Number(prod.stock_quantity || 0)
+        if (Math.abs(actual - branchTotal) > 0.01) {
+          db.prepare('UPDATE products SET stock_quantity = ?, updated_at = datetime("now") WHERE id = ?')
+            .run(branchTotal, prod.id)
           repairs++
-          errors.push(`Branch ${branch_id}, Product ${product_id}: branch_stock corrected from ${actual} to ${calculated}`)
+          errors.push(`Product ${prod.id}: stock corrected from ${actual} to ${branchTotal}`)
         }
       }
     })()
@@ -351,8 +340,14 @@ function verifyAndRepairCostPrices() {
         if (costUsd > 0 || costKhr > 0) {
           db.prepare(`
             UPDATE sale_items
-            SET cost_price_usd = COALESCE(cost_price_usd, ?),
-                cost_price_khr = COALESCE(cost_price_khr, ?)
+            SET cost_price_usd = CASE
+                  WHEN cost_price_usd IS NULL OR cost_price_usd = 0 THEN ?
+                  ELSE cost_price_usd
+                END,
+                cost_price_khr = CASE
+                  WHEN cost_price_khr IS NULL OR cost_price_khr = 0 THEN ?
+                  ELSE cost_price_khr
+                END
             WHERE id = ?
           `).run(costUsd, costKhr, item.id)
           repairs++
@@ -376,8 +371,14 @@ function verifyAndRepairCostPrices() {
         if (costUsd > 0 || costKhr > 0) {
           db.prepare(`
             UPDATE inventory_movements
-            SET unit_cost_usd = COALESCE(unit_cost_usd, ?),
-                unit_cost_khr = COALESCE(unit_cost_khr, ?)
+            SET unit_cost_usd = CASE
+                  WHEN unit_cost_usd IS NULL OR unit_cost_usd = 0 THEN ?
+                  ELSE unit_cost_usd
+                END,
+                unit_cost_khr = CASE
+                  WHEN unit_cost_khr IS NULL OR unit_cost_khr = 0 THEN ?
+                  ELSE unit_cost_khr
+                END
             WHERE id = ?
           `).run(costUsd, costKhr, mov.id)
           repairs++

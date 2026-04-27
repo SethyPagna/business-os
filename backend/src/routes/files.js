@@ -1,7 +1,7 @@
 'use strict'
 
 const express = require('express')
-const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit } = require('../middleware')
+const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
 const {
   deleteFileAsset,
@@ -11,13 +11,6 @@ const {
 
 const router = express.Router()
 
-function getActor(req) {
-  return {
-    userId: Number(req?.user?.id || 0) || null,
-    userName: String(req?.user?.name || req?.user?.username || '').trim() || null,
-  }
-}
-
 function getDeviceMeta(req) {
   return {
     deviceName: String(req.body?.deviceName || req.body?.device_name || req.headers['x-device-name'] || '').trim() || null,
@@ -26,7 +19,7 @@ function getDeviceMeta(req) {
   }
 }
 
-router.get('/', authToken, async (req, res) => {
+router.get('/', authToken, requirePermission('settings'), async (req, res) => {
   try {
     const files = await listFileAssets({
       search: req.query?.search || '',
@@ -38,10 +31,10 @@ router.get('/', authToken, async (req, res) => {
   }
 })
 
-router.post('/upload', authToken, routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
+router.post('/upload', authToken, requirePermission('settings'), routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
   try {
     if (!req.file) return err(res, 'No file uploaded')
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const deviceMeta = getDeviceMeta(req)
     const asset = await registerUploadFromRequest(req.file, actor)
     audit(actor.userId, actor.userName, 'upload', 'file_asset', asset.id, {
@@ -56,9 +49,9 @@ router.post('/upload', authToken, routeRateLimit({ name: 'files:upload', max: 30
   }
 })
 
-router.delete('/:id', authToken, (req, res) => {
+router.delete('/:id', authToken, requirePermission('settings'), (req, res) => {
   try {
-    const actor = getActor(req)
+    const actor = getAuditActor(req)
     const asset = deleteFileAsset(Number(req.params.id))
     audit(actor.userId, actor.userName, 'delete', 'file_asset', asset.id, {
       original_name: asset.original_name,

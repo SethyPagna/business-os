@@ -7,6 +7,7 @@ try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
 const { UPLOADS_PATH } = require('./config')
 const { validateUploadedBuffer } = require('./uploadSecurity')
+const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 
 const IMAGE_MIME_TO_EXT = {
   'image/jpeg': '.jpg',
@@ -342,6 +343,7 @@ async function backfillUploadAssets() {
 }
 
 async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
+  repairMissingUploadReferences(db)
   await backfillUploadAssets()
   return listAssetRows(search, mediaType).map(serializeAssetRow)
 }

@@ -128,6 +128,18 @@ export async function replaceTableContents(tableName, rows) {
   return safeRows
 }
 
+export async function resetLocalMirrorDb() {
+  try {
+    dexieDb.close()
+  } catch (_) {}
+  try {
+    await dexieDb.delete()
+  } catch (_) {}
+  try {
+    await dexieDb.open()
+  } catch (_) {}
+}
+
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 export function parseCSV(text) {
   if (!text) return []
