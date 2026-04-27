@@ -151,6 +151,13 @@ function mountSpaFallback(target) {
   // index.html so client-side routing can take over.
   if (!FRONTEND_DIST_EXISTS) return
 
+  // If an old client requests a missing built asset after a deploy, return a
+  // real 404 instead of ever falling through to the SPA shell. That avoids the
+  // confusing "stylesheet MIME type text/html" failure mode on stale tabs.
+  target.get('/assets/*', (_req, res) => {
+    res.status(404).type('text/plain; charset=utf-8').send('Asset not found')
+  })
+
   target.get('*', (req, res, next) => {
     if (!isSpaFallbackEligible(req.path)) return next()
     setHtmlNoCacheHeaders(res)

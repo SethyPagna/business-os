@@ -72,7 +72,14 @@ export default defineConfig({
         // break when an older shell requests a page bundle after a deploy.
         chunkFileNames: 'assets/[name].js',
         entryFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]',
+        assetFileNames(assetInfo) {
+          // Keep CSS asset names stable too so an already-open shell can keep
+          // finding styles across a deploy instead of requesting an old hashed
+          // stylesheet that no longer exists on disk.
+          const name = String(assetInfo?.name || '')
+          if (name.endsWith('.css')) return 'assets/[name].css'
+          return 'assets/[name]-[hash][extname]'
+        },
       },
     },
   },
