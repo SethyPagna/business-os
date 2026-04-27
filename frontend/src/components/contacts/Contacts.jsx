@@ -142,8 +142,7 @@ export default function Contacts() {
             title={t('import_all_contacts_title') || 'Import contacts'}
           >
             <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
-            <span className="sm:hidden">{t('import_btn') || 'Import'}</span>
+            <span>{t('import_contacts') || 'Import'}</span>
           </button>
           <button
             className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
@@ -151,8 +150,7 @@ export default function Contacts() {
             title={t('export_all_contacts') || 'Export all contacts as CSVs'}
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('export_all_contacts') || 'Export All'}</span>
-            <span className="sm:hidden">CSV</span>
+            <span>Export</span>
           </button>
         </div>
       </div>

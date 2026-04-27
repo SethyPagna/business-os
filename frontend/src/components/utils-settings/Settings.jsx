@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'

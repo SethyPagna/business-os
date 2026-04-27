@@ -1,5 +1,6 @@
 ﻿// ?? DeliveryTab ???????????????????????????????????????????????????????????????
 import { useState, useEffect, useCallback } from 'react'
+import { Download, Plus, Upload } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
@@ -214,15 +215,20 @@ function DeliveryTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           )}
-          <button className="btn-secondary text-sm whitespace-nowrap" onClick={() => setModal('import')}>
-            Import <span className="hidden sm:inline">CSV</span>
+          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => setModal('import')} title={t('import_contacts') || 'Import'}>
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
           </button>
-          <button className="btn-secondary text-sm whitespace-nowrap" onClick={() => {
+          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => {
             const rows = filtered.map(c => ({ Name: c.name||'', Phone: c.phone||'', Area: c.area||'', Notes: c.notes||'', Created: c.created_at||'' }))
             downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
-          }}>Export CSV</button>
-          <button className="btn-primary text-sm whitespace-nowrap" onClick={() => { setSelected(null); setModal('form') }}>
-            + <span className="hidden sm:inline">Add</span>
+          }} title="Export">
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+          <button className="btn-primary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => { setSelected(null); setModal('form') }} title={t('add_delivery_contact') || 'Add Delivery'}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('add_delivery_contact') || 'Add Delivery'}</span>
           </button>
         </div>
       </div>

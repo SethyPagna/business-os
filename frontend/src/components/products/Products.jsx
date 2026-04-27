@@ -373,9 +373,9 @@ export default function Products() {
   return (
     <div className="page-scroll p-3 sm:p-6">
       {/* ?�?� Single-row header ??compact on mobile, expanded on desktop ?�?� */}
-      <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <h1 className="mr-1 min-w-0 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('products')}</h1>
-        <div className="w-full sm:ml-auto sm:w-auto sm:flex-shrink-0">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+        <h1 className="mr-1 min-w-0 flex-1 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('products')}</h1>
+        <div className="min-w-0 flex-shrink-0 overflow-x-auto pb-1 sm:pb-0">
           <ProductsHeaderActions
             onManageCats={()=>setModal('cats')}
             onManageBrands={()=>setModal('brands')}

@@ -132,21 +132,21 @@ export default function Returns() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl font-bold text-gray-900 sm:text-2xl dark:text-white">{tr('returns', 'Returns')}</h1>
         </div>
-        <div className="flex w-full flex-row flex-nowrap gap-2 sm:w-auto sm:items-center">
+        <div className="flex flex-shrink-0 flex-row flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:items-center sm:pb-0">
           <button
             onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
             className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
           >
-            {tr('export_csv', 'Export')}
+            Export
           </button>
           {scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">+ {tr('return_to_supplier', 'Return to Supplier')}</button>
+            <button onClick={() => setShowSupplierForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">{tr('return_to_supplier', 'Return to Supplier')}</button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">+ {tr('new_return', 'New Return')}</button>
+            <button onClick={() => setShowCustomerForm(true)} className="btn-primary min-w-0 flex-1 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm">{tr('new_return', 'New Return')}</button>
           )}
         </div>
       </div>

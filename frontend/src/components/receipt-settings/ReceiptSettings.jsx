@@ -140,12 +140,12 @@ export default function ReceiptSettings() {
 
       {/* ?? Editor panel ?? */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        <div className="sticky top-0 z-20 flex flex-col gap-3 border-b border-gray-200 bg-white/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:px-6 sm:pt-6 lg:flex-row lg:items-center lg:justify-between">
-          <h1 className="flex items-center gap-2 text-lg font-bold text-gray-900 dark:text-white sm:text-2xl">
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-gray-200 bg-white/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:px-6 sm:pt-6">
+          <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-2xl">
             <Printer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('receipt_template')}
           </h1>
-          <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:pb-0 lg:justify-end">
+          <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             <button onClick={() => setPreviewOpen(true)} className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:hidden">
               <Eye className="h-4 w-4" />
               {t('preview') || 'Preview'}

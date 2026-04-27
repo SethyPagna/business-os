@@ -184,11 +184,11 @@ export default function Branches() {
 
   return (
     <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
-      <div className="mb-4 flex min-w-0 items-start justify-between gap-2">
+      <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('branches') || 'Branches'}</h1>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2 overflow-x-auto pb-1">
+        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {selectedCount > 0 ? (
             <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete}>
               <Trash2 className="h-4 w-4" />

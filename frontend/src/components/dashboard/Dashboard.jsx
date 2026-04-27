@@ -264,9 +264,9 @@ export default function Dashboard() {
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h1 className="min-w-0 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('dashboard')}</h1>
-        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:justify-end sm:pb-0">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <h1 className="min-w-0 flex-1 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('dashboard')}</h1>
+        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {silentRefresh && <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>}
           <button onClick={() => { window.api.getDashboard().then(d => setSummary(d)); loadAnalytics() }} className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
@@ -274,7 +274,7 @@ export default function Dashboard() {
           </button>
           <PortalMenu
             align="right"
-            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"><Download className="h-4 w-4" />{t('export_csv') || 'Export'}</button>}
+            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"><Download className="h-4 w-4" />Export</button>}
             items={[
               { label: t('export_all_report'), onClick: buildExportAll },
               'divider',

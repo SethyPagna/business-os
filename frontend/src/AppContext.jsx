@@ -815,8 +815,53 @@ export function AppProvider({ children }) {
   )
 }
 
-export const useApp = () => useContext(AppContext)
-export const useSync = () => useContext(SyncContext)
+const FALLBACK_SYNC_CONTEXT = {
+  syncConnected: false,
+  syncChannel: null,
+  syncServerUnreachable: false,
+}
+
+const FALLBACK_APP_CONTEXT = {
+  user: null,
+  login: async () => ({ success: false, error: 'App context not ready' }),
+  logout: () => {},
+  persistAuthenticatedUser: () => {},
+  page: 'dashboard',
+  setPage: () => {},
+  navigateTo: () => {},
+  settings: {},
+  loadSettings: async () => ({}),
+  saveSettings: async () => ({ success: false, error: 'Settings are not ready yet' }),
+  language: 'en',
+  theme: 'light',
+  t: (key) => key,
+  notify: () => {},
+  notification: null,
+  hasPermission: () => false,
+  canAccessPage: () => true,
+  getPermissions: () => [],
+  formatPrice: (value) => String(value ?? ''),
+  fmtUSD: (value) => `$${Number(value || 0).toFixed(2)}`,
+  fmtKHR: (value) => `${Number(value || 0).toLocaleString()} KHR`,
+  usdSymbol: '$',
+  khrSymbol: 'KHR',
+  displayCurrency: 'usd',
+  exchangeRate: 4000,
+  usdToKhr: (value) => Number(value || 0) * 4000,
+  khrToUsd: (value) => Number(value || 0) / 4000,
+  displayTimezone: 'UTC',
+  deviceTimezone: 'UTC',
+  formatDateTime: (value) => String(value || ''),
+  syncUrl: '',
+  updateSyncUrl: () => {},
+  syncConnected: false,
+  syncChannel: null,
+  syncServerUnreachable: false,
+  AccessDenied: () => null,
+}
+
+export const useApp = () => useContext(AppContext) || FALLBACK_APP_CONTEXT
+export const useSync = () => useContext(SyncContext) || FALLBACK_SYNC_CONTEXT
 
 // Helper hook: gather translations for a list of keys once per render
 export const useT = (keys = []) => {

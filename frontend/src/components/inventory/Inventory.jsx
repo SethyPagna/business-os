@@ -382,14 +382,14 @@ export default function Inventory() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
           <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
             <Boxes className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('inventory')}
           </h1>
         </div>
-        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:justify-end sm:pb-0">
+        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {/* Export inventory summary CSV */}
           <button
             onClick={() => {
@@ -410,11 +410,11 @@ export default function Inventory() {
               downloadCSV(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
             className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
-            title={t('export_csv')||'Export Inventory CSV'}
+            title={t('export_csv')||'Export'}
           >
             <span className="inline-flex items-center gap-2">
               <Download className="h-4 w-4" />
-              {t('export_csv')||'Export'}
+              Export
             </span>
           </button>
           {/* Export movements CSV */}

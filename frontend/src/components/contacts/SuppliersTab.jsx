@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
+import { Download, Plus, Upload } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
@@ -159,11 +160,12 @@ function SuppliersTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           ) : null}
-          <button className="btn-secondary whitespace-nowrap text-sm" onClick={() => setModal('import')}>
-            <span>{t('import_contacts') || 'Import'}</span>
+          <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={t('import_contacts') || 'Import'}>
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
           </button>
           <button
-            className="btn-secondary whitespace-nowrap text-sm"
+            className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={() => {
               const rows = filtered.map((supplier) => ({
                 Name: supplier.name || '',
@@ -178,10 +180,12 @@ function SuppliersTab({ t, notify }) {
               downloadCSV(`suppliers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
           >
-            <span>CSV</span>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export</span>
           </button>
-          <button className="btn-primary whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }}>
-            <span>{t('add_supplier') || 'Add Supplier'}</span>
+          <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={t('add_supplier') || 'Add Supplier'}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('add_supplier') || 'Add Supplier'}</span>
           </button>
         </div>
       </div>
