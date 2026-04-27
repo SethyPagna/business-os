@@ -8,6 +8,7 @@ const { ok, err, audit, broadcast, logOp, tryParse } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit } = require('../middleware')
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
 const { isSafeExternalImageReference } = require('../netSecurity')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
 
@@ -275,8 +276,9 @@ router.put('/:id', authToken, (req, res) => {
   try {
     const productId = parseInt(req.params.id, 10)
     db.transaction(() => {
-      const prev = db.prepare('SELECT stock_quantity, name, image_path FROM products WHERE id=?').get(productId)
+      const prev = db.prepare('SELECT id, stock_quantity, name, image_path, updated_at FROM products WHERE id=?').get(productId)
       if (!prev) throw new Error('Product not found')
+      assertUpdatedAtMatch('product', prev, getExpectedUpdatedAt(d))
       assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode, excludeId: productId })
 
       const desiredQty = Math.max(0, parseFloat(d.stock_quantity) || 0)
@@ -388,15 +390,19 @@ router.put('/:id', authToken, (req, res) => {
     logOp('products:update', Date.now() - t0)
     broadcast('products')
     ok(res, {})
-  } catch (e) { err(res, e.message) }
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 // ── DELETE /api/products/:id ──────────────────────────────────────────────────
 router.delete('/:id', authToken, (req, res) => {
   const { userId, userName, deviceName, deviceTz, clientTime } = req.body || req.query
   try {
-    const p = db.prepare('SELECT name FROM products WHERE id = ?').get(req.params.id)
+    const p = db.prepare('SELECT id, name, updated_at FROM products WHERE id = ?').get(req.params.id)
     if (!p) return err(res, 'Product not found')
+    assertUpdatedAtMatch('product', p, getExpectedUpdatedAt(req.body || req.query || {}))
     db.transaction(() => {
       db.prepare('UPDATE inventory_movements SET product_id = NULL WHERE product_id = ?').run(req.params.id)
       db.prepare('UPDATE sale_items SET product_id = NULL WHERE product_id = ?').run(req.params.id)
@@ -411,7 +417,10 @@ router.delete('/:id', authToken, (req, res) => {
     })
     broadcast('products')
     ok(res, {})
-  } catch (e) { err(res, e.message) }
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 // ── POST /api/products/upload-image ──────────────────────────────────────────

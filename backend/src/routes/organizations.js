@@ -7,17 +7,20 @@ const {
   searchOrganizations,
   getOrganizationContextForUser,
   getDefaultOrganizationGroup,
+  ensureOrganizationFilesystemLayout,
 } = require('../organizationContext')
 
 const router = express.Router()
 
 router.get('/bootstrap', (_req, res) => {
   const organization = getDefaultOrganization()
+  const storage = organization ? ensureOrganizationFilesystemLayout(organization) : null
   const group = organization ? getDefaultOrganizationGroup(organization.id) : null
   res.json({
     organizationCreationEnabled: false,
     organization,
     defaultGroup: group,
+    storage,
   })
 })
 
@@ -34,6 +37,12 @@ router.get('/current', authToken, (req, res) => {
   if (!current?.organization_id) {
     return res.status(404).json({ success: false, error: 'Organization context not found.' })
   }
+  const storage = ensureOrganizationFilesystemLayout({
+    id: current.organization_id,
+    name: current.organization_name,
+    slug: current.organization_slug,
+    public_id: current.organization_public_id,
+  })
   res.json({
     organization: {
       id: current.organization_id,
@@ -41,6 +50,7 @@ router.get('/current', authToken, (req, res) => {
       slug: current.organization_slug,
       public_id: current.organization_public_id,
     },
+    storage,
     group: current.organization_group_id ? {
       id: current.organization_group_id,
       name: current.organization_group_name,

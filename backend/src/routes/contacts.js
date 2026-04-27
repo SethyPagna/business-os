@@ -3,6 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, bulkImportCSV } = require('../helpers')
 const { authToken } = require('../middleware')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
 
@@ -140,7 +141,7 @@ router.post('/customers', authToken, (req, res) => {
   if (!d.name?.trim()) return err(res, 'Name required')
   try {
     const membershipNumber = assertUniqueMembershipNumber(d.membership_number)
-    const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes) VALUES (?,?,?,?,?,?,?)')
+    const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
       .run(d.name.trim(), membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null)
     audit(d.userId, d.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
     broadcast('customers')
@@ -151,19 +152,33 @@ router.post('/customers', authToken, (req, res) => {
 router.put('/customers/:id', authToken, (req, res) => {
   const d = req.body || {}
   try {
+    const current = db.prepare('SELECT id, updated_at FROM customers WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Customer not found', 404)
+    assertUpdatedAtMatch('customer', current, getExpectedUpdatedAt(d))
     const membershipNumber = assertUniqueMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
-    db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=? WHERE id=?')
+    db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(d.name, membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null, req.params.id)
     audit(d.userId, d.userName, 'update', 'customer', req.params.id)
     broadcast('customers')
     ok(res, {})
-  } catch (e) { err(res, e.message) }
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.delete('/customers/:id', authToken, (req, res) => {
-  db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id)
-  broadcast('customers')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT id, name, updated_at FROM customers WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Customer not found', 404)
+    assertUpdatedAtMatch('customer', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id)
+    broadcast('customers')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.post('/customers/bulk-import', authToken, (req, res) => {
@@ -194,7 +209,7 @@ router.post('/customers/bulk-import', authToken, (req, res) => {
   `)
   const updateCustomer = db.prepare(`
     UPDATE customers
-    SET name = ?, membership_number = ?, phone = ?, email = ?, address = ?, company = ?, notes = ?
+    SET name = ?, membership_number = ?, phone = ?, email = ?, address = ?, company = ?, notes = ?, updated_at = datetime('now')
     WHERE id = ?
   `)
 
@@ -303,7 +318,7 @@ router.get('/suppliers', authToken, (req, res) => {
 router.post('/suppliers', authToken, (req, res) => {
   const d = req.body || {}
   if (!d.name?.trim()) return err(res, 'Name required')
-  const r = db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes) VALUES (?,?,?,?,?,?,?)')
+  const r = db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
     .run(d.name.trim(), d.phone || null, d.email || null, d.address || null, d.company || null, d.contact_person || null, d.notes || null)
   audit(d.userId, d.userName, 'create', 'supplier', r.lastInsertRowid, { name: d.name })
   broadcast('suppliers')
@@ -312,16 +327,32 @@ router.post('/suppliers', authToken, (req, res) => {
 
 router.put('/suppliers/:id', authToken, (req, res) => {
   const d = req.body || {}
-  db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=? WHERE id=?')
-    .run(d.name, d.phone || null, d.email || null, d.address || null, d.company || null, d.contact_person || null, d.notes || null, req.params.id)
-  broadcast('suppliers')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT id, updated_at FROM suppliers WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Supplier not found', 404)
+    assertUpdatedAtMatch('supplier', current, getExpectedUpdatedAt(d))
+    db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+      .run(d.name, d.phone || null, d.email || null, d.address || null, d.company || null, d.contact_person || null, d.notes || null, req.params.id)
+    broadcast('suppliers')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.delete('/suppliers/:id', authToken, (req, res) => {
-  db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id)
-  broadcast('suppliers')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT id, name, updated_at FROM suppliers WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Supplier not found', 404)
+    assertUpdatedAtMatch('supplier', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id)
+    broadcast('suppliers')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.post('/suppliers/bulk-import', authToken, (req, res) => {
@@ -346,7 +377,7 @@ router.post('/suppliers/bulk-import', authToken, (req, res) => {
   `)
   const updateSupplier = db.prepare(`
     UPDATE suppliers
-    SET name = ?, phone = ?, email = ?, address = ?, company = ?, contact_person = ?, notes = ?
+    SET name = ?, phone = ?, email = ?, address = ?, company = ?, contact_person = ?, notes = ?, updated_at = datetime('now')
     WHERE id = ?
   `)
 
@@ -449,7 +480,7 @@ router.post('/delivery-contacts', authToken, (req, res) => {
   const phone = String(d.phone || '').trim()
   if (!name && !phone) return err(res, 'Driver name or phone is required')
   const finalName = name || `Driver ${phone}`
-  const r = db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes) VALUES (?,?,?,?,?)')
+  const r = db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
     .run(finalName, phone || null, d.area || null, d.address || null, d.notes || null)
   broadcast('deliveryContacts')
   ok(res, { id: r.lastInsertRowid })
@@ -461,16 +492,32 @@ router.put('/delivery-contacts/:id', authToken, (req, res) => {
   const phone = String(d.phone || '').trim()
   if (!name && !phone) return err(res, 'Driver name or phone is required')
   const finalName = name || `Driver ${phone}`
-  db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=? WHERE id=?')
-    .run(finalName, phone || null, d.area || null, d.address || null, d.notes || null, req.params.id)
-  broadcast('deliveryContacts')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT id, updated_at FROM delivery_contacts WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Delivery contact not found', 404)
+    assertUpdatedAtMatch('delivery contact', current, getExpectedUpdatedAt(d))
+    db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+      .run(finalName, phone || null, d.area || null, d.address || null, d.notes || null, req.params.id)
+    broadcast('deliveryContacts')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.delete('/delivery-contacts/:id', authToken, (req, res) => {
-  db.prepare('DELETE FROM delivery_contacts WHERE id = ?').run(req.params.id)
-  broadcast('deliveryContacts')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT id, name, updated_at FROM delivery_contacts WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Delivery contact not found', 404)
+    assertUpdatedAtMatch('delivery contact', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    db.prepare('DELETE FROM delivery_contacts WHERE id = ?').run(req.params.id)
+    broadcast('deliveryContacts')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 router.post('/delivery-contacts/bulk-import', authToken, (req, res) => {
@@ -495,7 +542,7 @@ router.post('/delivery-contacts/bulk-import', authToken, (req, res) => {
   `)
   const updateDelivery = db.prepare(`
     UPDATE delivery_contacts
-    SET name = ?, phone = ?, area = ?, address = ?, notes = ?
+    SET name = ?, phone = ?, area = ?, address = ?, notes = ?, updated_at = datetime('now')
     WHERE id = ?
   `)
 

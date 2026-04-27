@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { db } = require('./database')
-const { DATA_ROOT } = require('./config')
+const { DATA_ROOT, DB_PATH, UPLOADS_PATH } = require('./config')
 
 function trim(value) {
   return String(value || '').trim()
@@ -133,30 +133,87 @@ function getPortalPublicPath(organization) {
   return `/${slug}/public`
 }
 
-function ensureOrganizationFilesystemLayout(organization) {
+function getOrganizationFilesystemLayout(organization) {
   if (!organization?.public_id) return null
   const orgRoot = path.join(DATA_ROOT, 'organizations', organization.public_id)
-  const metaRoot = path.join(orgRoot, 'meta')
-  const userDataRoot = path.join(orgRoot, 'users')
-  fs.mkdirSync(metaRoot, { recursive: true })
-  fs.mkdirSync(userDataRoot, { recursive: true })
-  const metaFile = path.join(metaRoot, 'organization.json')
+  return {
+    orgRoot,
+    metaRoot: path.join(orgRoot, 'meta'),
+    userDataRoot: path.join(orgRoot, 'users'),
+    databaseRoot: path.join(orgRoot, 'db'),
+    uploadsRoot: path.join(orgRoot, 'uploads'),
+    importsRoot: path.join(orgRoot, 'imports'),
+    exportsRoot: path.join(orgRoot, 'exports'),
+    backupsRoot: path.join(orgRoot, 'backups'),
+    logsRoot: path.join(orgRoot, 'logs'),
+    tempRoot: path.join(orgRoot, 'tmp'),
+  }
+}
+
+function ensureOrganizationFilesystemLayout(organization) {
+  const layout = getOrganizationFilesystemLayout(organization)
+  if (!layout) return null
+  Object.values(layout).forEach((folderPath) => {
+    if (folderPath === layout.orgRoot || String(folderPath).startsWith(layout.orgRoot + path.sep)) {
+      fs.mkdirSync(folderPath, { recursive: true })
+    }
+  })
+  const metaFile = path.join(layout.metaRoot, 'organization.json')
+  const readmeFile = path.join(layout.metaRoot, 'README.txt')
   const payload = {
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
     public_id: organization.public_id,
     generated_at: new Date().toISOString(),
-    notes: 'This folder describes the active organization for this server instance. The SQLite database in business-os-data/db/business.db remains the source of truth.',
+    portal_public_path: getPortalPublicPath(organization),
+    runtime_source_of_truth: {
+      data_root: DATA_ROOT,
+      db_path: DB_PATH,
+      uploads_path: UPLOADS_PATH,
+    },
+    organization_layout: {
+      org_root: layout.orgRoot,
+      meta_root: layout.metaRoot,
+      users_root: layout.userDataRoot,
+      database_root: layout.databaseRoot,
+      uploads_root: layout.uploadsRoot,
+      imports_root: layout.importsRoot,
+      exports_root: layout.exportsRoot,
+      backups_root: layout.backupsRoot,
+      logs_root: layout.logsRoot,
+      temp_root: layout.tempRoot,
+    },
+    notes: [
+      'This organization folder is the canonical layout target for multi-business storage.',
+      'The current server may still be running from the legacy shared runtime root listed above.',
+      'Backups, imports, exports, uploads, and future per-organization runtime files belong under this folder.',
+    ],
   }
   try {
     fs.writeFileSync(metaFile, JSON.stringify(payload, null, 2), 'utf8')
   } catch (_) {}
+  try {
+    fs.writeFileSync(
+      readmeFile,
+      [
+        `Organization: ${organization.name}`,
+        `Public ID: ${organization.public_id}`,
+        '',
+        'Purpose:',
+        '- Keep organization-scoped files grouped together for future multi-business hosting.',
+        '- Provide a stable migration target away from the legacy shared runtime root.',
+        '',
+        `Current live database: ${DB_PATH}`,
+        `Current live uploads: ${UPLOADS_PATH}`,
+      ].join('\r\n'),
+      'utf8',
+    )
+  } catch (_) {}
   return {
-    orgRoot,
-    metaRoot,
-    userDataRoot,
+    ...layout,
     metaFile,
+    readmeFile,
   }
 }
 
@@ -171,5 +228,6 @@ module.exports = {
   getOrganizationGroup,
   getOrganizationContextForUser,
   getPortalPublicPath,
+  getOrganizationFilesystemLayout,
   ensureOrganizationFilesystemLayout,
 }

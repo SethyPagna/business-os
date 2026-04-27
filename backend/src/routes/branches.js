@@ -3,6 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken } = require('../middleware')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
 
@@ -28,7 +29,7 @@ router.post('/', authToken, (req, res) => {
     const activeFlag = toDbBool(is_active, 1)
     if (defaultFlag) db.prepare('UPDATE branches SET is_default = 0').run()
     const r = db.prepare(
-      'INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active) VALUES (?,?,?,?,?,?,?)'
+      'INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
     ).run(name.trim(), location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag)
     audit(userId, userName, 'create', 'branch', r.lastInsertRowid, { name }, {
       tableName: 'branches', recordId: r.lastInsertRowid,
@@ -43,42 +44,55 @@ router.post('/', authToken, (req, res) => {
 // PUT /api/branches/:id
 router.put('/:id', authToken, (req, res) => {
   const { name, location, phone, manager, notes, is_default, is_active, userId, userName, deviceName, deviceTz, clientTime } = req.body || {}
-  db.transaction(() => {
-    const defaultFlag = toDbBool(is_default, 0)
-    const activeFlag = toDbBool(is_active, 1)
-    if (defaultFlag) db.prepare('UPDATE branches SET is_default = 0').run()
-    db.prepare(
-      'UPDATE branches SET name=?, location=?, phone=?, manager=?, notes=?, is_default=?, is_active=? WHERE id=?'
-    ).run(name, location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag, req.params.id)
-    audit(userId, userName, 'update', 'branch', req.params.id, { name }, {
-      tableName: 'branches', recordId: req.params.id,
-      deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
-    })
-  })()
-  broadcast('branches')
-  ok(res, {})
+  try {
+    db.transaction(() => {
+      const current = db.prepare('SELECT id, updated_at FROM branches WHERE id = ?').get(req.params.id)
+      if (!current) throw new Error('Branch not found')
+      assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(req.body || {}))
+      const defaultFlag = toDbBool(is_default, 0)
+      const activeFlag = toDbBool(is_active, 1)
+      if (defaultFlag) db.prepare('UPDATE branches SET is_default = 0').run()
+      db.prepare(
+        'UPDATE branches SET name=?, location=?, phone=?, manager=?, notes=?, is_default=?, is_active=?, updated_at=datetime(\'now\') WHERE id=?'
+      ).run(name, location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag, req.params.id)
+      audit(userId, userName, 'update', 'branch', req.params.id, { name }, {
+        tableName: 'branches', recordId: req.params.id,
+        deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
+      })
+    })()
+    broadcast('branches')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
+  }
 })
 
 // DELETE /api/branches/:id
 router.delete('/:id', authToken, (req, res) => {
   const { userId, userName } = req.body || req.query
-  const branch = db.prepare('SELECT * FROM branches WHERE id = ?').get(req.params.id)
-  if (!branch) return err(res, 'Branch not found')
-  if (branch.is_default) return err(res, 'Cannot delete the default branch')
+  try {
+    const branch = db.prepare('SELECT * FROM branches WHERE id = ?').get(req.params.id)
+    if (!branch) return err(res, 'Branch not found')
+    assertUpdatedAtMatch('branch', branch, getExpectedUpdatedAt(req.body || req.query || {}))
+    if (branch.is_default) return err(res, 'Cannot delete the default branch')
 
-  // Check if there is any stock still in this branch
-  const stockCheck = db.prepare(`
-    SELECT SUM(quantity) as total FROM branch_stock WHERE branch_id = ? AND quantity > 0
-  `).get(req.params.id)
-  if (stockCheck && stockCheck.total > 0) {
-    return err(res, `Cannot delete branch — it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
+    const stockCheck = db.prepare(`
+      SELECT SUM(quantity) as total FROM branch_stock WHERE branch_id = ? AND quantity > 0
+    `).get(req.params.id)
+    if (stockCheck && stockCheck.total > 0) {
+      return err(res, `Cannot delete branch — it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
+    }
+
+    db.prepare('DELETE FROM branch_stock WHERE branch_id = ?').run(req.params.id)
+    db.prepare('DELETE FROM branches WHERE id = ?').run(req.params.id)
+    audit(userId, userName, 'delete', 'branch', req.params.id, { name: branch.name })
+    broadcast('branches')
+    ok(res, {})
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    err(res, e.message)
   }
-
-  db.prepare('DELETE FROM branch_stock WHERE branch_id = ?').run(req.params.id)
-  db.prepare('DELETE FROM branches WHERE id = ?').run(req.params.id)
-  audit(userId, userName, 'delete', 'branch', req.params.id, { name: branch.name })
-  broadcast('branches')
-  ok(res, {})
 })
 
 // GET /api/branches/:id/stock

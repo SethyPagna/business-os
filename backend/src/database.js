@@ -139,7 +139,8 @@ CREATE TABLE IF NOT EXISTS branches (
   notes      TEXT,
   is_default INTEGER DEFAULT 0,
   is_active  INTEGER DEFAULT 1,
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -209,7 +210,8 @@ CREATE TABLE IF NOT EXISTS customers (
   address    TEXT,
   company    TEXT,
   notes      TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -221,7 +223,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
   company        TEXT,
   contact_person TEXT,
   notes          TEXT,
-  created_at     TEXT DEFAULT (datetime('now'))
+  created_at     TEXT DEFAULT (datetime('now')),
+  updated_at     TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS delivery_contacts (
@@ -231,7 +234,8 @@ CREATE TABLE IF NOT EXISTS delivery_contacts (
   area       TEXT,
   address    TEXT,
   notes      TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 -- ─── SALES ────────────────────────────────────────────────────────────────────
@@ -581,6 +585,10 @@ const migrations = [
   // We keep both for backwards compat with any existing data
   `ALTER TABLE sale_items ADD COLUMN total_usd REAL DEFAULT 0`,
   `ALTER TABLE sale_items ADD COLUMN total_khr REAL DEFAULT 0`,
+  `ALTER TABLE branches ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`,
+  `ALTER TABLE customers ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`,
+  `ALTER TABLE suppliers ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`,
+  `ALTER TABLE delivery_contacts ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`,
 
   // inventory_movements — columns required by routes/inventory.js and routes/sales.js
   `ALTER TABLE inventory_movements ADD COLUMN unit_cost_usd REAL DEFAULT 0`,
@@ -703,6 +711,18 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
     // Never crash startup on index creation for legacy/corrupt customer schemas.
   }
 }
+
+;['branches', 'customers', 'suppliers', 'delivery_contacts'].forEach((tableName) => {
+  if (ensureColumn(tableName, 'updated_at', 'TEXT DEFAULT (datetime(\'now\'))')) {
+    try {
+      db.exec(`
+        UPDATE "${tableName}"
+        SET updated_at = COALESCE(updated_at, created_at, datetime('now'))
+        WHERE updated_at IS NULL OR trim(updated_at) = ''
+      `)
+    } catch (_) {}
+  }
+})
 
 if (ensureColumn('users', 'phone_lookup', 'TEXT')) {
   try {

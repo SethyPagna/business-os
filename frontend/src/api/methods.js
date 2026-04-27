@@ -45,6 +45,20 @@ function queueOfflineWrite(channel, payload) {
   }).catch(() => {})
 }
 
+async function withExpectedUpdatedAt(tableName, id, payload = {}) {
+  const body = { ...(payload || {}) }
+  if (body.expectedUpdatedAt || body.expected_updated_at) return body
+  if (body.updated_at) {
+    body.expectedUpdatedAt = body.updated_at
+    return body
+  }
+  try {
+    const row = await dexieDb[tableName]?.get?.(id)
+    if (row?.updated_at) body.expectedUpdatedAt = row.updated_at
+  } catch (_) {}
+  return body
+}
+
 function appendActorQuery(path, extra = {}) {
   const query = new URLSearchParams()
   const { userId, userName } = getCurrentUserContext()
@@ -167,8 +181,14 @@ export const deleteCustomField = id       => route('customFields:delete', () => 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))
 export const createBranch   = d        => route('branches:create', () => apiFetch('POST', '/api/branches', { ...getDeviceInfo(), ...d }),           null, true)
-export const updateBranch   = (id, d)  => route('branches:update', () => apiFetch('PUT', `/api/branches/${id}`, { ...getDeviceInfo(), ...d }),      null, true)
-export const deleteBranch   = (id, userId, userName) => route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, { userId, userName }),      null, true)
+export const updateBranch = async (id, d) => {
+  const payload = await withExpectedUpdatedAt('branches', id, { ...getDeviceInfo(), ...d })
+  return route('branches:update', () => apiFetch('PUT', `/api/branches/${id}`, payload), null, true)
+}
+export const deleteBranch = async (id, userId, userName) => {
+  const payload = await withExpectedUpdatedAt('branches', id, { userId, userName })
+  return route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, payload), null, true)
+}
 export const getBranchStock = id       => route('branches:stock',  () => apiFetch('GET', `/api/branches/${id}/stock`),   () => [])
 export const getTransfers   = ()       => route('transfers:get',   () => apiFetch('GET', '/api/transfers'),              () => dexieDb.stock_transfers.orderBy('created_at').reverse().toArray())
 export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', d), null, true)
@@ -321,9 +341,13 @@ export async function updateProduct(id, d) {
       }
     } catch (_) {}
   }
-  return route('products:update', () => apiFetch('PUT', `/api/products/${id}`, { ...getDeviceInfo(), ...d }), null, true)
+  const payload = await withExpectedUpdatedAt('products', id, { ...getDeviceInfo(), ...d })
+  return route('products:update', () => apiFetch('PUT', `/api/products/${id}`, payload), null, true)
 }
-export const deleteProduct      = id       => route('products:delete',     () => apiFetch('DELETE', `/api/products/${id}`),            null, true)
+export const deleteProduct = async (id) => {
+  const payload = await withExpectedUpdatedAt('products', id, {})
+  return route('products:delete', () => apiFetch('DELETE', `/api/products/${id}`, payload), null, true)
+}
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
 export const otpSetup   = d  => apiFetch('POST', '/api/auth/otp/setup', d)
@@ -586,24 +610,42 @@ export const getAnalytics = (params) => {
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray(), mirrorTable('customers'))
 export const createCustomer      = d        => route('customers:create',     () => apiFetch('POST', '/api/customers', d),                  null, true)
-export const updateCustomer      = (id, d)  => route('customers:update',     () => apiFetch('PUT', `/api/customers/${id}`, d),             null, true)
-export const deleteCustomer      = id       => route('customers:delete',     () => apiFetch('DELETE', `/api/customers/${id}`),             null, true)
+export const updateCustomer = async (id, d) => {
+  const payload = await withExpectedUpdatedAt('customers', id, d)
+  return route('customers:update', () => apiFetch('PUT', `/api/customers/${id}`, payload), null, true)
+}
+export const deleteCustomer = async (id) => {
+  const payload = await withExpectedUpdatedAt('customers', id, {})
+  return route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
+}
 export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
 export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
 export const createSupplier      = d        => route('suppliers:create',     () => apiFetch('POST', '/api/suppliers', d),                  null, true)
-export const updateSupplier      = (id, d)  => route('suppliers:update',     () => apiFetch('PUT', `/api/suppliers/${id}`, d),             null, true)
-export const deleteSupplier      = id       => route('suppliers:delete',     () => apiFetch('DELETE', `/api/suppliers/${id}`),             null, true)
+export const updateSupplier = async (id, d) => {
+  const payload = await withExpectedUpdatedAt('suppliers', id, d)
+  return route('suppliers:update', () => apiFetch('PUT', `/api/suppliers/${id}`, payload), null, true)
+}
+export const deleteSupplier = async (id) => {
+  const payload = await withExpectedUpdatedAt('suppliers', id, {})
+  return route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
+}
 export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
 export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
 export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
 export const createDeliveryContact = d        => route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', d),           null, true)
-export const updateDeliveryContact = (id, d)  => route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, d),      null, true)
-export const deleteDeliveryContact = id       => route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`),      null, true)
+export const updateDeliveryContact = async (id, d) => {
+  const payload = await withExpectedUpdatedAt('delivery_contacts', id, d)
+  return route('deliveryContacts:update', () => apiFetch('PUT', `/api/delivery-contacts/${id}`, payload), null, true)
+}
+export const deleteDeliveryContact = async (id) => {
+  const payload = await withExpectedUpdatedAt('delivery_contacts', id, {})
+  return route('deliveryContacts:delete', () => apiFetch('DELETE', `/api/delivery-contacts/${id}`, payload), null, true)
+}
 export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImport', () => apiFetch('POST', '/api/delivery-contacts/bulk-import', d), null, true)
 
 // ─── Users ────────────────────────────────────────────────────────────────────
