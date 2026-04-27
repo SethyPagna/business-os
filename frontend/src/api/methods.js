@@ -12,7 +12,7 @@ function getDeviceInfo() {
  */
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, isNetErr } from './http.js'
-import { dexieDb, localGetSettings, localSaveSettings, buildCSVTemplate, replaceTableContents } from './localDb.js'
+import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 
@@ -55,6 +55,16 @@ async function withExpectedUpdatedAt(tableName, id, payload = {}) {
   try {
     const row = await dexieDb[tableName]?.get?.(id)
     if (row?.updated_at) body.expectedUpdatedAt = row.updated_at
+  } catch (_) {}
+  return body
+}
+
+async function withSettingsExpectedUpdatedAt(payload = {}) {
+  const body = { ...(payload || {}) }
+  if (body.expectedUpdatedAt || body.expected_updated_at) return body
+  try {
+    const meta = await localGetSettingsMeta()
+    if (meta?.updatedAt) body.expectedUpdatedAt = meta.updatedAt
   } catch (_) {}
   return body
 }
@@ -177,11 +187,28 @@ export async function getCurrentOrganization() {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export async function getSettings() {
-  return routeMirrored('settings:get', () => apiFetch('GET', '/api/settings'), localGetSettings, localSaveSettings)
+  return routeMirrored('settings:get', async () => {
+    const [settings, meta] = await Promise.all([
+      apiFetch('GET', '/api/settings'),
+      apiFetch('GET', '/api/settings/meta').catch(() => null),
+    ])
+    if (meta?.updatedAt) {
+      await localSaveSettingsMeta(meta.updatedAt).catch(() => {})
+    }
+    return settings
+  }, localGetSettings, async (settings) => {
+    await localSaveSettings(settings)
+    return settings
+  })
 }
 export async function saveSettings(updates) {
-  await apiFetch('POST', '/api/settings', updates)
+  const payload = await withSettingsExpectedUpdatedAt(updates)
+  const result = await apiFetch('POST', '/api/settings', payload)
+  if (result?.updatedAt) {
+    await localSaveSettingsMeta(result.updatedAt).catch(() => {})
+  }
   await localSaveSettings(updates).catch(() => {})
+  return result
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -835,18 +862,43 @@ export const createSupplierReturn = d => route('returns:createSupplier', () => a
 export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', `/api/returns/${id}`), () => null)
 
 // ─── Sale status update ───────────────────────────────────────────────────────
-export const updateSaleStatus = (id, sale_status, notes) =>
-  route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, { sale_status, notes }), null, true)
+export const updateSaleStatus = async (id, sale_status, notes) => {
+  const payload = await withExpectedUpdatedAt('sales', id, { sale_status, notes })
+  const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
+  await dexieDb.sales.update(id, {
+    sale_status,
+    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+  }).catch(() => {})
+  return result
+}
 
 // ─── Sales export ─────────────────────────────────────────────────────────────
-export const attachSaleCustomer = (id, payload) =>
-  route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, payload), null, true)
+export const attachSaleCustomer = async (id, payload) => {
+  const body = await withExpectedUpdatedAt('sales', id, payload)
+  const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
+  await dexieDb.sales.update(id, {
+    customer_id: result?.customer?.id || null,
+    customer_name: result?.customer?.name || null,
+    customer_phone: result?.customer?.phone || null,
+    customer_address: result?.customer?.address || null,
+    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+  }).catch(() => {})
+  return result
+}
 
 export const getSalesExport = (params) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null)).toString()
   return route('sales:export', () => apiFetch('GET', `/api/sales/export${q ? '?' + q : ''}`), () => ({}))
 }
-export const updateReturn = (id, d) => route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, d), null, true)
+export const updateReturn = async (id, d) => {
+  const payload = await withExpectedUpdatedAt('returns', id, d)
+  const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
+  await dexieDb.returns.update(id, {
+    ...d,
+    updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
+  }).catch(() => {})
+  return result
+}
 
 // ─── Sync server health test ──────────────────────────────────────────────────
 // Used by ServerPage to validate a URL before saving it.

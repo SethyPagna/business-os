@@ -113,8 +113,9 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS categories (
@@ -282,7 +283,8 @@ CREATE TABLE IF NOT EXISTS sales (
   items                    TEXT DEFAULT '[]',
   device_name              TEXT,
   device_tz                TEXT,
-  created_at               TEXT DEFAULT (datetime('now'))
+  created_at               TEXT DEFAULT (datetime('now')),
+  updated_at               TEXT DEFAULT (datetime('now'))
 );
 
 -- ─── SALE ITEMS ───────────────────────────────────────────────────────────────
@@ -373,7 +375,8 @@ CREATE TABLE IF NOT EXISTS returns (
   status           TEXT DEFAULT 'completed',
   device_name      TEXT,
   device_tz        TEXT,
-  created_at       TEXT DEFAULT (datetime('now'))
+  created_at       TEXT DEFAULT (datetime('now')),
+  updated_at       TEXT DEFAULT (datetime('now'))
 );
 
 -- ─── RETURN ITEMS ─────────────────────────────────────────────────────────────
@@ -712,7 +715,7 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
   }
 }
 
-;['branches', 'customers', 'suppliers', 'delivery_contacts'].forEach((tableName) => {
+;['branches', 'customers', 'suppliers', 'delivery_contacts', 'sales', 'returns'].forEach((tableName) => {
   if (ensureColumn(tableName, 'updated_at', 'TEXT DEFAULT (datetime(\'now\'))')) {
     try {
       db.exec(`
@@ -723,6 +726,16 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
     } catch (_) {}
   }
 })
+
+if (ensureColumn('settings', 'updated_at', 'TEXT DEFAULT (datetime(\'now\'))')) {
+  try {
+    db.exec(`
+      UPDATE settings
+      SET updated_at = COALESCE(updated_at, datetime('now'))
+      WHERE updated_at IS NULL OR trim(updated_at) = ''
+    `)
+  } catch (_) {}
+}
 
 if (ensureColumn('users', 'phone_lookup', 'TEXT')) {
   try {

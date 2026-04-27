@@ -3,6 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken } = require('../middleware')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
 const CUSTOMER_SCOPE = 'customer'
@@ -514,12 +515,15 @@ router.patch('/returns/:id', authToken, (req, res) => {
   const newItems = Array.isArray(d.items) ? d.items : existingItems
 
   try {
+    assertUpdatedAtMatch('return', existing, getExpectedUpdatedAt(d))
     assertReturnableItems(existing.sale_id || null, newItems, parseInt(id, 10))
   } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
     return err(res, e.message)
   }
 
-  db.transaction(() => {
+  try {
+    db.transaction(() => {
     const branchName = d.branch_id
       ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
       : existing.branch_name
@@ -616,7 +620,7 @@ router.patch('/returns/:id', authToken, (req, res) => {
       UPDATE returns SET
         reason = ?, return_type = ?, notes = ?,
         total_refund_usd = ?, total_refund_khr = ?,
-        branch_id = ?, branch_name = ?
+        branch_id = ?, branch_name = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       d.reason || existing.reason,
@@ -645,7 +649,7 @@ router.patch('/returns/:id', authToken, (req, res) => {
       const fullyReturned = saleItems.every(si => (map[si.product_id] || 0) >= si.quantity)
       const hasAny = allReturned.length > 0
       const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
-      db.prepare("UPDATE sales SET sale_status = ? WHERE id = ?").run(newStatus, existing.sale_id)
+      db.prepare("UPDATE sales SET sale_status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, existing.sale_id)
     }
 
     audit(d.cashier_id, d.cashier_name, 'update', 'return', parseInt(id),
@@ -657,13 +661,18 @@ router.patch('/returns/:id', authToken, (req, res) => {
         deviceTz: d.device_tz || null,
         clientTime: d.client_time || null,
       })
-  })()
+    })()
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    return err(res, e.message)
+  }
 
   broadcast('returns')
   broadcast('products')
   broadcast('sales')
   broadcast('inventory')
-  ok(res, { id: parseInt(id) })
+  const updatedReturn = db.prepare('SELECT id, updated_at FROM returns WHERE id = ?').get(id)
+  ok(res, updatedReturn || { id: parseInt(id) })
 })
 
 module.exports = router

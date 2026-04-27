@@ -35,6 +35,30 @@ dexieDb.version(1).stores({
 })
 dexieDb.version(2).stores({
   settings:            'key',
+  settings_meta:       'key',
+  sync_queue:          '++_seq, id, channel, status, created_at',
+  users:               '++id, username',
+  roles:               '++id, name',
+  products:            '++id, name, category, sku, barcode',
+  categories:          '++id, name',
+  units:               '++id, name',
+  branches:            '++id, name',
+  branch_stock:        '++id, [product_id+branch_id]',
+  customers:           '++id, name, phone',
+  suppliers:           '++id, name',
+  delivery_contacts:   '++id, name',
+  sales:               '++id, receipt_number, created_at',
+  sale_items:          '++id, sale_id, product_id',
+  returns:             '++id, created_at, customer_id, supplier_id',
+  audit_logs:          '++id, created_at',
+  inventory_movements: '++id, product_id, created_at',
+  stock_transfers:     '++id, created_at',
+  custom_tables:       '++id, name',
+  custom_fields:       '++id, entity_type',
+})
+dexieDb.version(3).stores({
+  settings:            'key',
+  settings_meta:       'key',
   sync_queue:          '++_seq, id, channel, status, created_at',
   users:               '++id, username',
   roles:               '++id, name',
@@ -70,6 +94,20 @@ export async function localSaveSettings(updates) {
       await dexieDb.settings.put({ key, value: String(value) })
     }
   })
+}
+
+export async function localGetSettingsMeta() {
+  return (await dexieDb.settings_meta.get('settings')) || null
+}
+
+export async function localSaveSettingsMeta(updatedAt) {
+  if (!updatedAt) return null
+  await dexieDb.settings_meta.put({
+    key: 'settings',
+    updatedAt: String(updatedAt),
+    savedAt: new Date().toISOString(),
+  })
+  return updatedAt
 }
 
 export async function replaceTableContents(tableName, rows) {

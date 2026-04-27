@@ -3,6 +3,7 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
 const { authToken } = require('../middleware')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
 
@@ -351,7 +352,8 @@ router.post('/sales', authToken, (req, res) => {
 // PATCH /api/sales/:id/status  — update sale status
 router.patch('/sales/:id/status', authToken, (req, res) => {
   const { id } = req.params
-  const { sale_status, notes, cashier_id, cashier_name, device_name, device_tz, client_time } = req.body || {}
+  const payload = req.body || {}
+  const { sale_status, notes, cashier_id, cashier_name, device_name, device_tz, client_time } = payload
 
   const validStatuses = ['completed', 'awaiting_payment', 'awaiting_delivery', 'cancelled', 'partial_return', 'returned']
   if (!sale_status || !validStatuses.includes(sale_status)) {
@@ -360,14 +362,20 @@ router.patch('/sales/:id/status', authToken, (req, res) => {
 
   const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(id)
   if (!sale) return err(res, 'Sale not found', 404)
+  try {
+    assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(payload))
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    return err(res, e.message)
+  }
 
   const oldStatus = sale.sale_status || 'completed'
-  if (oldStatus === sale_status) return ok(res, { id: parseInt(id), sale_status })
+  if (oldStatus === sale_status) return ok(res, { id: parseInt(id), sale_status, updated_at: sale.updated_at || null })
 
   try {
     db.transaction(() => {
       // Build update query
-      const updates = ['sale_status = ?']
+      const updates = ['sale_status = ?', "updated_at = datetime('now')"]
       const params = [sale_status]
       if (notes !== undefined) { updates.push('notes = ?'); params.push(notes) }
       params.push(id)
@@ -468,18 +476,21 @@ router.patch('/sales/:id/status', authToken, (req, res) => {
         })
     })()
   } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
     return err(res, e.message)
   }
 
   broadcast('sales')
   broadcast('products')
   broadcast('inventory')
-  ok(res, { id: parseInt(id), sale_status })
+  const updatedSale = db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get(id)
+  ok(res, updatedSale || { id: parseInt(id), sale_status })
 })
 
 // PATCH /api/sales/:id/customer  -- attach a customer or membership to an existing sale
 router.patch('/sales/:id/customer', authToken, (req, res) => {
   const saleId = parseInt(req.params.id, 10)
+  const payload = req.body || {}
   const {
     customerId,
     membershipNumber,
@@ -489,7 +500,7 @@ router.patch('/sales/:id/customer', authToken, (req, res) => {
     cashier_name,
     device_name,
     device_tz,
-  } = req.body || {}
+  } = payload
 
   if (!saleId) return err(res, 'Invalid sale id')
 
@@ -499,58 +510,66 @@ router.patch('/sales/:id/customer', authToken, (req, res) => {
   const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId)
   if (!sale) return err(res, 'Sale not found', 404)
 
-  db.transaction(() => {
-    db.prepare(`
+  try {
+    db.transaction(() => {
+      assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(payload))
+
+      db.prepare(`
       UPDATE sales
-      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?
+      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(
+      `).run(
       customer.id,
       customer.name || null,
       customer.phone || null,
       customer.address || null,
       saleId
-    )
+      )
 
-    db.prepare(`
+      db.prepare(`
       UPDATE returns
-      SET customer_id = ?, customer_name = ?
+      SET customer_id = ?, customer_name = ?, updated_at = datetime('now')
       WHERE sale_id = ?
-    `).run(
+      `).run(
       customer.id,
       customer.name || null,
       saleId
-    )
+      )
 
-    audit(
-      userId || cashier_id || null,
-      userName || cashier_name || null,
-      'update',
-      'sale',
-      saleId,
-      {
-        previous_customer_id: sale.customer_id || null,
-        next_customer_id: customer.id,
-        membership_number: customer.membership_number || null,
-      },
-      {
-        tableName: 'sales',
-        recordId: saleId,
-        newValue: {
-          customer_id: customer.id,
-          customer_name: customer.name || null,
+      audit(
+        userId || cashier_id || null,
+        userName || cashier_name || null,
+        'update',
+        'sale',
+        saleId,
+        {
+          previous_customer_id: sale.customer_id || null,
+          next_customer_id: customer.id,
           membership_number: customer.membership_number || null,
         },
-        deviceName: device_name || null,
-        deviceTz: device_tz || null,
-      }
-    )
-  })()
+        {
+          tableName: 'sales',
+          recordId: saleId,
+          newValue: {
+            customer_id: customer.id,
+            customer_name: customer.name || null,
+            membership_number: customer.membership_number || null,
+          },
+          deviceName: device_name || null,
+          deviceTz: device_tz || null,
+        }
+      )
+    })()
+  } catch (e) {
+    if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
+    return err(res, e.message)
+  }
 
   broadcast('sales')
   broadcast('returns')
+  const updatedSale = db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get(saleId)
   ok(res, {
-    id: saleId,
+    ...(updatedSale || { id: saleId }),
     customer: {
       id: customer.id,
       name: customer.name || null,
