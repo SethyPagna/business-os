@@ -53,7 +53,7 @@ function allTermsMatch(text, terms) {
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
   const { syncChannel } = useSync()
-  const posCopy = (en, km) => ((settings.language || 'en') === 'km' ? km : en)
+  const posCopy = useCallback((en, km) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
 
   // ?�?� Remote data (shared across all orders) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   const [products,         setProducts]         = useState([])
@@ -228,6 +228,7 @@ export default function POS() {
   const catalogRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
+  const membershipRequestRef = useRef(0)
   const taxRate   = parseFloat(settings.tax_rate || '0') / 100
   const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
   const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_usd || '1') || 1))
@@ -302,6 +303,34 @@ export default function POS() {
     }
   }, [])
 
+  const loadMembershipInfo = useCallback(async (
+    membershipNumber,
+    label = 'POS membership lookup',
+  ) => {
+    const requestId = beginTrackedRequest(membershipRequestRef)
+    setMembershipLoading(true)
+    setMembershipError('')
+    try {
+      const data = await withLoaderTimeout(
+        () => window.api.lookupPortalMembership(membershipNumber),
+        label,
+      )
+      if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
+      setMembershipInfo(data || null)
+      if (!data) setMembershipError(posCopy('Membership not found'))
+      return data || null
+    } catch (error) {
+      if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
+      setMembershipInfo(null)
+      setMembershipError(error?.message || posCopy('Membership lookup failed'))
+      return null
+    } finally {
+      if (isTrackedRequestCurrent(membershipRequestRef, requestId)) {
+        setMembershipLoading(false)
+      }
+    }
+  }, [posCopy])
+
   // ?�?� Initial data load ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
     void Promise.allSettled([
@@ -331,6 +360,7 @@ export default function POS() {
     invalidateTrackedRequest(catalogRequestRef)
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)
+    invalidateTrackedRequest(membershipRequestRef)
   }, [])
 
   // ?�?� Customer autocomplete ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -360,36 +390,18 @@ export default function POS() {
   }, [active?.deliverySearch, deliveryContacts])
 
   useEffect(() => {
-    let cancelled = false
     const membershipNumber = String(active?.customer?.membership_number || '').trim()
 
     if (!membershipNumber) {
+      invalidateTrackedRequest(membershipRequestRef)
       setMembershipInfo(null)
       setMembershipError('')
       setMembershipLoading(false)
-      return () => { cancelled = true }
+      return
     }
 
-    async function loadMembership() {
-      try {
-        setMembershipLoading(true)
-        setMembershipError('')
-        const data = await window.api.lookupPortalMembership(membershipNumber)
-        if (cancelled) return
-        setMembershipInfo(data || null)
-      if (!data) setMembershipError(posCopy('Membership not found'))
-      } catch (error) {
-        if (cancelled) return
-        setMembershipInfo(null)
-      setMembershipError(error?.message || posCopy('Membership lookup failed'))
-      } finally {
-        if (!cancelled) setMembershipLoading(false)
-      }
-    }
-
-    loadMembership()
-    return () => { cancelled = true }
-  }, [active?.customer?.membership_number, syncChannel?.ts])
+    void loadMembershipInfo(membershipNumber, 'POS membership lookup')
+  }, [active?.customer?.membership_number, loadMembershipInfo, syncChannel?.ts])
 
   // ?�?� Customer actions ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   const selectCustomer = (c) => {
