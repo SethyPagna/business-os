@@ -42,6 +42,9 @@ if (typeof window !== 'undefined') {
     'plugin_not_implemented',
     'cssRules',
     'insertRule',
+    'unsafe-eval',
+    'Content Security Policy',
+    'Evaluating a string as JavaScript violates',
   ]
   const extensionOrigins = [
     'chrome-extension://',
@@ -53,12 +56,19 @@ if (typeof window !== 'undefined') {
     const text = String(value || '')
     return extensionOrigins.some((origin) => text.includes(origin))
   }
+  const valueIncludesLikelyInjectedBundle = (value) => {
+    const text = String(value || '')
+    if (valueIncludesExtensionSource(text)) return true
+    return /(^|[\\/])(vendor|content|inpage)\.js(?::\d+)?$/i.test(text)
+      || /content\.js/i.test(text)
+      || /tabs:outgoing\.message\.ready/i.test(text)
+  }
   const shouldIgnoreRuntimeValue = (value) => {
     const message = String(value?.message || value || '')
     if (!ignoredRuntimePatterns.some((pattern) => message.includes(pattern))) return false
     const stack = String(value?.stack || '')
-    return valueIncludesExtensionSource(message)
-      || valueIncludesExtensionSource(stack)
+    return valueIncludesLikelyInjectedBundle(message)
+      || valueIncludesLikelyInjectedBundle(stack)
       || /content\.js/i.test(stack)
   }
   const isIgnoredRuntimeMessage = (value) => {
@@ -104,7 +114,7 @@ if (typeof window !== 'undefined') {
   const stopKnownStartupNoise = (event, value) => {
     const filename = String(event?.filename || '')
     const source = String(event?.target?.src || event?.target?.href || '')
-    const stackSource = valueIncludesExtensionSource(filename) || valueIncludesExtensionSource(source)
+    const stackSource = valueIncludesLikelyInjectedBundle(filename) || valueIncludesLikelyInjectedBundle(source)
     if (!isIgnoredRuntimeMessage(value) && !stackSource) return false
     event.preventDefault()
     event.stopImmediatePropagation()

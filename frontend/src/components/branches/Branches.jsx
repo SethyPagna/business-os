@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRightLeft, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
+import { ArrowRightLeft, Building2, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
+import PageHeader from '../shared/PageHeader'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
@@ -190,11 +191,14 @@ export default function Branches() {
 
   return (
     <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
-      <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{t('branches') || 'Branches'}</h1>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+      <PageHeader
+        icon={Building2}
+        tone="blue"
+        title={t('branches') || 'Branches'}
+        subtitle={t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
+        className="mb-4"
+        actions={(
+          <div className="flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {selectedCount > 0 ? (
             <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete}>
               <Trash2 className="h-4 w-4" />
@@ -209,8 +213,9 @@ export default function Branches() {
             <Plus className="h-4 w-4" />
             <span>{t('branch') || 'Branch'}</span>
           </button>
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[
@@ -338,7 +343,7 @@ export default function Branches() {
                               {t('no_branch_stock') || 'No stock in this branch. Use Transfer or Adjust Stock to add items.'}
                             </p>
                           ) : (
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
                               {inStock.map((product) => (
                                 <div
                                   key={product.id}

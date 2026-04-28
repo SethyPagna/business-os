@@ -5,10 +5,12 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  Server,
   Wifi,
   WifiOff,
 } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import PageHeader from '../shared/PageHeader'
 
 function isAutoDetected(syncUrl) {
   if (!syncUrl || typeof window === 'undefined') return false
@@ -476,13 +478,13 @@ export default function ServerPage() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl space-y-5">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('sync_server_title') || 'Sync Server'}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {t('sync_server_desc') || 'One device runs the server. All others open the Tailscale URL in their browser with no manual config needed.'}
-          </p>
-        </div>
+      <div className="mx-auto max-w-5xl space-y-5">
+        <PageHeader
+          icon={Server}
+          tone="blue"
+          title={t('sync_server_title') || 'Sync Server'}
+          subtitle={t('sync_server_desc') || 'One device runs the server. All others open the Tailscale URL in their browser with no manual config needed.'}
+        />
 
         <div className={`card flex items-center gap-4 p-4 ${
           hasServer && syncConnected ? 'border-green-300 dark:border-green-700' :

@@ -5,6 +5,7 @@ import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
+import PageHeader from '../shared/PageHeader'
 
 const FALLBACK_COPY = {
   en: {
@@ -533,9 +534,15 @@ export default function Settings() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-6">{t('settings')}</h1>
+      <PageHeader
+        icon={SettingsIcon}
+        tone="slate"
+        title={t('settings')}
+        subtitle={t('all_settings') || 'Control workspace appearance, security, receipts, navigation, and device-facing defaults from one place.'}
+        className="mb-6"
+      />
 
-      <div className="max-w-5xl space-y-5">
+      <div className="mx-auto max-w-6xl space-y-5 2xl:max-w-7xl">
         {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('business_info')}</h2>

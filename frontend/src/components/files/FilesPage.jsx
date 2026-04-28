@@ -17,6 +17,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import PageHeader from '../shared/PageHeader'
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
@@ -335,19 +336,19 @@ export default function FilesPage() {
 
   return (
     <div className="page-scroll flex flex-col gap-4 p-3 sm:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{tr('library', 'Library')}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.')}
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-1.5">
+      <PageHeader
+        icon={FolderOpen}
+        tone="blue"
+        title={tr('library', 'Library')}
+        subtitle={tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.')}
+        actions={(
+          <div className="grid grid-cols-3 gap-1.5">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
           {tabButton('providers', tr('library_ai_providers', 'AI Providers'), KeyRound)}
           {tabButton('responses', tr('library_ai_responses', 'AI Responses'), History)}
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       {activeTab === 'assets' ? (
         <>
@@ -379,7 +380,7 @@ export default function FilesPage() {
           {!loadingFiles && !files.length ? <div className="card px-4 py-10 text-center text-sm text-slate-500">{tr('no_files_yet', 'No files yet.')}</div> : null}
 
           {files.length ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {files.map((asset) => (
                 <div key={asset.id} className="card p-4">
                   <AssetPreview asset={asset} />
@@ -411,7 +412,7 @@ export default function FilesPage() {
       ) : null}
 
       {activeTab === 'providers' ? (
-        <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr] 2xl:grid-cols-[1.3fr,0.7fr]">
           <section className="card p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>

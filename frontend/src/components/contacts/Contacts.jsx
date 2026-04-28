@@ -10,6 +10,7 @@ import { SuppliersTab } from './SuppliersTab'
 import { DeliveryTab } from './DeliveryTab'
 import { ImportModal } from './shared'
 import Modal from '../shared/Modal'
+import PageHeader from '../shared/PageHeader'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 const TABS = (t) => [
@@ -140,12 +141,14 @@ export default function Contacts() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
-        <h1 className="flex flex-shrink-0 items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-          <BookUser className="h-5 w-5 sm:h-6 sm:w-6" />
-          {t('contacts')}
-        </h1>
-        <div className="flex min-w-0 flex-shrink gap-1.5 overflow-x-auto pb-0.5">
+      <PageHeader
+        icon={BookUser}
+        tone="blue"
+        title={t('contacts')}
+        subtitle={t('perm_contacts') || 'Manage customers, suppliers, and delivery contacts from one workspace.'}
+        className="mb-4"
+        actions={(
+          <div className="flex min-w-0 flex-shrink gap-1.5 overflow-x-auto pb-0.5">
           <button
             className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={openImportPicker}
@@ -164,8 +167,9 @@ export default function Contacts() {
             <Download className="h-4 w-4" />
             <span>Export</span>
           </button>
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-700">
         {TABS(t).map(({ id, label, icon: Icon }) => (

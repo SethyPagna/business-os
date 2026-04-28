@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BadgeDollarSign, Gift, RotateCcw, Save, Search, Ticket } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import PageHeader from '../shared/PageHeader'
 
 const COPY = {
   en: {
@@ -236,19 +237,21 @@ export default function LoyaltyPointsPage() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{copy('pageTitle', 'Loyalty Points')}</h1>
-            <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{copy('pageSubtitle', 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.')}</p>
-          </div>
-          <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm" disabled={saving} onClick={handleSave}>
-            <Save className="mr-2 inline h-4 w-4" />
-            {copy('save', 'Save point rules')}
-          </button>
-        </div>
+      <div className="mx-auto max-w-7xl space-y-5">
+        <PageHeader
+          icon={Ticket}
+          tone="amber"
+          title={copy('pageTitle', 'Loyalty Points')}
+          subtitle={copy('pageSubtitle', 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.')}
+          actions={(
+            <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm" disabled={saving} onClick={handleSave}>
+              <Save className="mr-2 inline h-4 w-4" />
+              {copy('save', 'Save point rules')}
+            </button>
+          )}
+        />
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_420px]">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_380px] 2xl:grid-cols-[minmax(0,1.55fr)_420px]">
           <div className="space-y-5">
             <section className="card p-4 sm:p-5">
               <div className="flex items-start gap-3">

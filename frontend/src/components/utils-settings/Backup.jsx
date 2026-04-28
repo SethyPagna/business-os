@@ -4,6 +4,7 @@ import { useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
 import { refreshAppData } from '../../utils/appRefresh'
+import PageHeader from '../shared/PageHeader'
 
 const BACKUP_SECTION_CONFIG = [
   { key: 'products', label: 'Products' },
@@ -974,11 +975,13 @@ export default function Backup() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <h1 className="mb-4 flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-        <HardDriveDownload className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-        {copy('backup', 'Backup')}
-      </h1>
-      <div className="max-w-4xl space-y-4">
+      <div className="mx-auto max-w-6xl space-y-4">
+        <PageHeader
+          icon={HardDriveDownload}
+          tone="blue"
+          title={copy('backup', 'Backup')}
+          subtitle={copy('export_backup_desc', 'Export a full folder backup, or download the legacy JSON version when needed.')}
+        />
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
