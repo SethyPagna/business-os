@@ -76,9 +76,12 @@ export default function Sales() {
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [bulkStatusSaving, setBulkStatusSaving] = useState('')
   const selectAllRef = useRef(null)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const statusActionRef = useRef(new Set())
+  const membershipActionRef = useRef(new Set())
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -124,22 +127,34 @@ export default function Sales() {
   useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const handleStatusChange = async (saleId, newStatus, notes) => {
+    const numericId = Number(saleId)
+    if (!Number.isFinite(numericId)) return false
+    if (statusActionRef.current.has(numericId)) return false
+    statusActionRef.current.add(numericId)
     try {
       await window.api.updateSaleStatus(saleId, newStatus, notes)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       loadSales()
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+      return true
     } catch (error) {
       if (error?.conflict || error?.code === 'write_conflict') {
         await loadSales()
-        return
+        return false
       }
       notify(`Failed to update status: ${error.message || error}`, 'error')
+      return false
+    } finally {
+      statusActionRef.current.delete(numericId)
     }
   }
 
   const handleAttachMembership = async (saleId, membershipNumber) => {
+    const numericId = Number(saleId)
+    if (!Number.isFinite(numericId)) return false
+    if (membershipActionRef.current.has(numericId)) return false
+    membershipActionRef.current.add(numericId)
     try {
       const device = getClientDeviceInfo()
       await window.api.attachSaleCustomer(saleId, {
@@ -161,6 +176,8 @@ export default function Sales() {
       }
       notify(error?.message || translateOr('failed_to_attach_membership', 'Failed to link membership'), 'error')
       return false
+    } finally {
+      membershipActionRef.current.delete(numericId)
     }
   }
 
@@ -253,27 +270,27 @@ export default function Sales() {
   }
 
   const handleBulkStatusUpdate = async (nextStatus) => {
-    if (!selectedSales.length) return
+    if (!selectedSales.length || bulkStatusSaving) return
+    setBulkStatusSaving(nextStatus)
     let updated = 0
     let failed = 0
-    for (const sale of selectedSales) {
-      try {
-        await window.api.updateSaleStatus(sale.id, nextStatus, '')
-        updated += 1
-      } catch (_) {
-        failed += 1
+    try {
+      for (const sale of selectedSales) {
+        const ok = await handleStatusChange(sale.id, nextStatus, '')
+        if (ok) updated += 1
+        else failed += 1
       }
+      await loadSales()
+      if (!failed) setSelectedIds(new Set())
+      notify(
+        failed
+          ? `Updated ${updated} sales, ${failed} failed.`
+          : `Updated ${updated} sale${updated === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}.`,
+        failed ? 'warning' : 'success',
+      )
+    } finally {
+      setBulkStatusSaving('')
     }
-    await loadSales()
-    if (!failed) setSelectedIds(new Set())
-    notify(
-      failed
-        ? `Updated ${updated} sales, ${failed} failed.`
-        : `Updated ${updated} sale${updated === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}.`,
-      failed ? 'warning' : 'success',
-    )
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
-    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
   }
 
   if (selectedSale) return <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
@@ -363,9 +380,9 @@ export default function Sales() {
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedSales.length} selected</span>
           <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={handleExportSelected}>Export selected</button>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')}>Mark completed</button>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')}>Mark delivery</button>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')}>Mark cancelled</button>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? 'Saving...' : 'Mark completed'}</button>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? 'Saving...' : 'Mark delivery'}</button>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? 'Saving...' : 'Mark cancelled'}</button>
           <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
             Clear
           </button>

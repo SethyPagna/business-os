@@ -12,7 +12,17 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '' }
   const [form, setForm] = useState(init)
+  const [saving, setSaving] = useState(false)
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const handleSubmit = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      await Promise.resolve(onSave(form))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Modal title={supplier ? `✏️ ${t('edit_supplier') || 'Edit Supplier'}` : `➕ ${t('add_supplier') || 'Add Supplier'}`} onClose={onClose}>
@@ -50,8 +60,8 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
           <textarea id="supplier-form-notes" name="supplier_notes" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => set('notes', event.target.value)} />
         </div>
         <div className="flex gap-3 pt-1">
-          <button className="btn-primary flex-1" onClick={() => onSave(form)}>{t('save')}</button>
-          <button className="btn-secondary" onClick={onClose}>{t('cancel')}</button>
+          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? (t('saving') || 'Saving...') : t('save')}</button>
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
         </div>
       </div>
     </Modal>

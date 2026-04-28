@@ -80,8 +80,17 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
 function DeliveryForm({ contact, onSave, onClose, t }) {
   const init = contact ? { ...contact } : { name: '', phone: '', area: '', notes: '' }
   const [form, setForm] = useState(init)
+  const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const handleSave = () => onSave({ ...form })
+  const handleSave = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      await Promise.resolve(onSave({ ...form }))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Modal
@@ -112,8 +121,8 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
         <p className="text-xs text-gray-400">Provide driver name or phone number.</p>
 
         <div className="flex gap-3 pt-1">
-          <button type="button" className="btn-primary flex-1" onClick={handleSave}>{t('save')}</button>
-          <button type="button" className="btn-secondary" onClick={onClose}>{t('cancel')}</button>
+          <button type="button" className="btn-primary flex-1" onClick={handleSave} disabled={saving}>{saving ? (t('saving') || 'Saving...') : t('save')}</button>
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
         </div>
       </div>
     </Modal>

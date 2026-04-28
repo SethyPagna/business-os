@@ -113,11 +113,21 @@ function CustomerForm({ customer, onSave, onClose, t }) {
     const parsed = parseContactOptions(initial.address)
     return parsed.length ? parsed : [BLANK_OPTION()]
   })
+  const [saving, setSaving] = useState(false)
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => [...current, BLANK_OPTION()])
   const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const updateOption = (index, nextOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
+  const handleSubmit = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      await Promise.resolve(onSave({ ...form, address: serializeContactOptions(options) }))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Modal title={customer ? `${tr(t, 'edit_customer', 'Edit Customer')}` : tr(t, 'add_customer', 'Add Customer')} onClose={onClose}>
@@ -183,8 +193,8 @@ function CustomerForm({ customer, onSave, onClose, t }) {
         </div>
 
         <div className="flex flex-col gap-3 pt-1 sm:flex-row">
-          <button className="btn-primary flex-1" onClick={() => onSave({ ...form, address: serializeContactOptions(options) })}>{tr(t, 'save', 'Save')}</button>
-          <button className="btn-secondary" onClick={onClose}>{tr(t, 'cancel', 'Cancel')}</button>
+          <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? (t('saving') || 'Saving...') : tr(t, 'save', 'Save')}</button>
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>{tr(t, 'cancel', 'Cancel')}</button>
         </div>
       </div>
     </Modal>

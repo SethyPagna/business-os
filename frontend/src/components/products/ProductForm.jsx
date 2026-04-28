@@ -94,6 +94,7 @@ export default function ProductForm({
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState('')
+  const [saving, setSaving] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
 
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -128,10 +129,12 @@ export default function ProductForm({
   }
 
   async function addImages() {
+    if (saving) return
     await uploadPickedImages({})
   }
 
   async function addPhoto() {
+    if (saving) return
     await uploadPickedImages({ capture: 'environment' })
   }
 
@@ -172,7 +175,8 @@ export default function ProductForm({
     })
   }
 
-  function saveForm() {
+  async function saveForm() {
+    if (saving) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -195,7 +199,14 @@ export default function ProductForm({
       image_gallery: imageList.slice(0, 5),
       image_path: imageList[0] || '',
     }
-    onSave(payload)
+    setSaving(true)
+    try {
+      await Promise.resolve(onSave(payload))
+    } catch (error) {
+      alert(error?.message || tr('failed', 'Failed', 'បរាជ័យ'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   function openScanner(field) {
@@ -256,13 +267,13 @@ export default function ProductForm({
               <p className="text-xs text-gray-400">{imageList.length}/5</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={addImages}>
+              <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving}>
                 {tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={addPhoto}>
+              <button type="button" className="btn-secondary text-sm" onClick={addPhoto} disabled={saving}>
                 {tr('take_photo', 'Take Photo', 'ថតរូប')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>
+              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)} disabled={saving}>
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>
@@ -303,7 +314,7 @@ export default function ProductForm({
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('sku')} aria-label={scanSkuLabel}>
+                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('sku')} aria-label={scanSkuLabel} disabled={saving}>
                   <ScanLine className="h-4 w-4" />
                   <span className="hidden sm:inline">{scanLabel}</span>
                 </button>
@@ -322,7 +333,7 @@ export default function ProductForm({
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('barcode')} aria-label={scanBarcodeLabel}>
+                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('barcode')} aria-label={scanBarcodeLabel} disabled={saving}>
                   <ScanLine className="h-4 w-4" />
                   <span className="hidden sm:inline">{scanLabel}</span>
                 </button>
@@ -539,10 +550,10 @@ export default function ProductForm({
       ) : null}
 
       <div className="mt-6 flex gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-        <button type="button" className="btn-primary flex-1" onClick={saveForm}>
-          {t('save')}
+        <button type="button" className="btn-primary flex-1" onClick={saveForm} disabled={saving}>
+          {saving ? (t('saving') || 'Saving...') : t('save')}
         </button>
-        <button type="button" className="btn-secondary" onClick={onClose}>
+        <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
           {t('cancel')}
         </button>
       </div>

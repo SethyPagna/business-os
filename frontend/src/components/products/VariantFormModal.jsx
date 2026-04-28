@@ -33,6 +33,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   const setNumeric = (key, value) => setField(key, sanitizeNumericInput(value))
 
   const handleSave = async () => {
+    if (saving) return
     if (!form.name.trim()) {
       setErr(tr('variant_name_required', 'Variant name is required', 'ត្រូវការឈ្មោះវ៉ារីយ៉ង់'))
       return
@@ -57,7 +58,6 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
       if (response?.success === false) {
         setErr(response.error || tr('failed', 'Failed', 'បរាជ័យ'))
-        setSaving(false)
         return
       }
 
@@ -70,6 +70,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       onDone()
     } catch (error) {
       setErr(error?.message || tr('failed', 'Failed', 'បរាជ័យ'))
+    } finally {
       setSaving(false)
     }
   }
@@ -196,7 +197,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           <button type="button" className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
             {saving ? (t('saving') || 'Saving...') : (t('add_variant') || 'Add Variant')}
           </button>
-          <button type="button" className="btn-secondary" onClick={onClose}>{t('cancel') || 'Cancel'}</button>
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel') || 'Cancel'}</button>
         </div>
       </div>
     </Modal>

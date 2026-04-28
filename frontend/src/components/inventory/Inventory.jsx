@@ -79,6 +79,7 @@ export default function Inventory() {
   const [detailProduct, setDetailProduct] = useState(null)
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
+  const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
   const movementSelectAllRef = useRef(null)
@@ -163,6 +164,7 @@ export default function Inventory() {
   }, [branchFilter])
 
   const handleAdjust = async () => {
+    if (adjustSaving) return
     const qty = parseFloat(adjustForm.quantity)
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
     if (adjustForm.type === 'remove') {
@@ -178,6 +180,7 @@ export default function Inventory() {
         if (qty > totalQty) { notify(`Cannot remove ${qty} - only ${totalQty} available`, 'error'); return }
       }
     }
+    setAdjustSaving(true)
     try {
       const res = await window.api.adjustStock({
         productId: adjustModal.id, productName: adjustModal.name,
@@ -191,6 +194,7 @@ export default function Inventory() {
       if (res?.success) { notify('Stock adjusted'); setAdjustModal(null); load() }
       else notify(res?.error || 'Adjustment failed', 'error')
     } catch (e) { notify(e?.message || 'Error', 'error') }
+    finally { setAdjustSaving(false) }
   }
 
   const openAdjust = (p) => {
@@ -1373,8 +1377,8 @@ export default function Inventory() {
                   value={adjustForm.reason} onChange={e => setAdjustForm(f=>({...f, reason:e.target.value}))} />
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={handleAdjust} className="btn-primary flex-1 text-sm">{t('save')}</button>
-                <button onClick={() => setAdjustModal(null)} className="btn-secondary text-sm">{t('cancel')}</button>
+                <button onClick={handleAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
+                <button onClick={() => setAdjustModal(null)} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
               </div>
             </div>
           </div>
