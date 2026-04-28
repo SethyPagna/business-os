@@ -9,6 +9,10 @@ const { spawn, spawnSync } = require('child_process')
 
 const BACKEND_DIR = path.resolve(__dirname, '..')
 const SERVER_ENTRY = path.join(BACKEND_DIR, 'server.js')
+const PNG_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2p6xQAAAAASUVORK5CYII=',
+  'base64',
+)
 
 let failed = 0
 const pendingTests = new Set()
@@ -171,6 +175,32 @@ async function getInventoryMovements(baseUrl, authToken, branchId = null) {
   const rows = await fetchJson(baseUrl, `/api/inventory/movements${suffix}`, { authToken })
   assert.ok(Array.isArray(rows), 'Expected inventory movements list')
   return rows
+}
+
+async function getFiles(baseUrl, authToken) {
+  const result = await fetchJson(baseUrl, '/api/files', { authToken })
+  return Array.isArray(result?.items) ? result.items : []
+}
+
+async function getUsers(baseUrl, authToken) {
+  const rows = await fetchJson(baseUrl, '/api/users', { authToken })
+  assert.ok(Array.isArray(rows), 'Expected users list')
+  return rows
+}
+
+async function getSettings(baseUrl, authToken) {
+  return fetchJson(baseUrl, '/api/settings', { authToken })
+}
+
+async function uploadTinyPng(baseUrl, authToken, filename = 'factory-reset-proof.png') {
+  const form = new FormData()
+  form.append('file', new Blob([PNG_BUFFER], { type: 'image/png' }), filename)
+  const result = await fetchJson(baseUrl, '/api/files/upload', {
+    method: 'POST',
+    body: form,
+    authToken,
+  })
+  return result
 }
 
 function sumBranchStock(product) {
@@ -476,6 +506,149 @@ runTest('sales reset clears transactions and stock while keeping products and co
     assert.equal(sumBranchStock(product), 0)
     const branchRow = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
     assert.equal(Number(branchRow?.quantity || 0), 0)
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('inventory adjustments keep branch stock, aggregate stock, and movement logs aligned')
+runTest('inventory adjustments keep branch stock, aggregate stock, and movement logs aligned', async () => {
+  const runtimeDir = makeTempRoot('bos-stock-adjustments-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Inventory Adjustment Product',
+      sku: 'ADJ-001',
+      stock_quantity: 5,
+      purchase_price_usd: 4,
+      selling_price_usd: 10,
+    })
+
+    await fetchJson(server.baseUrl, '/api/inventory/adjust', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        productId,
+        productName: 'Inventory Adjustment Product',
+        type: 'add',
+        quantity: 3,
+        reason: 'Restock',
+        branchId: branch.id,
+        unitCostUsd: 4,
+      }),
+    })
+
+    let product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 8)
+    assert.equal(sumBranchStock(product), 8)
+
+    await fetchJson(server.baseUrl, '/api/inventory/adjust', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        productId,
+        productName: 'Inventory Adjustment Product',
+        type: 'remove',
+        quantity: 2,
+        reason: 'Damaged items',
+        branchId: branch.id,
+        unitCostUsd: 4,
+      }),
+    })
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 6)
+    assert.equal(sumBranchStock(product), 6)
+
+    await fetchJson(server.baseUrl, '/api/inventory/adjust', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        productId,
+        productName: 'Inventory Adjustment Product',
+        type: 'set',
+        quantity: 4,
+        reason: 'Cycle count',
+        branchId: branch.id,
+        unitCostUsd: 4,
+      }),
+    })
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 4)
+    assert.equal(sumBranchStock(product), 4)
+    const branchRow = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
+    assert.equal(Number(branchRow?.quantity || 0), 4)
+
+    const movements = await getInventoryMovements(server.baseUrl, authToken, branch.id)
+    assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'add' && Number(row.quantity) === 3))
+    assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'remove' && Number(row.quantity) === 2))
+    assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'set' && Number(row.quantity) === 2))
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('factory reset restores admin defaults while clearing business data and uploads')
+runTest('factory reset restores admin defaults while clearing business data and uploads', async () => {
+  const runtimeDir = makeTempRoot('bos-factory-reset-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    let authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+
+    await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Factory Reset Product',
+      sku: 'FR-001',
+      stock_quantity: 2,
+      purchase_price_usd: 5,
+      selling_price_usd: 12,
+    })
+
+    await fetchJson(server.baseUrl, '/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        name: 'Factory Reset Customer',
+        membership_number: 'FR-CUST-001',
+      }),
+    })
+
+    const upload = await uploadTinyPng(server.baseUrl, authToken)
+    assert.ok(upload.public_path, 'Expected uploaded public path before factory reset')
+
+    await fetchJson(server.baseUrl, '/api/system/factory-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({}),
+    })
+
+    authToken = await loginAsAdmin(server.baseUrl)
+
+    const products = await fetchJson(server.baseUrl, '/api/products', { authToken })
+    const customers = await fetchJson(server.baseUrl, '/api/customers', { authToken })
+    const files = await getFiles(server.baseUrl, authToken)
+    const users = await getUsers(server.baseUrl, authToken)
+    const branches = await fetchJson(server.baseUrl, '/api/branches', { authToken })
+    const settings = await getSettings(server.baseUrl, authToken)
+
+    assert.equal(Array.isArray(products) ? products.length : -1, 0)
+    assert.equal(Array.isArray(customers) ? customers.length : -1, 0)
+    assert.equal(files.length, 0)
+    assert.ok(Array.isArray(branches) && branches.length >= 1)
+    assert.ok(branches.some((row) => row.is_default))
+    assert.ok(Array.isArray(users) && users.some((row) => row.username === 'admin' && row.is_active))
+    assert.equal(settings.business_name, 'My Business')
+    assert.equal(settings.exchange_rate, '4100')
   } finally {
     await stopServer(server?.child)
   }
