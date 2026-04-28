@@ -1,27 +1,56 @@
 'use strict'
+
 const express = require('express')
-const { db }  = require('../database')
+const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 
-// ── Units ─────────────────────────────────────────────────────────────────────
 const unitsRouter = express.Router()
+const DEFAULT_UNIT_COLOR = '#6366f1'
 
-unitsRouter.get('/', authToken, requirePermission('products'), (req, res) => {
+function normalizeUnitColor(value) {
+  const raw = String(value || '').trim()
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : DEFAULT_UNIT_COLOR
+}
+
+unitsRouter.get('/', authToken, requirePermission('products'), (_req, res) => {
   res.json(db.prepare('SELECT * FROM units ORDER BY name').all())
 })
 
 unitsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
   const body = req.body || {}
-  const { name } = typeof body === 'string' ? { name: body } : body
+  const { name, color } = typeof body === 'string' ? { name: body } : body
   const actor = getAuditActor(req)
-  if (!name?.trim()) return err(res, 'Name required')
+  const trimmedName = String(name || '').trim()
+  if (!trimmedName) return err(res, 'Name required')
+
   try {
-    const r = db.prepare('INSERT INTO units (name) VALUES (?)').run(name.trim())
-    audit(actor.userId, actor.userName, 'create', 'unit', r.lastInsertRowid, { name })
+    const normalizedColor = normalizeUnitColor(color)
+    const result = db.prepare('INSERT INTO units (name, color) VALUES (?, ?)').run(trimmedName, normalizedColor)
+    audit(actor.userId, actor.userName, 'create', 'unit', result.lastInsertRowid, { name: trimmedName, color: normalizedColor })
     broadcast('units')
-    ok(res, { id: r.lastInsertRowid })
-  } catch { err(res, 'Unit already exists') }
+    ok(res, { id: result.lastInsertRowid })
+  } catch {
+    err(res, 'Unit already exists')
+  }
+})
+
+unitsRouter.put('/:id', authToken, requirePermission('products'), (req, res) => {
+  const actor = getAuditActor(req)
+  const unitId = Number(req.params.id || 0)
+  const trimmedName = String(req.body?.name || '').trim()
+  if (!unitId) return err(res, 'Invalid unit')
+  if (!trimmedName) return err(res, 'Name required')
+
+  try {
+    const normalizedColor = normalizeUnitColor(req.body?.color)
+    db.prepare('UPDATE units SET name = ?, color = ? WHERE id = ?').run(trimmedName, normalizedColor, unitId)
+    audit(actor.userId, actor.userName, 'update', 'unit', unitId, { name: trimmedName, color: normalizedColor })
+    broadcast('units')
+    ok(res, {})
+  } catch {
+    err(res, 'Unit already exists')
+  }
 })
 
 unitsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) => {
@@ -32,42 +61,4 @@ unitsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) 
   ok(res, {})
 })
 
-// ── Custom fields ─────────────────────────────────────────────────────────────
-const customFieldsRouter = express.Router()
-
-customFieldsRouter.get('/', authToken, requirePermission('products'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM custom_fields ORDER BY entity_type, field_name').all())
-})
-
-customFieldsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
-  const { entity_type, field_name, field_type, field_options } = req.body || {}
-  const actor = getAuditActor(req)
-  try {
-    const r = db.prepare(
-      'INSERT INTO custom_fields (entity_type, field_name, field_type, field_options) VALUES (?,?,?,?)'
-    ).run(entity_type, field_name, field_type || 'text', field_options || null)
-    audit(actor.userId, actor.userName, 'create', 'custom_field', r.lastInsertRowid, { entity_type, field_name })
-    broadcast('customFields')
-    ok(res, { id: r.lastInsertRowid })
-  } catch { err(res, 'Custom field already exists') }
-})
-
-customFieldsRouter.put('/:id', authToken, requirePermission('products'), (req, res) => {
-  const { field_name, field_type, field_options } = req.body || {}
-  const actor = getAuditActor(req)
-  db.prepare('UPDATE custom_fields SET field_name = ?, field_type = ?, field_options = ? WHERE id = ?')
-    .run(field_name, field_type, field_options || null, req.params.id)
-  audit(actor.userId, actor.userName, 'update', 'custom_field', req.params.id)
-  broadcast('customFields')
-  ok(res, {})
-})
-
-customFieldsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) => {
-  const actor = getAuditActor(req)
-  db.prepare('DELETE FROM custom_fields WHERE id = ?').run(req.params.id)
-  audit(actor.userId, actor.userName, 'delete', 'custom_field', req.params.id)
-  broadcast('customFields')
-  ok(res, {})
-})
-
-module.exports = { unitsRouter, customFieldsRouter }
+module.exports = { unitsRouter }

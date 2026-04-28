@@ -165,7 +165,7 @@ export default function Contacts() {
             aria-label={t('export') || 'Export'}
           >
             <Download className="h-4 w-4" />
-            <span>Export</span>
+            <span>{t('export') || 'Export'}</span>
           </button>
           </div>
         )}

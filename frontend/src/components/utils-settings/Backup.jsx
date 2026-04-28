@@ -7,18 +7,18 @@ import { refreshAppData } from '../../utils/appRefresh'
 import PageHeader from '../shared/PageHeader'
 
 const BACKUP_SECTION_CONFIG = [
-  { key: 'products', label: 'Products' },
-  { key: 'sales', label: 'Sales' },
-  { key: 'returns', label: 'Returns' },
-  { key: 'customers', label: 'Customers' },
-  { key: 'suppliers', label: 'Suppliers' },
-  { key: 'delivery_contacts', label: 'Delivery' },
-  { key: 'users', label: 'Users' },
-  { key: 'roles', label: 'Roles' },
-  { key: 'settings', label: 'Settings' },
-  { key: 'customer_share_submissions', label: 'Portal submissions' },
-  { key: 'audit_logs', label: 'Audit log' },
-  { key: 'file_assets', label: 'Files library' },
+  { key: 'products', labelKey: 'products', label: 'Products' },
+  { key: 'sales', labelKey: 'sales', label: 'Sales' },
+  { key: 'returns', labelKey: 'returns', label: 'Returns' },
+  { key: 'customers', labelKey: 'customers', label: 'Customers' },
+  { key: 'suppliers', labelKey: 'suppliers', label: 'Suppliers' },
+  { key: 'delivery_contacts', labelKey: 'delivery', label: 'Delivery' },
+  { key: 'users', labelKey: 'users', label: 'Users' },
+  { key: 'roles', labelKey: 'roles', label: 'Roles' },
+  { key: 'settings', labelKey: 'settings', label: 'Settings' },
+  { key: 'customer_share_submissions', labelKey: 'portal_submissions', label: 'Portal submissions' },
+  { key: 'audit_logs', labelKey: 'audit_log', label: 'Audit log' },
+  { key: 'file_assets', labelKey: 'library', label: 'Files library' },
 ]
 
 const QUICK_BACKUP_SECTIONS = [
@@ -124,7 +124,7 @@ function countBackupRows(backup, tableName) {
   return Array.isArray(backup?.[tableName]) ? backup[tableName].length : 0
 }
 
-function buildBackupPreview(backup, fileName) {
+function buildBackupPreview(backup, fileName, copy = (_key, fallback) => fallback) {
   const counts = Object.fromEntries(
     BACKUP_SECTION_CONFIG.map((section) => [section.key, countBackupRows(backup, section.key)]),
   )
@@ -138,7 +138,11 @@ function buildBackupPreview(backup, fileName) {
     || Object.values(backup?.custom_table_rows || {}).reduce((sum, value) => sum + (Array.isArray(value) ? value.length : 0), 0)
   const populatedSections = BACKUP_SECTION_CONFIG
     .filter((section) => counts[section.key] > 0)
-    .map((section) => ({ ...section, count: counts[section.key] }))
+    .map((section) => ({
+      ...section,
+      count: counts[section.key],
+      label: copy(section.labelKey, section.label),
+    }))
 
   const warnings = []
   if (!countBackupRows(backup, 'file_assets') && uploadsCount > 0) {
@@ -943,7 +947,7 @@ export default function Backup() {
       const parsed = JSON.parse(await file.text())
       setPendingImport({
         data: parsed,
-        preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json'),
+        preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json', copy),
       })
       notify(copy('backup_file_ready', 'Backup file loaded. Review it, then confirm restore.'), 'success')
     } catch (error) {
@@ -1130,13 +1134,13 @@ export default function Backup() {
                 <div>
                   <div className="text-sm font-semibold text-gray-900 dark:text-white">{pendingImport.preview.fileName}</div>
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Exported {formatDateTime(pendingImport.preview.exportedAt)}{pendingImport.preview.version ? ` | v${pendingImport.preview.version}` : ''}
+                    {copy('exported', 'Exported')} {formatDateTime(pendingImport.preview.exportedAt)}{pendingImport.preview.version ? ` | v${pendingImport.preview.version}` : ''}
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
-                  <SectionChip label="Rows" value={pendingImport.preview.totalRows} />
-                  <SectionChip label="Uploads" value={pendingImport.preview.uploadsCount} />
-                  <SectionChip label="Custom tables" value={`${pendingImport.preview.customTableCount} (${pendingImport.preview.customTableRowCount} rows)`} />
+                  <SectionChip label={copy('rows', 'Rows')} value={pendingImport.preview.totalRows} />
+                  <SectionChip label={copy('uploads', 'Uploads')} value={pendingImport.preview.uploadsCount} />
+                  <SectionChip label={copy('custom_tables', 'Custom tables')} value={`${pendingImport.preview.customTableCount} (${pendingImport.preview.customTableRowCount} ${copy('rows', 'rows')})`} />
                 </div>
               </div>
 

@@ -195,7 +195,6 @@ export default function Branches() {
         icon={Building2}
         tone="blue"
         title={t('branches') || 'Branches'}
-        subtitle={t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
         className="mb-4"
         actions={(
           <div className="flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
@@ -211,11 +210,15 @@ export default function Branches() {
           </button>
           <button className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs sm:text-sm" onClick={() => { setSelected(null); setModal('form') }}>
             <Plus className="h-4 w-4" />
-            <span>{t('branch') || 'Branch'}</span>
+            <span>{t('add_branch') || 'Add Branch'}</span>
           </button>
-          </div>
+        </div>
         )}
       />
+
+      <p className="mb-4 max-w-4xl text-sm text-gray-500 dark:text-gray-400">
+        {t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
+      </p>
 
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[

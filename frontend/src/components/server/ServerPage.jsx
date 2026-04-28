@@ -12,6 +12,16 @@ import {
 import { useApp } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
 
+function useLocalCopy() {
+  const { settings, t } = useApp()
+  const isKhmer = settings?.language === 'km'
+  return (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const translated = t?.(key)
+    if (translated && translated !== key) return translated
+    return isKhmer ? fallbackKm : fallbackEn
+  }
+}
+
 function isAutoDetected(syncUrl) {
   if (!syncUrl || typeof window === 'undefined') return false
   const isViteDev = window.location.hostname === 'localhost' &&
@@ -33,6 +43,7 @@ function StatusRow({ label, value, mono = false, extra = null }) {
 
 function InfoTab({ syncUrl, syncConnected }) {
   const { settings, t, formatDateTime, displayTimezone, deviceTimezone } = useApp()
+  const copy = useLocalCopy()
   const [clientTime, setClientTime] = useState(new Date())
   const [serverTime, setServerTime] = useState(null)
   const [serverErr, setServerErr] = useState(null)
@@ -84,8 +95,8 @@ function InfoTab({ syncUrl, syncConnected }) {
 
   const fmt = (value) => formatDateTime(value)
   const appliedTimezone = settings?.display_timezone || displayTimezone
-  const mode = syncUrl ? (isAutoDetected(syncUrl) ? 'Auto-detected (same origin)' : 'Manual') : 'Local (IndexedDB only)'
-  const ws = syncUrl ? (syncConnected ? 'Connected' : 'Reconnecting...') : 'Local only'
+  const mode = syncUrl ? (isAutoDetected(syncUrl) ? copy('sync_auto_mode', 'Auto-detected (same origin)', 'រកឃើញស្វ័យប្រវត្តិ (ដែនដើមដូចគ្នា)') : copy('manual', 'Manual', 'កំណត់ដោយដៃ')) : copy('sync_local_only_mode', 'Local (IndexedDB only)', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ (IndexedDB)')
+  const ws = syncUrl ? (syncConnected ? copy('connected', 'Connected', 'បានភ្ជាប់') : copy('reconnecting', 'Reconnecting...', 'កំពុងភ្ជាប់ឡើងវិញ...')) : copy('sync_local_only_short', 'Local only', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ')
 
   const driftLabel = drift === null
     ? '--'
@@ -106,17 +117,17 @@ function InfoTab({ syncUrl, syncConnected }) {
   return (
     <div className="space-y-3 px-4 py-3 text-xs">
       <div className="space-y-1">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">Connection</p>
-        <StatusRow label="Mode" value={mode} />
-        <StatusRow label="Server URL" value={syncUrl || 'none'} mono />
-        <StatusRow label="WebSocket" value={ws} />
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">{copy('sync_connection', 'Connection', 'ការតភ្ជាប់')}</p>
+        <StatusRow label={copy('sync_mode', 'Mode', 'របៀប')} value={mode} />
+        <StatusRow label={copy('server_url', 'Server URL', 'តំណម៉ាស៊ីនមេ')} value={syncUrl || copy('none', 'none', 'គ្មាន')} mono />
+        <StatusRow label={copy('sync_websocket', 'WebSocket', 'WebSocket')} value={ws} />
       </div>
 
       <div className="space-y-1 border-t border-gray-100 pt-2 dark:border-gray-700">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">Client (This Device)</p>
-        <StatusRow label="Local time" value={fmt(clientTime)} mono />
-        <StatusRow label="Display timezone" value={appliedTimezone} mono />
-        <StatusRow label="Device timezone" value={deviceTimezone} mono />
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">{copy('sync_client_this_device', 'Client (This Device)', 'ឧបករណ៍នេះ')}</p>
+        <StatusRow label={copy('local_time', 'Local time', 'ម៉ោងមូលដ្ឋាន')} value={fmt(clientTime)} mono />
+        <StatusRow label={copy('display_timezone', 'Display timezone', 'តំបន់ម៉ោងបង្ហាញ')} value={appliedTimezone} mono />
+        <StatusRow label={copy('device_timezone', 'Device timezone', 'តំបន់ម៉ោងឧបករណ៍')} value={deviceTimezone} mono />
       </div>
 
       {syncUrl ? (
@@ -129,7 +140,7 @@ function InfoTab({ syncUrl, syncConnected }) {
               className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${fetching ? 'animate-spin' : ''}`} />
-              {fetching ? 'Fetching...' : 'Refresh'}
+              {fetching ? copy('fetching', 'Fetching...', 'កំពុងទាញយក...') : copy('sync_refresh', 'Refresh', 'ធ្វើបច្ចុប្បន្នភាព')}
             </button>
           </div>
 
@@ -169,6 +180,7 @@ function InfoTab({ syncUrl, syncConnected }) {
 }
 
 function DiagnosticsPanel({ syncUrl, syncConnected }) {
+  const copy = useLocalCopy()
   const [clientLog, setClientLog] = useState([])
   const [serverLog, setServerLog] = useState([])
   const [serverInfo, setServerInfo] = useState(null)
@@ -246,9 +258,9 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
     <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-gray-800 dark:text-white">Diagnostics</span>
+          <span className="text-sm font-semibold text-gray-800 dark:text-white">{copy('diagnostics', 'Diagnostics', 'ការវិនិច្ឆ័យ')}</span>
           <span className={`h-2 w-2 rounded-full ${syncConnected ? 'bg-green-500' : syncUrl ? 'animate-pulse bg-yellow-400' : 'bg-gray-300'}`} />
-          {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients} device(s) | {Math.round(serverInfo.uptime)}s uptime</span> : null}
+          {serverInfo ? <span className="text-xs text-gray-500">{serverInfo.clients} {copy('devices', 'device(s)', 'ឧបករណ៍')} | {Math.round(serverInfo.uptime)}s {copy('uptime', 'uptime', 'ពេលដំណើរការ')}</span> : null}
           {pendingSync.total > 0 ? (
             <span className={`rounded-full px-2 py-0.5 text-xs ${pendingSync.failed > 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
               {pendingSync.pending} pending / {pendingSync.failed} failed
@@ -270,10 +282,10 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
               onChange={(event) => setAutoRefresh(event.target.checked)}
               className="h-3 w-3"
             />
-            Auto
+            {copy('auto', 'Auto', 'ស្វ័យប្រវត្តិ')}
           </label>
-          <button onClick={fetchServerLog} className="text-xs text-blue-600 hover:underline">Refresh</button>
-          <button onClick={() => { window.api?.clearCallLog?.(); setClientLog([]) }} className="text-xs text-gray-400 hover:text-red-500">Clear</button>
+          <button onClick={fetchServerLog} className="text-xs text-blue-600 hover:underline">{copy('refresh', 'Refresh', 'ធ្វើបច្ចុប្បន្នភាព')}</button>
+          <button onClick={() => { window.api?.clearCallLog?.(); setClientLog([]) }} className="text-xs text-gray-400 hover:text-red-500">{copy('clear', 'Clear', 'សម្អាត')}</button>
         </div>
       </div>
 
@@ -291,10 +303,10 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
 
       <div className="flex border-b border-gray-200 dark:border-gray-700">
         {[
-          { id: 'client', label: `Client (${clientLog.length})` },
-          { id: 'server', label: `Server (${serverLog.length})`, disabled: !syncUrl },
-          { id: 'queue', label: `Queue (${pendingSync.total})` },
-          { id: 'info', label: 'Info' },
+          { id: 'client', label: `${copy('client', 'Client', 'ឧបករណ៍')} (${clientLog.length})` },
+          { id: 'server', label: `${copy('server', 'Server', 'ម៉ាស៊ីនមេ')} (${serverLog.length})`, disabled: !syncUrl },
+          { id: 'queue', label: `${copy('queue', 'Queue', 'ជួរ')} (${pendingSync.total})` },
+          { id: 'info', label: copy('info', 'Info', 'ព័ត៌មាន') },
         ].map(({ id, label, disabled }) => (
           <button
             key={id}

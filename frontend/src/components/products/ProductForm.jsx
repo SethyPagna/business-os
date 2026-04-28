@@ -38,22 +38,10 @@ function pickImageFiles(maxCount = 1) {
   })
 }
 
-function parseCustomFieldOptions(field) {
-  const raw = field?.field_options ?? field?.options ?? '[]'
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch (_) {
-    if (typeof raw === 'string') return raw.split(',').map((entry) => entry.trim()).filter(Boolean)
-    return []
-  }
-}
-
 export default function ProductForm({
   product,
   categories,
   units,
-  customFields,
   branches,
   brandOptions = [],
   onSave,
@@ -70,13 +58,7 @@ export default function ProductForm({
 
   const initialForm = useMemo(() => {
     if (product) {
-      const customFieldsParsed = typeof product.custom_fields === 'string'
-        ? JSON.parse(product.custom_fields || '{}')
-        : (product.custom_fields || {})
-      return {
-        ...product,
-        custom_fields: customFieldsParsed,
-      }
+      return { ...product }
     }
     return {
       name: '',
@@ -98,7 +80,6 @@ export default function ProductForm({
       supplier: '',
       image_path: '',
       image_gallery: [],
-      custom_fields: {},
       branch_id: defaultBranchId,
     }
   }, [product, units, defaultBranchId])
@@ -129,16 +110,6 @@ export default function ProductForm({
 
   function setField(key, value) {
     setForm((current) => ({ ...current, [key]: value }))
-  }
-
-  function setCustomField(key, value) {
-    setForm((current) => ({
-      ...current,
-      custom_fields: {
-        ...(current.custom_fields || {}),
-        [key]: value,
-      },
-    }))
   }
 
   async function addImages() {
@@ -199,7 +170,6 @@ export default function ProductForm({
     { id: 'basic', label: `${t('basic_info')}` },
     { id: 'pricing', label: `${t('pricing')}` },
     { id: 'stock', label: `${t('stock')}` },
-    ...(customFields.length > 0 ? [{ id: 'custom', label: `${t('custom_fields')}` }] : []),
   ]
 
   const supplierMatches = form.supplier
@@ -443,49 +413,6 @@ export default function ProductForm({
               onDone={onSave}
             />
           ) : null}
-        </div>
-      ) : null}
-
-      {activeTab === 'custom' ? (
-        <div className="space-y-3">
-          {customFields.length === 0 ? (
-            <p className="text-sm text-gray-400">No custom fields defined.</p>
-          ) : customFields.map((field) => {
-            const options = parseCustomFieldOptions(field)
-            const value = form.custom_fields?.[field.field_name] || ''
-            return (
-              <div key={field.id}>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{field.field_name}</label>
-                {field.field_type === 'boolean' ? (
-                  <select className="input" value={value} onChange={(event) => setCustomField(field.field_name, event.target.value)}>
-                    <option value="">-</option>
-                    <option value="yes">{t('yes')}</option>
-                    <option value="no">{t('no')}</option>
-                  </select>
-                ) : field.field_type === 'dropdown' ? (
-                  <select className="input" value={value} onChange={(event) => setCustomField(field.field_name, event.target.value)}>
-                    <option value="">-</option>
-                    {options.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                ) : field.field_type === 'long_text' ? (
-                  <textarea className="input resize-none" rows={3} value={value} onChange={(event) => setCustomField(field.field_name, event.target.value)} />
-                ) : (
-                  <input
-                    className="input"
-                    type={field.field_type === 'number' || field.field_type === 'decimal'
-                      ? 'number'
-                      : field.field_type === 'date'
-                        ? 'date'
-                        : 'text'}
-                    value={value}
-                    onChange={(event) => setCustomField(field.field_name, event.target.value)}
-                  />
-                )}
-              </div>
-            )
-          })}
         </div>
       ) : null}
 

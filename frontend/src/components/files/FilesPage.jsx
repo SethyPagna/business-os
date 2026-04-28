@@ -16,8 +16,9 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
@@ -84,7 +85,8 @@ function compactTabLabel(label) {
 }
 
 export default function FilesPage() {
-  const { notify, user, t } = useApp()
+  const { notify, user, t, page } = useApp()
+  const { syncChannel } = useSync()
   const [activeTab, setActiveTab] = useState('assets')
 
   const [files, setFiles] = useState([])
@@ -119,9 +121,23 @@ export default function FilesPage() {
   }, [])
 
   useEffect(() => {
+    if (page !== 'files') return
+    if (!files.length && !loadingFiles) loadFiles()
+    if (!providers.length && !loadingProviders) loadProviders()
+    if (!responses.length && !loadingResponses) loadResponses()
+  }, [files.length, loadingFiles, loadingProviders, loadingResponses, page, providers.length, responses.length])
+
+  useEffect(() => {
     const timer = window.setTimeout(() => { loadFiles() }, 180)
     return () => window.clearTimeout(timer)
   }, [search, mediaType])
+
+  useEffect(() => {
+    if (!syncChannel) return
+    const channel = String(syncChannel.channel || '')
+    if (channel === 'files') loadFiles()
+    if (channel === 'files' || channel === 'settings') loadProviders()
+  }, [syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedProviderMeta) return
@@ -147,7 +163,7 @@ export default function FilesPage() {
   async function loadFiles() {
     setLoadingFiles(true)
     try {
-      const result = await window.api.getFiles({ search, mediaType })
+      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
       setFiles(Array.isArray(result) ? result : (result?.data || []))
     } catch (error) {
       notify(error?.message || 'Failed to load files', 'error')
@@ -159,7 +175,7 @@ export default function FilesPage() {
   async function loadProviders() {
     setLoadingProviders(true)
     try {
-      const result = await window.api.getAiProviders()
+      const result = await withLoaderTimeout(() => window.api.getAiProviders(), 'AI providers')
       setProviders(Array.isArray(result?.items) ? result.items : [])
       setProviderMeta(result?.providerMeta || {})
     } catch (error) {
@@ -172,7 +188,7 @@ export default function FilesPage() {
   async function loadResponses() {
     setLoadingResponses(true)
     try {
-      const result = await window.api.getAiResponses(80)
+      const result = await withLoaderTimeout(() => window.api.getAiResponses(80), 'AI responses')
       setResponses(Array.isArray(result?.items) ? result.items : [])
     } catch (error) {
       notify(error?.message || 'Failed to load AI responses', 'error')

@@ -21,22 +21,31 @@ function ToggleButton({ active = false, children, label, onClick }) {
 }
 
 export default function QuickPreferenceToggles({ className = '' }) {
-  const { language, theme, toggleLanguage, toggleTheme } = useApp()
+  const { language, theme, toggleLanguage, toggleTheme, t } = useApp()
+  const tr = (key, fallback) => {
+    const value = typeof t === 'function' ? t(key) : null
+    return value && value !== key ? value : fallback
+  }
   const darkMode = theme === 'dark'
   const khmerActive = language === 'km'
+  const nextLanguageLabel = khmerActive
+    ? tr('switch_to_english', 'Switch to English')
+    : tr('switch_to_khmer', 'Switch to Khmer')
 
   return (
     <div className={['flex items-center gap-2', className].filter(Boolean).join(' ')}>
       <ToggleButton
         active={darkMode}
-        label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+        label={darkMode
+          ? tr('switch_to_light_mode', 'Switch to light mode')
+          : tr('switch_to_dark_mode', 'Switch to dark mode')}
         onClick={toggleTheme}
       >
         {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </ToggleButton>
       <ToggleButton
         active={khmerActive}
-        label={khmerActive ? 'Switch to English' : 'Switch to Khmer'}
+        label={nextLanguageLabel}
         onClick={toggleLanguage}
       >
         <Languages className="h-4 w-4" />

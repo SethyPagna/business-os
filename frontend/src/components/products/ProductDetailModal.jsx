@@ -4,6 +4,7 @@ import { ProductImg, ProductImagePlaceholder } from './primitives'
 export default function ProductDetailModal({
   p,
   catMap,
+  unitMap,
   fmtUSD,
   fmtKHR,
   onEdit,
@@ -21,6 +22,7 @@ export default function ProductDetailModal({
     ? p.image_gallery.filter(Boolean).slice(0, 5)
     : (p?.image_path ? [p.image_path] : [])
   const primaryImage = gallery[0] || ''
+  const unitColor = unitMap?.[p.unit]?.color || ''
 
   const Row = ({ label, children }) => (
     <div className="flex gap-3">
@@ -70,9 +72,26 @@ export default function ProductDetailModal({
           {p.barcode ? <Row label={T('label_barcode', 'Barcode')}><span className="font-mono">{p.barcode}</span></Row> : null}
           {p.brand ? <Row label={T('brand', 'Brand')}>{p.brand}</Row> : null}
           {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
-          {p.unit ? <Row label={T('label_unit', 'Unit')}>{p.unit}</Row> : null}
+          {p.unit ? (
+            <Row label={T('label_unit', 'Unit')}>
+              {unitColor ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: unitColor }}>
+                  {p.unit}
+                </span>
+              ) : p.unit}
+            </Row>
+          ) : null}
           <Row label={T('label_stock', 'Stock')}>
-            <strong className="text-gray-900 dark:text-white">{p.stock_quantity}</strong> {p.unit}
+            <strong className="text-gray-900 dark:text-white">{p.stock_quantity}</strong>
+            {p.unit ? (
+              unitColor ? (
+                <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: unitColor }}>
+                  {p.unit}
+                </span>
+              ) : (
+                <span className="ml-1">{p.unit}</span>
+              )
+            ) : null}
           </Row>
           {p.description ? <Row label={T('label_description', 'Description')}>{p.description}</Row> : null}
 

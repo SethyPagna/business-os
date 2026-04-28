@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE TABLE IF NOT EXISTS units (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
+  color      TEXT DEFAULT '#6366f1',
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -830,6 +831,7 @@ if (ensureColumn('roles', 'code', 'TEXT')) {
 }
 
 ensureColumn('roles', 'is_system', 'INTEGER DEFAULT 0')
+ensureColumn('units', 'color', "TEXT DEFAULT '#6366f1'")
 
 function seedIfEmpty(table, rows, insertFn) {
   const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()
@@ -1078,8 +1080,13 @@ const DEFAULT_BRANCH_SEED = [
 ]
 
 const DEFAULT_UNIT_SEED = [
-  { name: 'pcs' }, { name: 'kg' }, { name: 'g' },
-  { name: 'L' }, { name: 'mL' }, { name: 'box' }, { name: 'bag' },
+  { name: 'pcs', color: '#6366f1' },
+  { name: 'kg', color: '#8b5cf6' },
+  { name: 'g', color: '#a855f7' },
+  { name: 'L', color: '#06b6d4' },
+  { name: 'mL', color: '#0ea5e9' },
+  { name: 'box', color: '#f59e0b' },
+  { name: 'bag', color: '#10b981' },
 ]
 
 function ensureDefaultSettings(defaultOrganizationContext = null) {
@@ -1101,7 +1108,7 @@ function ensureDefaultBranches() {
 
 function ensureDefaultUnits() {
   seedIfEmpty('units', DEFAULT_UNIT_SEED, (unit) => {
-    db.prepare(`INSERT OR IGNORE INTO units (name) VALUES (?)`).run(unit.name)
+    db.prepare(`INSERT OR IGNORE INTO units (name, color) VALUES (?, ?)`).run(unit.name, unit.color || '#6366f1')
   })
 }
 

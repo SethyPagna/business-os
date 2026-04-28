@@ -407,6 +407,70 @@ function emitCacheRefresh(channel) {
   }))
 }
 
+async function raceServerReadWithLocalFallback(channel, inflightPromise, localFn, t0, sourceLabel = 'cache-dedup') {
+  const localPromise = Promise.resolve()
+    .then(() => localFn())
+    .then((result) => {
+      if (hasUsableLocalData(result)) {
+        cacheSet(channel, result)
+      }
+      return result
+    })
+    .catch(() => null)
+
+  let fallbackTimer = null
+  const localFallbackPromise = new Promise((resolve) => {
+    fallbackTimer = window.setTimeout(async () => {
+      const localResult = await localPromise
+      if (hasUsableLocalData(localResult)) {
+        resolve({ source: 'local', data: localResult })
+        return
+      }
+      resolve({ source: 'local', data: null })
+    }, SYNC.READ_LOCAL_FALLBACK_MS)
+  })
+
+  try {
+    const winner = await Promise.race([
+      inflightPromise.then((result) => ({ source: 'server', data: result })),
+      localFallbackPromise,
+    ])
+    if (fallbackTimer != null) {
+      window.clearTimeout(fallbackTimer)
+    }
+
+    if (winner?.source === 'local' && winner.data !== null) {
+      logCall(channel, `${sourceLabel}-local`, Date.now() - t0)
+      inflightPromise
+        .then((result) => {
+          cacheSet(channel, result)
+          emitCacheRefresh(channel)
+        })
+        .catch(() => {})
+      return winner.data
+    }
+
+    logCall(channel, sourceLabel, Date.now() - t0)
+    return winner?.data ?? await inflightPromise
+  } catch (error) {
+    if (fallbackTimer != null) {
+      window.clearTimeout(fallbackTimer)
+    }
+    const localResult = await localPromise
+    if (hasUsableLocalData(localResult)) {
+      logCall(channel, `${sourceLabel}-local-recovery`, Date.now() - t0)
+      inflightPromise
+        .then((result) => {
+          cacheSet(channel, result)
+          emitCacheRefresh(channel)
+        })
+        .catch(() => {})
+      return localResult
+    }
+    throw error
+  }
+}
+
 // ??? Smart dispatcher ?????????????????????????????????????????????????????????
 /**
  * route() ??unified read/write dispatcher with:
@@ -443,6 +507,9 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
       if (_serverOnline || !localFn) {
         // Request deduplication: if same request already in flight, wait for it instead of re-requesting
         if (_inflight[channel]) {
+          if (localFn) {
+            return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0)
+          }
           logCall(channel, 'cache-dedup', Date.now() - t0)
           return _inflight[channel]
         }

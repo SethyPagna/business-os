@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BadgeDollarSign, Gift, RotateCcw, Save, Search, Ticket } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
 
 const COPY = {
@@ -120,7 +120,9 @@ export default function LoyaltyPointsPage() {
   const copy = (key, fallback) => {
     const translated = t?.(key)
     if (translated && translated !== key) return translated
-    return COPY[isKhmer ? 'km' : 'en'][key] || fallback || key
+    const localized = COPY[isKhmer ? 'km' : 'en'][key]
+    if (localized && !isBrokenLocalizedString(localized)) return localized
+    return COPY.en[key] || fallback || key
   }
 
   const [form, setForm] = useState({})
@@ -242,26 +244,34 @@ export default function LoyaltyPointsPage() {
           icon={Ticket}
           tone="amber"
           title={copy('pageTitle', 'Loyalty Points')}
-          subtitle={copy('pageSubtitle', 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.')}
-          actions={(
-            <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm" disabled={saving} onClick={handleSave}>
-              <Save className="mr-2 inline h-4 w-4" />
-              {copy('save', 'Save point rules')}
-            </button>
-          )}
         />
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_380px] 2xl:grid-cols-[minmax(0,1.55fr)_420px]">
           <div className="space-y-5">
             <section className="card p-4 sm:p-5">
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-amber-100 p-3 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  <Ticket className="h-5 w-5" />
+              <div className="flex flex-col gap-4 border-b border-gray-100 pb-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-amber-100 p-3 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                    <Ticket className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('policyTitle', 'Point policy')}</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('policyHint', 'These rules affect POS membership discounts, customer portal balances, and point deductions after refunds.')}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('policyTitle', 'Point policy')}</h2>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('policyHint', 'These rules affect POS membership discounts, customer portal balances, and point deductions after refunds.')}</p>
-                </div>
+                <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm" disabled={saving} onClick={handleSave}>
+                  <Save className="mr-2 inline h-4 w-4" />
+                  {copy('save', 'Save point rules')}
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-300">
+                  {policySummary}
+                </span>
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 dark:border-blue-800/50 dark:bg-blue-900/20 dark:text-blue-300">
+                  {copy('unitLabel', '1 redemption unit')}: {redeemPoints} pts
+                </span>
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -507,7 +517,7 @@ export default function LoyaltyPointsPage() {
             </section>
 
             <section className="card p-4 sm:p-5">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('customerTitle', 'Customer point lookup')}</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('customerTitle', 'Top customer points')}</h2>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('pointsLeaderboardHint', 'Top customer balances from current membership points.')}</p>
               <div className="mt-3 space-y-2">
                 {customerPointsLoading ? (

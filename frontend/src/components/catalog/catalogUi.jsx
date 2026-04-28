@@ -1,19 +1,19 @@
 import React from 'react'
 
 function statusClass(status) {
-  if (status === 'out_of_stock') return 'border-rose-200 bg-rose-50 text-rose-700'
-  if (status === 'low_stock') return 'border-amber-200 bg-amber-50 text-amber-700'
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'out_of_stock') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200'
+  if (status === 'low_stock') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200'
 }
 
 /** Shared shell block for portal sections. */
 export function SectionShell({ title, subtitle, action, children }) {
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
+          {subtitle ? <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
         </div>
         {action}
       </div>

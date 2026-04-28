@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilePickerModal from '../files/FilePickerModal'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { SectionShell } from './catalogUi'
 import {
   createAboutBlock,
@@ -523,7 +523,11 @@ const PORTAL_CACHE_KEY = 'business-os.portal.cache.v2'
 
 /** Resolve a portal-localized string with fallback order: extra -> base -> English -> provided fallback. */
 function tt(lang, key, fallback) {
-  return PORTAL_TEXT_EXTRA[lang]?.[key] || PORTAL_TEXT[lang]?.[key] || PORTAL_TEXT.en[key] || fallback
+  const localized = PORTAL_TEXT_EXTRA[lang]?.[key] || PORTAL_TEXT[lang]?.[key]
+  if (localized && !isBrokenLocalizedString(localized)) return localized
+  const english = PORTAL_TEXT_EXTRA.en?.[key] || PORTAL_TEXT.en?.[key]
+  if (english && !isBrokenLocalizedString(english)) return english
+  return fallback
 }
 
 /** Parse UI setting flags stored as boolean-like string values. */
@@ -1140,7 +1144,7 @@ function applyGoogleTranslateSelection(sourceLang, targetLang) {
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }) {
-  const { hasPermission, navigateTo, saveSettings, notify, user } = useApp()
+  const { hasPermission, navigateTo, saveSettings, notify, theme, user } = useApp()
   const { syncChannel } = useSync()
   const cachedPortalRef = useRef(readPortalCache())
   const cachedPortal = cachedPortalRef.current
@@ -1211,6 +1215,9 @@ export default function CatalogPage({ publicView = false }) {
   )
   const language = previewConfig.language === 'km' ? 'km' : 'en'
   const copy = (key, fallback) => tt(language, key, fallback)
+  const portalBackground = theme === 'dark'
+    ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
+    : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
   const resolveVisibleTab = (candidate, cfg = previewConfig) => {
     const visible = [
       cfg.showCatalog ? 'products' : null,
@@ -3090,11 +3097,14 @@ export default function CatalogPage({ publicView = false }) {
   if (loading) {
     return (
     <div
-      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'} bg-[radial-gradient(circle_at_top,_#fef3c7,_#fff7ed_35%,_#f8fafc_80%)]`}
-      style={publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}
+      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+      style={{
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        background: portalBackground,
+      }}
     >
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+          <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
             {copy('loadingPortal', 'Loading customer portal...')}
           </div>
         </div>
@@ -3110,8 +3120,11 @@ export default function CatalogPage({ publicView = false }) {
 
   return (
     <div
-      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'} bg-[radial-gradient(circle_at_top,_#fef3c7,_#fff7ed_28%,_#f8fafc_70%)]`}
-      style={publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}
+      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+      style={{
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        background: portalBackground,
+      }}
     >
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
@@ -3128,7 +3141,7 @@ export default function CatalogPage({ publicView = false }) {
                 </button>
               </div>
             ) : null}
-            <section className="overflow-hidden rounded-[36px] border border-slate-200 bg-white shadow-sm">
+            <section className="overflow-hidden rounded-[36px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
               <div
                 className="relative overflow-hidden px-6 py-8 text-white sm:px-8 sm:py-10"
                 style={{

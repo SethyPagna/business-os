@@ -181,6 +181,15 @@ function normalizeDateInput(value) {
   return Number.isNaN(date?.getTime?.()) ? null : date
 }
 
+export function isBrokenLocalizedString(value) {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  if (trimmed.includes('\ufffd')) return true
+  const questionMarks = (trimmed.match(/\?/g) || []).length
+  return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
+}
+
 function buildRuntimeDescriptorFromBootstrap(payload = {}) {
   const organizationPublicId = payload?.organization?.public_id || payload?.user?.organization_public_id || ''
   return normalizeRuntimeDescriptor({
@@ -296,7 +305,13 @@ export function AppProvider({ children }) {
 
   // Define translation lookup before any hook dependency arrays or callbacks
   // reference it, avoiding render-time TDZ crashes in production bundles.
-  const t = useCallback((key) => loadedLangs[language]?.[key] ?? loadedLangs.en?.[key] ?? key, [language, langRevision])
+  const t = useCallback((key) => {
+    const localized = loadedLangs[language]?.[key]
+    if (localized !== undefined && localized !== null && !isBrokenLocalizedString(localized)) return localized
+    const english = loadedLangs.en?.[key]
+    if (english !== undefined && english !== null && !isBrokenLocalizedString(english)) return english
+    return key
+  }, [language, langRevision])
 
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async () => {
@@ -690,7 +705,8 @@ export function AppProvider({ children }) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
     document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
-  }, [theme])
+    document.documentElement.setAttribute('lang', String(language || 'en').trim() || 'en')
+  }, [language, theme])
 
   useEffect(() => {
     let cancelled = false
@@ -756,8 +772,10 @@ export function AppProvider({ children }) {
     document.body.style.fontFamily = fonts[ff] || fonts.system
     document.body.style.fontSize   = `${baseSize}px`
     document.body.setAttribute('data-ui-font-family', ff)
-    document.body.setAttribute('data-ui-language', settings.language || 'en')
+    document.body.setAttribute('data-ui-language', language || 'en')
     document.body.setAttribute('data-density', settings.ui_density || 'comfortable')
+    document.body.classList.toggle('lang-km', (language || 'en') === 'km')
+    document.body.classList.toggle('lang-en', (language || 'en') !== 'km')
 
     // ?? Sidebar + page-bg colour overrides ???????????????????????????????
     // Dark-mode CSS sets background-color !important on aside/body.
@@ -816,7 +834,7 @@ export function AppProvider({ children }) {
       css += `${allBgSels} { background-color: ${pgb} !important; }\n`
     }
     styleEl.textContent = css
-  }, [settings])
+  }, [language, settings])
 
   // ?? Sync URL management ???????????????????????????????????????????????????
   const updateSyncUrl = useCallback((url) => {

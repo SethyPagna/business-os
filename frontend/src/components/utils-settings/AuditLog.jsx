@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, ClipboardList, Clock3, Download, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 
@@ -128,12 +129,13 @@ function DetailRow({ label, value, mono }) {
 }
 
 export default function AuditLog() {
-  const { t } = useApp()
+  const { t, page } = useApp()
   const [logs, setLogs] = useState([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
+  const loadedOnceRef = useRef(false)
 
   const actionLabels = useMemo(() => ({
     create: t('create') || 'Create',
@@ -155,8 +157,8 @@ export default function AuditLog() {
     reset_password: t('reset_password') || 'Reset Password',
     repair: t('repair') || 'Repair',
     return: t('returns') || 'Return',
-    backup_export: 'Backup Export',
-    backup_restore: 'Backup Restore',
+    backup_export: `${t('backup') || 'Backup'} ${t('export') || 'Export'}`,
+    backup_restore: `${t('backup') || 'Backup'} ${t('restore') || 'Restore'}`,
   }), [t])
 
   const actionLabel = useCallback((action) => {
@@ -173,19 +175,29 @@ export default function AuditLog() {
   const load = useCallback(() => {
     setLoading(true)
     setError(null)
-    window.api.getAuditLogs()
+    withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
       .then((data) => setLogs(Array.isArray(data) ? data : []))
       .catch((err) => {
         console.error('Failed to load audit logs:', err)
         setLogs([])
         setError(err?.message || 'Failed to load audit logs.')
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        loadedOnceRef.current = true
+        setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (page !== 'audit_log') return
+    if (!loadedOnceRef.current || (!loading && logs.length === 0 && error)) {
+      load()
+    }
+  }, [error, load, loading, logs.length, page])
 
   const query = search.trim().toLowerCase()
   const filtered = useMemo(() => logs.filter((log) => {

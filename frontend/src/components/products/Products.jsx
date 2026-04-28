@@ -12,7 +12,6 @@ import { ProductImg, ProductImagePlaceholder } from './primitives'
 import ManageCategoriesModal from './ManageCategoriesModal'
 import ManageBrandsModal from './ManageBrandsModal'
 import ManageUnitsModal      from './ManageUnitsModal'
-import ManageFieldsModal     from './ManageFieldsModal'
 import BulkImportModal       from './BulkImportModal'
 import BulkAddStockModal     from './BulkAddStockModal'
 import VariantFormModal      from './VariantFormModal'
@@ -37,7 +36,6 @@ export default function Products() {
   const [products,     setProducts]     = useState([])
   const [categories,   setCategories]   = useState([])
   const [units,        setUnits]        = useState([])
-  const [customFields, setCustomFields] = useState([])
   const [branches,     setBranches]     = useState([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
@@ -65,19 +63,16 @@ export default function Products() {
         products: () => window.api.getProducts(),
         categories: () => window.api.getCategories(),
         units: () => window.api.getUnits(),
-        customFields: () => window.api.getCustomFields(),
         branches: () => window.api.getBranches(),
       })
       const prods = result.values.products
       const cats = result.values.categories
       const unitList = result.values.units
-      const fields = result.values.customFields
       const brs = result.values.branches
 
       if (Array.isArray(prods) && (prods.length > 0 || !silent)) setProducts(prods)
       if (Array.isArray(cats)) setCategories(cats)
       if (Array.isArray(unitList)) setUnits(unitList)
-      if (Array.isArray(fields)) setCustomFields(fields)
       if (Array.isArray(brs)) setBranches((brs || []).filter(b => b.is_active))
 
       if (!result.hasAnySuccess) {
@@ -306,6 +301,7 @@ export default function Products() {
   }
 
   const catMap = Object.fromEntries(categories.map(c => [c.name, c]))
+  const unitMap = Object.fromEntries(units.map(unit => [unit.name, unit]))
   const brandOptions = useMemo(() => {
     const fromProducts = products
       .map((product) => String(product?.brand || '').trim())
@@ -333,6 +329,16 @@ export default function Products() {
   }
 
   const getProductGallery = (product) => normalizeGallery(product?.image_gallery, product?.image_path || null)
+  const renderUnitChip = (unitName) => {
+    if (!unitName) return null
+    const color = unitMap[unitName]?.color
+    if (!color) return <span className="ml-1 text-xs font-normal text-gray-400">{unitName}</span>
+    return (
+      <span className="ml-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: color }}>
+        {unitName}
+      </span>
+    )
+  }
 
   const openLightbox = (gallery, startIndex = 0, title = '') => {
     const list = normalizeGallery(gallery).map(resolveImageUrl).filter(Boolean)
@@ -401,7 +407,6 @@ export default function Products() {
             onManageCats={()=>setModal('cats')}
             onManageBrands={()=>setModal('brands')}
             onManageUnits={()=>setModal('units')}
-            onManageFields={()=>setModal('fields')}
             onImport={()=>setModal('bulk')}
             onExport={() => {
               const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
@@ -436,7 +441,6 @@ export default function Products() {
                 }))),
                 Parent_ID: p.parent_id || '',
                 Is_Group: p.is_group ? 'Yes' : 'No',
-                Custom_Fields_JSON: JSON.stringify(p.custom_fields || {}),
                 Active: p.is_active ? 'Yes' : 'No',
               }))
               downloadCSV(`products-${new Date().toISOString().slice(0,10)}.csv`, rows)
@@ -796,7 +800,7 @@ export default function Products() {
                     <td className="px-3 py-2 text-right">
                       <div className="font-bold text-gray-900 dark:text-white">
                         {branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity}
-                        <span className="text-xs font-normal text-gray-400 ml-1">{p.unit}</span>
+                        {renderUnitChip(p.unit)}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-center">{getStockBadge(p)}</td>
@@ -864,7 +868,7 @@ export default function Products() {
                 <div className="flex items-center gap-3 mt-1 text-xs flex-wrap">
                   <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
                   <span className="text-green-700">{fmtUSD(p.selling_price_usd)}</span>
-                  <span className="text-gray-500">{qty} {p.unit}</span>
+                  <span className="flex items-center text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
                 </div>
               </div>
               <div onClick={e=>e.stopPropagation()}>
@@ -883,7 +887,7 @@ export default function Products() {
       {/* Product detail modal */}
       {detailProduct && (
         <ProductDetailModal
-          p={detailProduct} catMap={catMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
+          p={detailProduct} catMap={catMap} unitMap={unitMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
           onEdit={()=>{setSelected(detailProduct);setDetailProduct(null);setModal('form')}}
           onDelete={()=>handleDelete(detailProduct)}
           onClose={()=>setDetailProduct(null)}
@@ -956,7 +960,7 @@ export default function Products() {
           t={t}
         />
       )}
-      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} customFields={customFields} branches={branches} brandOptions={brandOptions} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null)}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
+      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null)}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
       {variantModal && (
         <VariantFormModal
           parent={variantModal}
@@ -969,7 +973,6 @@ export default function Products() {
       {modal==='cats'   && <ManageCategoriesModal onClose={()=>{setModal(null);load()}} t={t} />}
       {modal==='brands' && <ManageBrandsModal onClose={()=>setModal(null)} onDone={load} products={products} user={user} t={t} />}
       {modal==='units'  && <ManageUnitsModal onClose={()=>{setModal(null);load()}} t={t} />}
-      {modal==='fields' && <ManageFieldsModal onClose={()=>{setModal(null);load()}} t={t} onChanged={load} />}
       {modal==='bulk'   && <BulkImportModal onClose={()=>setModal(null)} onDone={load} t={t} />}
     </div>
   )

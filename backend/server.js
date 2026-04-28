@@ -106,7 +106,7 @@ function mountHealthRoute(target) {
 function mountApiRoutes(target) {
   // Keep route ownership explicit so each domain file stays responsible for a
   // bounded slice of behavior.
-  const { unitsRouter, customFieldsRouter } = require('./src/routes/units')
+  const { unitsRouter } = require('./src/routes/units')
 
   target.use('/api', networkAccessGuard)
 
@@ -115,7 +115,6 @@ function mountApiRoutes(target) {
   target.use('/api/settings', require('./src/routes/settings'))
   target.use('/api/categories', require('./src/routes/categories'))
   target.use('/api/units', unitsRouter)
-  target.use('/api/custom-fields', customFieldsRouter)
   target.use('/api/branches', require('./src/routes/branches'))
   target.use('/api/products', require('./src/routes/products'))
   target.use('/api/files', require('./src/routes/files'))

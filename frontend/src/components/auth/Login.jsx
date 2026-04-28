@@ -66,7 +66,7 @@ function ModeBackButton({ label, onClick }) {
 }
 
 export default function Login() {
-  const { login, persistAuthenticatedUser, settings, t } = useApp()
+  const { login, persistAuthenticatedUser, settings, t, language } = useApp()
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -119,6 +119,14 @@ export default function Login() {
   const usernameRef = useRef()
   const otpRef = useRef()
   const organizationDisplayName = organizationSearch || tr('organization_not_selected', 'Choose organization')
+  const loginShellDescription = tr(
+    'auth_welcome_body',
+    'Sign in to manage sales, stock, customer accounts, and daily operations from one secure workspace.',
+  )
+  const loginFeatureFast = tr('auth_feature_fast', 'Fast daily workflow')
+  const loginFeatureSecure = tr('auth_feature_secure', 'Protected business access')
+  const loginFeatureSynced = tr('auth_feature_synced', 'Live server-backed data')
+  const loginFeatureTrusted = tr('auth_feature_trusted', 'Built for shared teams')
 
   const rememberOrganization = (item) => {
     try {
@@ -525,11 +533,60 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-4">
-      <div className="absolute right-4 top-4 z-10">
-        <QuickPreferenceToggles />
-      </div>
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/95 p-6 shadow-2xl backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/92">
+    <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center justify-center">
+        <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6 lg:right-8 lg:top-8">
+          <div className="rounded-2xl border border-white/70 bg-white/85 p-1.5 shadow-sm backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/75">
+            <QuickPreferenceToggles />
+          </div>
+        </div>
+        <div className="auth-frame grid w-full max-w-5xl overflow-hidden rounded-[2rem] border xl:grid-cols-[1.05fr_0.95fr]">
+          <aside className="auth-aside hidden xl:flex">
+            <div className="space-y-10">
+              <div className="space-y-5">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-white/80">
+                  <Building2 className="h-4 w-4" />
+                  <span>Business OS</span>
+                </div>
+                <div className="space-y-4">
+                  <h1 className="max-w-md text-4xl font-semibold leading-tight text-white">
+                    {tr('secure_signin_workspace', 'Secure sign-in for your business workspace')}
+                  </h1>
+                  <p className="max-w-lg text-sm leading-7 text-slate-100/95">
+                    {loginShellDescription}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4">
+                  <div className="text-sm font-semibold text-white">{loginFeatureFast}</div>
+                  <div className="mt-1 text-xs leading-6 text-slate-200/80">
+                    {tr('auth_feature_fast_desc', 'Compact tools for sales, stock, and customer work every day.')}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4">
+                  <div className="text-sm font-semibold text-white">{loginFeatureSecure}</div>
+                  <div className="mt-1 text-xs leading-6 text-slate-200/80">
+                    {tr('auth_feature_secure_desc', 'Protected sign-in methods, session control, and account recovery.')}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4">
+                  <div className="text-sm font-semibold text-white">{loginFeatureSynced}</div>
+                  <div className="mt-1 text-xs leading-6 text-slate-200/80">
+                    {tr('auth_feature_synced_desc', 'Your workspace stays connected to the live server and current data.')}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/12 bg-white/10 px-4 py-4">
+                  <div className="text-sm font-semibold text-white">{loginFeatureTrusted}</div>
+                  <div className="mt-1 text-xs leading-6 text-slate-200/80">
+                    {tr('auth_feature_trusted_desc', 'Made for teams sharing branches, devices, and daily business tasks.')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+          <div className="auth-card p-5 sm:p-7 lg:p-8">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/25">
             {otpRequired ? <ShieldCheck className="h-8 w-8" /> : <Building2 className="h-8 w-8" />}
@@ -540,11 +597,19 @@ export default function Login() {
               ? tr('two_factor_authentication', 'Two-Factor Authentication')
               : tr('secure_signin_workspace', 'Secure sign-in for your business workspace')}
           </p>
+          <div className="mt-3 flex items-center justify-center gap-2 text-[11px] font-medium text-gray-500 dark:text-slate-400">
+            <span className="rounded-full bg-gray-100 px-2.5 py-1 dark:bg-slate-800">
+              {language === 'km' ? tr('khmerLabel', 'Khmer') : tr('englishLabel', 'English')}
+            </span>
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700 dark:bg-blue-900/25 dark:text-blue-300">
+              {tr('auth_session_label', 'Secure session')}
+            </span>
+          </div>
         </div>
 
         {!otpRequired && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
           <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50/85 p-3 dark:border-slate-700 dark:bg-slate-900/60">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
                   <Building2 className="h-4 w-4 text-gray-400" />
@@ -562,7 +627,7 @@ export default function Login() {
                 ) : null}
               </div>
               {!organizationExpanded && (organizationSearch || organizationId) ? (
-                <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-300">
+                  <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 shadow-sm dark:border-slate-600 dark:bg-slate-950/70 dark:text-gray-300">
                   <div className="font-medium text-gray-800 dark:text-gray-100">{organizationDisplayName}</div>
                   <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                     {tr('organization_hidden_hint', 'Organization details stay hidden until you expand this section.')}
@@ -742,7 +807,7 @@ export default function Login() {
 
         {!otpRequired && showEmailReset && !recoveryAccessToken ? (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/90 p-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
               {tr('email_reset_notice', 'Enter your username, name, email, or phone. If this account has a saved email, Business OS will send a password reset link there.')}
             </div>
             <div>
@@ -752,7 +817,7 @@ export default function Login() {
               <input id="email-reset-identifier" name="email_reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
             </div>
 
-            {resetInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
+            {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
             <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithEmail}>
@@ -765,7 +830,7 @@ export default function Login() {
 
         {!otpRequired && showOtpReset ? (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/90 p-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
               {tr('otp_reset_notice', 'Use the OTP code from your authenticator app to set a new password. If OTP is not enabled on your account, use Google sign-in, email recovery, or ask an admin to reset the password.')}
             </div>
             <div>
@@ -802,7 +867,7 @@ export default function Login() {
               <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
             </div>
 
-            {resetInfo ? <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
+            {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
             <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithOtp}>
@@ -815,7 +880,7 @@ export default function Login() {
 
         {!otpRequired && recoveryAccessToken ? (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/90 p-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
               {resetInfo || tr('set_new_password_from_email', 'Set your new password below to finish email recovery.')}
             </div>
             <div>
@@ -903,6 +968,8 @@ export default function Login() {
             </button>
           </form>
         ) : null}
+          </div>
+        </div>
       </div>
     </div>
   )

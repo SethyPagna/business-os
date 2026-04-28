@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Chrome, Link2, Mail, ShieldCheck } from 'lucide-react'
+import { Chrome, Link2, LogOut, Mail, ShieldCheck } from 'lucide-react'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
@@ -51,7 +51,7 @@ function ProfileSectionButton({ active, children, onClick }) {
 }
 
 export default function UserProfileModal({ onClose }) {
-  const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
+  const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -655,6 +655,25 @@ export default function UserProfileModal({ onClose }) {
                   </select>
                 </div>
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
+              </div>
+
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-red-700 dark:text-red-300">{tr('sign_out', 'Sign out')}</div>
+                    <p className="mt-1 text-xs text-red-600/90 dark:text-red-300/80">
+                      {tr('sign_out_profile_hint', 'Use this to end your session from the current device when you are done.')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
+                    onClick={logout}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {tr('logout', 'Logout')}
+                  </button>
+                </div>
               </div>
             </section>
             ) : null}

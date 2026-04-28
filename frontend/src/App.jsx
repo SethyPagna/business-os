@@ -1,4 +1,5 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Server } from 'lucide-react'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import Login from './components/auth/Login'
@@ -7,6 +8,7 @@ import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { createCircularFaviconDataUrl } from './utils/favicon'
+import { withLoaderTimeout } from './utils/loaders.mjs'
 
 /**
  * Frontend application shell.
@@ -237,50 +239,54 @@ function getWarmupImporters() {
 
 function getDataWarmupLoaders(canAccessPage) {
   const steps = [
-    () => window.api?.getSettings?.(),
-    () => window.api?.getDashboard?.(),
+    createWarmupLoader('Settings warmup', () => window.api?.getSettings?.()),
+    createWarmupLoader('Dashboard warmup', () => window.api?.getDashboard?.()),
   ]
 
   // Prioritize the pages that have historically been slow on their first visit.
   // These warmups happen early so late-navigation admin screens have data and
   // auth-derived config ready before the user reaches them.
   if (canAccessPage('users')) {
-    steps.push(() => window.api?.getUsers?.())
-    steps.push(() => window.api?.getRoles?.())
+    steps.push(createWarmupLoader('Users warmup', () => window.api?.getUsers?.()))
+    steps.push(createWarmupLoader('Roles warmup', () => window.api?.getRoles?.()))
   }
   if (canAccessPage('audit_log')) {
-    steps.push(() => window.api?.getAuditLogs?.())
+    steps.push(createWarmupLoader('Audit log warmup', () => window.api?.getAuditLogs?.()))
   }
   if (canAccessPage('server') || canAccessPage('settings') || canAccessPage('backup')) {
-    steps.push(() => window.api?.getSystemConfig?.())
+    steps.push(createWarmupLoader('System config warmup', () => window.api?.getSystemConfig?.()))
   }
   if (canAccessPage('files')) {
-    steps.push(() => window.api?.getFiles?.())
-    steps.push(() => window.api?.getAiProviders?.())
-    steps.push(() => window.api?.getAiResponses?.(40))
+    steps.push(createWarmupLoader('Files warmup', () => window.api?.getFiles?.()))
+    steps.push(createWarmupLoader('AI providers warmup', () => window.api?.getAiProviders?.()))
+    steps.push(createWarmupLoader('AI responses warmup', () => window.api?.getAiResponses?.(40)))
   }
   if (canAccessPage('server')) {
-    steps.push(() => window.api?.getSystemDebugLog?.())
+    steps.push(createWarmupLoader('System diagnostics warmup', () => window.api?.getSystemDebugLog?.()))
   }
   if (canAccessPage('backup')) {
-    steps.push(() => window.api?.getDataPath?.())
-    steps.push(() => window.api?.getGoogleDriveSyncStatus?.())
+    steps.push(createWarmupLoader('Data path warmup', () => window.api?.getDataPath?.()))
+    steps.push(createWarmupLoader('Drive sync warmup', () => window.api?.getGoogleDriveSyncStatus?.()))
   }
 
   steps.push(
-    () => window.api?.getProducts?.(),
-    () => window.api?.getCategories?.(),
-    () => window.api?.getUnits?.(),
-    () => window.api?.getCustomFields?.(),
-    () => window.api?.getBranches?.(),
-    () => window.api?.getSales?.(),
-    () => window.api?.getReturns?.(),
-    () => window.api?.getCustomers?.(),
-    () => window.api?.getSuppliers?.(),
-    () => window.api?.getDeliveryContacts?.(),
+    createWarmupLoader('Products warmup', () => window.api?.getProducts?.()),
+    createWarmupLoader('Categories warmup', () => window.api?.getCategories?.()),
+    createWarmupLoader('Units warmup', () => window.api?.getUnits?.()),
+    createWarmupLoader('Branches warmup', () => window.api?.getBranches?.()),
+    createWarmupLoader('Sales warmup', () => window.api?.getSales?.()),
+    createWarmupLoader('Returns warmup', () => window.api?.getReturns?.()),
+    createWarmupLoader('Customers warmup', () => window.api?.getCustomers?.()),
+    createWarmupLoader('Suppliers warmup', () => window.api?.getSuppliers?.()),
+    createWarmupLoader('Delivery contacts warmup', () => window.api?.getDeliveryContacts?.()),
   )
 
   return steps.filter(Boolean)
+}
+
+function createWarmupLoader(label, fn) {
+  if (typeof fn !== 'function') return null
+  return () => withLoaderTimeout(() => fn(), label, 9000).catch(() => null)
 }
 
 function runWarmupBatches(loaders, batchSize = 3) {
@@ -294,37 +300,38 @@ function runWarmupBatches(loaders, batchSize = 3) {
 
 function getPageEntryWarmupLoaders(pageId, canAccessPage) {
   const loaders = []
-  const add = (fn) => {
-    if (typeof fn === 'function') loaders.push(fn)
+  const add = (label, fn) => {
+    const wrapped = createWarmupLoader(label, fn)
+    if (wrapped) loaders.push(wrapped)
   }
 
   if (pageId === 'users' && canAccessPage('users')) {
-    add(() => window.api?.getUsers?.())
-    add(() => window.api?.getRoles?.())
+    add('Users warmup', () => window.api?.getUsers?.())
+    add('Roles warmup', () => window.api?.getRoles?.())
   }
   if (pageId === 'audit_log' && canAccessPage('audit_log')) {
-    add(() => window.api?.getAuditLogs?.())
+    add('Audit log warmup', () => window.api?.getAuditLogs?.())
   }
   if (pageId === 'receipt_settings') {
-    add(() => window.api?.getSettings?.())
+    add('Receipt settings warmup', () => window.api?.getSettings?.())
   }
   if (pageId === 'settings' && canAccessPage('settings')) {
-    add(() => window.api?.getSettings?.())
-    add(() => window.api?.getSystemConfig?.())
+    add('Settings warmup', () => window.api?.getSettings?.())
+    add('System config warmup', () => window.api?.getSystemConfig?.())
   }
   if (pageId === 'files' && canAccessPage('files')) {
-    add(() => window.api?.getFiles?.())
-    add(() => window.api?.getAiProviders?.())
-    add(() => window.api?.getAiResponses?.(40))
+    add('Files warmup', () => window.api?.getFiles?.())
+    add('AI providers warmup', () => window.api?.getAiProviders?.())
+    add('AI responses warmup', () => window.api?.getAiResponses?.(40))
   }
   if (pageId === 'server' && canAccessPage('server')) {
-    add(() => window.api?.getSystemConfig?.())
-    add(() => window.api?.getSystemDebugLog?.())
+    add('Sync settings warmup', () => window.api?.getSystemConfig?.())
+    add('System diagnostics warmup', () => window.api?.getSystemDebugLog?.())
   }
   if (pageId === 'backup' && canAccessPage('backup')) {
-    add(() => window.api?.getSystemConfig?.())
-    add(() => window.api?.getDataPath?.())
-    add(() => window.api?.getGoogleDriveSyncStatus?.())
+    add('Backup settings warmup', () => window.api?.getSystemConfig?.())
+    add('Data path warmup', () => window.api?.getDataPath?.())
+    add('Drive sync warmup', () => window.api?.getGoogleDriveSyncStatus?.())
   }
 
   return loaders
@@ -667,6 +674,9 @@ export default function App() {
     reloadWriteConflict,
     syncUrl,
     canWriteToServer,
+    language,
+    theme,
+    t,
   } = useApp()
   const { syncError, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
@@ -755,7 +765,36 @@ export default function App() {
       <Sidebar />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 md:pt-0 pb-16 md:pb-0">
-        <div className="hidden h-14 items-center justify-end border-b border-gray-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/88 md:flex">
+        <div className="app-topbar hidden h-14 items-center justify-between border-b px-4 md:flex">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 dark:border-slate-700/70 dark:bg-slate-800/80">
+              {settings?.customer_portal_logo_image ? (
+                <img
+                  src={settings.customer_portal_logo_image}
+                  alt={settings?.business_name || 'Business OS'}
+                  className="h-full w-full object-contain p-0.5"
+                />
+              ) : (
+                <span className="grid h-full w-full place-items-center text-sm font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
+                  {String(settings?.business_name || 'Business OS').slice(0, 2).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                {settings?.business_name || 'Business OS'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPage('server')}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+              >
+                <Server className="h-3.5 w-3.5" />
+                <span>{t('sync_server_title') || 'Sync Server'}</span>
+                {syncUrl ? <span className={`h-2 w-2 rounded-full ${canWriteToServer ? 'bg-emerald-400' : 'bg-amber-400'}`} /> : null}
+              </button>
+            </div>
+          </div>
           <QuickPreferenceToggles />
         </div>
         {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}

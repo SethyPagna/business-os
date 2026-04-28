@@ -128,6 +128,7 @@ export default function Sidebar() {
   const language = settings?.language || 'en'
   const brandLogo = settings?.customer_portal_logo_image || ''
   const brandName = settings?.business_name || 'Business OS'
+  const mobileBrandName = brandName.length > 7 ? `${brandName.slice(0, 7)}...` : brandName
   const sidebarBg = settings?.ui_sidebar_color || ''
   const sidebarTextColor = settings?.ui_sidebar_text_color || ''
   const isDark = sidebarBg ? isDarkColor(sidebarBg) : null
@@ -160,35 +161,7 @@ export default function Sidebar() {
   return (
     <>
       <aside className={`sticky top-0 hidden h-screen w-[220px] flex-shrink-0 flex-col border-r min-h-0 md:flex ${!sidebarBg ? 'border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-transparent'}`}>
-        <div className={`border-b p-4 ${borderClass}`}>
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/90 dark:bg-slate-800/80">
-              {brandLogo ? (
-                <img src={brandLogo} alt={brandName} className="h-full w-full object-contain p-0.5" />
-              ) : (
-                <span className="grid h-full w-full place-items-center text-lg font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
-                  {brandName.slice(0, 2).toUpperCase()}
-                </span>
-              )}
-            </div>
-            <div className="overflow-hidden">
-              <div className={`truncate text-base font-bold ${textClass || 'text-gray-900 dark:text-white'}`} style={textStyle}>
-                {brandName}
-              </div>
-              <div className={`flex items-center gap-1 text-xs ${subTextClass || 'text-gray-400'}`} style={subduedTextStyle}>
-                v2.2.0
-                {syncUrl ? (
-                  <span title={syncConnected ? 'Sync: connected' : 'Sync: reconnecting'} className="ml-1 flex items-center gap-1">
-                    sync
-                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto p-3">
+        <nav className="flex-1 overflow-y-auto p-3 pt-4">
           <div className="space-y-0.5">
             {visibleItems.map((item) => {
               const Icon = item.icon
@@ -255,10 +228,12 @@ export default function Sidebar() {
               </span>
             )}
           </div>
-          <span className="truncate text-base font-bold text-gray-900 dark:text-white" style={textStyle}>
-            {brandName}
-          </span>
-          {syncUrl ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} /> : null}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-base font-bold text-gray-900 dark:text-white" style={textStyle}>
+              {mobileBrandName}
+            </span>
+            {syncUrl ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} /> : null}
+          </div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <QuickPreferenceToggles />
@@ -272,9 +247,6 @@ export default function Sidebar() {
                 </span>
               )}
             </div>
-          </button>
-          <button onClick={logout} className="p-1 text-gray-400 transition-colors hover:text-red-500" title={t('logout')} style={textStyle}>
-            <LogOut className="h-5 w-5" />
           </button>
         </div>
       </header>

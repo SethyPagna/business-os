@@ -29,7 +29,7 @@ function ManageCategoriesModal({ onClose, t }) {
   const handleUpdate = async (cat) => {
     setErr('')
     try {
-      const res = await window.api.updateCategory({ id: cat.id, name: cat.name, color: cat.color })
+      const res = await window.api.updateCategory(cat.id, { name: cat.name, color: cat.color })
       if (res?.success === false) { setErr(res.error || 'Failed'); return }
       setEditing(null); load()
     } catch(e) { setErr(e.message || 'Failed') }
@@ -75,4 +75,3 @@ function ManageCategoriesModal({ onClose, t }) {
     </Modal>
   )
 }
-

@@ -538,11 +538,11 @@ export default function Settings() {
         icon={SettingsIcon}
         tone="slate"
         title={t('settings')}
-        subtitle={t('all_settings') || 'Control workspace appearance, security, receipts, navigation, and device-facing defaults from one place.'}
+        subtitle={uiLanguage === 'km' ? 'ការកំណត់កម្មវិធីទាំងអស់' : 'All app settings'}
         className="mb-6"
       />
 
-      <div className="mx-auto max-w-6xl space-y-5 2xl:max-w-7xl">
+      <div className="mx-auto max-w-[96rem] space-y-4">
         {isAdmin ? (
         <div className="card p-4 sm:p-5">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('business_info')}</h2>

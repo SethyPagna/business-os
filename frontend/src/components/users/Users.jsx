@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CircleUserRound, UserPlus } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
@@ -7,6 +7,7 @@ import { useApp, useSync } from '../../AppContext'
 import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
+import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 /**
  * 1. Users Page Module
@@ -60,8 +61,9 @@ function formatContactValue(value) {
 }
 
 export default function Users() {
-  const { t, notify, hasPermission, user: currentUser } = useApp()
+  const { t, notify, hasPermission, user: currentUser, page } = useApp()
   const { syncChannel } = useSync()
+  const loadedOnceRef = useRef(false)
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -97,31 +99,33 @@ export default function Users() {
     if (!canManage) {
       setUsers([])
       setRoles([])
+      loadedOnceRef.current = true
       return
     }
     setLoading(true)
     try {
-      const [usersResult, rolesResult] = await Promise.allSettled([
-        window.api.getUsers(),
-        window.api.getRoles(),
-      ])
+      const result = await settleLoaderMap({
+        users: () => window.api.getUsers(),
+        roles: () => window.api.getRoles(),
+      })
 
-      if (usersResult.status === 'fulfilled') {
-        setUsers(Array.isArray(usersResult.value) ? usersResult.value : [])
+      if (Array.isArray(result.values.users)) {
+        setUsers(result.values.users)
       }
-      if (rolesResult.status === 'fulfilled') {
-        setRoles(Array.isArray(rolesResult.value) ? rolesResult.value : [])
-      }
-
-      if (usersResult.status === 'rejected' && rolesResult.status === 'rejected') {
-        throw usersResult.reason || rolesResult.reason || new Error('Failed to load users')
+      if (Array.isArray(result.values.roles)) {
+        setRoles(result.values.roles)
       }
 
-      if (usersResult.status === 'rejected') {
-        notify(usersResult.reason?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
-      } else if (rolesResult.status === 'rejected') {
-        notify(rolesResult.reason?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
+      if (!result.hasAnySuccess) {
+        throw new Error(getFirstLoaderError(result.errors, 'Failed to load users'))
       }
+
+      if (result.errors.users) {
+        notify(result.errors.users?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
+      } else if (result.errors.roles) {
+        notify(result.errors.roles?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
+      }
+      loadedOnceRef.current = true
     } catch (error) {
       notify(error?.message || 'Failed to load users', 'error')
     } finally {
@@ -130,6 +134,12 @@ export default function Users() {
   }
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (page !== 'users') return
+    if (!loadedOnceRef.current || (!loading && users.length === 0 && roles.length === 0 && canManage)) {
+      load()
+    }
+  }, [canManage, loading, page, roles.length, users.length]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!syncChannel) return
     if (syncChannel.channel === 'users' || syncChannel.channel === 'roles') load()

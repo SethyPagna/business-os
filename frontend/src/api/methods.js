@@ -347,13 +347,8 @@ export const deleteCategory = id       => route('categories:delete', () => apiFe
 // ─── Units ────────────────────────────────────────────────────────────────────
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
 export const createUnit = d   => route('units:create', () => apiFetch('POST', '/api/units', d),       null, true)
+export const updateUnit = (id, d) => route('units:update', () => apiFetch('PUT', `/api/units/${id}`, d), null, true)
 export const deleteUnit = id  => route('units:delete', () => apiFetch('DELETE', `/api/units/${id}`),  null, true)
-
-// ─── Custom fields ────────────────────────────────────────────────────────────
-export const getCustomFields   = ()       => routeMirrored('customFields:get',    () => apiFetch('GET', '/api/custom-fields'),              () => dexieDb.custom_fields.toArray(), mirrorTable('custom_fields'))
-export const createCustomField = d        => route('customFields:create', () => apiFetch('POST', '/api/custom-fields', d),           null, true)
-export const updateCustomField = (id, d)  => route('customFields:update', () => apiFetch('PUT', `/api/custom-fields/${id}`, d),      null, true)
-export const deleteCustomField = id       => route('customFields:delete', () => apiFetch('DELETE', `/api/custom-fields/${id}`),      null, true)
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))

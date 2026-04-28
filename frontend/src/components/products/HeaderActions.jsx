@@ -5,7 +5,6 @@ export default function ProductsHeaderActions({
   onManageCats,
   onManageBrands,
   onManageUnits,
-  onManageFields,
   onImport,
   onExport,
   onAdd,
@@ -15,7 +14,6 @@ export default function ProductsHeaderActions({
     { label: `Categories`, onClick: onManageCats },
     { label: `${t('brand') || 'Brand'}`, onClick: onManageBrands },
     { label: `Units`, onClick: onManageUnits },
-    { label: `${t('custom_fields') || 'Custom Fields'}`, onClick: onManageFields },
     'divider',
     { label: 'Import CSV', onClick: onImport, color: 'blue' },
     { label: 'Export CSV', onClick: onExport, color: 'green' },
@@ -75,7 +73,6 @@ export default function ProductsHeaderActions({
             { label: 'Categories', onClick: onManageCats },
             { label: `${t('brand') || 'Brand'}`, onClick: onManageBrands },
             { label: 'Units', onClick: onManageUnits },
-            { label: `${t('custom_fields') || 'Custom Fields'}`, onClick: onManageFields },
           ]}
         />
         <button

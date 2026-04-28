@@ -17,6 +17,7 @@
     color: #111827;
     overscroll-behavior: none;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   button,
   input,
@@ -37,6 +38,34 @@ body[data-public-portal='true'] {
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y pinch-zoom;
+}
+
+body.lang-km,
+body.lang-km button,
+body.lang-km input,
+body.lang-km textarea,
+body.lang-km select,
+body.lang-km table,
+body.lang-km th,
+body.lang-km td {
+  font-weight: 460;
+}
+
+body.lang-km .text-xs,
+body.lang-km .text-sm,
+body.lang-km .text-base,
+body.lang-km .text-lg,
+body.lang-km .text-xl,
+body.lang-km .text-2xl {
+  font-weight: 520 !important;
+}
+
+body.lang-km .sidebar-item,
+body.lang-km nav button,
+body.lang-km header button,
+body.lang-km .app-topbar button,
+body.lang-km .safe-area-inset-bottom button {
+  font-weight: 460 !important;
 }
   :root {
     --sidebar-width: 240px;
@@ -140,6 +169,67 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .dark .text-gray-700 { color: #d3dbe8 !important; }
 .dark .text-gray-600 { color: #b4c0d0 !important; }
 .dark .text-gray-500 { color: #90a0b5 !important; }
+.app-topbar {
+  border-color: #d9e2ec;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+}
+.dark .app-topbar {
+  border-color: #243041;
+  background: rgba(11, 18, 32, 0.92);
+}
+.auth-shell {
+  background:
+    linear-gradient(135deg, #f8fafc 0%, #eaf2ff 46%, #f3f7ff 100%);
+  color: #111827;
+}
+.dark .auth-shell {
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 28%),
+    linear-gradient(140deg, #08101b 0%, #0b1422 52%, #13253c 100%);
+  color: #eef2f7;
+}
+.auth-frame {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(20px);
+}
+.dark .auth-frame {
+  border-color: rgba(51, 65, 85, 0.85);
+  background: rgba(2, 8, 23, 0.72);
+  box-shadow: 0 24px 70px rgba(2, 8, 23, 0.5);
+}
+.auth-aside {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(30, 64, 175, 0.88));
+  padding: 2.75rem;
+}
+.dark .auth-aside {
+  background:
+    linear-gradient(180deg, rgba(8, 15, 27, 0.96), rgba(20, 46, 88, 0.9));
+}
+.auth-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+}
+.dark .auth-card {
+  background: linear-gradient(180deg, rgba(2, 8, 23, 0.8), rgba(15, 23, 42, 0.76));
+}
+.app-topbar {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(226, 232, 240, 0.95);
+  backdrop-filter: blur(12px);
+}
+.dark .app-topbar {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(51, 65, 85, 0.9);
+}
+.auth-card .input {
+  background-color: rgba(255, 255, 255, 0.92);
+}
+.dark .auth-card .input {
+  background-color: rgba(15, 23, 42, 0.92) !important;
+}
 .dark .three-dot-btn { color: #a8b5c8 !important; }
 .dark .three-dot-btn:hover { background-color: #1c2937 !important; color: #f8fbff !important; }
 
