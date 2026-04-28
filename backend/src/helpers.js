@@ -235,7 +235,7 @@ function verifyAndRepairStockQuantities() {
         const branchTotal = Math.max(0, Number(prod.branch_total || 0))
         const actual = Number(prod.stock_quantity || 0)
         if (Math.abs(actual - branchTotal) > 0.01) {
-          db.prepare('UPDATE products SET stock_quantity = ?, updated_at = datetime("now") WHERE id = ?')
+          db.prepare("UPDATE products SET stock_quantity = ?, updated_at = datetime('now') WHERE id = ?")
             .run(branchTotal, prod.id)
           repairs++
           errors.push(`Product ${prod.id}: stock corrected from ${actual} to ${branchTotal}`)
@@ -264,7 +264,7 @@ function verifyAndRepairSaleStatuses() {
 
   try {
     db.transaction(() => {
-      const sales = db.prepare('SELECT id, sale_status FROM sales WHERE sale_status NOT IN ("cancelled")')
+      const sales = db.prepare("SELECT id, sale_status FROM sales WHERE sale_status NOT IN ('cancelled')")
         .all()
 
       for (const sale of sales) {

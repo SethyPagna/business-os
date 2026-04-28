@@ -863,9 +863,11 @@ router.get('/verify-integrity', authToken, requireAnyPermission(['backup', 'sett
     } catch (error) {
       if (error !== rollbackMarker) { throw error }
     }
+    const integrityResult = result || {}
     res.json({
+      ...integrityResult,
       success: true,
-      ...(result || {}),
+      healthy: Array.isArray(integrityResult.errors) ? integrityResult.errors.length === 0 : true,
       action: 'verify-only'
     })
   } catch (e) {
@@ -892,8 +894,9 @@ router.post('/repair-integrity', authToken, requireAnyPermission(['backup', 'set
     }
 
     res.json({
-      success: result.errors.length === 0 || result.repairs > 0,
       ...result,
+      success: true,
+      healthy: Array.isArray(result.errors) ? result.errors.length === 0 : true,
       action: 'repair-and-verify'
     })
   } catch (e) {

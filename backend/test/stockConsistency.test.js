@@ -1,6 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const Database = require('better-sqlite3')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -192,6 +193,10 @@ async function getSettings(baseUrl, authToken) {
   return fetchJson(baseUrl, '/api/settings', { authToken })
 }
 
+async function getSettingsMeta(baseUrl, authToken) {
+  return fetchJson(baseUrl, '/api/settings/meta', { authToken })
+}
+
 async function uploadTinyPng(baseUrl, authToken, filename = 'factory-reset-proof.png') {
   const form = new FormData()
   form.append('file', new Blob([PNG_BUFFER], { type: 'image/png' }), filename)
@@ -201,6 +206,25 @@ async function uploadTinyPng(baseUrl, authToken, filename = 'factory-reset-proof
     authToken,
   })
   return result
+}
+
+function findDbPath(rootDir) {
+  const stack = [rootDir]
+  while (stack.length) {
+    const current = stack.pop()
+    let entries = []
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch (_) {
+      continue
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name)
+      if (entry.isFile() && entry.name === 'business.db') return fullPath
+      if (entry.isDirectory()) stack.push(fullPath)
+    }
+  }
+  return null
 }
 
 function sumBranchStock(product) {
@@ -650,6 +674,107 @@ runTest('factory reset restores admin defaults while clearing business data and 
     assert.equal(settings.business_name, 'My Business')
     assert.equal(settings.exchange_rate, '4100')
   } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('settings writes reject stale expectedUpdatedAt values')
+runTest('settings writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-settings-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const metaBefore = await getSettingsMeta(server.baseUrl, authToken)
+    assert.ok(metaBefore.updatedAt, 'Expected settings updatedAt before write')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, '/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: metaBefore.updatedAt,
+        business_name: 'Conflict Test Business',
+      }),
+    })
+    assert.ok(firstWrite.updatedAt, 'Expected updatedAt after first settings write')
+    assert.notEqual(firstWrite.updatedAt, metaBefore.updatedAt)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: metaBefore.updatedAt,
+        business_phone: '012345678',
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.conflict, true)
+    assert.equal(staleJson.entity, 'settings')
+
+    const settings = await getSettings(server.baseUrl, authToken)
+    assert.equal(settings.business_name, 'Conflict Test Business')
+    assert.notEqual(settings.business_phone, '012345678')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('verify-integrity reports inconsistencies without mutating data while repair-integrity fixes them')
+runTest('verify-integrity reports inconsistencies without mutating data while repair-integrity fixes them', async () => {
+  const runtimeDir = makeTempRoot('bos-verify-integrity-')
+  let server = null
+  let externalDb = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Integrity Drift Product',
+      sku: 'INT-001',
+      stock_quantity: 6,
+      purchase_price_usd: 3,
+      selling_price_usd: 7,
+    })
+
+    const dbPath = findDbPath(runtimeDir)
+    assert.ok(dbPath, 'Expected to find temp business.db path')
+    externalDb = new Database(dbPath)
+    externalDb.pragma('journal_mode = WAL')
+    externalDb.prepare('UPDATE products SET stock_quantity = 999 WHERE id = ?').run(productId)
+
+    let product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 999)
+    assert.equal(sumBranchStock(product), 6)
+
+    const verifyResult = await fetchJson(server.baseUrl, '/api/system/verify-integrity', { authToken })
+    assert.equal(verifyResult.action, 'verify-only')
+    assert.equal(verifyResult.success, true)
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 999, 'Verify-only route must not mutate live data')
+    assert.equal(sumBranchStock(product), 6)
+
+    const repairResult = await fetchJson(server.baseUrl, '/api/system/repair-integrity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({}),
+    })
+    assert.equal(repairResult.action, 'repair-and-verify')
+    assert.equal(repairResult.success, true)
+
+    product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 6)
+    assert.equal(sumBranchStock(product), 6)
+  } finally {
+    try { externalDb?.close() } catch (_) {}
     await stopServer(server?.child)
   }
 })
