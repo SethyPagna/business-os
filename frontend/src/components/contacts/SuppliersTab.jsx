@@ -212,7 +212,8 @@ function SuppliersTab({ t, notify }) {
         renderRow={(supplier) => (
           <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(supplier.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
-              <input type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
+              <label htmlFor={`supplier-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
+              <input id={`supplier-select-${supplier.id}`} name={`supplier_select_${supplier.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
             </td>
             <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.name}</td>
             <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.phone || '--'}</td>
@@ -227,7 +228,8 @@ function SuppliersTab({ t, notify }) {
         renderCard={(supplier) => (
           <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(supplier.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(supplier.id) }}>
-              <input type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
+              <label htmlFor={`supplier-card-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
+              <input id={`supplier-card-select-${supplier.id}`} name={`supplier_card_select_${supplier.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
             </div>
             <div className="h-9 w-9 flex-shrink-0 rounded-full bg-orange-100 text-center text-sm font-bold leading-9 text-orange-600 dark:bg-orange-900/40">
               {supplier.name?.[0]?.toUpperCase()}

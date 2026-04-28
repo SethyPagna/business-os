@@ -155,6 +155,7 @@ export default function AuditLog() {
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
   const loadedOnceRef = useRef(false)
+  const pageLoadRequestedRef = useRef(false)
 
   const actionLabels = useMemo(() => ({
     create: t('create') || 'Create',
@@ -232,15 +233,14 @@ export default function AuditLog() {
   }, [])
 
   useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (page !== 'audit_log') return
-    if (!loadedOnceRef.current || (!loading && logs.length === 0 && error)) {
-      load()
+    if (page !== 'audit_log') {
+      pageLoadRequestedRef.current = false
+      return
     }
-  }, [error, load, loading, logs.length, page])
+    if (pageLoadRequestedRef.current) return
+    pageLoadRequestedRef.current = true
+    load()
+  }, [load, page])
 
   const query = search.trim().toLowerCase()
   const searchedLogs = useMemo(() => logs.filter((log) => {

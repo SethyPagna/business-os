@@ -40,6 +40,20 @@ function getStoredAuthToken() {
 // no longer exists in that error-path, which manifests as
 // "TypeError: r is not a function" in minified builds.
 if (typeof window !== 'undefined') {
+  const extensionOrigins = [
+    'chrome-extension://',
+    'moz-extension://',
+    'safari-extension://',
+    'ms-browser-extension://',
+  ]
+  const hasExtensionSource = (value) => extensionOrigins.some((origin) => String(value || '').includes(origin))
+  const isLikelyInjectedBundle = (value) => {
+    const text = String(value || '')
+    return hasExtensionSource(text)
+      || /(^|[\\/])(vendor|content|inpage)\.js(?::\d+)?$/i.test(text)
+      || /content\.js/i.test(text)
+      || /tabs:outgoing\.message\.ready/i.test(text)
+  }
   const isSuppressedRuntimeMessage = (message) => {
     const msg = String(message || '')
     return (
@@ -69,16 +83,33 @@ if (typeof window !== 'undefined') {
     const fileName = String(event?.filename || '')
     const stack = String(event?.error?.stack || '')
     const isExtensionError = (
-      fileName.startsWith('chrome-extension://')
-      || fileName.startsWith('moz-extension://')
-      || stack.includes('content.js')
-      || stack.includes('vendor.js')
+      hasExtensionSource(fileName)
+      || isLikelyInjectedBundle(fileName)
+      || isLikelyInjectedBundle(stack)
     )
     if (!isExtensionError) return
     if (isSuppressedRuntimeMessage(message)) {
       event.preventDefault()
       event.stopImmediatePropagation()
     }
+  }, true)
+
+  window.addEventListener('securitypolicyviolation', (event) => {
+    const directive = String(event?.violatedDirective || '')
+    const blockedURI = String(event?.blockedURI || '')
+    const sourceFile = String(event?.sourceFile || '')
+    const sample = String(event?.sample || '')
+    const isSuppressedViolation = (
+      directive.includes('script-src')
+      && (
+        blockedURI === 'eval'
+        || sample.includes('unsafe-eval')
+        || sample.includes('tabs:outgoing')
+        || isLikelyInjectedBundle(sourceFile)
+      )
+    )
+    if (!isSuppressedViolation) return
+    event.stopImmediatePropagation()
   }, true)
 }
 

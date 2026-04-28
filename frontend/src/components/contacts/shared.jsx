@@ -188,6 +188,7 @@ export function ContactTable({
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
             <tr>
               <th className="w-10 px-3 py-2">
+                <label htmlFor="contacts-select-all" className="sr-only">Select all contacts</label>
                 <input
                   ref={selectAllRef}
                   id="contacts-select-all"

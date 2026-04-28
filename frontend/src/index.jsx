@@ -33,6 +33,71 @@ function disableServiceWorkerCaching() {
   }
 }
 
+function installFormFieldAccessibility() {
+  if (typeof document === 'undefined') return
+
+  let generatedFieldCount = 0
+  const fieldSelector = 'input, select, textarea'
+  const escapeSelectorValue = (value) => {
+    if (typeof window.CSS?.escape === 'function') return window.CSS.escape(value)
+    return String(value).replace(/["\\]/g, '\\$&')
+  }
+
+  const wireField = (field) => {
+    if (!(field instanceof HTMLElement)) return
+    if (!field.matches(fieldSelector)) return
+    if (!field.id) {
+      generatedFieldCount += 1
+      field.id = `bo-field-${generatedFieldCount}`
+    }
+    if (!field.getAttribute('name')) {
+      field.setAttribute('name', field.id.replace(/-/g, '_'))
+    }
+    if (field.closest('label')) return
+    const existingLabel = document.querySelector(`label[for="${escapeSelectorValue(field.id)}"]`)
+    if (existingLabel) return
+
+    const parent = field.parentElement
+    if (!parent) return
+    const siblingLabel = parent.querySelector('label:not([for])')
+    if (!siblingLabel) return
+    if (siblingLabel.querySelector(fieldSelector)) return
+    siblingLabel.setAttribute('for', field.id)
+  }
+
+  const scan = (root) => {
+    if (!root) return
+    if (root instanceof HTMLElement && root.matches(fieldSelector)) {
+      wireField(root)
+      return
+    }
+    if (typeof root.querySelectorAll !== 'function') return
+    root.querySelectorAll(fieldSelector).forEach(wireField)
+  }
+
+  scan(document)
+
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return
+        scan(node)
+      })
+    })
+  })
+
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true })
+    return
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    if (!document.body) return
+    scan(document)
+    observer.observe(document.body, { childList: true, subtree: true })
+  }, { once: true })
+}
+
 // Keep known browser-extension and CSS-injection noise away from React startup.
 if (typeof window !== 'undefined') {
   const ignoredRuntimePatterns = [
@@ -128,9 +193,28 @@ if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     stopKnownStartupNoise(event, event?.error || event?.message)
   }, true)
+
+  window.addEventListener('securitypolicyviolation', (event) => {
+    const directive = String(event?.violatedDirective || '')
+    const blockedURI = String(event?.blockedURI || '')
+    const sourceFile = String(event?.sourceFile || '')
+    const sample = String(event?.sample || '')
+    const looksLikeKnownRuntimeNoise = (
+      directive.includes('script-src')
+      && (
+        blockedURI === 'eval'
+        || sample.includes('unsafe-eval')
+        || sample.includes('tabs:outgoing')
+        || valueIncludesLikelyInjectedBundle(sourceFile)
+      )
+    )
+    if (!looksLikeKnownRuntimeNoise) return
+    event.stopImmediatePropagation()
+  }, true)
 }
 
 disableServiceWorkerCaching()
+installFormFieldAccessibility()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

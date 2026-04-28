@@ -64,6 +64,7 @@ export default function Users() {
   const { t, notify, hasPermission, user: currentUser, page } = useApp()
   const { syncChannel } = useSync()
   const loadedOnceRef = useRef(false)
+  const pageLoadKeyRef = useRef('')
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -137,12 +138,16 @@ export default function Users() {
     }
   }
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (page !== 'users') return
-    if (!loadedOnceRef.current || (!loading && loadError && canManage)) {
-      load()
+    if (page !== 'users') {
+      pageLoadKeyRef.current = ''
+      return
     }
+    const accessKey = canManage ? 'manage' : 'view'
+    const nextLoadKey = `${page}:${accessKey}`
+    if (pageLoadKeyRef.current === nextLoadKey) return
+    pageLoadKeyRef.current = nextLoadKey
+    load()
   }, [canManage, loadError, loading, page]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!syncChannel) return
