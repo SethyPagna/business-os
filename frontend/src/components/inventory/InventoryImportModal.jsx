@@ -1,72 +1,29 @@
 import { useMemo, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
-
-function parseCsv(text) {
-  const lines = String(text || '').trim().split(/\r?\n/).filter(Boolean)
-  if (lines.length < 2) return []
-  const headers = splitCsvLine(lines[0]).map((value) => String(value || '').trim().replace(/^"|"$/g, '').toLowerCase())
-  return lines.slice(1).map((line) => {
-    const values = splitCsvLine(line)
-    const row = {}
-    headers.forEach((header, index) => {
-      row[header] = String(values[index] || '').trim().replace(/^"|"$/g, '')
-    })
-    return row
-  }).filter((row) => Object.values(row).some(Boolean))
-}
-
-function splitCsvLine(line) {
-  const result = []
-  let current = ''
-  let inQuotes = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    const nextChar = line[index + 1]
-    if (char === '"' && inQuotes && nextChar === '"') {
-      current += '"'
-      index += 1
-      continue
-    }
-    if (char === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (char === ',' && !inQuotes) {
-      result.push(current)
-      current = ''
-      continue
-    }
-    current += char
-  }
-  result.push(current)
-  return result
-}
-
-function normalizeKey(value) {
-  return String(value || '').trim().toLowerCase()
-}
-
-function toNumber(value, fallback = 0) {
-  const numeric = parseFloat(value)
-  return Number.isFinite(numeric) ? numeric : fallback
-}
+import { normalizeCsvKey, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
 
 function normalizeAction(value) {
-  const raw = normalizeKey(value)
+  const raw = normalizeCsvKey(value)
   if (['add', 'remove', 'set'].includes(raw)) return raw
   if (raw === 'adjustment') return 'add'
   return 'add'
 }
 
 export default function InventoryImportModal({ onClose, onDone }) {
-  const { user, notify } = useApp()
+  const { user, notify, t } = useApp()
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = typeof t === 'function' ? t(key) : null
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }
 
-  const previewRows = useMemo(() => parseCsv(csvText), [csvText])
+  const previewRows = useMemo(() => parseCsvRows(csvText), [csvText])
 
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
@@ -81,9 +38,9 @@ export default function InventoryImportModal({ onClose, onDone }) {
   }
 
   const handleImport = async () => {
-    const rows = parseCsv(csvText)
+    const rows = parseCsvRows(csvText)
     if (!rows.length) {
-      notify('Choose a CSV file with at least one inventory row.', 'error')
+      notify(tr('inventory_import_choose_rows', 'Choose a CSV file with at least one inventory row.', 'សូមជ្រើសឯកសារ CSV ដែលមានយ៉ាងហោចណាស់មួយជួរស្តុក។'), 'error')
       return
     }
 
@@ -98,9 +55,9 @@ export default function InventoryImportModal({ onClose, onDone }) {
       const byBarcode = new Map()
       const byName = new Map()
       ;(Array.isArray(products) ? products : []).forEach((product) => {
-        const sku = normalizeKey(product?.sku)
-        const barcode = normalizeKey(product?.barcode)
-        const name = normalizeKey(product?.name)
+        const sku = normalizeCsvKey(product?.sku)
+        const barcode = normalizeCsvKey(product?.barcode)
+        const name = normalizeCsvKey(product?.name)
         if (sku) bySku.set(sku, product)
         if (barcode) byBarcode.set(barcode, product)
         if (name) byName.set(name, product)
@@ -110,8 +67,8 @@ export default function InventoryImportModal({ onClose, onDone }) {
       const defaultBranch = activeBranches.find((branch) => branch?.is_default) || activeBranches[0] || null
       const branchMap = new Map()
       activeBranches.forEach((branch) => {
-        branchMap.set(normalizeKey(branch?.name), branch)
-        branchMap.set(normalizeKey(branch?.id), branch)
+        branchMap.set(normalizeCsvKey(branch?.name), branch)
+        branchMap.set(normalizeCsvKey(branch?.id), branch)
       })
 
       let imported = 0
@@ -119,24 +76,28 @@ export default function InventoryImportModal({ onClose, onDone }) {
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index]
-        const product = bySku.get(normalizeKey(row.sku))
-          || byBarcode.get(normalizeKey(row.barcode))
-          || byName.get(normalizeKey(row.name))
+        const product = bySku.get(normalizeCsvKey(row.sku))
+          || byBarcode.get(normalizeCsvKey(row.barcode))
+          || byName.get(normalizeCsvKey(row.name))
         if (!product) {
-          errors.push(`Row ${index + 2}: product not found`)
+          errors.push(tr('inventory_import_row_product_not_found', 'Row {row}: product not found', 'ជួរ {row}: រកមិនឃើញផលិតផល').replace('{row}', index + 2))
           continue
         }
 
-        const quantity = toNumber(row.quantity, 0)
+        const quantity = parseCsvNumber(row.quantity, 0)
         if (quantity <= 0) {
-          errors.push(`Row ${index + 2}: quantity must be greater than 0`)
+          errors.push(tr('inventory_import_row_quantity_invalid', 'Row {row}: quantity must be greater than 0', 'ជួរ {row}: បរិមាណត្រូវតែធំជាង 0').replace('{row}', index + 2))
           continue
         }
 
         const branchValue = String(row.branch || '').trim()
-        const branch = branchValue ? branchMap.get(normalizeKey(branchValue)) : defaultBranch
+        const branch = branchValue ? branchMap.get(normalizeCsvKey(branchValue)) : defaultBranch
         if (branchValue && !branch) {
-          errors.push(`Row ${index + 2}: branch "${branchValue}" not found`)
+          errors.push(
+            tr('inventory_import_row_branch_not_found', 'Row {row}: branch "{branch}" not found', 'ជួរ {row}: មិនឃើញសាខា "{branch}"')
+              .replace('{row}', index + 2)
+              .replace('{branch}', branchValue),
+          )
           continue
         }
 
@@ -146,9 +107,9 @@ export default function InventoryImportModal({ onClose, onDone }) {
             productName: product.name,
             type: normalizeAction(row.action || row.type || row.movement_type),
             quantity,
-            unitCostUsd: toNumber(row.unit_cost_usd, 0),
-            unitCostKhr: toNumber(row.unit_cost_khr, 0),
-            reason: String(row.reason || '').trim() || 'Inventory import',
+            unitCostUsd: parseCsvNumber(row.unit_cost_usd, 0),
+            unitCostKhr: parseCsvNumber(row.unit_cost_khr, 0),
+            reason: String(row.reason || '').trim() || tr('inventory_import_reason', 'Inventory import', 'នាំចូលស្តុក'),
             branchId: branch?.id || null,
             userId: user?.id || null,
             userName: user?.name || '',
@@ -156,39 +117,43 @@ export default function InventoryImportModal({ onClose, onDone }) {
           })
           imported += 1
         } catch (error) {
-          errors.push(`Row ${index + 2}: ${error?.message || 'Import failed'}`)
+          errors.push(
+            tr('inventory_import_row_failed', 'Row {row}: {message}', 'ជួរ {row}: {message}')
+              .replace('{row}', index + 2)
+              .replace('{message}', error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')),
+          )
         }
       }
 
       const nextResult = { imported, errors }
       setResult(nextResult)
       if (imported > 0) {
-        notify(`Inventory import finished: ${imported} row${imported === 1 ? '' : 's'} applied.`, 'success')
+        notify(tr('inventory_import_finished', 'Inventory import finished: {count} row(s) applied.', 'ការនាំចូលស្តុកបានបញ្ចប់៖ បានអនុវត្ត {count} ជួរ។').replace('{count}', imported), 'success')
         onDone?.()
       } else {
-        notify('No inventory rows were imported.', 'warning')
+        notify(tr('inventory_import_none', 'No inventory rows were imported.', 'មិនមានជួរស្តុកណាមួយត្រូវបាននាំចូលទេ។'), 'warning')
       }
     } catch (error) {
-      const nextResult = { imported: 0, errors: [error?.message || 'Import failed'] }
+      const nextResult = { imported: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
       setResult(nextResult)
-      notify(error?.message || 'Import failed', 'error')
+      notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Modal title="Import Inventory" onClose={onClose}>
+    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Import stock adjustments from CSV rows. Supported actions are `add`, `remove`, and `set`.
+          {tr('inventory_import_help', 'Import stock adjustments from CSV rows. Supported actions are add, remove, and set.', 'នាំចូលការកែស្តុកពីជួរ CSV។ សកម្មភាពដែលគាំទ្រមាន add, remove និង set។')}
         </p>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-secondary text-sm" onClick={handleDownloadTemplate}>
-            Download template
+            {t('download_template') || 'Download Template'}
           </button>
           <button type="button" className="btn-secondary text-sm" onClick={handlePickFile}>
-            Choose CSV
+            {tr('choose_csv_file', 'Choose CSV', 'ជ្រើស CSV')}
           </button>
         </div>
         {fileName ? (
@@ -196,19 +161,24 @@ export default function InventoryImportModal({ onClose, onDone }) {
             {fileName}
           </div>
         ) : null}
+        <label htmlFor="inventory-import-csv" className="sr-only">
+          {tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')}
+        </label>
         <textarea
+          id="inventory-import-csv"
+          name="inventory_import_csv"
           className="input min-h-[180px] font-mono text-xs"
           value={csvText}
           onChange={(event) => setCsvText(event.target.value)}
-          placeholder="Paste CSV here if you do not want to pick a file."
+          placeholder={tr('csv_paste_placeholder', 'Paste CSV here if you do not want to pick a file.', 'បិទភ្ជាប់ CSV នៅទីនេះ ប្រសិនបើអ្នកមិនចង់ជ្រើសឯកសារ។')}
         />
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-          {previewRows.length} row{previewRows.length === 1 ? '' : 's'} ready
+          {tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRows.length)}
         </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
-              Imported {result.imported} row{result.imported === 1 ? '' : 's'}
+              {tr('imported_rows_count', 'Imported {count} row(s)', 'បាននាំចូល {count} ជួរ').replace('{count}', result.imported)}
             </div>
             {result.errors?.length ? (
               <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">
@@ -218,9 +188,9 @@ export default function InventoryImportModal({ onClose, onDone }) {
           </div>
         ) : null}
         <div className="flex gap-2">
-          <button type="button" className="btn-secondary flex-1" onClick={onClose}>Close</button>
+          <button type="button" className="btn-secondary flex-1" onClick={onClose}>{t('close') || 'Close'}</button>
           <button type="button" className="btn-primary flex-1" disabled={loading || !String(csvText || '').trim()} onClick={handleImport}>
-            {loading ? 'Importing...' : 'Import inventory'}
+            {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_inventory_button', 'Import inventory', 'នាំចូលស្តុក')}
           </button>
         </div>
       </div>

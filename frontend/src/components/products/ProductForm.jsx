@@ -473,8 +473,10 @@ export default function ProductForm({
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
+              <label htmlFor="product-stock-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
               <input
+                id="product-stock-quantity"
+                name="product_stock_quantity"
                 className="input"
                 type="text"
                 inputMode="decimal"
@@ -484,8 +486,10 @@ export default function ProductForm({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('low_stock_threshold')}</label>
+              <label htmlFor="product-low-stock-threshold" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('low_stock_threshold')}</label>
               <input
+                id="product-low-stock-threshold"
+                name="product_low_stock_threshold"
                 className="input"
                 type="text"
                 inputMode="decimal"
@@ -495,8 +499,10 @@ export default function ProductForm({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('out_of_stock_threshold')}</label>
+              <label htmlFor="product-out-of-stock-threshold" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('out_of_stock_threshold')}</label>
               <input
+                id="product-out-of-stock-threshold"
+                name="product_out_of_stock_threshold"
                 className="input"
                 type="text"
                 inputMode="decimal"
@@ -509,8 +515,8 @@ export default function ProductForm({
 
           {!product && branches.length > 0 ? (
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
-              <select className="input" value={form.branch_id || ''} onChange={(event) => setField('branch_id', event.target.value)}>
+              <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
+              <select id="product-initial-branch" name="product_initial_branch" className="input" value={form.branch_id || ''} onChange={(event) => setField('branch_id', event.target.value)}>
                 {branches.map((branch) => (
                   <option key={branch.id} value={branch.id}>
                     {branch.name}{branch.is_default ? ` (${tr('default_label', 'default', 'លំនាំដើម')})` : ''}
