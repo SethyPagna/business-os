@@ -37,6 +37,7 @@ const {
   getDefaultOrganizationGroup,
   getOrganizationContextForUser,
 } = require('../organizationContext')
+const { assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { revokeUserSessions } = require('../sessionAuth')
 
 const router = express.Router()
@@ -210,7 +211,7 @@ function getUserSecurityContext(id) {
 function getUserWithRole(id) {
   return db.prepare(`
     SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
-           u.otp_enabled, u.is_active, u.supabase_user_id, u.deleted_at, u.created_at, r.name AS role_name,
+           u.otp_enabled, u.is_active, u.supabase_user_id, u.deleted_at, u.created_at, u.updated_at, r.name AS role_name,
            r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system,
            o.name AS organization_name, o.slug AS organization_slug, o.public_id AS organization_public_id,
            g.name AS organization_group_name, g.slug AS organization_group_slug
@@ -360,7 +361,7 @@ router.get('/users', authToken, (req, res) => {
 
   const rows = db.prepare(`
     SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
-           u.otp_enabled, u.is_active, u.created_at, r.name AS role_name,
+           u.otp_enabled, u.is_active, u.created_at, u.updated_at, r.name AS role_name,
            r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system,
            o.name AS organization_name, o.slug AS organization_slug, o.public_id AS organization_public_id,
            g.name AS organization_group_name, g.slug AS organization_group_slug
@@ -652,11 +653,12 @@ router.put('/users/:id', authToken, async (req, res) => {
   if (!isValidEmail(email)) return err(res, 'Valid email required')
 
   try {
-    const existing = db.prepare('SELECT id, username, name, permissions, phone, phone_verified, email, email_verified, supabase_user_id, deleted_at, is_active FROM users WHERE id = ?').get(req.params.id)
+    const existing = db.prepare('SELECT id, username, name, permissions, phone, phone_verified, email, email_verified, supabase_user_id, deleted_at, is_active, updated_at FROM users WHERE id = ?').get(req.params.id)
     const existingSecurity = getUserSecurityContext(req.params.id)
     const adminRole = db.prepare(`SELECT id FROM roles WHERE lower(trim(code)) = 'admin' LIMIT 1`).get()
     if (!existing) return err(res, 'User not found', 404)
     if (!existingSecurity) return err(res, 'User not found', 404)
+    assertUpdatedAtMatch('user', existing, getExpectedUpdatedAt(req.body || {}))
     if (existing.deleted_at) return err(res, 'User is deleted', 400)
     if (!canManageTarget(actor, existingSecurity)) return err(res, 'Cannot modify another admin account', 403)
     if (isPrimaryAdmin(existingSecurity) && String(username || '').trim().toLowerCase() !== 'admin') {
@@ -696,7 +698,7 @@ router.put('/users/:id', authToken, async (req, res) => {
     }
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       normalizedUsername,
@@ -725,7 +727,7 @@ router.put('/users/:id', authToken, async (req, res) => {
         return err(res, synced.error || 'Failed to sync authentication account')
       }
       if (synced.success && synced.userId && !updatedUser.supabase_user_id) {
-        db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(synced.userId, updatedUser.id)
+        db.prepare('UPDATE users SET supabase_user_id = ?, updated_at = datetime(\'now\') WHERE id = ?').run(synced.userId, updatedUser.id)
         updatedUser.supabase_user_id = synced.userId
       }
       if (updatedUser.supabase_user_id) {
@@ -735,8 +737,9 @@ router.put('/users/:id', authToken, async (req, res) => {
 
     audit(userId || actor.id, userName || actor.name, 'update', 'user', req.params.id)
     broadcast('users')
-    ok(res, {})
+    ok(res, sanitizeUserRow(getUserWithRole(req.params.id)))
   } catch (e) {
+    if (e?.name === 'WriteConflictError') return sendWriteConflict(res, e)
     const message = String(e?.message || '')
     if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
     if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
@@ -838,7 +841,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
 
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id), updated_at = datetime('now')
       WHERE id = ?
     `).run(
       normalizedUsername,
@@ -924,7 +927,7 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
+  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = datetime(\'now\') WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id, { mode: allowAdminOverride ? 'admin' : 'self_service' })
@@ -959,7 +962,7 @@ router.post('/users/:id/reset-password', authToken, async (req, res) => {
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
+  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = datetime(\'now\') WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id)
@@ -972,7 +975,11 @@ router.post('/users/:id/reset-password', authToken, async (req, res) => {
 router.get('/roles', authToken, (req, res) => {
   const actor = requireAdminControl(req, res)
   if (!actor) return
-  res.json(db.prepare('SELECT * FROM roles ORDER BY is_system DESC, name').all())
+  res.json(db.prepare(`
+    SELECT id, name, code, is_system, permissions, created_at, updated_at
+    FROM roles
+    ORDER BY is_system DESC, name
+  `).all())
 })
 
 router.post('/roles', authToken, (req, res) => {
@@ -997,26 +1004,42 @@ router.put('/roles/:id', authToken, (req, res) => {
   const { name, permissions } = req.body || {}
   const actor = requireAdminControl(req, res)
   if (!actor) return
-  const existingRole = db.prepare('SELECT id, code, is_system FROM roles WHERE id = ?').get(req.params.id)
+  const existingRole = db.prepare('SELECT id, code, is_system, updated_at FROM roles WHERE id = ?').get(req.params.id)
   if (!existingRole) return err(res, 'Role not found', 404)
-  if (Number(existingRole.is_system || 0) === 1 || String(existingRole.code || '').trim().toLowerCase() === 'admin') {
-    return err(res, 'System roles cannot be edited', 403)
+  try {
+    assertUpdatedAtMatch('role', existingRole, getExpectedUpdatedAt(req.body || {}))
+    if (Number(existingRole.is_system || 0) === 1 || String(existingRole.code || '').trim().toLowerCase() === 'admin') {
+      return err(res, 'System roles cannot be edited', 403)
+    }
+    const normalizedName = String(name || '').trim()
+    if (!normalizedName) return err(res, 'Name required')
+    if (normalizedName.toLowerCase() === 'admin') return err(res, 'Admin role is reserved', 400)
+    db.prepare('UPDATE roles SET name = ?, permissions = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .run(normalizedName, JSON.stringify(permissions || {}), req.params.id)
+    audit(actor.id, actor.name, 'update', 'role', req.params.id, { name: normalizedName })
+    broadcast('roles')
+    ok(res, db.prepare(`
+      SELECT id, name, code, is_system, permissions, created_at, updated_at
+      FROM roles
+      WHERE id = ?
+    `).get(req.params.id))
+  } catch (error) {
+    if (error?.name === 'WriteConflictError') return sendWriteConflict(res, error)
+    const message = String(error?.message || '')
+    return err(res, message.includes('UNIQUE') ? 'Role already exists' : (message || 'Failed to update role'))
   }
-  const normalizedName = String(name || '').trim()
-  if (!normalizedName) return err(res, 'Name required')
-  if (normalizedName.toLowerCase() === 'admin') return err(res, 'Admin role is reserved', 400)
-  db.prepare('UPDATE roles SET name = ?, permissions = ? WHERE id = ?')
-    .run(normalizedName, JSON.stringify(permissions || {}), req.params.id)
-  audit(actor.id, actor.name, 'update', 'role', req.params.id, { name: normalizedName })
-  broadcast('roles')
-  ok(res, {})
 })
 
 router.delete('/roles/:id', authToken, (req, res) => {
   const actor = requireAdminControl(req, res)
   if (!actor) return
-  const existingRole = db.prepare('SELECT id, code, is_system FROM roles WHERE id = ?').get(req.params.id)
+  const existingRole = db.prepare('SELECT id, code, is_system, updated_at FROM roles WHERE id = ?').get(req.params.id)
   if (!existingRole) return err(res, 'Role not found', 404)
+  try {
+    assertUpdatedAtMatch('role', existingRole, getExpectedUpdatedAt(req.body || {}))
+  } catch (error) {
+    return sendWriteConflict(res, error)
+  }
   if (Number(existingRole.is_system || 0) === 1 || String(existingRole.code || '').trim().toLowerCase() === 'admin') {
     return err(res, 'System roles cannot be deleted', 403)
   }

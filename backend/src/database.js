@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS users (
   otp_pending_created_at TEXT,
   is_active   INTEGER DEFAULT 1,
   created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now')),
   FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
   FOREIGN KEY(organization_group_id) REFERENCES organization_groups(id) ON DELETE SET NULL
 );
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS roles (
   code        TEXT,
   is_system   INTEGER DEFAULT 0,
   permissions TEXT DEFAULT '{}',
-  created_at  TEXT DEFAULT (datetime('now'))
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -732,7 +734,7 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
   }
 }
 
-;['branches', 'customers', 'suppliers', 'delivery_contacts', 'sales', 'returns'].forEach((tableName) => {
+;['users', 'roles', 'branches', 'customers', 'suppliers', 'delivery_contacts', 'sales', 'returns'].forEach((tableName) => {
   if (ensureColumn(tableName, 'updated_at', 'TEXT DEFAULT (datetime(\'now\'))')) {
     try {
       db.exec(`

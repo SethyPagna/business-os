@@ -520,6 +520,27 @@ export function AppProvider({ children }) {
       } else if (entity === 'return') {
         message = 'This return changed on another device. Latest data is loading now.'
         entityLabel = 'Return'
+      } else if (entity === 'product') {
+        message = 'This product changed on another device. Latest data is loading now.'
+        entityLabel = 'Product'
+      } else if (entity === 'customer') {
+        message = 'This customer changed on another device. Latest data is loading now.'
+        entityLabel = 'Customer'
+      } else if (entity === 'supplier') {
+        message = 'This supplier changed on another device. Latest data is loading now.'
+        entityLabel = 'Supplier'
+      } else if (entity === 'delivery_contact') {
+        message = 'This delivery contact changed on another device. Latest data is loading now.'
+        entityLabel = 'Delivery contact'
+      } else if (entity === 'branch') {
+        message = 'This branch changed on another device. Latest data is loading now.'
+        entityLabel = 'Branch'
+      } else if (entity === 'user') {
+        message = 'This user changed on another device. Latest data is loading now.'
+        entityLabel = 'User'
+      } else if (entity === 'role') {
+        message = 'This role changed on another device. Latest data is loading now.'
+        entityLabel = 'Role'
       }
       setNotification({ message, type: 'error', id: Date.now() })
       setWriteConflict({

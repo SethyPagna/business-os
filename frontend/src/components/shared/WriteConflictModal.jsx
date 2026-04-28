@@ -38,6 +38,23 @@ function summarizeCurrentValue(entity, current) {
     ].filter(Boolean)
   }
 
+  if (entity === 'user') {
+    return [
+      current.name ? { label: 'Name', value: String(current.name) } : null,
+      current.username ? { label: 'Username', value: String(current.username) } : null,
+      current.email ? { label: 'Email', value: String(current.email) } : null,
+      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
+    ].filter(Boolean)
+  }
+
+  if (entity === 'role') {
+    return [
+      current.name ? { label: 'Role', value: String(current.name) } : null,
+      current.code ? { label: 'Code', value: String(current.code) } : null,
+      current.updated_at ? { label: 'Updated', value: formatConflictTime(current.updated_at) } : null,
+    ].filter(Boolean)
+  }
+
   return Object.entries(current)
     .slice(0, 4)
     .map(([key, value]) => ({
@@ -116,6 +133,36 @@ function getConflictFieldRows(conflict) {
       })
     }
     return rows
+  }
+
+  if (entity === 'user') {
+    return [
+      { label: 'Name', attempted: formatValue(attempted.name), current: formatValue(current.name) },
+      { label: 'Username', attempted: formatValue(attempted.username), current: formatValue(current.username) },
+      { label: 'Email', attempted: formatValue(attempted.email), current: formatValue(current.email) },
+      { label: 'Phone', attempted: formatValue(attempted.phone), current: formatValue(current.phone) },
+      { label: 'Role', attempted: formatValue(attempted.role_name || attempted.role_id), current: formatValue(current.role_name || current.role_id) },
+      { label: 'Active', attempted: formatValue(attempted.is_active), current: formatValue(current.is_active) },
+    ].filter((row) => row.attempted !== '—' || row.current !== '—')
+  }
+
+  if (entity === 'role') {
+    return [
+      { label: 'Role name', attempted: formatValue(attempted.name), current: formatValue(current.name) },
+      {
+        label: 'Permissions',
+        attempted: formatValue(
+          attempted.permissions && typeof attempted.permissions === 'object'
+            ? JSON.stringify(attempted.permissions)
+            : attempted.permissions,
+        ),
+        current: formatValue(
+          current.permissions && typeof current.permissions === 'object'
+            ? JSON.stringify(current.permissions)
+            : current.permissions,
+        ),
+      },
+    ].filter((row) => row.attempted !== '—' || row.current !== '—')
   }
 
   return []

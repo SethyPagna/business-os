@@ -274,6 +274,7 @@ export default function Users() {
         avatar_path: userForm.avatar_path.trim(),
         role_id: userForm.role_id || null,
         is_active: userForm.is_active,
+        expectedUpdatedAt: selectedUser?.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
       }
@@ -339,6 +340,7 @@ export default function Users() {
       const payload = {
         name: roleForm.name.trim(),
         permissions: roleForm.permissions,
+        expectedUpdatedAt: selectedRole?.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
       }

@@ -753,7 +753,7 @@ export const bulkImportDeliveryContacts = d   => route('deliveryContacts:bulkImp
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const getUsers      = ()       => routeMirrored('users:get',           () => apiFetch('GET', appendActorQuery('/api/users')),        () => dexieDb.users.toArray(), mirrorTable('users'))
 export const createUser    = d        => route('users:create',        () => apiFetch('POST', '/api/users', d),                      null, true)
-export const updateUser    = (id, d)  => route('users:update',        () => apiFetch('PUT', `/api/users/${id}`, d),                 null, true)
+export const updateUser    = (id, d)  => route('users:update',        async () => apiFetch('PUT', `/api/users/${id}`, await withExpectedUpdatedAt('users', id, d)), null, true)
 export const getUserProfile = (id)    => route(`users:profile:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/profile`)), () => null)
 export const getUserAuthMethods = (id) =>
   route(`users:authMethods:${id}`, () => apiFetch('GET', appendActorQuery(`/api/users/${id}/auth-methods`)), () => null)
@@ -768,8 +768,8 @@ export const resetPassword = (id, d)  => route('users:resetPassword', () => apiF
 // ─── Roles ────────────────────────────────────────────────────────────────────
 export const getRoles   = ()       => routeMirrored('roles:get',    () => apiFetch('GET', appendActorQuery('/api/roles')), () => dexieDb.roles.toArray(), mirrorTable('roles'))
 export const createRole = d        => route('roles:create', () => apiFetch('POST', '/api/roles', d),           null, true)
-export const updateRole = (id, d)  => route('roles:update', () => apiFetch('PUT', `/api/roles/${id}`, d),      null, true)
-export const deleteRole = (id, payload) => route('roles:delete', () => apiFetch('DELETE', `/api/roles/${id}`, payload), null, true)
+export const updateRole = (id, d)  => route('roles:update', async () => apiFetch('PUT', `/api/roles/${id}`, await withExpectedUpdatedAt('roles', id, d)), null, true)
+export const deleteRole = (id, payload) => route('roles:delete', async () => apiFetch('DELETE', `/api/roles/${id}`, await withExpectedUpdatedAt('roles', id, payload)), null, true)
 
 // ─── Custom tables ────────────────────────────────────────────────────────────
 export const getCustomTables    = ()                      => route('customTables:get',       () => apiFetch('GET', '/api/custom-tables'),                                             () => dexieDb.custom_tables.toArray())
