@@ -341,8 +341,8 @@ export async function saveSettings(updates) {
 // ─── Categories ───────────────────────────────────────────────────────────────
 export const getCategories  = ()       => routeMirrored('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray(), mirrorTable('categories'))
 export const createCategory = d        => route('categories:create', () => apiFetch('POST', '/api/categories', d),           null, true)
-export const updateCategory = (id, d)  => route('categories:update', () => apiFetch('PUT', `/api/categories/${id}`, d),      null, true)
-export const deleteCategory = id       => route('categories:delete', () => apiFetch('DELETE', `/api/categories/${id}`),      null, true)
+export const updateCategory = (id, d)  => route('categories:update', async () => apiFetch('PUT', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, d)),      null, true)
+export const deleteCategory = (id, payload) => route('categories:delete', async () => apiFetch('DELETE', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, payload)),      null, true)
 
 // ─── Units ────────────────────────────────────────────────────────────────────
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
@@ -777,7 +777,7 @@ export const createCustomTable  = d                       => route('customTables
 export const getCustomTableData = ({ tableName })         => route('customTables:data',      () => apiFetch('GET', `/api/custom-tables/${tableName}/data`),                           () => [])
 export const insertCustomRow    = ({ tableName, data })   => route('customTables:insertRow', () => apiFetch('POST', `/api/custom-tables/${tableName}/rows`, { data }),                null, true)
 export const updateCustomRow    = ({ tableName, id, data }) => route('customTables:updateRow', () => apiFetch('PUT', `/api/custom-tables/${tableName}/rows/${id}`, { data }),         null, true)
-export const deleteCustomRow    = ({ tableName, id })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`),                  null, true)
+export const deleteCustomRow    = ({ tableName, id, payload })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`, payload),                  null, true)
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray(), mirrorTable('audit_logs'))

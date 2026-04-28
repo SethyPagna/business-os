@@ -273,6 +273,7 @@ export default function FilesPage() {
   function startEditProvider(provider) {
     setProviderForm({
       id: provider.id,
+      updated_at: provider.updated_at || '',
       name: provider.name || '',
       provider: provider.provider || 'groq',
       provider_type: provider.provider_type || 'chat',
@@ -309,6 +310,7 @@ export default function FilesPage() {
       cooldown_seconds: Math.max(5, Number(providerForm.cooldown_seconds || 20) || 20),
       userId: user?.id,
       userName: user?.name,
+      expectedUpdatedAt: providerForm.updated_at || undefined,
     }
     if (!payload.name.trim()) {
       notify('Provider name is required', 'error')
@@ -355,7 +357,7 @@ export default function FilesPage() {
     if (!provider?.id) return
     if (!window.confirm(`Delete AI provider "${provider.name}"?`)) return
     try {
-      await window.api.deleteAiProvider(provider.id, { userId: user?.id, userName: user?.name })
+      await window.api.deleteAiProvider(provider.id, { userId: user?.id, userName: user?.name, expectedUpdatedAt: provider.updated_at || undefined })
       notify('Provider deleted', 'success')
       if (providerForm.id === provider.id) startCreateProvider()
       await loadProviders()

@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS categories (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
   color      TEXT DEFAULT '#6366f1',
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS units (
@@ -429,7 +430,8 @@ CREATE TABLE IF NOT EXISTS custom_tables (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
   columns    TEXT DEFAULT '[]',
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS customer_share_submissions (
@@ -733,6 +735,18 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
     // Never crash startup on index creation for legacy/corrupt customer schemas.
   }
 }
+
+;['categories', 'custom_tables'].forEach((tableName) => {
+  if (ensureColumn(tableName, 'updated_at', 'TEXT')) {
+    try {
+      db.exec(`
+        UPDATE "${tableName}"
+        SET updated_at = COALESCE(updated_at, created_at, datetime('now'))
+        WHERE updated_at IS NULL OR trim(updated_at) = ''
+      `)
+    } catch (_) {}
+  }
+})
 
 ;['users', 'roles', 'branches', 'customers', 'suppliers', 'delivery_contacts', 'sales', 'returns'].forEach((tableName) => {
   if (ensureColumn(tableName, 'updated_at', 'TEXT DEFAULT (datetime(\'now\'))')) {

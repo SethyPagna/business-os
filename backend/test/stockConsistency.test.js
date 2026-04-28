@@ -222,6 +222,18 @@ async function getSettingsMeta(baseUrl, authToken) {
   return fetchJson(baseUrl, '/api/settings/meta', { authToken })
 }
 
+async function getCategories(baseUrl, authToken) {
+  const rows = await fetchJson(baseUrl, '/api/categories', { authToken })
+  assert.ok(Array.isArray(rows), 'Expected categories list')
+  return rows
+}
+
+async function getAiProviders(baseUrl, authToken) {
+  const result = await fetchJson(baseUrl, '/api/ai/providers', { authToken })
+  const items = Array.isArray(result?.items) ? result.items : []
+  return items
+}
+
 async function uploadTinyPng(baseUrl, authToken, filename = 'factory-reset-proof.png') {
   const form = new FormData()
   form.append('file', new Blob([PNG_BUFFER], { type: 'image/png' }), filename)
@@ -1025,6 +1037,224 @@ runTest('profile writes reject stale expectedUpdatedAt values', async () => {
     const profileAfter = await fetchJson(server.baseUrl, '/api/users/1/profile', { authToken })
     assert.equal(profileAfter.name, 'Administrator Conflict Safe')
     assert.notEqual(profileAfter.phone, '099999999')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('category writes reject stale expectedUpdatedAt values')
+runTest('category writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-category-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const created = await fetchJson(server.baseUrl, '/api/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({ name: 'QA Conflict Category', color: '#123456' }),
+    })
+    assert.ok(created?.id, 'Expected created category id')
+    assert.ok(created?.updated_at, 'Expected category updated_at after create')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/categories/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Conflict Category Updated',
+        color: '#654321',
+      }),
+    })
+    assert.equal(firstWrite.name, 'QA Conflict Category Updated')
+    assert.notEqual(firstWrite.updated_at, created.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/categories/${created.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Conflict Category Stale',
+        color: '#999999',
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'category')
+
+    const categories = await getCategories(server.baseUrl, authToken)
+    const saved = categories.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(saved.name, 'QA Conflict Category Updated')
+    assert.equal(saved.color, '#654321')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('custom table row writes reject stale expectedUpdatedAt values')
+runTest('custom table row writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-custom-table-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const table = await fetchJson(server.baseUrl, '/api/custom-tables', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        name: 'QA Conflict Table',
+        display_name: 'QA Conflict Table',
+        schema: [{ name: 'title', type: 'text' }],
+      }),
+    })
+    assert.ok(table?.name, 'Expected custom table name')
+
+    const created = await fetchJson(server.baseUrl, `/api/custom-tables/${table.name}/rows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({ data: { title: 'Initial row' } }),
+    })
+    assert.ok(created?.id, 'Expected custom row id')
+    assert.ok(created?.updated_at, 'Expected custom row updated_at after create')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/custom-tables/${table.name}/rows/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        data: {
+          id: created.id,
+          title: 'Updated row',
+          expectedUpdatedAt: created.updated_at,
+        },
+      }),
+    })
+    assert.equal(firstWrite.title, 'Updated row')
+    assert.notEqual(firstWrite.updated_at, created.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/custom-tables/${table.name}/rows/${created.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        data: {
+          id: created.id,
+          title: 'Stale row overwrite',
+          expectedUpdatedAt: created.updated_at,
+        },
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'custom table row')
+
+    const rows = await fetchJson(server.baseUrl, `/api/custom-tables/${table.name}/data`, { authToken })
+    const saved = rows.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(saved.title, 'Updated row')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('ai provider writes reject stale expectedUpdatedAt values')
+runTest('ai provider writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-ai-provider-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const createdResult = await fetchJson(server.baseUrl, '/api/ai/providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        name: 'QA Provider',
+        provider: 'groq',
+        provider_type: 'chat',
+        api_key: 'test-key-123',
+        default_model: 'llama-3.1-8b-instant',
+        enabled: true,
+        priority: 20,
+        requests_per_minute: 5,
+        max_input_chars: 800,
+        max_completion_tokens: 512,
+        timeout_ms: 5000,
+        cooldown_seconds: 10,
+      }),
+    })
+    const created = createdResult?.item
+    assert.ok(created?.id, 'Expected AI provider id')
+    assert.ok(created?.updated_at, 'Expected AI provider updated_at after create')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/ai/providers/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Provider Updated',
+        provider: created.provider,
+        provider_type: created.provider_type,
+        default_model: created.default_model,
+        enabled: created.enabled,
+        priority: 10,
+        requests_per_minute: created.requests_per_minute,
+        max_input_chars: created.max_input_chars,
+        max_completion_tokens: created.max_completion_tokens,
+        timeout_ms: created.timeout_ms,
+        cooldown_seconds: created.cooldown_seconds,
+      }),
+    })
+    assert.equal(firstWrite.item.name, 'QA Provider Updated')
+    assert.notEqual(firstWrite.item.updated_at, created.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/ai/providers/${created.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Provider Stale',
+        provider: created.provider,
+        provider_type: created.provider_type,
+        default_model: created.default_model,
+        enabled: created.enabled,
+        priority: 99,
+        requests_per_minute: created.requests_per_minute,
+        max_input_chars: created.max_input_chars,
+        max_completion_tokens: created.max_completion_tokens,
+        timeout_ms: created.timeout_ms,
+        cooldown_seconds: created.cooldown_seconds,
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'ai_provider_config')
+
+    const providers = await getAiProviders(server.baseUrl, authToken)
+    const saved = providers.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(saved.name, 'QA Provider Updated')
+    assert.equal(saved.priority, 10)
   } finally {
     await stopServer(server?.child)
   }

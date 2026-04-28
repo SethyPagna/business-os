@@ -29,7 +29,7 @@ function ManageCategoriesModal({ onClose, t }) {
   const handleUpdate = async (cat) => {
     setErr('')
     try {
-      const res = await window.api.updateCategory(cat.id, { name: cat.name, color: cat.color })
+      const res = await window.api.updateCategory(cat.id, { name: cat.name, color: cat.color, expectedUpdatedAt: cat.updated_at || undefined })
       if (res?.success === false) { setErr(res.error || 'Failed'); return }
       setEditing(null); load()
     } catch(e) { setErr(e.message || 'Failed') }
@@ -37,7 +37,8 @@ function ManageCategoriesModal({ onClose, t }) {
   const handleDelete = async (id) => {
     if (!confirm(t('confirm_delete'))) return
     try {
-      await window.api.deleteCategory(id); load()
+      const category = cats.find((item) => Number(item.id) === Number(id))
+      await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined }); load()
     } catch(e) { notify(e.message || 'Failed', 'error') }
   }
 

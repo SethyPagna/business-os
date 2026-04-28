@@ -191,6 +191,7 @@ function getConflictRefreshChannels(error, fallbackChannel) {
   if (entity === 'settings') return ['settings']
   if (entity === 'sale') return ['sales', 'returns', 'inventory', 'dashboard']
   if (entity === 'return') return ['returns', 'sales', 'inventory', 'dashboard']
+  if (entity === 'ai_provider_config') return ['settings']
   return [getChannelRefreshKey(fallbackChannel)]
 }
 

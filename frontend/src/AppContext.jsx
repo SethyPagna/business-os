@@ -541,6 +541,15 @@ export function AppProvider({ children }) {
       } else if (entity === 'role') {
         message = 'This role changed on another device. Latest data is loading now.'
         entityLabel = 'Role'
+      } else if (entity === 'category') {
+        message = 'This category changed on another device. Latest data is loading now.'
+        entityLabel = 'Category'
+      } else if (entity === 'custom table row') {
+        message = 'This custom table row changed on another device. Latest data is loading now.'
+        entityLabel = 'Custom table row'
+      } else if (entity === 'ai_provider_config') {
+        message = 'This AI provider changed on another device. Latest data is loading now.'
+        entityLabel = 'AI provider'
       }
       setNotification({ message, type: 'error', id: Date.now() })
       setWriteConflict({

@@ -3,7 +3,8 @@
 const express = require('express')
 const { db } = require('../database')
 const { authToken, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
-const { ok, err, audit } = require('../helpers')
+const { ok, err, audit, broadcast } = require('../helpers')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const {
   PROVIDER_META,
   normalizeProviderPayload,
@@ -52,7 +53,7 @@ router.post('/providers', authToken, requirePermission('settings'), async (req, 
         max_input_chars, max_completion_tokens, timeout_ms, cooldown_seconds,
         created_by_id, created_by_name,
         created_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       payload.name,
       payload.provider,
@@ -83,6 +84,7 @@ router.post('/providers', authToken, requirePermission('settings'), async (req, 
       name: created.name,
       provider_type: created.provider_type,
     })
+    broadcast('settings')
     ok(res, { item: serializeProviderRow(created) })
   } catch (error) {
     err(res, error?.message || 'Failed to save AI provider')
@@ -94,6 +96,7 @@ router.put('/providers/:id', authToken, requirePermission('settings'), async (re
     const actor = getAuditActor(req)
     const existing = getProviderRow(req.params.id)
     if (!existing) return err(res, 'AI provider not found', 404)
+    assertUpdatedAtMatch('ai_provider_config', existing, getExpectedUpdatedAt(req.body || {}))
 
     const payload = normalizeProviderPayload(req.body || {})
     const apiKeyEncrypted = payload.apiKey ? encryptSecret(payload.apiKey) : existing.api_key_encrypted
@@ -147,8 +150,10 @@ router.put('/providers/:id', authToken, requirePermission('settings'), async (re
       provider_type: updated.provider_type,
       api_key_updated: !!payload.apiKey,
     })
+    broadcast('settings')
     ok(res, { item: serializeProviderRow(updated) })
   } catch (error) {
+    if (error instanceof WriteConflictError) return sendWriteConflict(res, error)
     err(res, error?.message || 'Failed to update AI provider')
   }
 })
@@ -171,6 +176,7 @@ router.post('/providers/:id/test', authToken, requirePermission('settings'), rou
       name: row.name,
       status: 'ok',
     })
+    broadcast('settings')
     ok(res, {
       success: true,
       message: result.message || 'Provider test passed',
@@ -184,6 +190,7 @@ router.post('/providers/:id/test', authToken, requirePermission('settings'), rou
         SET last_status = ?, last_error = ?, last_checked_at = ?, updated_at = ?
         WHERE id = ?
       `).run('error', String(error?.message || 'Provider test failed'), new Date().toISOString(), new Date().toISOString(), row.id)
+      broadcast('settings')
     }
     err(res, error?.message || 'Provider test failed')
   }
@@ -194,6 +201,7 @@ router.delete('/providers/:id', authToken, requirePermission('settings'), (req, 
     const actor = getAuditActor(req)
     const row = getProviderRow(req.params.id)
     if (!row) return err(res, 'AI provider not found', 404)
+    assertUpdatedAtMatch('ai_provider_config', row, getExpectedUpdatedAt(req.body || req.query || {}))
 
     db.prepare('DELETE FROM ai_provider_configs WHERE id = ?').run(row.id)
     audit(actor.userId, actor.userName, 'delete', 'ai_provider_config', row.id, {
@@ -201,8 +209,10 @@ router.delete('/providers/:id', authToken, requirePermission('settings'), (req, 
       name: row.name,
       provider_type: row.provider_type,
     })
+    broadcast('settings')
     ok(res, { success: true })
   } catch (error) {
+    if (error instanceof WriteConflictError) return sendWriteConflict(res, error)
     err(res, error?.message || 'Failed to delete AI provider')
   }
 })

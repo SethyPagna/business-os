@@ -77,7 +77,8 @@ export default function CustomTables() {
 
   const handleDeleteRow = async (id) => {
     if (!confirm(t('confirm_delete_row')||'Delete this row?')) return
-    await window.api.deleteCustomRow({ tableName: activeTable.name, id })
+    const row = tableData.find((entry) => Number(entry.id) === Number(id))
+    await window.api.deleteCustomRow({ tableName: activeTable.name, id, payload: { expectedUpdatedAt: row?.updated_at || undefined } })
     window.api.getCustomTableData({ tableName: activeTable.name }).then(setTableData)
   }
 
