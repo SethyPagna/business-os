@@ -405,6 +405,7 @@ export default function UserProfileModal({ onClose }) {
         phone: profile.phone,
         email: profile.email,
         avatar_path: profile.avatar_path,
+        expectedUpdatedAt: profile.updated_at || undefined,
         currentPassword: canAdminOverride ? undefined : currentPassword,
         adminOverride: canAdminOverride,
         userId: user.id,

@@ -208,6 +208,12 @@ async function getUsers(baseUrl, authToken) {
   return rows
 }
 
+async function getRoles(baseUrl, authToken) {
+  const rows = await fetchJson(baseUrl, '/api/roles', { authToken })
+  assert.ok(Array.isArray(rows), 'Expected roles list')
+  return rows
+}
+
 async function getSettings(baseUrl, authToken) {
   return fetchJson(baseUrl, '/api/settings', { authToken })
 }
@@ -817,6 +823,208 @@ runTest('settings writes reject stale expectedUpdatedAt values', async () => {
     const settings = await getSettings(server.baseUrl, authToken)
     assert.equal(settings.business_name, 'Conflict Test Business')
     assert.notEqual(settings.business_phone, '012345678')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('user writes reject stale expectedUpdatedAt values')
+runTest('user writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-user-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const created = await fetchJson(server.baseUrl, '/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        username: 'stale-user',
+        name: 'Stale User',
+        password: 'password123',
+        email: 'stale-user@example.com',
+        role_id: null,
+        is_active: 1,
+      }),
+    })
+    assert.ok(created?.id, 'Expected created user id')
+
+    const usersBefore = await getUsers(server.baseUrl, authToken)
+    const userBefore = usersBefore.find((row) => Number(row.id) === Number(created.id))
+    assert.ok(userBefore?.updated_at, 'Expected user updated_at before write')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/users/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: userBefore.updated_at,
+        username: userBefore.username,
+        name: 'Conflict Safe User',
+        phone: userBefore.phone || '',
+        email: userBefore.email || '',
+        avatar_path: userBefore.avatar_path || '',
+        role_id: userBefore.role_id || null,
+        is_active: userBefore.is_active,
+      }),
+    })
+    assert.equal(firstWrite.name, 'Conflict Safe User')
+    assert.ok(firstWrite.updated_at)
+    assert.notEqual(firstWrite.updated_at, userBefore.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/users/${created.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: userBefore.updated_at,
+        username: userBefore.username,
+        name: 'Stale Overwrite',
+        phone: '012345678',
+        email: userBefore.email || '',
+        avatar_path: userBefore.avatar_path || '',
+        role_id: userBefore.role_id || null,
+        is_active: userBefore.is_active,
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'user')
+
+    const usersAfter = await getUsers(server.baseUrl, authToken)
+    const userAfter = usersAfter.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(userAfter.name, 'Conflict Safe User')
+    assert.notEqual(userAfter.phone, '012345678')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('role writes reject stale expectedUpdatedAt values')
+runTest('role writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-role-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const created = await fetchJson(server.baseUrl, '/api/roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        name: 'QA Conflict Role',
+        permissions: { products: true },
+      }),
+    })
+    assert.ok(created?.id, 'Expected created role id')
+
+    const rolesBefore = await getRoles(server.baseUrl, authToken)
+    const roleBefore = rolesBefore.find((row) => Number(row.id) === Number(created.id))
+    assert.ok(roleBefore?.updated_at, 'Expected role updated_at before write')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/roles/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: roleBefore.updated_at,
+        name: 'QA Conflict Role Updated',
+        permissions: { products: true, sales: true },
+      }),
+    })
+    assert.equal(firstWrite.name, 'QA Conflict Role Updated')
+    assert.ok(firstWrite.updated_at)
+    assert.notEqual(firstWrite.updated_at, roleBefore.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/roles/${created.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: roleBefore.updated_at,
+        name: 'QA Conflict Role Stale',
+        permissions: { inventory: true },
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'role')
+
+    const rolesAfter = await getRoles(server.baseUrl, authToken)
+    const roleAfter = rolesAfter.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(roleAfter.name, 'QA Conflict Role Updated')
+    assert.equal(JSON.parse(roleAfter.permissions || '{}').sales, true)
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('profile writes reject stale expectedUpdatedAt values')
+runTest('profile writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-profile-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const profileBefore = await fetchJson(server.baseUrl, '/api/users/1/profile', { authToken })
+    assert.ok(profileBefore?.updated_at, 'Expected profile updated_at before write')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, '/api/users/1/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: profileBefore.updated_at,
+        username: 'admin',
+        name: 'Administrator Conflict Safe',
+        phone: profileBefore.phone || '',
+        email: profileBefore.email || '',
+        avatar_path: profileBefore.avatar_path || '',
+        currentPassword: 'admin',
+        adminOverride: false,
+      }),
+    })
+    assert.equal(firstWrite.name, 'Administrator Conflict Safe')
+    assert.ok(firstWrite.updated_at)
+    assert.notEqual(firstWrite.updated_at, profileBefore.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/users/1/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: profileBefore.updated_at,
+        username: 'admin',
+        name: 'Administrator Stale',
+        phone: '099999999',
+        email: profileBefore.email || '',
+        avatar_path: profileBefore.avatar_path || '',
+        currentPassword: 'admin',
+        adminOverride: false,
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'user')
+
+    const profileAfter = await fetchJson(server.baseUrl, '/api/users/1/profile', { authToken })
+    assert.equal(profileAfter.name, 'Administrator Conflict Safe')
+    assert.notEqual(profileAfter.phone, '099999999')
   } finally {
     await stopServer(server?.child)
   }

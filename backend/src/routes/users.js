@@ -776,8 +776,13 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
   if (!canManageTarget(actor, targetSecurity)) return err(res, 'No permission', 403)
   if (adminOverride && !actorCanManage) return err(res, 'No permission', 403)
 
-  const user = db.prepare('SELECT id, username, name, password, phone, phone_verified, email, email_verified, supabase_user_id, is_active, deleted_at FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.id)
+  const user = db.prepare('SELECT id, username, name, password, phone, phone_verified, email, email_verified, supabase_user_id, is_active, deleted_at, updated_at FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.id)
   if (!user) return err(res, 'User not found', 404)
+  try {
+    assertUpdatedAtMatch('user', user, getExpectedUpdatedAt(req.body || {}))
+  } catch (error) {
+    return sendWriteConflict(res, error)
+  }
   if (isPrimaryAdmin(targetSecurity) && String(username || '').trim().toLowerCase() !== 'admin') {
     return err(res, 'Primary admin username cannot be changed', 400)
   }
