@@ -136,6 +136,25 @@ async function getDefaultBranch(baseUrl, authToken) {
   return branch
 }
 
+async function createBranch(baseUrl, authToken, overrides = {}) {
+  const created = await fetchJson(baseUrl, '/api/branches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    authToken,
+    body: JSON.stringify({
+      name: overrides.name || `Branch ${Date.now()}`,
+      location: overrides.location || 'QA Location',
+      phone: overrides.phone || null,
+      manager: overrides.manager || null,
+      notes: overrides.notes || null,
+      is_default: overrides.is_default ?? false,
+      is_active: overrides.is_active ?? true,
+    }),
+  })
+  assert.ok(created?.id, 'Expected branch id from create branch')
+  return created.id
+}
+
 async function createProduct(baseUrl, authToken, branchId, overrides = {}) {
   const payload = {
     name: overrides.name || `Stock Test ${Date.now()}`,
@@ -614,6 +633,83 @@ runTest('inventory adjustments keep branch stock, aggregate stock, and movement 
     assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'add' && Number(row.quantity) === 3))
     assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'remove' && Number(row.quantity) === 2))
     assert.ok(movements.some((row) => row.product_id === productId && row.movement_type === 'set' && Number(row.quantity) === 2))
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('branch transfers move stock between branches without changing aggregate stock and enforce delete safety')
+runTest('branch transfers move stock between branches without changing aggregate stock and enforce delete safety', async () => {
+  const runtimeDir = makeTempRoot('bos-branch-transfer-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const destinationBranch = await getDefaultBranch(server.baseUrl, authToken)
+    const sourceBranchId = await createBranch(server.baseUrl, authToken, {
+      name: 'Transfer Source Branch',
+    })
+
+    const productId = await createProduct(server.baseUrl, authToken, sourceBranchId, {
+      name: 'Branch Transfer Product',
+      sku: 'XFER-001',
+      stock_quantity: 6,
+      purchase_price_usd: 5,
+      selling_price_usd: 12,
+    })
+
+    let deleteResponse = await fetch(`${server.baseUrl}/api/branches/${sourceBranchId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-auth-session': authToken,
+      },
+    })
+    let deleteJson = JSON.parse(await deleteResponse.text())
+    assert.equal(deleteResponse.status, 400)
+    assert.match(deleteJson.error || '', /Transfer all stock to another branch first/i)
+
+    await fetchJson(server.baseUrl, '/api/branches/transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        fromBranchId: sourceBranchId,
+        toBranchId: destinationBranch.id,
+        productId,
+        productName: 'Branch Transfer Product',
+        quantity: 6,
+        note: 'Move all stock before archive',
+      }),
+    })
+
+    const product = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(Number(product.stock_quantity), 6)
+    assert.equal(sumBranchStock(product), 6)
+    const sourceRow = (product.branch_stock || []).find((row) => row.branch_id === sourceBranchId)
+    const destinationRow = (product.branch_stock || []).find((row) => row.branch_id === destinationBranch.id)
+    assert.equal(Number(sourceRow?.quantity || 0), 0)
+    assert.equal(Number(destinationRow?.quantity || 0), 6)
+
+    const movements = await getInventoryMovements(server.baseUrl, authToken)
+    const transferOutPattern = new RegExp(`Transfer out to ${destinationBranch.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i')
+    const transferInPattern = /Transfer in from Transfer Source Branch/i
+    assert.ok(movements.some((row) => row.product_id === productId && row.branch_id === sourceBranchId && row.movement_type === 'transfer' && transferOutPattern.test(row.reason || '')))
+    assert.ok(movements.some((row) => row.product_id === productId && row.branch_id === destinationBranch.id && row.movement_type === 'transfer' && transferInPattern.test(row.reason || '')))
+
+    deleteResponse = await fetch(`${server.baseUrl}/api/branches/${sourceBranchId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-auth-session': authToken,
+      },
+    })
+    deleteJson = JSON.parse(await deleteResponse.text())
+    assert.equal(deleteResponse.status, 200)
+    assert.equal(deleteJson.success, true)
+
+    const branches = await fetchJson(server.baseUrl, '/api/branches', { authToken })
+    assert.ok(Array.isArray(branches))
+    assert.ok(!branches.some((row) => row.id === sourceBranchId))
+    assert.ok(branches.some((row) => row.id === destinationBranch.id))
   } finally {
     await stopServer(server?.child)
   }

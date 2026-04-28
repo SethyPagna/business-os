@@ -15,6 +15,15 @@ function toDbBool(value, fallback = 1) {
   return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0
 }
 
+function getStockTransferNoteColumn() {
+  try {
+    const columns = db.prepare(`PRAGMA table_info(stock_transfers)`).all()
+    if (columns.some((column) => String(column?.name || '').toLowerCase() === 'notes')) return 'notes'
+    if (columns.some((column) => String(column?.name || '').toLowerCase() === 'note')) return 'note'
+  } catch (_) {}
+  return null
+}
+
 // GET /api/branches
 router.get('/', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all())
@@ -113,8 +122,10 @@ router.get('/:id/stock', authToken, (req, res) => {
 
 // GET /api/transfers
 router.get('/transfers/list', authToken, (req, res) => {
+  const noteColumn = getStockTransferNoteColumn()
+  const noteSelect = noteColumn ? `st.${noteColumn} AS note,` : 'NULL AS note,'
   const rows = db.prepare(`
-    SELECT st.*, b1.name AS from_name, b2.name AS to_name
+    SELECT st.*, ${noteSelect} b1.name AS from_name, b2.name AS to_name
     FROM stock_transfers st
     LEFT JOIN branches b1 ON b1.id = st.from_branch_id
     LEFT JOIN branches b2 ON b2.id = st.to_branch_id
@@ -153,9 +164,18 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
         ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity
       `).run(productId, toBranchId, qty)
 
+      const noteColumn = getStockTransferNoteColumn()
+      const transferColumns = ['product_id', 'product_name', 'from_branch_id', 'to_branch_id', 'quantity', 'user_id', 'user_name']
+      const transferValues = [productId, productName, fromBranchId, toBranchId, qty, actor.userId, actor.userName]
+      if (noteColumn) {
+        transferColumns.splice(5, 0, noteColumn)
+        transferValues.splice(5, 0, note || null)
+      }
+      const placeholders = transferColumns.map(() => '?').join(',')
+      const quotedColumns = transferColumns.map((column) => `"${column}"`).join(', ')
       const r = db.prepare(
-        'INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, note, user_id, user_name) VALUES (?,?,?,?,?,?,?,?)'
-      ).run(productId, productName, fromBranchId, toBranchId, qty, note || null, actor.userId, actor.userName)
+        `INSERT INTO stock_transfers (${quotedColumns}) VALUES (${placeholders})`
+      ).run(...transferValues)
 
       const transferId = r.lastInsertRowid
       const insertMovement = db.prepare(`
