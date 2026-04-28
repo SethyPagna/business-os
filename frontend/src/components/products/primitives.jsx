@@ -4,6 +4,22 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
 
+function sanitizeNumericInput(value, { allowDecimal = true, allowNegative = false } = {}) {
+  let next = String(value ?? '').replace(/,/g, '').replace(/[^\d.-]/g, '')
+  if (!allowNegative) next = next.replace(/-/g, '')
+  else if (next.includes('-')) next = `${next.startsWith('-') ? '-' : ''}${next.replace(/-/g, '')}`
+  if (!allowDecimal) return next.replace(/\./g, '')
+  const dotIndex = next.indexOf('.')
+  if (dotIndex === -1) return next
+  return `${next.slice(0, dotIndex + 1)}${next.slice(dotIndex + 1).replace(/\./g, '')}`
+}
+
+function parseNumericInput(value, fallback = 0) {
+  if (value === '' || value === null || typeof value === 'undefined') return fallback
+  const parsed = Number(String(value).replace(/,/g, ''))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 function ProductImg({ src, alt, className, onClick }) {
   const [url, setUrl] = useState(null)
   const [failed, setFailed] = useState(false)
@@ -91,16 +107,8 @@ function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }) {
 }
 
 function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, onKhrChange, usdSymbol, khrSymbol, exchangeRate, t }) {
-  const handleUsdChange = (val) => {
-    const num = parseFloat(val) || 0
-    onUsdChange(num)
-    if (!valueKhr) onKhrChange(num * exchangeRate)
-  }
-
-  const handleKhrChange = (val) => {
-    const num = parseFloat(val) || 0
-    onKhrChange(num)
-  }
+  const handleUsdChange = (val) => onUsdChange(sanitizeNumericInput(val))
+  const handleKhrChange = (val) => onKhrChange(sanitizeNumericInput(val))
 
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -108,13 +116,29 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
         <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{labelUsd} ({usdSymbol})</label>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{usdSymbol}</span>
-          <input className="input pl-7" type="number" step="0.01" min="0" value={valueUsd || ''} onChange={(event) => handleUsdChange(event.target.value)} placeholder="0.00" />
+          <input
+            className="input pl-7"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={valueUsd ?? ''}
+            onChange={(event) => handleUsdChange(event.target.value)}
+            placeholder="0.00"
+          />
         </div>
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{labelKhr} ({khrSymbol})</label>
         <div className="relative">
-          <input className="input pr-7" type="number" step="1" min="0" value={valueKhr || ''} onChange={(event) => handleKhrChange(event.target.value)} placeholder="0" />
+          <input
+            className="input pr-7"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={valueKhr ?? ''}
+            onChange={(event) => handleKhrChange(event.target.value)}
+            placeholder="0"
+          />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{khrSymbol}</span>
         </div>
       </div>
@@ -122,4 +146,4 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
   )
 }
 
-export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput }
+export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, sanitizeNumericInput, parseNumericInput }

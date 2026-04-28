@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ScanLine } from 'lucide-react'
 import Modal from '../shared/Modal'
-import { MarginCard, DualPriceInput } from './primitives'
+import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from './primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
@@ -123,6 +123,10 @@ export default function ProductForm({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  function setNumericField(key, value, options) {
+    setField(key, sanitizeNumericInput(value, options))
+  }
+
   async function addImages() {
     await uploadPickedImages({})
   }
@@ -179,6 +183,15 @@ export default function ProductForm({
     }
     const payload = {
       ...form,
+      purchase_price_usd: parseNumericInput(form.purchase_price_usd),
+      purchase_price_khr: parseNumericInput(form.purchase_price_khr),
+      selling_price_usd: parseNumericInput(form.selling_price_usd),
+      selling_price_khr: parseNumericInput(form.selling_price_khr),
+      cost_price_usd: parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd),
+      cost_price_khr: parseNumericInput(form.cost_price_khr ?? form.purchase_price_khr),
+      stock_quantity: parseNumericInput(form.stock_quantity),
+      low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
+      out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       image_gallery: imageList.slice(0, 5),
       image_path: imageList[0] || '',
     }
@@ -405,7 +418,10 @@ export default function ProductForm({
               onUsdChange={(value) => {
                 setField('purchase_price_usd', value)
                 setField('cost_price_usd', value)
-                if (!form.purchase_price_khr) setField('purchase_price_khr', value * exchangeRate)
+                if (!String(form.purchase_price_khr ?? '').trim()) {
+                  const converted = parseNumericInput(value) * exchangeRate
+                  setField('purchase_price_khr', value === '' ? '' : String(converted))
+                }
               }}
               onKhrChange={(value) => {
                 setField('purchase_price_khr', value)
@@ -430,7 +446,10 @@ export default function ProductForm({
               valueKhr={form.selling_price_khr}
               onUsdChange={(value) => {
                 setField('selling_price_usd', value)
-                if (!form.selling_price_khr) setField('selling_price_khr', value * exchangeRate)
+                if (!String(form.selling_price_khr ?? '').trim()) {
+                  const converted = parseNumericInput(value) * exchangeRate
+                  setField('selling_price_khr', value === '' ? '' : String(converted))
+                }
               }}
               onKhrChange={(value) => setField('selling_price_khr', value)}
               usdSymbol={usdSymbol}
@@ -455,15 +474,36 @@ export default function ProductForm({
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
-              <input className="input" type="number" value={form.stock_quantity || 0} onChange={(event) => setField('stock_quantity', Number(event.target.value || 0))} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.stock_quantity ?? ''}
+                onChange={(event) => setNumericField('stock_quantity', event.target.value)}
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('low_stock_threshold')}</label>
-              <input className="input" type="number" value={form.low_stock_threshold || 10} onChange={(event) => setField('low_stock_threshold', Number(event.target.value || 0))} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.low_stock_threshold ?? ''}
+                onChange={(event) => setNumericField('low_stock_threshold', event.target.value)}
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('out_of_stock_threshold')}</label>
-              <input className="input" type="number" value={form.out_of_stock_threshold || 0} onChange={(event) => setField('out_of_stock_threshold', Number(event.target.value || 0))} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.out_of_stock_threshold ?? ''}
+                onChange={(event) => setNumericField('out_of_stock_threshold', event.target.value)}
+              />
             </div>
           </div>
 

@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import Modal from '../shared/Modal'
-import { DualPriceInput } from './primitives'
+import { parseNumericInput, sanitizeNumericInput } from './primitives'
 
 export default
 function VariantFormModal({ parent, categories, units, branches, user, onClose, onDone, t, usdSymbol, khrSymbol, exchangeRate }) {
@@ -19,6 +19,7 @@ function VariantFormModal({ parent, categories, units, branches, user, onClose, 
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const setNumeric = (k, v) => set(k, sanitizeNumericInput(v))
   const { notify } = useApp()
 
   const handleSave = async () => {
@@ -26,9 +27,15 @@ function VariantFormModal({ parent, categories, units, branches, user, onClose, 
     setSaving(true); setErr('')
     try {
       const res = await window.api.createProductVariant({
-        ...form, parent_id: parent.id,
-        cost_price_usd: form.purchase_price_usd,
-        cost_price_khr: form.purchase_price_khr,
+        ...form,
+        parent_id: parent.id,
+        purchase_price_usd: parseNumericInput(form.purchase_price_usd),
+        purchase_price_khr: parseNumericInput(form.purchase_price_khr),
+        selling_price_usd: parseNumericInput(form.selling_price_usd),
+        selling_price_khr: parseNumericInput(form.selling_price_khr),
+        stock_quantity: parseNumericInput(form.stock_quantity),
+        cost_price_usd: parseNumericInput(form.purchase_price_usd),
+        cost_price_khr: parseNumericInput(form.purchase_price_khr),
         userId: user?.id, userName: user?.name,
       })
       if (res?.success === false) { setErr(res.error || 'Failed'); setSaving(false); return }
@@ -65,15 +72,36 @@ function VariantFormModal({ parent, categories, units, branches, user, onClose, 
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Purchase Price ({usdSymbol})</label>
-              <input className="input" type="number" step="0.01" min="0" value={form.purchase_price_usd} onChange={e => set("purchase_price_usd", parseFloat(e.target.value)||0)} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.purchase_price_usd ?? ''}
+                onChange={e => setNumeric("purchase_price_usd", e.target.value)}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selling Price ({usdSymbol})</label>
-              <input className="input" type="number" step="0.01" min="0" value={form.selling_price_usd} onChange={e => set("selling_price_usd", parseFloat(e.target.value)||0)} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.selling_price_usd ?? ''}
+                onChange={e => setNumeric("selling_price_usd", e.target.value)}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Initial Stock</label>
-              <input className="input" type="number" min="0" value={form.stock_quantity} onChange={e => set("stock_quantity", parseFloat(e.target.value)||0)} />
+              <input
+                className="input"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.stock_quantity ?? ''}
+                onChange={e => setNumeric("stock_quantity", e.target.value)}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">🏪 Assign to Branch</label>
