@@ -1,6 +1,12 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
@@ -27,37 +33,44 @@ export default function FilePickerModal({
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [deletingAssetId, setDeletingAssetId] = useState(null)
   const [selectedPaths, setSelectedPaths] = useState([])
   const inputRef = useRef(null)
+  const loadRequestRef = useRef(0)
 
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }
 
-  async function loadFiles() {
+  const loadFiles = useCallback(async () => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const result = await window.api.getFiles({ search, mediaType })
+      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library picker')
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setFiles(Array.isArray(result) ? result : (result?.data || []))
     } catch (error) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notify(error?.message || 'Failed to load files', 'error')
     } finally {
-      setLoading(false)
+      if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
-  }
+  }, [mediaType, notify, search])
 
   useEffect(() => {
     if (!open) return undefined
     setSelectedPaths(Array.isArray(initialSelected) ? initialSelected.filter(Boolean) : [])
     loadFiles()
-  }, [open, initialSelected])
+  }, [initialSelected, loadFiles, open])
 
   useEffect(() => {
     if (!open) return undefined
     const timer = window.setTimeout(() => { loadFiles() }, 180)
     return () => window.clearTimeout(timer)
-  }, [open, search, mediaType])
+  }, [loadFiles, open])
+
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const accept = useMemo(() => {
     if (mediaType === 'image') return 'image/*'
@@ -112,19 +125,22 @@ export default function FilePickerModal({
   }
 
   async function handleDelete(asset) {
-    if (!asset?.id) return
+    if (!asset?.id || deletingAssetId) return
     if (!asset.canDelete) {
       notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
       return
     }
     if (!window.confirm(`Delete "${asset.original_name}"?`)) return
+    setDeletingAssetId(asset.id)
     try {
-      await window.api.deleteFileAsset(asset.id)
+      await window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined })
       notify(tr('file_deleted', 'File deleted'), 'success')
       await loadFiles()
       setSelectedPaths((current) => current.filter((entry) => entry !== asset.public_path))
     } catch (error) {
       notify(error?.message || 'Delete failed', 'error')
+    } finally {
+      setDeletingAssetId(null)
     }
   }
 
@@ -137,7 +153,7 @@ export default function FilePickerModal({
       <div className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />
-          <button type="button" className="btn-primary" onClick={() => inputRef.current?.click()} disabled={uploading}>
+          <button type="button" className="btn-primary" onClick={() => inputRef.current?.click()} disabled={uploading || deletingAssetId != null}>
             {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
           </button>
           <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden" onChange={handleUpload} />
@@ -171,8 +187,13 @@ export default function FilePickerModal({
                     <button type="button" className="btn-secondary text-sm" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})}>
                       {tr('copy', 'Copy')}
                     </button>
-                    <button type="button" className="btn-secondary text-sm" onClick={() => handleDelete(asset)} disabled={!asset.canDelete}>
-                      {tr('delete', 'Delete')}
+                    <button
+                      type="button"
+                      className="btn-secondary text-sm"
+                      onClick={() => handleDelete(asset)}
+                      disabled={!asset.canDelete || deletingAssetId != null}
+                    >
+                      {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
                     </button>
                   </div>
                 </div>

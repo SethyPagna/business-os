@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Brain,
   ChevronDown,
@@ -18,7 +18,12 @@ import {
 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
@@ -94,6 +99,7 @@ export default function FilesPage() {
   const [mediaType, setMediaType] = useState('all')
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [deletingAssetId, setDeletingAssetId] = useState(null)
 
   const [providers, setProviders] = useState([])
   const [providerMeta, setProviderMeta] = useState({})
@@ -105,6 +111,7 @@ export default function FilesPage() {
   const [responses, setResponses] = useState([])
   const [loadingResponses, setLoadingResponses] = useState(false)
   const [expandedResponseId, setExpandedResponseId] = useState(null)
+  const fileLoadRequestRef = useRef(0)
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallback, fallbackKm = fallback) => {
@@ -139,30 +146,47 @@ export default function FilesPage() {
   const providerOptions = useMemo(() => Object.entries(providerMeta || {}), [providerMeta])
   const selectedProviderMeta = providerMeta?.[providerForm.provider] || null
 
+  const loadFiles = useCallback(async () => {
+    const requestId = beginTrackedRequest(fileLoadRequestRef)
+    setLoadingFiles(true)
+    try {
+      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
+      if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
+      setFiles(Array.isArray(result) ? result : (result?.data || []))
+    } catch (error) {
+      if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
+      notify(error?.message || 'Failed to load files', 'error')
+    } finally {
+      if (isTrackedRequestCurrent(fileLoadRequestRef, requestId)) setLoadingFiles(false)
+    }
+  }, [mediaType, notify, search])
+
   useEffect(() => {
     loadFiles()
     loadProviders()
     loadResponses()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (page !== 'files') return
     if (!files.length && !loadingFiles) loadFiles()
     if (!providers.length && !loadingProviders) loadProviders()
     if (!responses.length && !loadingResponses) loadResponses()
-  }, [files.length, loadingFiles, loadingProviders, loadingResponses, page, providers.length, responses.length])
+  }, [files.length, loadingFiles, loadingProviders, loadingResponses, loadFiles, page, providers.length, responses.length])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { loadFiles() }, 180)
     return () => window.clearTimeout(timer)
-  }, [search, mediaType])
+  }, [loadFiles])
 
   useEffect(() => {
     if (!syncChannel) return
     const channel = String(syncChannel.channel || '')
     if (channel === 'files') loadFiles()
     if (channel === 'files' || channel === 'settings') loadProviders()
-  }, [syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadFiles, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => invalidateTrackedRequest(fileLoadRequestRef), [])
 
   useEffect(() => {
     if (!selectedProviderMeta) return
@@ -184,18 +208,6 @@ export default function FilesPage() {
       }
     })
   }, [selectedProviderMeta])
-
-  async function loadFiles() {
-    setLoadingFiles(true)
-    try {
-      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
-      setFiles(Array.isArray(result) ? result : (result?.data || []))
-    } catch (error) {
-      notify(error?.message || 'Failed to load files', 'error')
-    } finally {
-      setLoadingFiles(false)
-    }
-  }
 
   async function loadProviders() {
     setLoadingProviders(true)
@@ -239,18 +251,21 @@ export default function FilesPage() {
   }
 
   async function handleDeleteAsset(asset) {
-    if (!asset?.id) return
+    if (!asset?.id || deletingAssetId) return
     if (!asset.canDelete) {
       notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
       return
     }
     if (!window.confirm(`Delete "${asset.original_name}"?`)) return
+    setDeletingAssetId(asset.id)
     try {
-      await window.api.deleteFileAsset(asset.id)
+      await window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined })
       notify(tr('file_deleted', 'File deleted'), 'success')
       await loadFiles()
     } catch (error) {
       notify(error?.message || 'Delete failed', 'error')
+    } finally {
+      setDeletingAssetId(null)
     }
   }
 
@@ -442,9 +457,14 @@ export default function FilesPage() {
                       <Copy className="mr-2 inline h-4 w-4" />
                       {tr('copy_path', 'Copy path')}
                     </button>
-                    <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => handleDeleteAsset(asset)} disabled={!asset.canDelete}>
+                    <button
+                      type="button"
+                      className="btn-secondary shrink-0 whitespace-nowrap text-sm"
+                      onClick={() => handleDeleteAsset(asset)}
+                      disabled={!asset.canDelete || deletingAssetId != null}
+                    >
                       <Trash2 className="mr-2 inline h-4 w-4" />
-                      {tr('delete', 'Delete')}
+                      {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
                     </button>
                   </div>
                 </div>

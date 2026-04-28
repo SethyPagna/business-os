@@ -1323,6 +1323,50 @@ runTest('unit writes reject stale expectedUpdatedAt values', async () => {
   }
 })
 
+pendingTests.add('file asset deletes reject stale expectedUpdatedAt values')
+runTest('file asset deletes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-file-conflict-')
+  let server = null
+  let externalDb = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const uploaded = await uploadTinyPng(server.baseUrl, authToken, 'qa-file-conflict.png')
+    assert.ok(uploaded?.id, 'Expected uploaded file id')
+    assert.ok(uploaded?.updated_at, 'Expected file updated_at after upload')
+
+    const dbPath = findDbPath(runtimeDir)
+    assert.ok(dbPath, 'Expected business.db to exist for file conflict test')
+    externalDb = new Database(dbPath)
+    const bumpedUpdatedAt = new Date(Date.now() + 2000).toISOString()
+    externalDb.prepare('UPDATE file_assets SET updated_at = ? WHERE id = ?').run(bumpedUpdatedAt, uploaded.id)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/files/${uploaded.id}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: uploaded.updated_at,
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'file asset')
+
+    const files = await getFiles(server.baseUrl, authToken)
+    const saved = files.find((row) => Number(row.id) === Number(uploaded.id))
+    assert.ok(saved, 'Expected file to remain after stale delete attempt')
+    assert.equal(saved.updated_at, bumpedUpdatedAt)
+  } finally {
+    try { externalDb?.close() } catch (_) {}
+    await stopServer(server?.child)
+  }
+})
+
 pendingTests.add('verify-integrity reports inconsistencies without mutating data while repair-integrity fixes them')
 runTest('verify-integrity reports inconsistencies without mutating data while repair-integrity fixes them', async () => {
   const runtimeDir = makeTempRoot('bos-verify-integrity-')

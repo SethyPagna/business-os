@@ -3,8 +3,10 @@
 const express = require('express')
 const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const {
   deleteFileAsset,
+  getFileAssetById,
   listFileAssets,
   registerUploadFromRequest,
 } = require('../fileAssets')
@@ -72,7 +74,11 @@ router.post('/upload', authToken, requirePermission('settings'), routeRateLimit(
 router.delete('/:id', authToken, requirePermission('settings'), (req, res) => {
   try {
     const actor = getAuditActor(req)
-    const asset = deleteFileAsset(parseFileAssetId(req.params.id))
+    const assetId = parseFileAssetId(req.params.id)
+    const current = getFileAssetById(assetId)
+    if (!current) return err(res, 'File not found', 404)
+    assertUpdatedAtMatch('file asset', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    const asset = deleteFileAsset(assetId)
     audit(actor.userId, actor.userName, 'delete', 'file_asset', asset.id, {
       original_name: asset.original_name,
       public_path: asset.public_path,
@@ -80,6 +86,7 @@ router.delete('/:id', authToken, requirePermission('settings'), (req, res) => {
     broadcast('files')
     ok(res, asset)
   } catch (error) {
+    if (error instanceof WriteConflictError) return sendWriteConflict(res, error)
     err(res, error.message || 'Failed to delete file')
   }
 })

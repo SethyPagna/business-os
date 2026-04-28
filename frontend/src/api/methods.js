@@ -554,8 +554,11 @@ export async function uploadFileAsset({ file, userId, userName }) {
   return json?.data || json
 }
 
-export async function deleteFileAsset(id) {
-  return route('files:delete', () => apiFetch('DELETE', `/api/files/${id}`, getCurrentUserContext()), null, true)
+export async function deleteFileAsset(id, payload = {}) {
+  return route('files:delete', () => apiFetch('DELETE', `/api/files/${id}`, {
+    ...getCurrentUserContext(),
+    ...(payload || {}),
+  }), null, true)
 }
 
 /**

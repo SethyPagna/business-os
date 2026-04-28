@@ -1,72 +1,184 @@
-// ── ManageCategoriesModal ────────────────────────────────────────────────────
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp, useSync } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
-export default
-function ManageCategoriesModal({ onClose, t }) {
+const DEFAULT_CATEGORY_COLOR = '#3b82f6'
+
+export default function ManageCategoriesModal({ onClose, t }) {
   const [cats, setCats] = useState([])
   const [newName, setNewName] = useState('')
-  const [newColor, setNewColor] = useState('#3b82f6')
+  const [newColor, setNewColor] = useState(DEFAULT_CATEGORY_COLOR)
   const [editing, setEditing] = useState(null)
   const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const { notify } = useApp()
   const { syncChannel } = useSync()
+  const loadRequestRef = useRef(0)
 
-  const load = () => window.api.getCategories().then(d => setCats(Array.isArray(d) ? d : []))
+  const load = useCallback(async () => {
+    const requestId = beginTrackedRequest(loadRequestRef)
+    setLoading(true)
+    try {
+      const data = await withLoaderTimeout(() => window.api.getCategories(), 'Categories')
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      setCats(Array.isArray(data) ? data : [])
+      setErr('')
+    } catch (error) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      setErr(error?.message || 'Failed to load categories')
+    } finally {
+      if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
+    }
+  }, [])
+
   useEffect(() => { load() }, [])
-  useEffect(() => { if (syncChannel?.channel === 'categories') load() }, [syncChannel]) // eslint-disable-line
+  useEffect(() => {
+    if (syncChannel?.channel === 'categories') load()
+  }, [load, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const handleAdd = async () => {
-    if (!newName.trim()) return
+    if (!newName.trim() || saving) return
     setErr('')
+    setSaving(true)
     try {
       const res = await window.api.createCategory({ name: newName.trim(), color: newColor })
-      if (res?.success === false) { setErr(res.error || 'Failed'); return }
-      setNewName(''); setNewColor('#3b82f6'); load()
-    } catch(e) { setErr(e.message || 'Failed') }
+      if (res?.success === false) {
+        setErr(res.error || 'Failed')
+        return
+      }
+      setNewName('')
+      setNewColor(DEFAULT_CATEGORY_COLOR)
+      load()
+    } catch (error) {
+      setErr(error?.message || 'Failed')
+    } finally {
+      setSaving(false)
+    }
   }
+
   const handleUpdate = async (cat) => {
+    if (saving) return
     setErr('')
+    setSaving(true)
     try {
-      const res = await window.api.updateCategory(cat.id, { name: cat.name, color: cat.color, expectedUpdatedAt: cat.updated_at || undefined })
-      if (res?.success === false) { setErr(res.error || 'Failed'); return }
-      setEditing(null); load()
-    } catch(e) { setErr(e.message || 'Failed') }
+      const res = await window.api.updateCategory(cat.id, {
+        name: cat.name,
+        color: cat.color,
+        expectedUpdatedAt: cat.updated_at || undefined,
+      })
+      if (res?.success === false) {
+        setErr(res.error || 'Failed')
+        return
+      }
+      setEditing(null)
+      load()
+    } catch (error) {
+      setErr(error?.message || 'Failed')
+    } finally {
+      setSaving(false)
+    }
   }
+
   const handleDelete = async (id) => {
+    if (saving || deletingId) return
     if (!confirm(t('confirm_delete'))) return
+    setDeletingId(id)
     try {
       const category = cats.find((item) => Number(item.id) === Number(id))
-      await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined }); load()
-    } catch(e) { notify(e.message || 'Failed', 'error') }
+      await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined })
+      load()
+    } catch (error) {
+      notify(error?.message || 'Failed', 'error')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
-    <Modal title={`🏷 ${t('manage_categories')}`} onClose={onClose}>
+    <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose}>
       <div className="space-y-4">
-        {err && <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">{err}</div>}
-        <div className="flex gap-2 items-end">
-          <div className="flex-1"><label className="text-xs text-gray-500 mb-1 block">{t('name')}</label><input className="input" value={newName} onChange={e => setNewName(e.target.value)} placeholder={t('category')} /></div>
-          <div><label className="text-xs text-gray-500 mb-1 block">{t('color')}</label><input type="color" value={newColor} onChange={e => setNewColor(e.target.value)} className="w-10 h-10 rounded-lg border border-gray-300 cursor-pointer" /></div>
-          <button className="btn-primary" onClick={handleAdd}>{t('add')}</button>
+        {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <label htmlFor="new-category-name" className="mb-1 block text-xs text-gray-500">{t('name') || 'Name'}</label>
+            <input
+              id="new-category-name"
+              name="new_category_name"
+              className="input"
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder={t('category') || 'Category'}
+              onKeyDown={(event) => { if (event.key === 'Enter') handleAdd() }}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-category-color" className="mb-1 block text-xs text-gray-500">{t('color') || 'Color'}</label>
+            <input
+              id="new-category-color"
+              name="new_category_color"
+              type="color"
+              value={newColor}
+              onChange={(event) => setNewColor(event.target.value)}
+              className="h-10 w-10 cursor-pointer rounded-lg border border-gray-300"
+            />
+          </div>
+          <button className="btn-primary" onClick={handleAdd} disabled={saving}>
+            {saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}
+          </button>
         </div>
-        <div className="space-y-2 max-h-80 overflow-auto">
-          {cats.map(c => (
-            <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg border border-gray-100 dark:border-gray-700">
-              {editing?.id === c.id ? (
+
+        <div className="max-h-80 space-y-2 overflow-auto">
+          {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
+          {cats.map((category) => (
+            <div key={category.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-2 dark:border-gray-700">
+              {editing?.id === category.id ? (
                 <>
-                  <input type="color" value={editing.color} onChange={e => setEditing(ed => ({...ed, color: e.target.value}))} className="w-8 h-8 rounded cursor-pointer border border-gray-300" />
-                  <input className="input flex-1 py-1" value={editing.name} onChange={e => setEditing(ed => ({...ed, name: e.target.value}))} />
-                  <button className="btn-primary text-xs py-1 px-3" onClick={() => handleUpdate(editing)}>{t('save')}</button>
-                  <button className="btn-secondary text-xs py-1 px-2" onClick={() => setEditing(null)}>{t('cancel')}</button>
+                  <input
+                    id={`category-color-${category.id}`}
+                    name={`category_color_${category.id}`}
+                    type="color"
+                    value={editing.color || DEFAULT_CATEGORY_COLOR}
+                    onChange={(event) => setEditing((current) => ({ ...current, color: event.target.value }))}
+                    className="h-8 w-8 cursor-pointer rounded border border-gray-300"
+                  />
+                  <input
+                    id={`category-name-${category.id}`}
+                    name={`category_name_${category.id}`}
+                    className="input flex-1 py-1"
+                    value={editing.name}
+                    onChange={(event) => setEditing((current) => ({ ...current, name: event.target.value }))}
+                  />
+                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => handleUpdate(editing)} disabled={saving}>
+                    {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
+                  </button>
+                  <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setEditing(null)} disabled={saving}>
+                    {t('cancel') || 'Cancel'}
+                  </button>
                 </>
               ) : (
                 <>
-                  <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                  <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{c.name}</span>
-                  <button onClick={() => setEditing({...c})} className="text-blue-500 text-xs hover:underline">{t('edit')}</button>
-                  <button onClick={() => handleDelete(c.id)} className="text-red-500 text-xs hover:underline">{t('delete')}</button>
+                  <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
+                  <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{category.name}</span>
+                  <button
+                    onClick={() => setEditing({ ...category, color: category.color || DEFAULT_CATEGORY_COLOR })}
+                    className="text-xs text-blue-500 hover:underline"
+                    disabled={saving || deletingId != null}
+                  >
+                    {t('edit') || 'Edit'}
+                  </button>
+                  <button onClick={() => handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId}>
+                    {deletingId === category.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
+                  </button>
                 </>
               )}
             </div>

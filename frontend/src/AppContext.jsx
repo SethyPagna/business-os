@@ -553,6 +553,9 @@ export function AppProvider({ children }) {
       } else if (entity === 'unit') {
         message = 'This unit changed on another device. Latest data is loading now.'
         entityLabel = 'Unit'
+      } else if (entity === 'file asset') {
+        message = 'This file changed on another device. Latest data is loading now.'
+        entityLabel = 'File'
       }
       setNotification({ message, type: 'error', id: Date.now() })
       setWriteConflict({
