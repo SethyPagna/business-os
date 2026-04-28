@@ -9,6 +9,7 @@ const {
   isAllowedRequestOrigin,
   isAllowedWebSocketOrigin,
   mapServerError,
+  setTunnelSecurityHeaders,
 } = require('../src/serverUtils')
 
 let failed = 0
@@ -99,6 +100,34 @@ runTest('mapServerError maps known errors and defaults to 500', () => {
   assert.equal(mapServerError(new Error('CORS origin denied')).status, 403)
   assert.equal(mapServerError({ message: 'Unsupported file type' }).status, 400)
   assert.equal(mapServerError(new Error('boom')).status, 500)
+})
+
+runTest('setTunnelSecurityHeaders emits strict script CSP without unsafe-inline', () => {
+  const headers = new Map()
+  const res = {
+    setHeader(name, value) {
+      headers.set(String(name), String(value))
+    },
+  }
+  const req = {
+    protocol: 'https',
+    headers: {
+      host: 'localhost:4000',
+      'x-forwarded-proto': 'https',
+    },
+  }
+
+  setTunnelSecurityHeaders(req, res)
+
+  const csp = headers.get('Content-Security-Policy') || ''
+  const scriptSrc = csp
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('script-src')) || ''
+  assert.equal(scriptSrc, "script-src 'self'")
+  assert.match(csp, /manifest-src 'self'/)
+  assert.match(csp, /worker-src 'self' blob:/)
+  assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
 })
 
 if (failed > 0) {

@@ -23,6 +23,7 @@ import {
 import { useApp } from '../../AppContext'
 import UserProfileModal from '../users/UserProfileModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
+import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 
 const ICONS_BY_ID = {
   dashboard: LayoutDashboard,
@@ -260,6 +261,7 @@ export default function Sidebar() {
           {syncUrl ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} /> : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
+          <QuickPreferenceToggles />
           <button type="button" onClick={() => setProfileOpen(true)} className="flex items-center justify-center">
             <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
               {user?.avatar_path ? (

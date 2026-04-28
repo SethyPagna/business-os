@@ -5,6 +5,7 @@ import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
+import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 
 /**
@@ -754,6 +755,9 @@ export default function App() {
       <Sidebar />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 md:pt-0 pb-16 md:pb-0">
+        <div className="hidden h-14 items-center justify-end border-b border-gray-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/88 md:flex">
+          <QuickPreferenceToggles />
+        </div>
         {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
         {mountedPages.map((mountedPage) => (
           <PageSlot

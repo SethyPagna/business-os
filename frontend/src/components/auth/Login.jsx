@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.js'
 
@@ -523,8 +524,11 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/95 p-6 shadow-2xl backdrop-blur dark:bg-slate-900/95">
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex items-center justify-center p-4">
+      <div className="absolute right-4 top-4 z-10">
+        <QuickPreferenceToggles />
+      </div>
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/95 p-6 shadow-2xl backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/92">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/25">
             {otpRequired ? <ShieldCheck className="h-8 w-8" /> : <Building2 className="h-8 w-8" />}

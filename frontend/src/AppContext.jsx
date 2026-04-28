@@ -689,6 +689,7 @@ export function AppProvider({ children }) {
   // ?? Theme and CSS variables ???????????????????????????????????????????????
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
+    document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
   }, [theme])
 
   useEffect(() => {
@@ -1019,6 +1020,25 @@ export function AppProvider({ children }) {
     return () => { cancelled = true }
   }, [notify, t, user])
 
+  const applyDeviceSettings = useCallback((updates = {}) => {
+    const nextUpdates = updates && typeof updates === 'object' ? updates : {}
+    if (!Object.keys(nextUpdates).length) return
+
+    const nextDeviceSettings = { ...readDeviceSettings(), ...nextUpdates }
+    writeDeviceSettings(nextDeviceSettings)
+    setSettings((previous) => ({ ...previous, ...nextUpdates }))
+
+    if (Object.prototype.hasOwnProperty.call(nextUpdates, 'login_session_duration')) {
+      writeStoredSessionDuration(nextUpdates.login_session_duration)
+    }
+    if (Object.prototype.hasOwnProperty.call(nextUpdates, 'language')) {
+      setLanguage(String(nextUpdates.language || 'en').trim() || 'en')
+    }
+    if (Object.prototype.hasOwnProperty.call(nextUpdates, 'theme')) {
+      setTheme(String(nextUpdates.theme || 'light').trim() || 'light')
+    }
+  }, [])
+
   // ?? Settings save ?????????????????????????????????????????????????????????
   const saveSettings = useCallback(async (newSettings) => {
     try {
@@ -1033,11 +1053,10 @@ export function AppProvider({ children }) {
       if (Object.keys(serverUpdates).length) {
         await window.api.saveSettings(serverUpdates)
       }
-      const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
       if (Object.keys(deviceUpdates).length) {
-        const nextDeviceSettings = { ...readDeviceSettings(), ...deviceUpdates }
-        writeDeviceSettings(nextDeviceSettings)
+        applyDeviceSettings(deviceUpdates)
       }
+      const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
       if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
         const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
         const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
@@ -1066,9 +1085,9 @@ export function AppProvider({ children }) {
           window.api?.setAuthSessionToken?.(nextAuthToken)
         }
       }
-      setSettings(prev => ({ ...prev, ...mergedUpdates }))
-      if (mergedUpdates.language) setLanguage(mergedUpdates.language)
-      if (mergedUpdates.theme)    setTheme(mergedUpdates.theme)
+      if (Object.keys(serverUpdates).length) {
+        setSettings((prev) => ({ ...prev, ...serverUpdates }))
+      }
       notify(t('settings_saved'))
       return { success: true }
     } catch (error) {
@@ -1079,7 +1098,15 @@ export function AppProvider({ children }) {
       notify(error?.message || 'Failed to save settings', 'error')
       return { success: false, error }
     }
-  }, [loadSettings, notify, user]) // eslint-disable-line
+  }, [applyDeviceSettings, loadSettings, notify, user]) // eslint-disable-line
+
+  const toggleTheme = useCallback(() => {
+    applyDeviceSettings({ theme: theme === 'dark' ? 'light' : 'dark' })
+  }, [applyDeviceSettings, theme])
+
+  const toggleLanguage = useCallback(() => {
+    applyDeviceSettings({ language: language === 'km' ? 'en' : 'km' })
+  }, [applyDeviceSettings, language])
 
   // ?? Permissions ???????????????????????????????????????????????????????????
   const getPermissions = useCallback(() => {
@@ -1153,6 +1180,7 @@ export function AppProvider({ children }) {
     page, setPage, navigateTo,
     settings, loadSettings, saveSettings,
     language, theme, t,
+    toggleTheme, toggleLanguage,
     notify, notification,
     writeConflict, dismissWriteConflict, reloadWriteConflict,
     hasPermission, canAccessPage, getPermissions,
@@ -1205,6 +1233,8 @@ const FALLBACK_APP_CONTEXT = {
   language: 'en',
   theme: 'light',
   t: (key) => key,
+  toggleTheme: () => {},
+  toggleLanguage: () => {},
   notify: () => {},
   notification: null,
   writeConflict: null,
