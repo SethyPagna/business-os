@@ -6,6 +6,8 @@ const {
   sanitizeStringValue,
   isApiOrHealthPath,
   isSpaFallbackEligible,
+  isAllowedRequestOrigin,
+  isAllowedWebSocketOrigin,
   mapServerError,
 } = require('../src/serverUtils')
 
@@ -67,10 +69,34 @@ runTest('isSpaFallbackEligible only allows browser navigation paths', () => {
   assert.equal(isSpaFallbackEligible('/assets/app.js'), false)
 })
 
+runTest('origin policy allows localhost and denies unknown web origins', () => {
+  assert.equal(isAllowedRequestOrigin(undefined), true)
+  assert.equal(isAllowedRequestOrigin('http://localhost:5173'), true)
+  assert.equal(isAllowedRequestOrigin('http://127.0.0.1:3000'), true)
+  assert.equal(isAllowedRequestOrigin('https://evil.example.com'), false)
+})
+
+runTest('websocket origin policy accepts same-host and rejects mismatched origins', () => {
+  assert.equal(isAllowedWebSocketOrigin({
+    headers: {
+      origin: 'http://localhost:5173',
+      host: 'localhost:4000',
+    },
+  }), true)
+  assert.equal(isAllowedWebSocketOrigin({
+    headers: {
+      origin: 'https://evil.example.com',
+      host: 'localhost:4000',
+    },
+  }), false)
+})
+
 runTest('mapServerError maps known errors and defaults to 500', () => {
   assert.equal(mapServerError({ type: 'entity.too.large' }).status, 413)
+  assert.equal(mapServerError({ type: 'entity.parse.failed' }).status, 400)
   assert.equal(mapServerError({ name: 'MulterError', code: 'LIMIT_FILE_SIZE' }).status, 413)
   assert.equal(mapServerError({ name: 'MulterError', code: 'ANY' }).status, 400)
+  assert.equal(mapServerError(new Error('CORS origin denied')).status, 403)
   assert.equal(mapServerError({ message: 'Unsupported file type' }).status, 400)
   assert.equal(mapServerError(new Error('boom')).status, 500)
 })

@@ -51,6 +51,7 @@ const {
   createAuthSession,
   getPresentedSessionToken,
   revokeAuthSession,
+  revokeUserSessions,
   SESSION_ROTATION_GRACE_MS,
 } = require('../sessionAuth')
 const {
@@ -69,12 +70,18 @@ const router = express.Router()
 
 const LOGIN_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_LOGIN_MAX_ATTEMPTS || 8))
 const LOGIN_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_WINDOW_MS || 10 * 60 * 1000))
+const LOGIN_IP_LIMIT_MAX = Math.max(LOGIN_LIMIT_MAX, Number(process.env.AUTH_LOGIN_IP_MAX_ATTEMPTS || 20))
+const LOGIN_IP_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_IP_WINDOW_MS || LOGIN_LIMIT_WINDOW_MS))
 const OTP_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_OTP_MAX_ATTEMPTS || 10))
 const OTP_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_OTP_WINDOW_MS || 10 * 60 * 1000))
+const OTP_IP_LIMIT_MAX = Math.max(OTP_LIMIT_MAX, Number(process.env.AUTH_OTP_IP_MAX_ATTEMPTS || 25))
+const OTP_IP_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_OTP_IP_WINDOW_MS || OTP_LIMIT_WINDOW_MS))
 const LOGIN_LOCK_THRESHOLD = Math.max(1, Number(process.env.AUTH_LOGIN_LOCK_THRESHOLD || 12))
 const LOGIN_LOCK_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_WINDOW_MS || 15 * 60 * 1000))
 const LOGIN_LOCK_DURATION_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK_DURATION_MS || 15 * 60 * 1000))
 const SERVER_START_TIME = Math.floor(Date.now() / 1000)
+const MAX_LOGIN_IDENTIFIER_LENGTH = Math.max(32, Number(process.env.AUTH_MAX_LOGIN_IDENTIFIER_LENGTH || 160))
+const MAX_PASSWORD_LENGTH = Math.max(32, Number(process.env.AUTH_MAX_PASSWORD_LENGTH || 4096))
 
 /**
  * 1. Shared Helpers
@@ -107,6 +114,11 @@ function applyRateLimit(req, res, { bucket, key, max, windowMs, message }) {
  */
 function getLoginLockKey(identifier) {
   return String(identifier || '').trim().toLowerCase().slice(0, 160)
+}
+
+function isReasonableCredentialLength(identifier, password) {
+  return String(identifier || '').length <= MAX_LOGIN_IDENTIFIER_LENGTH
+    && String(password || '').length <= MAX_PASSWORD_LENGTH
 }
 
 function normalizeLookupText(value) {
@@ -474,14 +486,24 @@ router.post('/login', async (req, res) => {
   const t0 = Date.now()
   const { username, password, organization, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!username || !password) return err(res, 'Username, name, email, or phone number and password are required')
-  const organizationRecord = resolveOrganizationLookup(organization)
-  if (!organizationRecord || !organizationRecord.is_active) return err(res, 'Organization not found', 404)
+  if (!isReasonableCredentialLength(username, password)) {
+    return rejectLogin(res, t0, getLoginLockKey(username), loginIdentifierPreview(username), 'invalid_credential_shape')
+  }
   const lockKey = getLoginLockKey(username)
   const lockState = checkAbuseLock('auth:login_lock', lockKey, LOGIN_LOCK_WINDOW_MS)
   if (lockState.locked) {
     res.setHeader('Retry-After', String(lockState.retryAfterSeconds))
     return err(res, `Too many failed login attempts. Try again in ${lockState.retryAfterSeconds} seconds.`, 429)
   }
+
+  const ipLimitKey = getClientKey(req, 'login-ip')
+  if (!applyRateLimit(req, res, {
+    bucket: 'auth:login_ip',
+    key: ipLimitKey,
+    max: LOGIN_IP_LIMIT_MAX,
+    windowMs: LOGIN_IP_LIMIT_WINDOW_MS,
+    message: 'Too many login attempts from this network.',
+  })) return
 
   const limitKey = getClientKey(req, username)
   if (!applyRateLimit(req, res, {
@@ -491,6 +513,11 @@ router.post('/login', async (req, res) => {
     windowMs: LOGIN_LIMIT_WINDOW_MS,
     message: 'Too many login attempts.',
   })) return
+
+  const organizationRecord = resolveOrganizationLookup(organization)
+  if (!organizationRecord || !organizationRecord.is_active) {
+    return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username), 'invalid_organization_or_credentials')
+  }
 
   const user = findUserByIdentifier(username, {
     requireVerifiedContact: false,
@@ -726,6 +753,14 @@ router.post('/otp/verify', (req, res) => {
   const { userId, token, clientTime, deviceTz, deviceName, sessionDuration } = req.body || {}
   if (!userId || !token) return err(res, 'userId and token required')
 
+  if (!applyRateLimit(req, res, {
+    bucket: 'auth:otp_ip',
+    key: getClientKey(req, 'otp-ip'),
+    max: OTP_IP_LIMIT_MAX,
+    windowMs: OTP_IP_LIMIT_WINDOW_MS,
+    message: 'Too many OTP attempts from this network.',
+  })) return
+
   const limitKey = getClientKey(req, String(userId))
   if (!applyRateLimit(req, res, {
     bucket: 'auth:otp',
@@ -929,10 +964,10 @@ router.post('/password-reset/otp', async (req, res) => {
     organizationId: Number(organizationRecord?.id || 0),
   })
   if (!user) return err(res, 'Invalid reset request', 400)
-  if (!Number(user.otp_enabled || 0)) return err(res, 'OTP is not enabled for this account. Use Google, email recovery, or ask an admin to reset the password.', 400)
+  if (!Number(user.otp_enabled || 0)) return err(res, 'Invalid reset request', 400)
 
   const otpSecret = getOtpSecret(user)
-  if (!otpSecret) return err(res, 'OTP is unavailable for this account. Please contact admin.', 503)
+  if (!otpSecret) return err(res, 'Invalid reset request', 400)
 
   const verified = speakeasy.totp.verify({
     secret: otpSecret,
@@ -962,6 +997,7 @@ router.post('/password-reset/otp', async (req, res) => {
   const hash = bcrypt.hashSync(String(newPassword), 10)
   db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
     .run(hash, supabaseUserId, user.id)
+  revokeUserSessions(user.id)
 
   audit(user.id, user.username, 'password_reset_complete', 'user', user.id, {
     method: 'otp',
@@ -1070,6 +1106,7 @@ router.post('/password-reset/complete', async (req, res) => {
         supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
     WHERE id = ?
   `).run(hash, String(authUser.id || '').trim(), localUser.id)
+  revokeUserSessions(localUser.id)
 
   audit(localUser.id, localUser.username, 'password_reset_complete', 'user', localUser.id, {
     method: 'email',

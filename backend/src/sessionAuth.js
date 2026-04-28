@@ -158,6 +158,22 @@ function revokeAuthSession(token, options = {}) {
   `).run(revokedAt, hashToken(value), revokedAt)
 }
 
+function revokeUserSessions(userId, options = {}) {
+  const id = Number(userId || 0)
+  if (!id) return 0
+  const revokedAt = buildRevocationTimestamp(options.graceMs)
+  const exceptToken = String(options.exceptToken || '').trim()
+  const exceptTokenHash = exceptToken ? hashToken(exceptToken) : ''
+  const result = db.prepare(`
+    UPDATE user_sessions
+    SET revoked_at = ?
+    WHERE user_id = ?
+      AND (revoked_at IS NULL OR revoked_at > ?)
+      AND (? = '' OR token_hash != ?)
+  `).run(revokedAt, id, revokedAt, exceptTokenHash, exceptTokenHash)
+  return Number(result?.changes || 0)
+}
+
 module.exports = {
   SESSION_COOKIE_NAME,
   SESSION_ROTATION_GRACE_MS,
@@ -166,4 +182,5 @@ module.exports = {
   getPresentedSessionToken,
   getSessionUser,
   revokeAuthSession,
+  revokeUserSessions,
 }

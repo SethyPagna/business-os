@@ -37,6 +37,7 @@ const {
   getDefaultOrganizationGroup,
   getOrganizationContextForUser,
 } = require('../organizationContext')
+const { revokeUserSessions } = require('../sessionAuth')
 
 const router = express.Router()
 
@@ -925,6 +926,7 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
   const hash = bcrypt.hashSync(newPassword, 10)
   db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
+  revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id, { mode: allowAdminOverride ? 'admin' : 'self_service' })
   ok(res, {})
 })
@@ -959,6 +961,7 @@ router.post('/users/:id/reset-password', authToken, async (req, res) => {
   const hash = bcrypt.hashSync(newPassword, 10)
   db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
+  revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id)
   ok(res, {})
 })

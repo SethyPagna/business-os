@@ -1,5 +1,7 @@
 'use strict'
 
+const { TAILSCALE_URL } = require('./config')
+
 const API_PATH_PREFIX = '/api/'
 const UPLOADS_PATH_PREFIX = '/uploads/'
 const HEALTH_PATH = '/health'
@@ -8,8 +10,64 @@ const DANGEROUS_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 const STRIP_CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
 const STRIP_BIDI_RE = /[\u202A-\u202E\u2066-\u2069]/g
 
+function parseOriginHost(origin) {
+  const value = String(origin || '').trim()
+  if (!value) return ''
+  try {
+    return new URL(value).hostname.trim().toLowerCase()
+  } catch (_) {
+    return ''
+  }
+}
+
+function normalizeConfiguredHost(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  try {
+    return new URL(raw).hostname.trim().toLowerCase()
+  } catch (_) {
+    return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, '').trim().toLowerCase()
+  }
+}
+
+function isAllowedRequestOrigin(origin) {
+  if (!origin) return true
+  const host = parseOriginHost(origin)
+  if (!host) return false
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true
+  const configuredHost = normalizeConfiguredHost(TAILSCALE_URL)
+  if (configuredHost && host === configuredHost) return true
+  return host.endsWith('.ts.net')
+}
+
+function isAllowedWebSocketOrigin(req) {
+  const origin = String(req?.headers?.origin || '').trim()
+  if (!origin) return true
+  if (!isAllowedRequestOrigin(origin)) return false
+  const originHost = parseOriginHost(origin)
+  const requestHost = String(req?.headers?.host || req?.headers?.['x-forwarded-host'] || '')
+    .split(',')[0]
+    .trim()
+    .replace(/:\d+$/, '')
+    .toLowerCase()
+  if (!requestHost) return true
+  const configuredHost = normalizeConfiguredHost(TAILSCALE_URL)
+  if (originHost === requestHost) return true
+  if (configuredHost && originHost === configuredHost) return true
+  if (originHost.endsWith('.ts.net') && requestHost.endsWith('.ts.net')) return true
+  return hostIsLoopbackPair(originHost, requestHost)
+}
+
+function hostIsLoopbackPair(left, right) {
+  const loopbacks = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+  return loopbacks.has(left) && loopbacks.has(right)
+}
+
 const CORS_OPTIONS = {
-  origin: true,
+  origin(origin, callback) {
+    if (isAllowedRequestOrigin(origin)) return callback(null, true)
+    return callback(new Error('CORS origin denied'))
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -156,8 +214,16 @@ function setUploadStaticHeaders(res, filePath) {
 function mapServerError(error) {
   if (!error) return null
 
+  if (error.message === 'CORS origin denied') {
+    return { status: 403, body: { success: false, error: 'Origin is not allowed.' } }
+  }
+
   if (error.type === 'entity.too.large') {
     return { status: 413, body: { success: false, error: 'Request payload is too large.' } }
+  }
+
+  if (error.type === 'entity.parse.failed') {
+    return { status: 400, body: { success: false, error: 'Request body is not valid JSON.' } }
   }
 
   if (error.name === 'MulterError') {
@@ -192,4 +258,6 @@ module.exports = {
   setFrontendStaticHeaders,
   setUploadStaticHeaders,
   mapServerError,
+  isAllowedRequestOrigin,
+  isAllowedWebSocketOrigin,
 }
