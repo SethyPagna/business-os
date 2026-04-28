@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
-import { getFirstLoaderError, settleLoaderMap } from '../src/utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  getFirstLoaderError,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  settleLoaderMap,
+} from '../src/utils/loaders.mjs'
 
 let failed = 0
 
@@ -33,6 +39,18 @@ await runTest('getFirstLoaderError returns the first useful message', () => {
   })
 
   assert.equal(message, 'first failed')
+})
+
+await runTest('tracked requests only treat the latest request as current', () => {
+  const ref = { current: 0 }
+  const first = beginTrackedRequest(ref)
+  const second = beginTrackedRequest(ref)
+
+  assert.equal(isTrackedRequestCurrent(ref, first), false)
+  assert.equal(isTrackedRequestCurrent(ref, second), true)
+
+  invalidateTrackedRequest(ref)
+  assert.equal(isTrackedRequestCurrent(ref, second), false)
 })
 
 if (failed > 0) {

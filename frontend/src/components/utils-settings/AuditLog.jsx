@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, ClipboardList, Clock3, Download, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 
@@ -156,6 +161,7 @@ export default function AuditLog() {
   const [error, setError] = useState(null)
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const actionLabels = useMemo(() => ({
     create: t('create') || 'Create',
@@ -217,16 +223,22 @@ export default function AuditLog() {
   }, [])
 
   const load = useCallback(() => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     setError(null)
     withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
-      .then((data) => setLogs(Array.isArray(data) ? data : []))
+      .then((data) => {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLogs(Array.isArray(data) ? data : [])
+      })
       .catch((err) => {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.error('Failed to load audit logs:', err)
         setLogs([])
         setError(err?.message || 'Failed to load audit logs.')
       })
       .finally(() => {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         loadedOnceRef.current = true
         setLoading(false)
       })
@@ -235,12 +247,17 @@ export default function AuditLog() {
   useEffect(() => {
     if (page !== 'audit_log') {
       pageLoadRequestedRef.current = false
+      invalidateTrackedRequest(loadRequestRef)
       return
     }
-    if (pageLoadRequestedRef.current) return
+    if (pageLoadRequestedRef.current) {
+      load()
+      return
+    }
     pageLoadRequestedRef.current = true
-    load()
+    load(loadedOnceRef.current)
   }, [load, page])
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const query = search.trim().toLowerCase()
   const searchedLogs = useMemo(() => logs.filter((log) => {

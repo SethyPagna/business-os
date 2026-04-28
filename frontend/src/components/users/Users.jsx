@@ -7,7 +7,13 @@ import { useApp, useSync } from '../../AppContext'
 import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  getFirstLoaderError,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  settleLoaderMap,
+} from '../../utils/loaders.mjs'
 
 /**
  * 1. Users Page Module
@@ -65,6 +71,7 @@ export default function Users() {
   const { syncChannel } = useSync()
   const loadedOnceRef = useRef(false)
   const pageLoadKeyRef = useRef('')
+  const loadRequestRef = useRef(0)
   const tr = (key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -98,7 +105,9 @@ export default function Users() {
   }
 
   const load = async () => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     if (!canManage) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setUsers([])
       setRoles([])
       setLoadError(null)
@@ -114,15 +123,18 @@ export default function Users() {
       })
 
       if (Array.isArray(result.values.users)) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setUsers(result.values.users)
       }
       if (Array.isArray(result.values.roles)) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setRoles(result.values.roles)
       }
 
       if (!result.hasAnySuccess) {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to load users'))
       }
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
       if (result.errors.users) {
         notify(result.errors.users?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
@@ -131,9 +143,11 @@ export default function Users() {
       }
       loadedOnceRef.current = true
     } catch (error) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoadError(error?.message || 'Failed to load users')
       notify(error?.message || 'Failed to load users', 'error')
     } finally {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoading(false)
     }
   }
@@ -141,6 +155,7 @@ export default function Users() {
   useEffect(() => {
     if (page !== 'users') {
       pageLoadKeyRef.current = ''
+      invalidateTrackedRequest(loadRequestRef)
       return
     }
     const accessKey = canManage ? 'manage' : 'view'
@@ -148,11 +163,12 @@ export default function Users() {
     if (pageLoadKeyRef.current === nextLoadKey) return
     pageLoadKeyRef.current = nextLoadKey
     load()
-  }, [canManage, loadError, loading, page]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canManage, page]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!syncChannel) return
+    if (page !== 'users' || !syncChannel) return
     if (syncChannel.channel === 'users' || syncChannel.channel === 'roles') load()
-  }, [syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()

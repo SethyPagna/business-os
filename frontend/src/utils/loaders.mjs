@@ -31,6 +31,22 @@ export async function settleLoaderMap(loaders = {}) {
   }
 }
 
+export function beginTrackedRequest(ref) {
+  const nextId = (Number(ref?.current) || 0) + 1
+  if (ref) ref.current = nextId
+  return nextId
+}
+
+export function isTrackedRequestCurrent(ref, requestId) {
+  return Number(ref?.current) === Number(requestId)
+}
+
+export function invalidateTrackedRequest(ref) {
+  if (!ref) return 0
+  ref.current = (Number(ref.current) || 0) + 1
+  return ref.current
+}
+
 const DEFAULT_LOADER_TIMEOUT_MS = 12_000
 
 export function createLoaderTimeoutError(label, timeoutMs = DEFAULT_LOADER_TIMEOUT_MS) {

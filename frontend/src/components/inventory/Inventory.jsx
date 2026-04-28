@@ -10,7 +10,13 @@ import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  getFirstLoaderError,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  settleLoaderMap,
+} from '../../utils/loaders.mjs'
 
 function getGroupDateParts(group) {
   const parsed = new Date(group?.latest_at || group?.created_at || '')
@@ -45,7 +51,7 @@ function buildMovementSections(groups, mode) {
 }
 
 export default function Inventory() {
-  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
+  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol, page } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -76,8 +82,10 @@ export default function Inventory() {
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
   const movementSelectAllRef = useRef(null)
+  const loadRequestRef = useRef(0)
 
   const load = useCallback(async (silent = false) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent) setLoading(true)
     // branchId must be a number or omitted ??NOT wrapped in a plain object at the call site
     const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter) } : {}
@@ -95,9 +103,10 @@ export default function Inventory() {
       const rets = result.values.returns
       const dash = result.values.dashboard
 
-      if (Array.isArray(sum)  && (sum.length  > 0 || !silent)) setSummary(sum   || [])
-      if (Array.isArray(movs) && (movs.length > 0 || !silent)) setMovements(movs || [])
-      if (Array.isArray(brs))  setBranches(brs.filter(b => b.is_active))
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (Array.isArray(sum)) setSummary(sum || [])
+      if (Array.isArray(movs)) setMovements(movs || [])
+      if (Array.isArray(brs)) setBranches(brs.filter(b => b.is_active))
       if (dash && typeof dash === 'object') {
         setTaxDelivery({
           tax:           dash.all_tax_usd      || 0,
@@ -126,18 +135,26 @@ export default function Inventory() {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
       }
     } catch (e) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       console.warn('[Inventory] load failed:', e.message)
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
   }, [branchFilter])
 
-  useEffect(() => { load() }, [load])
   useEffect(() => {
-    if (!syncChannel) return
+    if (page !== 'inventory') {
+      invalidateTrackedRequest(loadRequestRef)
+      return
+    }
+    load()
+  }, [load, page])
+  useEffect(() => {
+    if (page !== 'inventory' || !syncChannel) return
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
-  }, [syncChannel, load]) // eslint-disable-line
+  }, [page, syncChannel, load]) // eslint-disable-line
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const getStockQty = useCallback((product) => {
     if (!product) return 0

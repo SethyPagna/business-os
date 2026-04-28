@@ -9,7 +9,12 @@ import SaleDetailModal from './SaleDetailModal'
 import ExportModal from './ExportModal'
 import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function multiMatch(text, terms) {
   return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
@@ -57,7 +62,7 @@ function buildGroupedSales(sales, groupMode) {
 }
 
 export default function Sales() {
-  const { t, settings, fmtUSD, fmtKHR, notify, user } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, page } = useApp()
   const { syncChannel } = useSync()
   const [sales, setSales] = useState([])
   const [search, setSearch] = useState('')
@@ -72,6 +77,8 @@ export default function Sales() {
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
   const selectAllRef = useRef(null)
+  const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -81,32 +88,40 @@ export default function Sales() {
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
 
   const loadSales = useCallback((silent = false) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent) setLoading(true)
     return withLoaderTimeout(() => window.api.getSales(), 'Sales')
       .then((result) => {
-        if (Array.isArray(result) && result.length > 0) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (Array.isArray(result)) {
           setSales(result)
+          loadedOnceRef.current = true
           return
         }
-        if (!silent) setSales(Array.isArray(result) ? result : [])
       })
       .catch((error) => {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.error('[Sales] load failed:', error.message)
         if (!silent) setSales([])
       })
       .finally(() => {
-        if (!silent) setLoading(false)
+        if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
       })
   }, [])
 
   useEffect(() => {
-    loadSales()
-  }, [loadSales])
+    if (page !== 'sales') {
+      invalidateTrackedRequest(loadRequestRef)
+      return
+    }
+    loadSales(loadedOnceRef.current)
+  }, [loadSales, page])
 
   useEffect(() => {
-    if (!syncChannel) return
+    if (page !== 'sales' || !syncChannel) return
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
-  }, [syncChannel, loadSales])
+  }, [page, syncChannel, loadSales])
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const handleStatusChange = async (saleId, newStatus, notes) => {
     try {

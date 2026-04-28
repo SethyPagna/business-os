@@ -18,7 +18,13 @@ import VariantFormModal      from './VariantFormModal'
 import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  getFirstLoaderError,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  settleLoaderMap,
+} from '../../utils/loaders.mjs'
 import { getContrastingTextColor } from '../../utils/color.js'
 
 function multiMatch(text, terms) {
@@ -32,7 +38,7 @@ function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant }) {
 // ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 export default function Products() {
-  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
+  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, page } = useApp()
   const { syncChannel } = useSync()
   const [products,     setProducts]     = useState([])
   const [categories,   setCategories]   = useState([])
@@ -56,9 +62,13 @@ export default function Products() {
   const [loading,      setLoading]      = useState(true)
   const [loadError,    setLoadError]    = useState(null)
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
+  const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
 
   const load = useCallback(async (silent = false) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent) setLoadError(null)
+    if (!silent) setLoading(true)
     try {
       const result = await settleLoaderMap({
         products: () => window.api.getProducts(),
@@ -71,7 +81,8 @@ export default function Products() {
       const unitList = result.values.units
       const brs = result.values.branches
 
-      if (Array.isArray(prods) && (prods.length > 0 || !silent)) setProducts(prods)
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (Array.isArray(prods)) setProducts(prods)
       if (Array.isArray(cats)) setCategories(cats)
       if (Array.isArray(unitList)) setUnits(unitList)
       if (Array.isArray(brs)) setBranches((brs || []).filter(b => b.is_active))
@@ -79,18 +90,32 @@ export default function Products() {
       if (!result.hasAnySuccess) {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to load products'))
       }
+      loadedOnceRef.current = true
       if (result.hasErrors && !silent) {
         notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
       }
-    } catch (e) { if (!silent) setLoadError(e.message || 'Failed to load products') }
-    finally { if (!silent) setLoading(false) }
+    } catch (e) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!silent) setLoadError(e.message || 'Failed to load products')
+    } finally {
+      if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
+    }
   }, [notify, t])
-  useEffect(() => { load() }, [load])
+
   useEffect(() => {
-    if (!syncChannel) return
+    if (page !== 'products') {
+      invalidateTrackedRequest(loadRequestRef)
+      return
+    }
+    const silent = loadedOnceRef.current
+    load(silent)
+  }, [load, page])
+  useEffect(() => {
+    if (page !== 'products' || !syncChannel) return
     const ch = syncChannel.channel
     if (ch==='products'||ch==='categories'||ch==='units'||ch==='branches') load(true)
-  }, [syncChannel, load])
+  }, [page, syncChannel, load])
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const handleSave = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
