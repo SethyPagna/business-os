@@ -33,6 +33,23 @@ function AvatarPreview({ name, avatarPath }) {
   )
 }
 
+function ProfileSectionButton({ active, children, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        active
+          ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-900/30 dark:text-blue-300'
+          : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300',
+      ].join(' ')}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function UserProfileModal({ onClose }) {
   const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
   const tr = (key, fallback) => {
@@ -58,6 +75,7 @@ export default function UserProfileModal({ onClose }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [activeSection, setActiveSection] = useState('personal')
   const [sessionDuration, setSessionDuration] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'session'
@@ -73,7 +91,22 @@ export default function UserProfileModal({ onClose }) {
    */
   const canAdminOverride = hasPermission('all')
   const needsSensitivePassword = !canAdminOverride || !!authMethods?.google_linked
-  const title = tr('my_profile', 'My Profile')
+  const title = tr('profile', 'Profile')
+  const organizationDetails = useMemo(() => {
+    let storedOrganization = null
+    try {
+      storedOrganization = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
+    } catch (_) {
+      storedOrganization = null
+    }
+
+    return {
+      name: profile?.organization_name || user?.organization_name || storedOrganization?.name || settings?.business_name || tr('organization_not_selected', 'Organization not selected'),
+      businessName: settings?.business_name || profile?.organization_name || user?.organization_name || '',
+      roleName: profile?.role_name || user?.role_name || tr('no_role', 'No role'),
+      branchName: profile?.branch_name || user?.branch_name || '',
+    }
+  }, [profile?.branch_name, profile?.organization_name, profile?.role_name, settings?.business_name, t, tr, user?.branch_name, user?.organization_name, user?.role_name])
 
   /**
    * 3. Data Hydration
@@ -355,9 +388,25 @@ export default function UserProfileModal({ onClose }) {
               </div>
             </div>
 
+            <div className="flex flex-wrap gap-2">
+              <ProfileSectionButton active={activeSection === 'personal'} onClick={() => setActiveSection('personal')}>
+                {tr('personal_details', 'Personal details')}
+              </ProfileSectionButton>
+              <ProfileSectionButton active={activeSection === 'login_methods'} onClick={() => setActiveSection('login_methods')}>
+                {tr('sign_in_methods', 'Sign-in methods')}
+              </ProfileSectionButton>
+              <ProfileSectionButton active={activeSection === 'security'} onClick={() => setActiveSection('security')}>
+                {tr('security', 'Security')}
+              </ProfileSectionButton>
+              <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
+                {tr('organization', 'Organization')}
+              </ProfileSectionButton>
+            </div>
+
+            {activeSection === 'personal' ? (
             <section className="space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tr('account_details', 'Account details')}</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tr('personal_details', 'Personal details')}</h3>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{verificationHelp}</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -447,7 +496,9 @@ export default function UserProfileModal({ onClose }) {
                 </button>
               </div>
             </section>
+            ) : null}
 
+            {activeSection === 'login_methods' ? (
             <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
@@ -533,7 +584,9 @@ export default function UserProfileModal({ onClose }) {
                 <div className="mt-2">{tr('provider_change_note', 'To switch to another Google account, disconnect the current one first and then connect the new provider.')}</div>
               </div>
             </section>
+            ) : null}
 
+            {activeSection === 'security' ? (
             <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
@@ -604,6 +657,56 @@ export default function UserProfileModal({ onClose }) {
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
               </div>
             </section>
+            ) : null}
+
+            {activeSection === 'organization' ? (
+              <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tr('organization', 'Organization')}</h3>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {tr('organization_privacy_hint', 'Organization identifiers stay hidden here. Only the organization name and role context are shown.')}
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {tr('organization_name', 'Organization name')}
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-gray-900 dark:text-white">
+                      {organizationDetails.name}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {tr('role', 'Role')}
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-gray-900 dark:text-white">
+                      {organizationDetails.roleName}
+                    </div>
+                  </div>
+                  {organizationDetails.businessName ? (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        {tr('workspace', 'Workspace')}
+                      </div>
+                      <div className="mt-2 text-sm text-gray-700 dark:text-gray-200">
+                        {organizationDetails.businessName}
+                      </div>
+                    </div>
+                  ) : null}
+                  {organizationDetails.branchName ? (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        {tr('branch', 'Branch')}
+                      </div>
+                      <div className="mt-2 text-sm text-gray-700 dark:text-gray-200">
+                        {organizationDetails.branchName}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
           </div>
         )}
       </Modal>

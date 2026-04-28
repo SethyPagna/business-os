@@ -118,6 +118,7 @@ export default function Login() {
 
   const usernameRef = useRef()
   const otpRef = useRef()
+  const organizationDisplayName = organizationSearch || tr('organization_not_selected', 'Choose organization')
 
   const rememberOrganization = (item) => {
     try {
@@ -562,8 +563,10 @@ export default function Login() {
               </div>
               {!organizationExpanded && (organizationSearch || organizationId) ? (
                 <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-300">
-                  <div className="font-medium text-gray-800 dark:text-gray-100">{organizationSearch || tr('organization_selected', 'Organization selected')}</div>
-                  {organizationId ? <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{organizationId}</div> : null}
+                  <div className="font-medium text-gray-800 dark:text-gray-100">{organizationDisplayName}</div>
+                  <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    {tr('organization_hidden_hint', 'Organization details stay hidden until you expand this section.')}
+                  </div>
                 </div>
               ) : (
                 <>
@@ -577,17 +580,6 @@ export default function Login() {
                     onChange={(event) => setOrganizationSearch(event.target.value)}
                     placeholder="LeangCosmetics"
                     autoComplete="organization"
-                  />
-                  <label htmlFor="organization-id" className="sr-only">{tr('organization_id', 'Organization ID')}</label>
-                  <input
-                    id="organization-id"
-                    name="organization_id"
-                    className="input"
-                    type="text"
-                    value={organizationId}
-                    onChange={(event) => setOrganizationId(event.target.value)}
-                    placeholder="org_xxxxxxxxxxxxxxxx"
-                    autoComplete="off"
                   />
                   {organizationLoading ? (
                     <div className="text-xs text-gray-500 dark:text-gray-400">{tr('finding_organization', 'Finding organization...')}</div>
@@ -606,7 +598,7 @@ export default function Login() {
                             rememberOrganization(item)
                           }}
                         >
-                          {item.name} · {item.public_id}
+                          {item.name}
                         </button>
                       ))}
                     </div>
@@ -616,7 +608,7 @@ export default function Login() {
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {organizationLocked
                   ? tr('organization_join_locked', 'Organization creation is currently disabled. This server is prepared for LeangCosmetics and future organization-ready expansion.')
-                  : tr('organization_join_hint', 'Search the organization name, then use the organization ID to sign in.')}
+                  : tr('organization_join_hint', 'Search the organization name and select it before signing in.')}
               </p>
             </div>
 
@@ -915,3 +907,4 @@ export default function Login() {
     </div>
   )
 }
+
