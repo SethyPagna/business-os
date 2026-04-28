@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
+import { getContrastingTextColor } from '../../utils/color.js'
 
 export default function ProductDetailModal({
   p,
@@ -23,6 +24,7 @@ export default function ProductDetailModal({
     : (p?.image_path ? [p.image_path] : [])
   const primaryImage = gallery[0] || ''
   const unitColor = unitMap?.[p.unit]?.color || ''
+  const categoryColor = catMap?.[p.category]?.color || '#6b7280'
 
   const Row = ({ label, children }) => (
     <div className="flex gap-3">
@@ -64,7 +66,7 @@ export default function ProductDetailModal({
         <div className="min-h-0 flex-1 space-y-2.5 overflow-auto p-4">
           {p.category ? (
             <Row label={T('label_category', 'Category')}>
-              <span className="rounded-full px-2 py-0.5 text-xs text-white" style={{ background: catMap[p.category]?.color || '#6b7280' }}>
+              <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: categoryColor, color: getContrastingTextColor(categoryColor) }}>
                 {p.category}
               </span>
             </Row>
@@ -75,7 +77,7 @@ export default function ProductDetailModal({
           {p.unit ? (
             <Row label={T('label_unit', 'Unit')}>
               {unitColor ? (
-                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: unitColor }}>
+                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
                   {p.unit}
                 </span>
               ) : p.unit}
@@ -85,7 +87,7 @@ export default function ProductDetailModal({
             <strong className="text-gray-900 dark:text-white">{p.stock_quantity}</strong>
             {p.unit ? (
               unitColor ? (
-                <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: unitColor }}>
+                <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
                   {p.unit}
                 </span>
               ) : (

@@ -9,6 +9,11 @@ export const PRINT_DEFAULTS = {
   customHeight: '297',
 }
 
+function parsePrintNumber(value, fallback) {
+  const parsed = Number.parseFloat(String(value ?? ''))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 const RECEIPT_INLINE_STYLE_PROPS = [
   'display',
   'position',
@@ -341,10 +346,7 @@ async function renderElementToCanvas(element) {
   }
 }
 
-async function withReceiptElement(content, widthMm, action) {
-  const isElement = typeof HTMLElement !== 'undefined' && content instanceof HTMLElement
-  if (isElement) return action(content)
-
+async function withReceiptElement(content, widthMm, action, printSettings = getPrintSettings()) {
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
   host.style.position = 'fixed'
@@ -353,11 +355,30 @@ async function withReceiptElement(content, widthMm, action) {
   host.style.width = `${widthMm}mm`
   host.style.maxWidth = `${widthMm}mm`
   host.style.background = '#fff'
-  host.style.padding = '0'
+  host.style.boxSizing = 'border-box'
+  host.style.padding = `${Math.max(0, parsePrintNumber(printSettings.marginTop, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginRight, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginBottom, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginLeft, 4))}mm`
   host.style.pointerEvents = 'none'
-  host.innerHTML = String(content || '')
+  const inner = document.createElement('div')
+  inner.style.width = '100%'
+  inner.style.transformOrigin = 'top left'
+  const scaleFactor = Math.max(0.5, Math.min(1.5, parsePrintNumber(printSettings.scale, 100) / 100))
+  if (scaleFactor !== 1) {
+    inner.style.transform = `scale(${scaleFactor})`
+    inner.style.width = `${100 / scaleFactor}%`
+  }
+  if (typeof HTMLElement !== 'undefined' && content instanceof HTMLElement) {
+    inner.innerHTML = cloneWithInlineStyles(content)
+  } else {
+    inner.innerHTML = String(content || '')
+  }
+  host.appendChild(inner)
   document.body.appendChild(host)
   try {
+    if (scaleFactor !== 1) {
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
+      const rect = inner.getBoundingClientRect()
+      host.style.minHeight = `${Math.ceil(rect.height)}px`
+    }
     return await action(host)
   } finally {
     host.remove()
@@ -406,7 +427,7 @@ export async function createReceiptPdfBlob(content, options = {}) {
   const pageWidthPt = mmToPt(widthMm)
 
   try {
-    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas)
+    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
     const jpegUrl = canvas.toDataURL('image/jpeg', 0.96)
     const jpegBytes = dataUrlToBytes(jpegUrl)
     const pdfBytes = buildSingleImagePdf({
@@ -421,7 +442,7 @@ export async function createReceiptPdfBlob(content, options = {}) {
     const textSource = await withReceiptElement(content, widthMm, async (element) => {
       await waitForElementAssets(element)
       return element.innerText || element.textContent || title
-    })
+    }, printSettings)
     const lines = String(textSource || title)
       .split(/\r?\n/)
       .map((line) => line.trim())

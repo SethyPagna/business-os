@@ -9,15 +9,16 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 function useLocalCopy() {
   const { settings, t } = useApp()
   const isKhmer = settings?.language === 'km'
   return (key, fallbackEn, fallbackKm = fallbackEn) => {
     const translated = t?.(key)
-    if (translated && translated !== key) return translated
+    if (translated && translated !== key && !isBrokenLocalizedString(translated)) return translated
     return isKhmer ? fallbackKm : fallbackEn
   }
 }
@@ -140,7 +141,7 @@ function InfoTab({ syncUrl, syncConnected }) {
               className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${fetching ? 'animate-spin' : ''}`} />
-              {fetching ? copy('fetching', 'Fetching...', 'កំពុងទាញយក...') : copy('sync_refresh', 'Refresh', 'ធ្វើបច្ចុប្បន្នភាព')}
+              {fetching ? copy('fetching', 'Fetching...', 'កំពុងទាញយក...') : copy('refresh', 'Refresh', 'ស្រស់ថ្មី')}
             </button>
           </div>
 
@@ -284,7 +285,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
             />
             {copy('auto', 'Auto', 'ស្វ័យប្រវត្តិ')}
           </label>
-          <button onClick={fetchServerLog} className="text-xs text-blue-600 hover:underline">{copy('refresh', 'Refresh', 'ធ្វើបច្ចុប្បន្នភាព')}</button>
+          <button onClick={fetchServerLog} className="text-xs text-blue-600 hover:underline">{copy('refresh', 'Refresh', 'ស្រស់ថ្មី')}</button>
           <button onClick={() => { window.api?.clearCallLog?.(); setClientLog([]) }} className="text-xs text-gray-400 hover:text-red-500">{copy('clear', 'Clear', 'សម្អាត')}</button>
         </div>
       </div>
@@ -444,7 +445,7 @@ export default function ServerPage() {
   useEffect(() => {
     const loadSecurityConfig = async () => {
       try {
-        const config = await window.api.getSystemConfig?.()
+        const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Sync settings')
         if (config) setSecurityConfig(config)
       } catch (_) {}
     }

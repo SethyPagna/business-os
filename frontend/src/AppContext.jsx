@@ -20,11 +20,30 @@ import { getClientDeviceInfo } from './utils/deviceInfo.js'
  * - provide navigation, notifications, and shared formatters
  */
 
-const LANG_LOADERS = {
-  en: async () => en,
-  km: async () => (await import('./lang/km.json')).default,
+function flattenTranslationTree(input, target = {}) {
+  if (!input || typeof input !== 'object') return target
+  Object.entries(input).forEach(([key, value]) => {
+    if (value == null) return
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      target[key] = String(value)
+      return
+    }
+    if (Array.isArray(value)) return
+    flattenTranslationTree(value, target)
+  })
+  return target
 }
-const loadedLangs = { en }
+
+const baseEnglishPack = flattenTranslationTree(en, {})
+
+const LANG_LOADERS = {
+  en: async () => baseEnglishPack,
+  km: async () => {
+    const { default: km } = await import('./lang/km.json')
+    return flattenTranslationTree(km, {})
+  },
+}
+const loadedLangs = { en: baseEnglishPack }
 const AppContext = createContext(null)
 const SyncContext = createContext(null)
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
@@ -186,6 +205,7 @@ export function isBrokenLocalizedString(value) {
   const trimmed = value.trim()
   if (!trimmed) return false
   if (trimmed.includes('\ufffd')) return true
+  if (/[\uE000-\uF8FF]/.test(trimmed)) return true
   const questionMarks = (trimmed.match(/\?/g) || []).length
   return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
 }

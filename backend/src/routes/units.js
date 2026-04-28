@@ -35,7 +35,7 @@ unitsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-unitsRouter.put('/:id', authToken, requirePermission('products'), (req, res) => {
+function updateUnitHandler(req, res) {
   const actor = getAuditActor(req)
   const unitId = Number(req.params.id || 0)
   const trimmedName = String(req.body?.name || '').trim()
@@ -51,7 +51,10 @@ unitsRouter.put('/:id', authToken, requirePermission('products'), (req, res) => 
   } catch {
     err(res, 'Unit already exists')
   }
-})
+}
+
+unitsRouter.put('/:id', authToken, requirePermission('products'), updateUnitHandler)
+unitsRouter.patch('/:id', authToken, requirePermission('products'), updateUnitHandler)
 
 unitsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   const actor = getAuditActor(req)

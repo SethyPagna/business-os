@@ -347,7 +347,7 @@ export const deleteCategory = id       => route('categories:delete', () => apiFe
 // ─── Units ────────────────────────────────────────────────────────────────────
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
 export const createUnit = d   => route('units:create', () => apiFetch('POST', '/api/units', d),       null, true)
-export const updateUnit = (id, d) => route('units:update', () => apiFetch('PUT', `/api/units/${id}`, d), null, true)
+export const updateUnit = (id, d) => route('units:update', () => apiFetch('PATCH', `/api/units/${id}`, d), null, true)
 export const deleteUnit = id  => route('units:delete', () => apiFetch('DELETE', `/api/units/${id}`),  null, true)
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
@@ -885,6 +885,20 @@ export function downloadImportTemplate(type) {
   if (type === 'customer') return downloadCustomerTemplate()
   if (type === 'deliveryContact') return buildCSVTemplate(['name', 'phone', 'area', 'address', 'notes'], 'delivery-contacts-template.csv')
   if (type === 'supplier') return downloadSupplierTemplate()
+  if (type === 'sales') {
+    return buildCSVTemplate([
+      'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency',
+      'branch', 'customer_name', 'customer_phone', 'customer_address',
+      'cashier_name', 'name', 'sku', 'barcode', 'quantity',
+      'unit_price_usd', 'unit_price_khr', 'notes',
+    ], 'sales-template.csv')
+  }
+  if (type === 'inventory') {
+    return buildCSVTemplate([
+      'date', 'action', 'branch', 'name', 'sku', 'barcode', 'quantity',
+      'unit_cost_usd', 'unit_cost_khr', 'reason',
+    ], 'inventory-template.csv')
+  }
   buildCSVTemplate([
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',

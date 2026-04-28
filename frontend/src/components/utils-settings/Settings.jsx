@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
-import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
@@ -540,6 +540,13 @@ export default function Settings() {
         title={t('settings')}
         subtitle={uiLanguage === 'km' ? 'ការកំណត់កម្មវិធីទាំងអស់' : 'All app settings'}
         className="mb-6"
+        stackOnMobile={false}
+        actions={(
+          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={() => saveSettings(form)}>
+            <Save className="h-4 w-4" />
+            <span>{t('save')}</span>
+          </button>
+        )}
       />
 
       <div className="mx-auto max-w-[96rem] space-y-4">

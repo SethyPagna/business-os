@@ -1,5 +1,4 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { Server } from 'lucide-react'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import Login from './components/auth/Login'
@@ -7,6 +6,13 @@ import Sidebar from './components/navigation/Sidebar'
 import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
+import Users from './components/users/Users'
+import AuditLog from './components/utils-settings/AuditLog'
+import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
+import Backup from './components/utils-settings/Backup'
+import Settings from './components/utils-settings/Settings'
+import FilesPage from './components/files/FilesPage'
+import ServerPage from './components/server/ServerPage'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
 
@@ -31,13 +37,6 @@ const PAGE_IMPORTERS = {
   contacts: () => import('./components/contacts/Contacts'),
   catalog: () => import('./components/catalog/CatalogPage'),
   loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
-  users: () => import('./components/users/Users'),
-  audit_log: () => import('./components/utils-settings/AuditLog'),
-  receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
-  backup: () => import('./components/utils-settings/Backup'),
-  settings: () => import('./components/utils-settings/Settings'),
-  files: () => import('./components/files/FilesPage'),
-  server: () => import('./components/server/ServerPage'),
 }
 
 const WARMUP_PAGE_IDS = [
@@ -196,13 +195,6 @@ const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
-const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
-const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
-const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
-const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
-const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
-const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
-const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const PAGE_COMPONENTS = {
   dashboard: Dashboard,
   products: Products,
@@ -238,50 +230,12 @@ function getWarmupImporters() {
 }
 
 function getDataWarmupLoaders(canAccessPage) {
-  const steps = [
-    createWarmupLoader('Settings warmup', () => window.api?.getSettings?.()),
-    createWarmupLoader('Dashboard warmup', () => window.api?.getDashboard?.()),
-  ]
-
-  // Prioritize the pages that have historically been slow on their first visit.
-  // These warmups happen early so late-navigation admin screens have data and
-  // auth-derived config ready before the user reaches them.
-  if (canAccessPage('users')) {
-    steps.push(createWarmupLoader('Users warmup', () => window.api?.getUsers?.()))
-    steps.push(createWarmupLoader('Roles warmup', () => window.api?.getRoles?.()))
-  }
-  if (canAccessPage('audit_log')) {
-    steps.push(createWarmupLoader('Audit log warmup', () => window.api?.getAuditLogs?.()))
-  }
-  if (canAccessPage('server') || canAccessPage('settings') || canAccessPage('backup')) {
-    steps.push(createWarmupLoader('System config warmup', () => window.api?.getSystemConfig?.()))
-  }
-  if (canAccessPage('files')) {
-    steps.push(createWarmupLoader('Files warmup', () => window.api?.getFiles?.()))
-    steps.push(createWarmupLoader('AI providers warmup', () => window.api?.getAiProviders?.()))
-    steps.push(createWarmupLoader('AI responses warmup', () => window.api?.getAiResponses?.(40)))
-  }
-  if (canAccessPage('server')) {
-    steps.push(createWarmupLoader('System diagnostics warmup', () => window.api?.getSystemDebugLog?.()))
-  }
-  if (canAccessPage('backup')) {
-    steps.push(createWarmupLoader('Data path warmup', () => window.api?.getDataPath?.()))
-    steps.push(createWarmupLoader('Drive sync warmup', () => window.api?.getGoogleDriveSyncStatus?.()))
-  }
-
-  steps.push(
-    createWarmupLoader('Products warmup', () => window.api?.getProducts?.()),
-    createWarmupLoader('Categories warmup', () => window.api?.getCategories?.()),
-    createWarmupLoader('Units warmup', () => window.api?.getUnits?.()),
-    createWarmupLoader('Branches warmup', () => window.api?.getBranches?.()),
-    createWarmupLoader('Sales warmup', () => window.api?.getSales?.()),
-    createWarmupLoader('Returns warmup', () => window.api?.getReturns?.()),
-    createWarmupLoader('Customers warmup', () => window.api?.getCustomers?.()),
-    createWarmupLoader('Suppliers warmup', () => window.api?.getSuppliers?.()),
-    createWarmupLoader('Delivery contacts warmup', () => window.api?.getDeliveryContacts?.()),
-  )
-
-  return steps.filter(Boolean)
+  // Data warmups used to prefetch many page reads in the background. In
+  // practice that created first-visit contention: the real page load would
+  // inherit a half-stuck warmup request and sit on "Loading..." until the
+  // older request timed out. Keep shell warmup focused on code chunks; pages
+  // now own their own data fetch lifecycle.
+  return []
 }
 
 function createWarmupLoader(label, fn) {
@@ -299,42 +253,10 @@ function runWarmupBatches(loaders, batchSize = 3) {
 }
 
 function getPageEntryWarmupLoaders(pageId, canAccessPage) {
-  const loaders = []
-  const add = (label, fn) => {
-    const wrapped = createWarmupLoader(label, fn)
-    if (wrapped) loaders.push(wrapped)
-  }
-
-  if (pageId === 'users' && canAccessPage('users')) {
-    add('Users warmup', () => window.api?.getUsers?.())
-    add('Roles warmup', () => window.api?.getRoles?.())
-  }
-  if (pageId === 'audit_log' && canAccessPage('audit_log')) {
-    add('Audit log warmup', () => window.api?.getAuditLogs?.())
-  }
-  if (pageId === 'receipt_settings') {
-    add('Receipt settings warmup', () => window.api?.getSettings?.())
-  }
-  if (pageId === 'settings' && canAccessPage('settings')) {
-    add('Settings warmup', () => window.api?.getSettings?.())
-    add('System config warmup', () => window.api?.getSystemConfig?.())
-  }
-  if (pageId === 'files' && canAccessPage('files')) {
-    add('Files warmup', () => window.api?.getFiles?.())
-    add('AI providers warmup', () => window.api?.getAiProviders?.())
-    add('AI responses warmup', () => window.api?.getAiResponses?.(40))
-  }
-  if (pageId === 'server' && canAccessPage('server')) {
-    add('Sync settings warmup', () => window.api?.getSystemConfig?.())
-    add('System diagnostics warmup', () => window.api?.getSystemDebugLog?.())
-  }
-  if (pageId === 'backup' && canAccessPage('backup')) {
-    add('Backup settings warmup', () => window.api?.getSystemConfig?.())
-    add('Data path warmup', () => window.api?.getDataPath?.())
-    add('Drive sync warmup', () => window.api?.getGoogleDriveSyncStatus?.())
-  }
-
-  return loaders
+  // See getDataWarmupLoaders(): route-entry data warmups were duplicating the
+  // fetches that the pages themselves already perform, which made first visits
+  // less reliable instead of more reliable.
+  return []
 }
 
 function useMountedPages(activePage) {
@@ -613,11 +535,27 @@ function ReadOnlyServerBanner() {
 }
 
 function PageLoader() {
+  const [stalled, setStalled] = useState(false)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setStalled(true), 8000)
+    return () => window.clearTimeout(timer)
+  }, [])
+
   return (
     <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600">
       <div className="text-center">
         <div className="text-3xl mb-2 animate-pulse">...</div>
         <p className="text-sm">Loading...</p>
+        {stalled ? (
+          <button
+            type="button"
+            className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition hover:border-blue-400 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+            onClick={() => window.location.reload()}
+          >
+            Reload page
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -761,53 +699,57 @@ export default function App() {
   }
 
   return (
-    <div id="app-root" className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
-      <Sidebar />
-
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 md:pt-0 pb-16 md:pb-0">
-        <div className="app-topbar hidden h-14 items-center justify-between border-b px-4 md:flex">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 dark:border-slate-700/70 dark:bg-slate-800/80">
-              {settings?.customer_portal_logo_image ? (
-                <img
-                  src={settings.customer_portal_logo_image}
-                  alt={settings?.business_name || 'Business OS'}
-                  className="h-full w-full object-contain p-0.5"
-                />
-              ) : (
-                <span className="grid h-full w-full place-items-center text-sm font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
-                  {String(settings?.business_name || 'Business OS').slice(0, 2).toUpperCase()}
-                </span>
-              )}
-            </div>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {settings?.business_name || 'Business OS'}
-              </div>
-              <button
-                type="button"
-                onClick={() => setPage('server')}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
-              >
-                <Server className="h-3.5 w-3.5" />
-                <span>{t('sync_server_title') || 'Sync Server'}</span>
-                {syncUrl ? <span className={`h-2 w-2 rounded-full ${canWriteToServer ? 'bg-emerald-400' : 'bg-amber-400'}`} /> : null}
-              </button>
-            </div>
+    <div id="app-root" className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+      <div className="app-topbar hidden h-14 flex-shrink-0 items-center justify-between border-b px-4 md:flex">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 dark:border-slate-700/70 dark:bg-slate-800/80">
+            {settings?.customer_portal_logo_image ? (
+              <img
+                src={settings.customer_portal_logo_image}
+                alt={settings?.business_name || 'Business OS'}
+                className="h-full w-full object-contain p-0.5"
+              />
+            ) : (
+              <span className="grid h-full w-full place-items-center text-sm font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
+                {String(settings?.business_name || 'Business OS').slice(0, 2).toUpperCase()}
+              </span>
+            )}
           </div>
-          <QuickPreferenceToggles />
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {settings?.business_name || 'Business OS'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setPage('server')}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+            >
+              <span>{t('sync_server_title') || 'Sync Server'}</span>
+              {syncUrl ? <span className={`h-2 w-2 rounded-full ${canWriteToServer ? 'bg-emerald-400' : 'bg-amber-400'}`} /> : null}
+            </button>
+          </div>
         </div>
-        {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
-        {mountedPages.map((mountedPage) => (
-          <PageSlot
-            key={mountedPage}
-            accessDenied={accessDeniedNode}
-            activePageId={page}
-            canAccessPage={canAccessPage}
-            pageId={mountedPage}
-          />
-        ))}
-      </main>
+        <QuickPreferenceToggles />
+      </div>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
+
+        <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
+          <div className="flex min-w-0 items-center gap-3">
+          </div>
+          {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
+          {mountedPages.map((mountedPage) => (
+            <PageSlot
+              key={mountedPage}
+              accessDenied={accessDeniedNode}
+              activePageId={page}
+              canAccessPage={canAccessPage}
+              pageId={mountedPage}
+            />
+          ))}
+        </main>
+      </div>
 
       <Notification notification={notification} />
       <WriteConflictModal

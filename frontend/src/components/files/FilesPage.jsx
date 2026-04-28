@@ -106,9 +106,34 @@ export default function FilesPage() {
   const [loadingResponses, setLoadingResponses] = useState(false)
   const [expandedResponseId, setExpandedResponseId] = useState(null)
 
-  const tr = (key, fallback) => {
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallback, fallbackKm = fallback) => {
     const value = typeof t === 'function' ? t(key) : null
-    return value && value !== key ? value : fallback
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallback
+  }
+  const providerText = {
+    entryName: tr('entry_name', 'Entry name', 'ឈ្មោះធាតុ'),
+    type: tr('type', 'Type', 'ប្រភេទ'),
+    accountEmail: tr('account_email', 'Account email', 'អ៊ីមែលគណនី'),
+    projectWorkspace: tr('project_workspace', 'Project / workspace', 'គម្រោង / កន្លែងការងារ'),
+    apiKey: tr('api_key', 'API key', 'សោ API'),
+    apiKeyHint: tr('api_key_hint', 'Keys are encrypted before they are stored and only shown later in masked form.', 'សោត្រូវបានអ៊ិនគ្រីបមុនពេលរក្សាទុក ហើយពេលក្រោយនឹងបង្ហាញតែជាទម្រង់លាក់ប៉ុណ្ណោះ។'),
+    defaultModel: tr('default_model', 'Default model', 'ម៉ូឌែលលំនាំដើម'),
+    endpointOverride: tr('endpoint_override', 'Endpoint override', 'ប្ដូរ endpoint'),
+    priority: tr('priority', 'Priority', 'អាទិភាព'),
+    priorityHint: tr('priority_hint', 'Lower numbers are tried first.', 'លេខតូចជាង នឹងត្រូវសាកមុន។'),
+    rpm: tr('requests_per_minute', 'Requests / minute', 'សំណើ / នាទី'),
+    maxInput: tr('max_input_chars', 'Max input chars', 'អក្សរបញ្ចូលអតិបរមា'),
+    maxOutput: tr('max_completion_tokens', 'Max completion tokens', 'តូខិនចម្លើយអតិបរមា'),
+    timeout: tr('timeout_ms', 'Timeout (ms)', 'អស់ពេល (មិល្លីវិនាទី)'),
+    cooldown: tr('cooldown_seconds', 'Cooldown (seconds)', 'ពេលរង់ចាំ (វិនាទី)'),
+    supportedModels: tr('supported_models', 'Supported models', 'ម៉ូឌែលដែលគាំទ្រ'),
+    notes: tr('notes', 'Notes', 'កំណត់ចំណាំ'),
+    enabled: tr('enabled', 'Enabled', 'បើក'),
+    saveProvider: tr('save_provider', 'Save provider', 'រក្សាទុក provider'),
+    addProvider: tr('add_provider', 'Add provider', 'បន្ថែម provider'),
+    saving: tr('saving', 'Saving...', 'កំពុងរក្សាទុក...'),
   }
 
   const providerOptions = useMemo(() => Object.entries(providerMeta || {}), [providerMeta])
@@ -356,12 +381,12 @@ export default function FilesPage() {
         icon={FolderOpen}
         tone="blue"
         title={tr('library', 'Library')}
-        subtitle={tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.')}
+        subtitle={tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.', 'គ្រប់គ្រងឯកសារ AI providers និងចម្លើយ AI ដែលបានរក្សាទុក នៅកន្លែងតែមួយ។')}
         actions={(
           <div className="grid grid-cols-3 gap-1.5">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
-          {tabButton('providers', tr('library_ai_providers', 'AI Providers'), KeyRound)}
-          {tabButton('responses', tr('library_ai_responses', 'AI Responses'), History)}
+          {tabButton('providers', tr('library_ai_providers', 'AI Providers', 'AI Providers'), KeyRound)}
+          {tabButton('responses', tr('library_ai_responses', 'AI Responses', 'ចម្លើយ AI'), History)}
           </div>
         )}
       />
@@ -432,18 +457,18 @@ export default function FilesPage() {
           <section className="card p-4 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">AI providers</h2>
-                <p className="mt-1 text-sm text-slate-500">Store provider keys securely, keep them masked after save, and test each connection before using it in the portal.</p>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{tr('library_ai_providers', 'AI Providers', 'AI Providers')}</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{tr('ai_providers_hint', 'Store provider keys securely, keep them masked after save, and test each connection before using it in the portal.', 'រក្សាទុកសោ provider ឲ្យមានសុវត្ថិភាព លាក់វាបន្ទាប់ពីរក្សាទុក ហើយសាកល្បងមុនប្រើក្នុង Customer Portal។')}</p>
               </div>
               <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={loadProviders}>
                 <RefreshCcw className="mr-2 inline h-4 w-4" />
-                Refresh
+                {tr('refresh', 'Refresh', 'ស្រស់ថ្មី')}
               </button>
             </div>
 
             <div className="mt-4 space-y-3">
-              {loadingProviders ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">Loading providers...</div> : null}
-              {!loadingProviders && !providers.length ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">No AI providers yet.</div> : null}
+              {loadingProviders ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">{tr('loading_providers', 'Loading providers...', 'កំពុងផ្ទុក providers...')}</div> : null}
+              {!loadingProviders && !providers.length ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">{tr('no_ai_providers', 'No AI providers yet.', 'មិនទាន់មាន AI providers ទេ។')}</div> : null}
               {providers.map((provider) => (
                 <article key={provider.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -522,11 +547,11 @@ export default function FilesPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="provider-form-name" className="block text-sm font-medium text-slate-700">Entry name</label>
-                  <input id="provider-form-name" name="provider_form_name" className="input mt-1" value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Groq main account" />
+                  <label htmlFor="provider-form-name" className="block text-sm font-medium text-slate-700">{providerText.entryName}</label>
+                  <input id="provider-form-name" name="provider_form_name" className="input mt-1" value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder={isKhmer ? 'គណនី Groq សំខាន់' : 'Groq main account'} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-type" className="block text-sm font-medium text-slate-700">Type</label>
+                  <label htmlFor="provider-form-type" className="block text-sm font-medium text-slate-700">{providerText.type}</label>
                   <select id="provider-form-type" name="provider_form_type" className="input mt-1" value={providerForm.provider_type} onChange={(event) => setProviderForm((current) => ({ ...current, provider_type: event.target.value }))}>
                     {(selectedProviderMeta?.supportedTypes || ['chat']).map((type) => (
                       <option key={type} value={type}>{type}</option>
@@ -536,71 +561,71 @@ export default function FilesPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="provider-form-email" className="block text-sm font-medium text-slate-700">Account email</label>
+                  <label htmlFor="provider-form-email" className="block text-sm font-medium text-slate-700">{providerText.accountEmail}</label>
                   <input id="provider-form-email" name="provider_form_email" className="input mt-1" value={providerForm.account_email} onChange={(event) => setProviderForm((current) => ({ ...current, account_email: event.target.value }))} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-project" className="block text-sm font-medium text-slate-700">Project / workspace</label>
+                  <label htmlFor="provider-form-project" className="block text-sm font-medium text-slate-700">{providerText.projectWorkspace}</label>
                   <input id="provider-form-project" name="provider_form_project" className="input mt-1" value={providerForm.project_name} onChange={(event) => setProviderForm((current) => ({ ...current, project_name: event.target.value }))} />
                 </div>
               </div>
               <div>
-                <label htmlFor="provider-form-api-key" className="block text-sm font-medium text-slate-700">API key</label>
-                <input id="provider-form-api-key" name="provider_form_api_key" className="input mt-1" value={providerForm.api_key} onChange={(event) => setProviderForm((current) => ({ ...current, api_key: event.target.value }))} placeholder={providerForm.id ? 'Leave blank to keep the current key' : 'Paste API key'} />
-                <p className="mt-1 text-xs text-slate-500">Keys are encrypted before they are stored and only shown later in masked form.</p>
+                <label htmlFor="provider-form-api-key" className="block text-sm font-medium text-slate-700">{providerText.apiKey}</label>
+                <input id="provider-form-api-key" name="provider_form_api_key" className="input mt-1" value={providerForm.api_key} onChange={(event) => setProviderForm((current) => ({ ...current, api_key: event.target.value }))} placeholder={providerForm.id ? (isKhmer ? 'ទុកទទេ ដើម្បីរក្សាសោបច្ចុប្បន្ន' : 'Leave blank to keep the current key') : (isKhmer ? 'បិទភ្ជាប់សោ API' : 'Paste API key')} />
+                <p className="mt-1 text-xs text-slate-500">{providerText.apiKeyHint}</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="provider-form-model" className="block text-sm font-medium text-slate-700">Default model</label>
+                  <label htmlFor="provider-form-model" className="block text-sm font-medium text-slate-700">{providerText.defaultModel}</label>
                   <input id="provider-form-model" name="provider_form_model" className="input mt-1" value={providerForm.default_model} onChange={(event) => setProviderForm((current) => ({ ...current, default_model: event.target.value }))} placeholder={selectedProviderMeta?.defaultModel || ''} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-endpoint" className="block text-sm font-medium text-slate-700">Endpoint override</label>
+                  <label htmlFor="provider-form-endpoint" className="block text-sm font-medium text-slate-700">{providerText.endpointOverride}</label>
                   <input id="provider-form-endpoint" name="provider_form_endpoint" className="input mt-1" value={providerForm.endpoint_override} onChange={(event) => setProviderForm((current) => ({ ...current, endpoint_override: event.target.value }))} placeholder={selectedProviderMeta?.defaultEndpoint || ''} />
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
-                  <label htmlFor="provider-form-priority" className="block text-sm font-medium text-slate-700">Priority</label>
+                  <label htmlFor="provider-form-priority" className="block text-sm font-medium text-slate-700">{providerText.priority}</label>
                   <input id="provider-form-priority" name="provider_form_priority" className="input mt-1" type="number" min="1" max="999" value={providerForm.priority} onChange={(event) => setProviderForm((current) => ({ ...current, priority: event.target.value }))} />
-                  <p className="mt-1 text-xs text-slate-500">Lower numbers are tried first.</p>
+                  <p className="mt-1 text-xs text-slate-500">{providerText.priorityHint}</p>
                 </div>
                 <div>
-                  <label htmlFor="provider-form-rpm" className="block text-sm font-medium text-slate-700">Requests / minute</label>
+                  <label htmlFor="provider-form-rpm" className="block text-sm font-medium text-slate-700">{providerText.rpm}</label>
                   <input id="provider-form-rpm" name="provider_form_requests_per_minute" className="input mt-1" type="number" min="1" max="120" value={providerForm.requests_per_minute} onChange={(event) => setProviderForm((current) => ({ ...current, requests_per_minute: event.target.value }))} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-max-input" className="block text-sm font-medium text-slate-700">Max input chars</label>
+                  <label htmlFor="provider-form-max-input" className="block text-sm font-medium text-slate-700">{providerText.maxInput}</label>
                   <input id="provider-form-max-input" name="provider_form_max_input_chars" className="input mt-1" type="number" min="200" max="4000" value={providerForm.max_input_chars} onChange={(event) => setProviderForm((current) => ({ ...current, max_input_chars: event.target.value }))} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-max-output" className="block text-sm font-medium text-slate-700">Max completion tokens</label>
+                  <label htmlFor="provider-form-max-output" className="block text-sm font-medium text-slate-700">{providerText.maxOutput}</label>
                   <input id="provider-form-max-output" name="provider_form_max_completion_tokens" className="input mt-1" type="number" min="128" max="8192" value={providerForm.max_completion_tokens} onChange={(event) => setProviderForm((current) => ({ ...current, max_completion_tokens: event.target.value }))} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-timeout" className="block text-sm font-medium text-slate-700">Timeout (ms)</label>
+                  <label htmlFor="provider-form-timeout" className="block text-sm font-medium text-slate-700">{providerText.timeout}</label>
                   <input id="provider-form-timeout" name="provider_form_timeout_ms" className="input mt-1" type="number" min="3000" max="60000" step="500" value={providerForm.timeout_ms} onChange={(event) => setProviderForm((current) => ({ ...current, timeout_ms: event.target.value }))} />
                 </div>
                 <div>
-                  <label htmlFor="provider-form-cooldown" className="block text-sm font-medium text-slate-700">Cooldown (seconds)</label>
+                  <label htmlFor="provider-form-cooldown" className="block text-sm font-medium text-slate-700">{providerText.cooldown}</label>
                   <input id="provider-form-cooldown" name="provider_form_cooldown_seconds" className="input mt-1" type="number" min="5" max="300" value={providerForm.cooldown_seconds} onChange={(event) => setProviderForm((current) => ({ ...current, cooldown_seconds: event.target.value }))} />
                 </div>
               </div>
               <div>
-                <label htmlFor="provider-form-supported-models" className="block text-sm font-medium text-slate-700">Supported models</label>
-                <textarea id="provider-form-supported-models" name="provider_form_supported_models" className="input mt-1 resize-none" rows={4} value={providerForm.supported_models_text} onChange={(event) => setProviderForm((current) => ({ ...current, supported_models_text: event.target.value }))} placeholder="One model per line" />
+                <label htmlFor="provider-form-supported-models" className="block text-sm font-medium text-slate-700">{providerText.supportedModels}</label>
+                <textarea id="provider-form-supported-models" name="provider_form_supported_models" className="input mt-1 resize-none" rows={4} value={providerForm.supported_models_text} onChange={(event) => setProviderForm((current) => ({ ...current, supported_models_text: event.target.value }))} placeholder={isKhmer ? 'មួយម៉ូឌែលក្នុងមួយបន្ទាត់' : 'One model per line'} />
               </div>
               <div>
-                <label htmlFor="provider-form-notes" className="block text-sm font-medium text-slate-700">Notes</label>
-                <textarea id="provider-form-notes" name="provider_form_notes" className="input mt-1 resize-none" rows={4} value={providerForm.notes} onChange={(event) => setProviderForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Purpose, monthly budget, or when to use this provider" />
+                <label htmlFor="provider-form-notes" className="block text-sm font-medium text-slate-700">{providerText.notes}</label>
+                <textarea id="provider-form-notes" name="provider_form_notes" className="input mt-1 resize-none" rows={4} value={providerForm.notes} onChange={(event) => setProviderForm((current) => ({ ...current, notes: event.target.value }))} placeholder={isKhmer ? 'គោលបំណង ថវិកាប្រចាំខែ ឬពេលណាគួរប្រើ provider នេះ' : 'Purpose, monthly budget, or when to use this provider'} />
               </div>
               <label htmlFor="provider-form-enabled" className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <span className="text-sm font-medium text-slate-700">Enabled</span>
+                <span className="text-sm font-medium text-slate-700">{providerText.enabled}</span>
                 <input id="provider-form-enabled" name="provider_form_enabled" type="checkbox" checked={providerForm.enabled} onChange={(event) => setProviderForm((current) => ({ ...current, enabled: event.target.checked }))} />
               </label>
               <button type="button" className="btn-primary text-sm" onClick={saveProvider} disabled={savingProvider}>
                 <Save className="mr-2 inline h-4 w-4" />
-                {savingProvider ? 'Saving...' : (providerForm.id ? 'Save provider' : 'Add provider')}
+                {savingProvider ? providerText.saving : (providerForm.id ? providerText.saveProvider : providerText.addProvider)}
               </button>
             </div>
           </section>
@@ -610,19 +635,19 @@ export default function FilesPage() {
       {activeTab === 'responses' ? (
         <section className="card p-4 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">AI response history</h2>
-              <p className="mt-1 text-sm text-slate-500">Saved portal answers stay here so the team can review what was suggested, by which provider, and with what product references.</p>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{tr('library_ai_responses', 'AI Responses', 'ចម្លើយ AI')}</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{tr('ai_responses_hint', 'Saved portal answers stay here so the team can review what was suggested, by which provider, and with what product references.', 'ចម្លើយ Portal ដែលបានរក្សាទុកនឹងនៅទីនេះ ដើម្បីឲ្យក្រុមអាចពិនិត្យបានថា provider មួយណាបានផ្តល់សំណើអ្វី និងយោងផលិតផលណាខ្លះ។')}</p>
             </div>
             <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={loadResponses}>
               <RefreshCcw className="mr-2 inline h-4 w-4" />
-              Refresh
+              {tr('refresh', 'Refresh', 'ស្រស់ថ្មី')}
             </button>
           </div>
 
           <div className="mt-4 space-y-3">
-            {loadingResponses ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">Loading AI responses...</div> : null}
-            {!loadingResponses && !responses.length ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">No AI responses saved yet.</div> : null}
+            {loadingResponses ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">{tr('loading_ai_responses', 'Loading AI responses...', 'កំពុងផ្ទុកចម្លើយ AI...')}</div> : null}
+            {!loadingResponses && !responses.length ? <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">{tr('no_ai_responses', 'No AI responses saved yet.', 'មិនទាន់មានចម្លើយ AI ដែលបានរក្សាទុកទេ។')}</div> : null}
             {responses.map((entry) => {
               const expanded = expandedResponseId === entry.id
               return (
@@ -657,12 +682,12 @@ export default function FilesPage() {
                     <div className="mt-4 grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Profile</div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{tr('profile', 'Profile', 'ប្រវត្តិរូប')}</div>
                           <div className="mt-2 space-y-2 text-sm text-slate-600">
                             {Object.entries(entry.profile || {}).filter(([, value]) => value).map(([key, value]) => (
                               <div key={key}><span className="font-medium capitalize text-slate-900">{key}:</span> {String(value)}</div>
                             ))}
-                            {!Object.entries(entry.profile || {}).filter(([, value]) => value).length ? <div>No profile fields were supplied.</div> : null}
+                            {!Object.entries(entry.profile || {}).filter(([, value]) => value).length ? <div>{tr('no_profile_fields', 'No profile fields were supplied.', 'មិនមានទិន្នន័យប្រវត្តិរូបត្រូវបានផ្តល់ទេ។')}</div> : null}
                           </div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-white p-4">

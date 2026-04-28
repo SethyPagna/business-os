@@ -1,19 +1,58 @@
 ﻿// ?? Inventory ????????????????????????????????????????????????????????????????
 // Main Inventory page ??sub-components imported from sibling files.
 
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
-import { Boxes, ChevronDown, ChevronRight, ClipboardList, Download, Package, X } from 'lucide-react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
+import InventoryImportModal from './InventoryImportModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+
+function getGroupDateParts(group) {
+  const parsed = new Date(group?.latest_at || group?.created_at || '')
+  if (Number.isNaN(parsed.getTime())) return null
+  const year = parsed.getFullYear()
+  const month = parsed.getMonth() + 1
+  return {
+    year,
+    month,
+    yearLabel: String(year),
+    monthKey: `${year}-${String(month).padStart(2, '0')}`,
+    monthLabel: parsed.toLocaleString(undefined, { month: 'long', year: 'numeric' }),
+  }
+}
+
+function buildMovementSections(groups, mode) {
+  if (mode === 'none') return [{ id: 'all', label: 'All movements', items: groups }]
+  const sections = new Map()
+  groups.forEach((group) => {
+    const parts = getGroupDateParts(group)
+    const sectionId = mode === 'year'
+      ? (parts?.yearLabel || 'Unknown year')
+      : (parts?.monthKey || 'unknown-month')
+    const sectionLabel = mode === 'year'
+      ? (parts?.yearLabel || 'Unknown year')
+      : (parts?.monthLabel || 'Unknown month')
+    const current = sections.get(sectionId) || { id: sectionId, label: sectionLabel, items: [] }
+    current.items.push(group)
+    sections.set(sectionId, current)
+  })
+  return [...sections.values()]
+}
 
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
   const { syncChannel } = useSync()
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = typeof t === 'function' ? t(key) : null
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }
   const [summary,       setSummary]       = useState([])
   const [movements,     setMovements]     = useState([])
   const [branches,      setBranches]      = useState([])
@@ -27,10 +66,16 @@ export default function Inventory() {
   const [stockFilter,   setStockFilter]   = useState('all')
   const [tab,           setTab]           = useState('products')
   const [movFilter,     setMovFilter]     = useState('all')
+  const [movementYearFilter, setMovementYearFilter] = useState('all')
+  const [movementMonthFilter, setMovementMonthFilter] = useState('all')
+  const [movementGroupMode, setMovementGroupMode] = useState('month')
+  const [selectedMovementIds, setSelectedMovementIds] = useState(() => new Set())
   const [detailProduct, setDetailProduct] = useState(null)
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [statDetail,    setStatDetail]    = useState(null)
+  const [showImport, setShowImport] = useState(false)
+  const movementSelectAllRef = useRef(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -176,13 +221,44 @@ export default function Inventory() {
     buildMovementGroups(filteredMovements).filter((group) => matchesSearch(movementGroupHaystack(group)))
   ), [filteredMovements, searchTerms, searchMode])
 
+  const movementYears = useMemo(() => {
+    const years = new Set()
+    groupedMovements.forEach((group) => {
+      const parts = getGroupDateParts(group)
+      if (parts?.yearLabel) years.add(parts.yearLabel)
+    })
+    return [...years].sort((left, right) => Number(right) - Number(left))
+  }, [groupedMovements])
+
+  const visibleMovementGroups = useMemo(() => groupedMovements.filter((group) => {
+    const parts = getGroupDateParts(group)
+    if (movementYearFilter !== 'all' && parts?.yearLabel !== movementYearFilter) return false
+    if (movementMonthFilter !== 'all' && String(parts?.month || '') !== movementMonthFilter) return false
+    return true
+  }), [groupedMovements, movementMonthFilter, movementYearFilter])
+
+  const movementSections = useMemo(
+    () => buildMovementSections(visibleMovementGroups, movementGroupMode),
+    [movementGroupMode, visibleMovementGroups],
+  )
+
   useEffect(() => {
     setExpandedMovementGroups((current) => {
-      const validIds = new Set(groupedMovements.map((group) => group.id))
+      const validIds = new Set(visibleMovementGroups.map((group) => group.id))
       const next = new Set([...current].filter((id) => validIds.has(id)))
       return next.size === current.size ? current : next
     })
-  }, [groupedMovements])
+  }, [visibleMovementGroups])
+
+  useEffect(() => {
+    const validIds = new Set(visibleMovementGroups.map((group) => group.id))
+    setSelectedMovementIds((current) => new Set([...current].filter((id) => validIds.has(id))))
+  }, [visibleMovementGroups])
+
+  useEffect(() => {
+    if (!movementSelectAllRef.current) return
+    movementSelectAllRef.current.indeterminate = selectedMovementIds.size > 0 && selectedMovementIds.size < visibleMovementGroups.length
+  }, [selectedMovementIds.size, visibleMovementGroups.length])
 
   const toggleMovementGroup = useCallback((groupId) => {
     setExpandedMovementGroups((current) => {
@@ -192,6 +268,23 @@ export default function Inventory() {
       return next
     })
   }, [])
+
+  const toggleMovementSelection = useCallback((groupId) => {
+    setSelectedMovementIds((current) => {
+      const next = new Set(current)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }, [])
+
+  const toggleAllMovementSelection = useCallback((checked) => {
+    if (!checked) {
+      setSelectedMovementIds(new Set())
+      return
+    }
+    setSelectedMovementIds(new Set(visibleMovementGroups.map((group) => group.id)))
+  }, [visibleMovementGroups])
 
   const MOV_COLORS = {
     add:             'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -389,6 +482,21 @@ export default function Inventory() {
     },
   ]
   const inventoryBrands = [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
+
+  const exportMovementGroups = useCallback((groups, filePrefix = 'inventory-movements') => {
+    const rows = groups.map(group => ({
+      Date: group.latest_at || '',
+      Activity: group.movementLabel || '',
+      Products: group.productSummary || '',
+      Records: group.items?.length || 0,
+      Qty: group.totalQuantity || 0,
+      Branch: group.branchSummary || '',
+      Reason: group.reasonSummary || '',
+      User: group.userSummary || '',
+    }))
+    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows)
+  }, [])
 
   return (
     <div className="page-scroll p-3 sm:p-6">
@@ -400,6 +508,16 @@ export default function Inventory() {
           </h1>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <button
+            onClick={() => setShowImport(true)}
+            className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
+            title={tr('import', 'Import', 'នាំចូល')}
+          >
+            <span className="inline-flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              {tr('import', 'Import', 'នាំចូល')}
+            </span>
+          </button>
           {/* Export inventory summary CSV */}
           <button
             onClick={() => {
@@ -420,38 +538,38 @@ export default function Inventory() {
               downloadCSV(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
             className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
-            title={t('export_csv')||'Export'}
+            title={tr('export', 'Export', 'នាំចេញ')}
           >
             <span className="inline-flex items-center gap-2">
-              <Download className="h-4 w-4" />
-              Export
+              <Upload className="h-4 w-4" />
+              {tr('export', 'Export', 'នាំចេញ')}
             </span>
           </button>
           {/* Export movements CSV */}
           <button
-            onClick={() => {
-              const rows = groupedMovements.map(group => ({
-                Date: group.latest_at || '',
-                Activity: group.movementLabel || '',
-                Products: group.productSummary || '',
-                Records: group.items?.length || 0,
-                Qty: group.totalQuantity || 0,
-                Branch: group.branchSummary || '',
-                Reason: group.reasonSummary || '',
-                User: group.userSummary || '',
-              }))
-              downloadCSV(`inventory-movements-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-            }}
+            onClick={() => exportMovementGroups(visibleMovementGroups)}
             className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
-            title={t('stock_movements')||'Export Movements CSV'}
+            title={`${tr('export', 'Export', 'នាំចេញ')} ${t('movements') || 'Movements'}`}
           >
             <span className="inline-flex items-center gap-2">
               <ClipboardList className="h-4 w-4" />
-              {t('movements') || 'Movements'}
+              {tr('export', 'Export', 'នាំចេញ')} {t('movements') || 'Movements'}
             </span>
           </button>
         </div>
       </div>
+
+      {selectedMovementGroups.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
+          <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} movement group{selectedMovementGroups.length === 1 ? '' : 's'} selected</span>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')}>
+            Export selected
+          </button>
+          <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedMovementIds(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : null}
 
       {/* ?? Primary Stats bar ?? */}
       <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
@@ -691,6 +809,44 @@ export default function Inventory() {
             ))}
           </select>
         )}
+        {tab === 'movements' && (
+          <select
+            className="input w-full text-sm sm:w-32 sm:flex-shrink-0"
+            value={movementYearFilter}
+            onChange={e => setMovementYearFilter(e.target.value)}
+            aria-label="Inventory movement year filter"
+          >
+            <option value="all">All years</option>
+            {movementYears.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        )}
+        {tab === 'movements' && (
+          <select
+            className="input w-full text-sm sm:w-36 sm:flex-shrink-0"
+            value={movementMonthFilter}
+            onChange={e => setMovementMonthFilter(e.target.value)}
+            aria-label="Inventory movement month filter"
+          >
+            <option value="all">All months</option>
+            {Array.from({ length: 12 }, (_, index) => {
+              const month = index + 1
+              const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
+              return <option key={month} value={String(month)}>{label}</option>
+            })}
+          </select>
+        )}
+        {tab === 'movements' && (
+          <select
+            className="input w-full text-sm sm:w-40 sm:flex-shrink-0"
+            value={movementGroupMode}
+            onChange={e => setMovementGroupMode(e.target.value)}
+            aria-label="Inventory movement grouping"
+          >
+            <option value="month">Group by month</option>
+            <option value="year">Group by year</option>
+            <option value="none">No grouping</option>
+          </select>
+        )}
       </div>
 
       {search.trim() && tab === 'products' && (
@@ -704,7 +860,7 @@ export default function Inventory() {
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
-          : `${filteredMovements.length} ${t('movements')||'movements'}`}
+          : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'}`}
       </p>
 
       {/* ????????????????????????????????????????
@@ -851,95 +1007,113 @@ export default function Inventory() {
                 <div className="text-sm font-semibold text-gray-900 dark:text-white">Grouped movement history</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">Related stock changes are bundled into a single activity so sales, returns, imports, and transfers are easier to review.</div>
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{groupedMovements.length} groups</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups</div>
             </div>
           </div>
 
           <div className="space-y-2 sm:hidden">
             {loading ? (
               <div className="py-10 text-center text-gray-400">{t('loading')}</div>
-            ) : groupedMovements.length === 0 ? (
+            ) : visibleMovementGroups.length === 0 ? (
               <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
-            ) : groupedMovements.map((group) => {
-              const isExpanded = expandedMovementGroups.has(group.id)
-              return (
-                <div key={group.id} className="card overflow-hidden">
-                  <button
-                    type="button"
-                    className="w-full p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                    onClick={() => toggleMovementGroup(group.id)}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
-                            {group.movementLabel}
-                          </span>
-                          <span className="text-[10px] text-gray-400">{fmtTime(group.latest_at)}</span>
-                        </div>
-                        <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                          <span>{group.items.length} records</span>
-                          {group.branchSummary ? <span>{group.branchSummary}</span> : null}
-                          {group.userSummary ? <span>{group.userSummary}</span> : null}
-                        </div>
-                        {group.reasonSummary ? <div className="mt-1 truncate text-xs text-gray-500">{group.reasonSummary}</div> : null}
+            ) : movementSections.map((section) => (
+              <div key={section.id} className="space-y-2">
+                {movementGroupMode !== 'none' ? (
+                  <div className="px-1 pt-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{section.label}</div>
+                ) : null}
+                {section.items.map((group) => {
+                  const isExpanded = expandedMovementGroups.has(group.id)
+                  return (
+                    <div key={group.id} className="card overflow-hidden">
+                      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+                        <label className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={selectedMovementIds.has(group.id)}
+                            onChange={() => toggleMovementSelection(group.id)}
+                          />
+                          Select
+                        </label>
                       </div>
-                      <div className="flex items-start gap-2 text-right">
-                        <div>
-                          <div className="text-sm font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
-                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</div>
+                      <button
+                        type="button"
+                        className="w-full p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                        onClick={() => toggleMovementGroup(group.id)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
+                                {group.movementLabel}
+                              </span>
+                              <span className="text-[10px] text-gray-400">{fmtTime(group.latest_at)}</span>
+                            </div>
+                            <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
+                              <span>{group.items.length} records</span>
+                              {group.branchSummary ? <span>{group.branchSummary}</span> : null}
+                              {group.userSummary ? <span>{group.userSummary}</span> : null}
+                            </div>
+                            {group.reasonSummary ? <div className="mt-1 truncate text-xs text-gray-500">{group.reasonSummary}</div> : null}
+                          </div>
+                          <div className="flex items-start gap-2 text-right">
+                            <div>
+                              <div className="text-sm font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
+                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</div>
+                            </div>
+                            <ChevronDown className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </div>
                         </div>
-                        <ChevronDown className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </div>
-                    </div>
-                  </button>
-                  {isExpanded ? (
-                    <div className="border-t border-gray-200 p-3 dark:border-gray-700">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Records</div>
-                          <div className="text-base font-bold text-gray-900 dark:text-white">{group.items.length}</div>
-                        </div>
-                        <div>
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('quantity')}</div>
-                          <div className="text-base font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
-                        </div>
-                      </div>
-                      {group.reasonSummary ? (
-                        <div className="mt-3">
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('reason')}</div>
-                          <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-800 dark:bg-gray-700/50 dark:text-gray-200">{group.reasonSummary}</div>
-                        </div>
-                      ) : null}
-                      <div className="mt-3 space-y-2">
-                        {group.items.map((movement) => (
-                          <div key={movement.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <Package className="h-4 w-4 text-gray-400" />
-                                  <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
-                                </div>
-                                <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                  <span>{fmtTime(movement.created_at)}</span>
-                                  {movement.branch_name ? <span>{movement.branch_name}</span> : null}
-                                  {movement.user_name ? <span>{movement.user_name}</span> : null}
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-sm font-semibold text-gray-900 dark:text-white">{movement.quantity}</div>
-                                {(movement.total_cost_usd || 0) > 0 ? <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(movement.total_cost_usd || 0)}</div> : null}
-                              </div>
+                      </button>
+                      {isExpanded ? (
+                        <div className="border-t border-gray-200 p-3 dark:border-gray-700">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Records</div>
+                              <div className="text-base font-bold text-gray-900 dark:text-white">{group.items.length}</div>
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('quantity')}</div>
+                              <div className="text-base font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
                             </div>
                           </div>
-                        ))}
-                      </div>
+                          {group.reasonSummary ? (
+                            <div className="mt-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('reason')}</div>
+                              <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-800 dark:bg-gray-700/50 dark:text-gray-200">{group.reasonSummary}</div>
+                            </div>
+                          ) : null}
+                          <div className="mt-3 space-y-2">
+                            {group.items.map((movement) => (
+                              <div key={movement.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <Package className="h-4 w-4 text-gray-400" />
+                                      <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                      <span>{fmtTime(movement.created_at)}</span>
+                                      {movement.branch_name ? <span>{movement.branch_name}</span> : null}
+                                      {movement.user_name ? <span>{movement.user_name}</span> : null}
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{movement.quantity}</div>
+                                    {(movement.total_cost_usd || 0) > 0 ? <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(movement.total_cost_usd || 0)}</div> : null}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              )
-            })}
+                  )
+                })}
+              </div>
+            ))}
           </div>
 
           <div className="card hidden overflow-hidden sm:block">
@@ -947,6 +1121,16 @@ export default function Inventory() {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
                   <tr>
+                    <th className="w-10 px-3 py-2">
+                      <input
+                        ref={movementSelectAllRef}
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={visibleMovementGroups.length > 0 && selectedMovementIds.size === visibleMovementGroups.length}
+                        onChange={(event) => toggleAllMovementSelection(event.target.checked)}
+                        aria-label="Select all movement groups"
+                      />
+                    </th>
                     <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date')}</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">Activity</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">Products</th>
@@ -959,81 +1143,101 @@ export default function Inventory() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
-                  ) : groupedMovements.length === 0 ? (
-                    <tr><td colSpan={8} className="py-8 text-center text-gray-400">{t('no_data')}</td></tr>
-                  ) : groupedMovements.map((group) => {
-                    const isExpanded = expandedMovementGroups.has(group.id)
-                    return (
-                      <Fragment key={group.id}>
-                        <tr key={group.id} className="table-row hover:bg-blue-50 dark:hover:bg-blue-900/10">
-                          <td className="whitespace-nowrap px-3 py-2 text-[10px] text-gray-400">{fmtTime(group.latest_at)}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
-                                {group.movementLabel}
-                              </span>
-                              <span className="text-[10px] text-gray-400">{group.items.length} records</span>
-                            </div>
-                            {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
-                          </td>
-                          <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</td>
-                          <td className="px-3 py-2 text-right font-bold text-gray-900 dark:text-white">{group.totalQuantity}</td>
-                          <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</td>
-                          <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{group.branchSummary || 'N/A'}</td>
-                          <td className="px-3 py-2 text-gray-500 hidden xl:table-cell">{group.userSummary || 'N/A'}</td>
-                          <td className="px-3 py-2 text-center">
-                            <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700" onClick={() => toggleMovementGroup(group.id)}>
-                              <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                              {isExpanded ? 'Collapse' : 'Expand'}
-                            </button>
+                    <tr><td colSpan={9} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
+                  ) : visibleMovementGroups.length === 0 ? (
+                    <tr><td colSpan={9} className="py-8 text-center text-gray-400">{t('no_data')}</td></tr>
+                  ) : movementSections.map((section) => (
+                    <Fragment key={section.id}>
+                      {movementGroupMode !== 'none' ? (
+                        <tr className="bg-slate-50 dark:bg-slate-800/60">
+                          <td colSpan={9} className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            {section.label} · {section.items.length} groups
                           </td>
                         </tr>
-                        {isExpanded ? (
-                          <tr key={`${group.id}-details`} className="bg-gray-50/80 dark:bg-gray-900/30">
-                            <td colSpan={8} className="px-4 py-3">
-                              <div className="grid gap-3 lg:grid-cols-[220px,1fr]">
-                                <div className="space-y-3">
-                                  <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
-                                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('reference')}</div>
-                                    <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{group.reference_id || 'N/A'}</div>
-                                  </div>
-                                  <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
-                                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('recorded_at')}</div>
-                                    <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{new Date(group.created_at).toLocaleString()}</div>
-                                  </div>
+                      ) : null}
+                      {section.items.map((group) => {
+                        const isExpanded = expandedMovementGroups.has(group.id)
+                        return (
+                          <Fragment key={group.id}>
+                            <tr className="table-row hover:bg-blue-50 dark:hover:bg-blue-900/10">
+                              <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded"
+                                  checked={selectedMovementIds.has(group.id)}
+                                  onChange={() => toggleMovementSelection(group.id)}
+                                  aria-label={`Select movement group ${group.id}`}
+                                />
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-[10px] text-gray-400">{fmtTime(group.latest_at)}</td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
+                                    {group.movementLabel}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400">{group.items.length} records</span>
                                 </div>
-                                <div className="space-y-2">
-                                  {group.items.map((movement) => (
-                                    <div key={movement.id} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-2">
-                                            <Package className="h-4 w-4 text-gray-400" />
-                                            <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
-                                          </div>
-                                          <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                            <span>{fmtTime(movement.created_at)}</span>
-                                            {movement.branch_name ? <span>{movement.branch_name}</span> : null}
-                                            {movement.user_name ? <span>{movement.user_name}</span> : null}
-                                            {movement.reason ? <span>{movement.reason}</span> : null}
-                                          </div>
-                                        </div>
-                                        <div className="text-right">
-                                          <div className="text-sm font-semibold text-gray-900 dark:text-white">{movement.quantity}</div>
-                                          {(movement.total_cost_usd || 0) > 0 ? <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(movement.total_cost_usd || 0)}</div> : null}
-                                        </div>
+                                {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
+                              </td>
+                              <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</td>
+                              <td className="px-3 py-2 text-right font-bold text-gray-900 dark:text-white">{group.totalQuantity}</td>
+                              <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</td>
+                              <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{group.branchSummary || 'N/A'}</td>
+                              <td className="px-3 py-2 text-gray-500 hidden xl:table-cell">{group.userSummary || 'N/A'}</td>
+                              <td className="px-3 py-2 text-center">
+                                <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700" onClick={() => toggleMovementGroup(group.id)}>
+                                  <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                  {isExpanded ? 'Collapse' : 'Expand'}
+                                </button>
+                              </td>
+                            </tr>
+                            {isExpanded ? (
+                              <tr className="bg-gray-50/80 dark:bg-gray-900/30">
+                                <td colSpan={9} className="px-4 py-3">
+                                  <div className="grid gap-3 lg:grid-cols-[220px,1fr]">
+                                    <div className="space-y-3">
+                                      <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('reference')}</div>
+                                        <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{group.reference_id || 'N/A'}</div>
+                                      </div>
+                                      <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('recorded_at')}</div>
+                                        <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{new Date(group.created_at).toLocaleString()}</div>
                                       </div>
                                     </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    )
-                  })}
+                                    <div className="space-y-2">
+                                      {group.items.map((movement) => (
+                                        <div key={movement.id} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0 flex-1">
+                                              <div className="flex items-center gap-2">
+                                                <Package className="h-4 w-4 text-gray-400" />
+                                                <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
+                                              </div>
+                                              <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                                <span>{fmtTime(movement.created_at)}</span>
+                                                {movement.branch_name ? <span>{movement.branch_name}</span> : null}
+                                                {movement.user_name ? <span>{movement.user_name}</span> : null}
+                                                {movement.reason ? <span>{movement.reason}</span> : null}
+                                              </div>
+                                            </div>
+                                            <div className="text-right">
+                                              <div className="text-sm font-semibold text-gray-900 dark:text-white">{movement.quantity}</div>
+                                              {(movement.total_cost_usd || 0) > 0 ? <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(movement.total_cost_usd || 0)}</div> : null}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        )
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -1159,6 +1363,16 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {showImport ? (
+        <InventoryImportModal
+          onClose={() => setShowImport(false)}
+          onDone={() => {
+            setShowImport(false)
+            load()
+          }}
+        />
+      ) : null}
 
       {detailProduct && (
         <ProductDetailModal

@@ -63,14 +63,16 @@ export default function ManageUnitsModal({ onClose, t }) {
   }
 
   return (
-    <Modal title={`📏 ${t('manage_units') || 'Manage Units'}`} onClose={onClose}>
+    <Modal title={t('manage_units') || 'Manage Units'} onClose={onClose}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <label className="mb-1 block text-xs text-gray-500">{t('name') || 'Name'}</label>
+            <label htmlFor="new-unit-name" className="mb-1 block text-xs text-gray-500">{t('name') || 'Name'}</label>
             <input
+              id="new-unit-name"
+              name="new_unit_name"
               className="input"
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
@@ -79,8 +81,10 @@ export default function ManageUnitsModal({ onClose, t }) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-gray-500">{t('color') || 'Color'}</label>
+            <label htmlFor="new-unit-color" className="mb-1 block text-xs text-gray-500">{t('color') || 'Color'}</label>
             <input
+              id="new-unit-color"
+              name="new_unit_color"
               type="color"
               value={newColor}
               onChange={(event) => setNewColor(event.target.value)}
@@ -96,12 +100,16 @@ export default function ManageUnitsModal({ onClose, t }) {
               {editing?.id === unit.id ? (
                 <>
                   <input
+                    id={`unit-color-${unit.id}`}
+                    name={`unit_color_${unit.id}`}
                     type="color"
                     value={editing.color || DEFAULT_UNIT_COLOR}
                     onChange={(event) => setEditing((current) => ({ ...current, color: event.target.value }))}
                     className="h-8 w-8 cursor-pointer rounded border border-gray-300"
                   />
                   <input
+                    id={`unit-name-${unit.id}`}
+                    name={`unit_name_${unit.id}`}
                     className="input flex-1 py-1"
                     value={editing.name}
                     onChange={(event) => setEditing((current) => ({ ...current, name: event.target.value }))}

@@ -19,6 +19,7 @@ import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import { getContrastingTextColor } from '../../utils/color.js'
 
 function multiMatch(text, terms) {
   return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
@@ -334,7 +335,10 @@ export default function Products() {
     const color = unitMap[unitName]?.color
     if (!color) return <span className="ml-1 text-xs font-normal text-gray-400">{unitName}</span>
     return (
-      <span className="ml-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: color }}>
+      <span
+        className="ml-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
+        style={{ background: color, color: getContrastingTextColor(color) }}
+      >
         {unitName}
       </span>
     )
@@ -782,7 +786,17 @@ export default function Products() {
                     </td>
                     <td className="px-3 py-2 text-gray-400 font-mono text-xs hidden lg:table-cell">{p.sku||'N/A'}</td>
                     <td className="px-3 py-2 hidden md:table-cell">
-                      {p.category ? <span className="text-xs px-2 py-0.5 rounded-full text-white" style={{background:catMap[p.category]?.color||'#6b7280'}}>{p.category}</span> : 'N/A'}
+                      {p.category ? (
+                        <span
+                          className="rounded-full px-2 py-0.5 text-xs"
+                          style={{
+                            background: catMap[p.category]?.color || '#6b7280',
+                            color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+                          }}
+                        >
+                          {p.category}
+                        </span>
+                      ) : 'N/A'}
                     </td>
                     <td className="px-3 py-2 text-right col-highlight-red">
                       <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(purchaseUsd)}</div>
@@ -864,7 +878,17 @@ export default function Products() {
                   <div className="font-semibold text-gray-900 dark:text-white text-sm truncate">{p.name}</div>
                   {getStockBadge(p)}
                 </div>
-                {p.category && <span className="text-xs px-1.5 py-0.5 rounded-full text-white inline-block mt-0.5" style={{background:catMap[p.category]?.color||'#6b7280'}}>{p.category}</span>}
+                {p.category && (
+                  <span
+                    className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-xs"
+                    style={{
+                      background: catMap[p.category]?.color || '#6b7280',
+                      color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+                    }}
+                  >
+                    {p.category}
+                  </span>
+                )}
                 <div className="flex items-center gap-3 mt-1 text-xs flex-wrap">
                   <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
                   <span className="text-green-700">{fmtUSD(p.selling_price_usd)}</span>

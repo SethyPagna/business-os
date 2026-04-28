@@ -5,6 +5,7 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 function SupplierForm({ supplier, onSave, onClose, t }) {
   const init = supplier
@@ -60,6 +61,12 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
 function SuppliersTab({ t, notify }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = typeof t === 'function' ? t(key) : null
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }
   const [suppliers, setSuppliers] = useState([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
@@ -83,7 +90,7 @@ function SuppliersTab({ t, notify }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await window.api.getSuppliers()
+      const data = await withLoaderTimeout(() => window.api.getSuppliers(), 'Suppliers')
       setSuppliers(Array.isArray(data) ? data : [])
     } catch (error) {
       setSuppliers([])
@@ -162,9 +169,9 @@ function SuppliersTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           ) : null}
-          <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={t('import_contacts') || 'Import'}>
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
+          <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr('import_contacts', 'Import', 'នាំចូល')}>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
           </button>
           <button
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
@@ -181,13 +188,14 @@ function SuppliersTab({ t, notify }) {
               }))
               downloadCSV(`suppliers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
+            title={tr('export', 'Export', 'នាំចេញ')}
           >
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export</span>
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">{tr('export', 'Export', 'នាំចេញ')}</span>
           </button>
-          <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={t('add_supplier') || 'Add Supplier'}>
+          <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={tr('add_supplier', 'Add Supplier', 'បន្ថែមអ្នកផ្គត់ផ្គង់')}>
             <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('add_supplier') || 'Add Supplier'}</span>
+            <span className="hidden sm:inline">{tr('add_supplier', 'Add Supplier', 'បន្ថែមអ្នកផ្គត់ផ្គង់')}</span>
           </button>
         </div>
       </div>

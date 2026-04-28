@@ -70,7 +70,9 @@ function readAuthTokenFromStorage() {
 // ??? In-memory read cache with request deduplication ????????????????????????
 const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
+const _inflightStartedAt = {}
 const CACHE_TTL   = 20_000   // 20 seconds
+const INFLIGHT_REUSE_WINDOW_MS = 900
 
 export function cacheGet(key) {
   const e = _cache[key]
@@ -83,6 +85,7 @@ export function cacheInvalidate(prefix) {
 export function cacheClearAll() {
   Object.keys(_cache).forEach(k => delete _cache[k])
   Object.keys(_inflight).forEach(k => delete _inflight[k])
+  Object.keys(_inflightStartedAt).forEach(k => delete _inflightStartedAt[k])
 }
 
 // Invalidate cache on any sync update so stale reads never survive a broadcast
@@ -407,6 +410,21 @@ function emitCacheRefresh(channel) {
   }))
 }
 
+function clearInflight(channel) {
+  delete _inflight[channel]
+  delete _inflightStartedAt[channel]
+}
+
+function hasReusableInflight(channel) {
+  if (!_inflight[channel]) return false
+  const startedAt = _inflightStartedAt[channel] || 0
+  if (startedAt && Date.now() - startedAt > INFLIGHT_REUSE_WINDOW_MS) {
+    clearInflight(channel)
+    return false
+  }
+  return true
+}
+
 async function raceServerReadWithLocalFallback(channel, inflightPromise, localFn, t0, sourceLabel = 'cache-dedup') {
   const localPromise = Promise.resolve()
     .then(() => localFn())
@@ -506,7 +524,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
       // No cache ??try server (skip if known offline)
       if (_serverOnline || !localFn) {
         // Request deduplication: if same request already in flight, wait for it instead of re-requesting
-        if (_inflight[channel]) {
+        if (hasReusableInflight(channel)) {
           if (localFn) {
             return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0)
           }
@@ -518,14 +536,15 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           cacheSet(channel, result)
           setServerHealth(true)
           logCall(channel, 'server', Date.now() - t0)
-          delete _inflight[channel]
+          clearInflight(channel)
           return result
         }).catch(e => {
-          delete _inflight[channel]
+          clearInflight(channel)
           throw e
         })
         
         _inflight[channel] = promise
+        _inflightStartedAt[channel] = Date.now()
         
         if (localFn) {
           const localPromise = Promise.resolve()

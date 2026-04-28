@@ -6,6 +6,14 @@ const { authToken, requirePermission, getAuditActor } = require('../middleware')
 
 const router = express.Router()
 
+function normalizeImportedTimestamp(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
+
 // POST /api/inventory/adjust
 router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => {
   const t0 = Date.now()
@@ -17,6 +25,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
   const actor = getAuditActor(req, body)
   const unitCostUsd = parseFloat(body.unitCostUsd ?? body.unit_cost_usd ?? 0) || 0
   const unitCostKhr = parseFloat(body.unitCostKhr ?? body.unit_cost_khr ?? 0) || 0
+  const movementCreatedAt = normalizeImportedTimestamp(body.created_at ?? body.movement_date ?? body.date)
 
   if (!productId || !quantity) return err(res, 'Missing required fields')
   if (!['add', 'remove', 'set'].includes(type)) return err(res, 'Invalid stock action')
@@ -118,7 +127,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
             || db.prepare('SELECT name FROM branches WHERE id = ?').get(movementBranchId)?.name
           : null
 
-        db.prepare(`
+        const movementId = db.prepare(`
           INSERT INTO inventory_movements
             (product_id, product_name, branch_id, branch_name, movement_type, quantity,
              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
@@ -137,7 +146,12 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
           reason || null,
           actor.userId,
           actor.userName,
-        )
+        ).lastInsertRowid
+
+        if (movementCreatedAt) {
+          db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
+            .run(movementCreatedAt, movementId)
+        }
       }
     })()
 

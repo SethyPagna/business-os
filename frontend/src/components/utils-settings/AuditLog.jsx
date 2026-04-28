@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, ClipboardList, Clock3, Download, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
@@ -30,6 +30,13 @@ const ACTION_COLOR_CLASS = {
   backup_restore: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
 }
 
+const TIME_FILTERS = [
+  { id: 'all', days: null },
+  { id: 'today', days: 1 },
+  { id: '7d', days: 7 },
+  { id: '30d', days: 30 },
+]
+
 function toIso(raw) {
   if (!raw) return null
   if (raw.includes('T') || raw.endsWith('Z')) return raw
@@ -58,6 +65,13 @@ function formatLogTime(log) {
   return formatDateTime(log.client_time || log.created_at)
 }
 
+function getLogEpoch(log) {
+  const iso = toIso(log?.client_time || log?.created_at)
+  if (!iso) return 0
+  const epoch = new Date(iso).getTime()
+  return Number.isFinite(epoch) ? epoch : 0
+}
+
 function formatJsonPretty(value) {
   try {
     return JSON.stringify(JSON.parse(value), null, 2)
@@ -74,46 +88,49 @@ function parseLogJson(raw) {
   }
 }
 
+function flattenSummaryValue(value) {
+  if (value === null || value === undefined || value === '') return null
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => flattenSummaryValue(entry))
+      .filter(Boolean)
+      .join(', ')
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined && entryValue !== '')
+      .slice(0, 4)
+      .map(([key, entryValue]) => `${key}: ${flattenSummaryValue(entryValue)}`)
+      .filter(Boolean)
+    return entries.join(', ')
+  }
+  return String(value)
+}
+
 function formatEntityName(log) {
   const raw = String(log.table_name || log.entity || '').trim()
   if (!raw) return 'System'
   return raw.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-function extractReference(log) {
-  const parsed = parseLogJson(log.new_value)
-  if (!parsed || typeof parsed !== 'object') return null
-  const candidates = [
-    parsed.receiptNumber,
-    parsed.returnNumber,
-    parsed.username,
-    parsed.name,
-    parsed.original_name,
-    parsed.destinationDir,
-    parsed.sourceDir,
-  ].filter(Boolean)
-  return candidates[0] ? String(candidates[0]) : null
-}
-
 function readableSummary(log) {
   const parsed = parseLogJson(log.new_value)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const keys = ['name', 'receiptNumber', 'returnNumber', 'username', 'reason', 'status', 'branch', 'destinationDir', 'sourceDir']
+    const keys = ['name', 'receiptNumber', 'returnNumber', 'username', 'reason', 'status', 'branch', 'destinationDir', 'sourceDir', 'notes', 'platform', 'membershipNumber']
     const parts = keys
       .filter((key) => parsed[key] !== undefined && parsed[key] !== null && parsed[key] !== '')
-      .map((key) => String(parsed[key]))
+      .map((key) => flattenSummaryValue(parsed[key]))
+      .filter(Boolean)
     if (parts.length) return parts.join(' | ')
+    const flattened = flattenSummaryValue(parsed)
+    if (flattened) return flattened.slice(0, 180)
   }
   if (log.details) return String(log.details).slice(0, 120)
-  if (log.new_value) return String(log.new_value).slice(0, 120)
-  return null
-}
-
-function recordIdentifier(log) {
-  if (log.record_id !== null && log.record_id !== undefined && String(log.record_id).trim()) {
-    return `ID ${log.record_id}`
+  if (log.new_value) {
+    const flattened = flattenSummaryValue(parseLogJson(log.new_value) || log.new_value)
+    if (flattened) return flattened.slice(0, 180)
   }
-  return 'No record ID'
+  return null
 }
 
 function DetailRow({ label, value, mono }) {
@@ -132,6 +149,8 @@ export default function AuditLog() {
   const { t, page } = useApp()
   const [logs, setLogs] = useState([])
   const [search, setSearch] = useState('')
+  const [timeFilter, setTimeFilter] = useState('all')
+  const [sortDirection, setSortDirection] = useState('desc')
   const [loading, setLoading] = useState(true)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
@@ -160,6 +179,30 @@ export default function AuditLog() {
     backup_export: `${t('backup') || 'Backup'} ${t('export') || 'Export'}`,
     backup_restore: `${t('backup') || 'Backup'} ${t('restore') || 'Restore'}`,
   }), [t])
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const auditFallbacks = useMemo(() => ({
+    all_time: { en: 'All time', km: 'គ្រប់ពេល' },
+    time: 'ពេលវេលា',
+    sort: 'តម្រៀប',
+    today: 'ថ្ងៃនេះ',
+    last_7_days: '៧ ថ្ងៃចុងក្រោយ',
+    last_30_days: '៣០ ថ្ងៃចុងក្រោយ',
+    newest_first: 'ថ្មីជាងគេមុន',
+    oldest_first: 'ចាស់ជាងគេមុន',
+    refresh: 'ស្រស់ថ្មី',
+    export: 'នាំចេញ',
+    entries: 'កំណត់ត្រា',
+  }), [])
+  const copy = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+    const override = auditFallbacks[key]
+    if (override && typeof override === 'object') {
+      return isKhmer ? override.km : override.en
+    }
+    if (isKhmer && typeof override === 'string') return override
+    const value = t(key)
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }, [auditFallbacks, isKhmer, t])
 
   const actionLabel = useCallback((action) => {
     if (!action) return '--'
@@ -200,7 +243,7 @@ export default function AuditLog() {
   }, [error, load, loading, logs.length, page])
 
   const query = search.trim().toLowerCase()
-  const filtered = useMemo(() => logs.filter((log) => {
+  const searchedLogs = useMemo(() => logs.filter((log) => {
     if (!query) return true
     return [
       log.user_name,
@@ -210,20 +253,56 @@ export default function AuditLog() {
       log.device_name,
       log.entity,
       readableSummary(log),
-      extractReference(log),
-      recordIdentifier(log),
     ]
       .map((value) => String(value || '').toLowerCase())
       .some((value) => value.includes(query))
   }), [logs, query])
 
+  const timeFilteredLogs = useMemo(() => {
+    const activeFilter = TIME_FILTERS.find((entry) => entry.id === timeFilter)
+    if (!activeFilter?.days) return searchedLogs
+
+    const now = Date.now()
+    const rangeStart = activeFilter.days === 1
+      ? (() => {
+          const start = new Date()
+          start.setHours(0, 0, 0, 0)
+          return start.getTime()
+        })()
+      : now - (activeFilter.days * 24 * 60 * 60 * 1000)
+
+    return searchedLogs.filter((log) => getLogEpoch(log) >= rangeStart)
+  }, [searchedLogs, timeFilter])
+
+  const chronologicalLogs = useMemo(() => (
+    [...timeFilteredLogs].sort((a, b) => {
+      const delta = getLogEpoch(a) - getLogEpoch(b)
+      if (delta !== 0) return delta
+      return Number(a?.id || 0) - Number(b?.id || 0)
+    })
+  ), [timeFilteredLogs])
+
+  const filtered = useMemo(() => (
+    sortDirection === 'asc' ? chronologicalLogs : [...chronologicalLogs].reverse()
+  ), [chronologicalLogs, sortDirection])
+
+  const rowNumberById = useMemo(() => {
+    const next = new Map()
+    chronologicalLogs.forEach((log, index) => {
+      next.set(log.id, index + 1)
+    })
+    return next
+  }, [chronologicalLogs])
+
+  function sessionEntryLabel(log) {
+    return `#${rowNumberById.get(log.id) || 0}`
+  }
+
   const exportCsv = useCallback(() => {
     const rows = filtered.map((log) => ({
-      ID: log.id,
+      Entry: sessionEntryLabel(log),
       Time: formatLogTime(log),
       Entity: formatEntityName(log),
-      Record: recordIdentifier(log),
-      Reference: extractReference(log) || '',
       User: log.user_name || '',
       Action: actionLabel(log.action),
       Device: log.device_name || '',
@@ -231,7 +310,7 @@ export default function AuditLog() {
       Summary: readableSummary(log) || '',
     }))
     downloadCSV(`audit-log-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-  }, [actionLabel, filtered])
+  }, [actionLabel, filtered, rowNumberById])
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
@@ -241,13 +320,37 @@ export default function AuditLog() {
           {t('audit_log') || 'Audit Log'}
         </h1>
         <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
+          <label htmlFor="audit-log-time-filter" className="sr-only">{copy('time', 'Time', 'ពេលវេលា')}</label>
+          <select
+            id="audit-log-time-filter"
+            name="audit_log_time_filter"
+            className="input h-9 min-w-[8rem] shrink-0 px-3 py-1.5 text-xs sm:text-sm"
+            value={timeFilter}
+            onChange={(event) => setTimeFilter(event.target.value)}
+          >
+            <option value="all">{copy('all_time', 'All time', 'គ្រប់ពេល')}</option>
+            <option value="today">{copy('today', 'Today', 'ថ្ងៃនេះ')}</option>
+            <option value="7d">{copy('last_7_days', 'Last 7 days', '៧ ថ្ងៃចុងក្រោយ')}</option>
+            <option value="30d">{copy('last_30_days', 'Last 30 days', '៣០ ថ្ងៃចុងក្រោយ')}</option>
+          </select>
+          <label htmlFor="audit-log-sort-direction" className="sr-only">{copy('sort', 'Sort', 'តម្រៀប')}</label>
+          <select
+            id="audit-log-sort-direction"
+            name="audit_log_sort_direction"
+            className="input h-9 min-w-[8rem] shrink-0 px-3 py-1.5 text-xs sm:text-sm"
+            value={sortDirection}
+            onChange={(event) => setSortDirection(event.target.value)}
+          >
+            <option value="desc">{copy('newest_first', 'Newest first', 'ថ្មីបំផុតមុន')}</option>
+            <option value="asc">{copy('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន')}</option>
+          </select>
           <button onClick={load} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className="h-4 w-4" />
-            {t('refresh') || 'Refresh'}
+            {copy('refresh', 'Refresh', 'ស្រស់ថ្មី')}
           </button>
           <button onClick={exportCsv} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
-            <Download className="h-4 w-4" />
-            {t('export_csv') || 'CSV'}
+              <Download className="h-4 w-4" />
+            {copy('export', 'Export', 'នាំចេញ')}
           </button>
         </div>
       </div>
@@ -290,9 +393,8 @@ export default function AuditLog() {
           <table className="w-full min-w-[860px] text-sm table-bordered">
             <thead className="sticky top-0 z-10">
               <tr>
+                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{copy('entry', 'Entry', 'លំដាប់')}</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Entity</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Record</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Reference</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('user') || 'User'}</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('action') || 'Action'}</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('device') || 'Device'}</th>
@@ -302,9 +404,9 @@ export default function AuditLog() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
               {loading ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
+                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
               ) : filtered.map((log) => (
                 <tr
                   key={log.id}
@@ -312,12 +414,11 @@ export default function AuditLog() {
                   onClick={() => setDetailLog(log)}
                 >
                   <td className="px-3 py-2">
-                    <div className="text-xs font-medium text-gray-800 dark:text-gray-200">{formatEntityName(log)}</div>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="text-xs font-mono text-gray-600 dark:text-gray-300">{recordIdentifier(log)}</div>
+                    <div className="text-xs font-medium text-gray-800 dark:text-gray-200">{formatEntityName(log)}</div>
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{extractReference(log) || '--'}</td>
                   <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
                   <td className="px-3 py-2">
                     <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
@@ -340,7 +441,7 @@ export default function AuditLog() {
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          <span>{filtered.length} {t('entries') || 'entries'}</span>
+          <span>{filtered.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
           <span>{t('click_row_details') || 'Click a row for details'}</span>
         </div>
       </div>
@@ -365,8 +466,8 @@ export default function AuditLog() {
                   </span>
                   <span className="text-xs text-gray-500">{formatEntityName(log)}</span>
                 </div>
-                <div className="text-xs font-mono text-gray-500">{recordIdentifier(log)}</div>
-                {extractReference(log) ? <div className="mt-1 text-xs text-gray-400">{extractReference(log)}</div> : null}
+                <div className="text-xs font-semibold text-gray-500">{sessionEntryLabel(log)}</div>
+                {readableSummary(log) ? <div className="mt-1 text-xs text-gray-400 line-clamp-2">{readableSummary(log)}</div> : null}
                 <div className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-300">{log.user_name || '--'}</div>
                 <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
               </div>
@@ -390,7 +491,7 @@ export default function AuditLog() {
                   </span>
                   <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog)}</span>
                 </div>
-                <div className="mt-1 text-xs font-mono text-gray-400">{recordIdentifier(detailLog)}</div>
+                <div className="mt-1 text-xs font-semibold text-gray-400">{sessionEntryLabel(detailLog)}</div>
               </div>
               <button
                 onClick={() => setDetailLog(null)}
@@ -422,7 +523,8 @@ export default function AuditLog() {
                     <DetailRow label={t('user') || 'User'} value={detailLog.user_name || '--'} />
                     <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
                     <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog)} />
-                    <DetailRow label={t('reference') || 'Reference'} value={extractReference(detailLog) || '--'} />
+                    <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={sessionEntryLabel(detailLog)} />
+                    <DetailRow label={t('summary') || 'Summary'} value={readableSummary(detailLog) || '--'} />
                   </div>
                 </div>
               </div>

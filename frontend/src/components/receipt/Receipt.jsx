@@ -92,9 +92,36 @@ const LABELS = {
   },
 }
 
+const CLEAN_KHMER_LABELS = {
+  receipt: 'បង្កាន់ដៃ',
+  receiptNum: 'លេខបង្កាន់ដៃ:',
+  date: 'កាលបរិច្ឆេទ:',
+  cashier: 'អ្នកគិតលុយ:',
+  payment: 'ការទូទាត់:',
+  rate: 'អត្រាប្តូរ:',
+  status: 'ស្ថានភាព:',
+  customer: 'អតិថិជន:',
+  phone: 'ទូរស័ព្ទ:',
+  address: 'អាសយដ្ឋាន:',
+  membership: 'សមាជិកភាព:',
+  delivery: 'ការដឹកជញ្ជូន:',
+  driver: 'អ្នកដឹកជញ្ជូន:',
+  subtotal: 'សរុបរង:',
+  discount: 'បញ្ចុះតម្លៃ:',
+  membershipDiscount: 'បញ្ចុះតម្លៃសមាជិក:',
+  pointsRedeemed: 'ពិន្ទុបានប្រើ:',
+  tax: 'ពន្ធ:',
+  total: 'សរុប',
+  paid: 'បានបង់:',
+  change: 'ប្រាក់អាប់:',
+  refunded: 'បានសងវិញ:',
+  thankYou: 'សូមអរគុណសម្រាប់ការគាំទ្រ!',
+  qty: 'ចំនួន',
+}
+
 function labelFor(mode, key) {
-  if (mode === 'both') return `${LABELS.en[key]} / ${LABELS.km[key]}`
-  return (mode === 'km' ? LABELS.km : LABELS.en)[key]
+  if (mode === 'both') return `${LABELS.en[key]} / ${CLEAN_KHMER_LABELS[key]}`
+  return (mode === 'km' ? CLEAN_KHMER_LABELS : LABELS.en)[key]
 }
 
 function Row({ label, value, subValue, bold = false, tone = '' }) {

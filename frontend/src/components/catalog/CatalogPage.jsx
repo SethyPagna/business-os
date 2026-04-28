@@ -521,10 +521,220 @@ const DEFAULT_CONFIG = {
 
 const PORTAL_CACHE_KEY = 'business-os.portal.cache.v2'
 
+const PORTAL_KM_FALLBACKS = {
+  studioTitle: 'កែសម្រួលផតថល',
+  studioHint: 'កែប្រែទំព័រដែលអតិថិជនមើលឃើញនៅទីនេះ។ ទំព័រសាធារណៈនៅតែអានបានតែប៉ុណ្ណោះ។',
+  saveChanges: 'រក្សាទុកការកែប្រែ',
+  savedPreview: 'មើលជាមុនសាធារណៈ',
+  openPortal: 'បើកទំព័រអតិថិជន',
+  jumpToPreview: 'ទៅកាន់ការមើលជាមុន',
+  backToEditor: 'ត្រឡប់ទៅកាន់កម្មវិធីកែសម្រួល',
+  portalPublishing: 'ការបោះផ្សាយ',
+  portalCatalogSettings: 'ការកំណត់កាតាឡុក',
+  portalMembershipSettings: 'ការកំណត់សមាជិកភាព',
+  portalSubmissionSettings: 'ការកំណត់ការដាក់ស្នើ',
+  portalAssistantSettings: 'ការកំណត់ជំនួយការ AI',
+  portalAssistantHint: 'ជំនួយការនេះអាចណែនាំផលិតផលពីកាតាឡុកបច្ចុប្បន្នរបស់អ្នក និងអាចបង្ហាញប្រភពអនឡាញនៅពេលអ្នកផ្តល់សេវាគាំទ្រ។',
+  assistantEnabled: 'បើកជំនួយការ AI',
+  assistantTitle: 'ចំណងជើងជំនួយការ',
+  assistantIntro: 'សេចក្ដីណែនាំជំនួយការ',
+  assistantDisclaimer: 'សេចក្ដីបដិសេធរបស់ជំនួយការ',
+  assistantProvider: 'អ្នកផ្តល់សេវា AI',
+  assistantProviderAuto: 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)',
+  assistantPrompt: 'ការណែនាំបន្ថែមសម្រាប់ប្រូម',
+  assistantPromptHint: 'ជាជម្រើស សម្រាប់ច្បាប់ជាក់លាក់របស់ហាង ដូចជាសម្លេង ឬប្រភេទផលិតផលដែលត្រូវអាទិភាព។',
+  faqSection: 'កម្មវិធីកែសម្រួល FAQ',
+  faqSettings: 'ការកំណត់ FAQ',
+  faqTitle: 'ចំណងជើង FAQ',
+  faqHint: 'បន្ថែមសំណួរដែលអតិថិជនសួរញឹកញាប់។ អតិថិជនអាចបើកមើលចម្លើយម្តងមួយ។',
+  faqEnabled: 'បង្ហាញផ្នែក FAQ',
+  faqQuestion: 'សំណួរ',
+  faqAnswer: 'ចម្លើយ',
+  addFaq: 'បន្ថែម FAQ',
+  publicUrlLabel: 'តំណសាធារណៈសម្រាប់អតិថិជន',
+  publicUrlHint: 'ប្រើដែនសាធារណៈ ឬ Funnel URL ផ្សេងនៅទីនេះ នៅពេលបោះផ្សាយផតថលអតិថិជននៅក្រៅតំណអ្នកគ្រប់គ្រង។',
+  openEmbeddedPreview: 'បើកការមើលជាមុនសាធារណៈ',
+  translateWidget: 'បើកឧបករណ៍បកប្រែសាធារណៈ',
+  translateWidgetHint: 'អតិថិជនសាធារណៈអាចប្ដូរភាសាតាម Google Translate។ ការបកប្រែខាងក្នុង Business OS ដាច់ដោយឡែក។',
+  visibility: 'ការមើលឃើញ',
+  contactVisibility: 'ការមើលឃើញព័ត៌មានទំនាក់ទំនង',
+  socialVisibility: 'ការមើលឃើញបណ្តាញសង្គម',
+  mapCard: 'ផែនទីហាង',
+  mapEmbed: 'តំណបង្កប់ Google Map',
+  mapEmbedHint: 'បិទភ្ជាប់តំណ Google Maps ឬ embed URL។ ផតថលនឹងបង្ហាញវាជាកាតផែនទីអន្តរកម្ម។',
+  showGoogleMap: 'បង្ហាញ Google Map',
+  showLogo: 'បង្ហាញឡូហ្គោ',
+  showCover: 'បង្ហាញរូបគម្រប',
+  showPhone: 'បង្ហាញលេខទូរស័ព្ទ',
+  showEmail: 'បង្ហាញអ៊ីមែល',
+  showAddress: 'បង្ហាញអាសយដ្ឋាន',
+  showWebsite: 'បង្ហាញវេបសាយ',
+  showFacebook: 'បង្ហាញ Facebook',
+  showInstagram: 'បង្ហាញ Instagram',
+  showTelegram: 'បង្ហាញ Telegram',
+  openGallery: 'បើកវិចិត្រសាលរូបភាព',
+  prevImage: 'មុន',
+  nextImage: 'បន្ទាប់',
+  about: 'អំពី',
+  showAbout: 'បង្ហាញផ្នែកអំពី',
+  aboutTitle: 'ចំណងជើងអំពី',
+  aboutContent: 'មាតិកាអំពី',
+  aboutContentHint: 'ប្រាប់អតិថិជនអំពីរឿងរ៉ាវ ម៉ោងធ្វើការ គោលការណ៍ ឬសេវាកម្មរបស់អ្នក។',
+}
+
+Object.assign(PORTAL_KM_FALLBACKS, {
+  studioTitle: 'កែសម្រួលផតថល',
+  studioHint: 'កែប្រែទំព័រដែលអតិថិជនមើលឃើញនៅទីនេះ។ ទំព័រសាធារណៈនៅតែអាចមើលបានតែប៉ុណ្ណោះ។',
+  saveChanges: 'រក្សាទុកការកែប្រែ',
+  savedPreview: 'មើលជាមុនសាធារណៈ',
+  openPortal: 'បើកទំព័រអតិថិជន',
+  jumpToPreview: 'ទៅកាន់ការមើលជាមុន',
+  backToEditor: 'ត្រឡប់ទៅកាន់ការកែសម្រួល',
+  businessInfo: 'ព័ត៌មានអាជីវកម្ម',
+  mediaSection: 'មេឌៀ',
+  display: 'ការបង្ហាញ',
+  about: 'អំពី',
+  faqSection: 'កែសម្រួល FAQ',
+  portalAssistant: 'ជំនួយការ AI',
+  portalPublishing: 'ការបោះផ្សាយ',
+  portalSubmissionSettings: 'ការកំណត់សំណើ',
+  businessName: 'ឈ្មោះអាជីវកម្ម',
+  businessTagline: 'ស្លាកពាក្យខ្លី',
+  phone: 'លេខទូរស័ព្ទ',
+  email: 'អ៊ីមែល',
+  address: 'អាសយដ្ឋាន',
+  addressLink: 'តំណអាសយដ្ឋាន',
+  addressLinkHint: 'ជាជម្រើស សម្រាប់បើកផែនទី ឬទិសដៅ នៅពេលអតិថិជនចុចលើអាសយដ្ឋាន។',
+  portalTitle: 'ចំណងជើងផតថល',
+  portalIntro: 'អត្ថបទណែនាំផតថល',
+  language: 'ភាសាផតថល',
+  followApp: 'តាមកម្មវិធី',
+  english: 'អង់គ្លេស',
+  khmer: 'ខ្មែរ',
+  showCatalog: 'បង្ហាញកាតាឡុកផលិតផល',
+  showMembership: 'បង្ហាញការស្វែងរកសមាជិកភាព',
+  showAbout: 'បង្ហាញផ្នែកអំពី',
+  showPrices: 'បង្ហាញតម្លៃលក់',
+  showOutOfStockProducts: 'បង្ហាញផលិតផលអស់ស្តុក',
+  priceDisplay: 'ការបង្ហាញតម្លៃ',
+  refreshSeconds: 'ចន្លោះពេលផ្ទុកឡើងវិញសាធារណៈ (វិនាទី)',
+  gridColumnsMobile: 'ចំនួនជួរឈរទូរស័ព្ទ',
+  gridColumnsDesktop: 'ចំនួនជួរឈរកុំព្យូទ័រ',
+  syncSpeedHint: 'តម្លៃតូចនឹងផ្ទុកឡើងវិញលឿនជាង ប៉ុន្តែបង្កើនចំនួនសំណើ។ ការមើលជាមុនខាងក្នុងនៅតែឆ្លើយតបភ្លាមៗទៅនឹងសមកាលកម្ម។',
+  portalTheme: 'រចនាប័ទ្មផតថល',
+  heroGradientStart: 'ពណ៌ក្បាលទី ១',
+  heroGradientMid: 'ពណ៌ក្បាលទី ២',
+  heroGradientEnd: 'ពណ៌ក្បាលទី ៣',
+  aboutTitle: 'ចំណងជើងផ្នែកអំពី',
+  aboutContent: 'មាតិកាផ្នែកអំពី',
+  aboutContentHint: 'ប្រាប់អតិថិជនអំពីរឿងរ៉ាវ ម៉ោងបើក គោលការណ៍ ឬសេវាកម្មរបស់អ្នក។',
+  aboutBlocks: 'ប្លុកអំពី',
+  aboutBlocksHint: 'បន្ថែមអត្ថបទ រូបភាព និងវីដេអូ ហើយរៀបលំដាប់តាមដែលអ្នកចង់ឲ្យអតិថិជនមើលឃើញ។',
+  addTextBlock: 'អត្ថបទ',
+  addImageBlock: 'រូបភាព',
+  addVideoBlock: 'វីដេអូ',
+  dragToReorder: 'អូសដើម្បីរៀបលំដាប់',
+  remove: 'លុប',
+  sectionTitle: 'ចំណងជើងផ្នែក',
+  textContent: 'មាតិកាអត្ថបទ',
+  captionDescription: 'ចំណងជើងរូប / សេចក្ដីពិពណ៌នា',
+  imageUrl: 'តំណរូបភាព',
+  videoUrl: 'តំណវីដេអូ',
+  uploadVideo: 'បង្ហោះវីដេអូ',
+  openFiles: 'ឯកសារ',
+  openGallery: 'បើកវិចិត្រសាលរូបភាព',
+  aboutEmpty: 'បន្ថែមប្លុកអំពីដំបូងរបស់អ្នក ដើម្បីបង្កើតទំព័រដែលមានអត្ថបទ រូបភាព និងវីដេអូអាចរៀបលំដាប់បាន។',
+  faqSettings: 'ការកំណត់ FAQ',
+  faqTitle: 'ចំណងជើង FAQ',
+  faqHint: 'បន្ថែមសំណួរដែលអតិថិជនសួរញឹកញាប់បំផុតនៅទីនេះ។ អតិថិជនអាចបើកមើលចម្លើយម្តងមួយ។',
+  faqEnabled: 'បង្ហាញផ្នែក FAQ',
+  faqQuestion: 'សំណួរ',
+  faqAnswer: 'ចម្លើយ',
+  addFaq: 'បន្ថែម FAQ',
+  addStarterSet: 'សំណុំចាប់ផ្តើម',
+  addAiStarterSet: 'សំណុំ AI ចាប់ផ្តើម',
+  portalAssistantSettings: 'ការកំណត់ជំនួយការ AI',
+  portalAssistantHint: 'ផ្នែក AI សម្រាប់អតិថិជននេះនឹងណែនាំផលិតផលពីកាតាឡុកបច្ចុប្បន្ន ហើយអាចភ្ជាប់ប្រភពអនឡាញបាន បើអ្នកផ្តល់សេវាដែលបានជ្រើសគាំទ្រ។',
+  assistantEnabled: 'បើកជំនួយការ AI',
+  assistantTitle: 'ចំណងជើងជំនួយការ',
+  assistantProvider: 'អ្នកផ្តល់សេវា AI',
+  assistantProviderAuto: 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)',
+  noModel: 'មិនទាន់មានម៉ូឌែល',
+  assistantIntro: 'អត្ថបទណែនាំជំនួយការ',
+  assistantDisclaimer: 'សេចក្ដីជូនដំណឹងជំនួយការ',
+  assistantPrompt: 'សេចក្ដីណែនាំបន្ថែមសម្រាប់ prompt',
+  assistantPromptHint: 'ជាជម្រើស ដូចជាសម្លេងនៃការឆ្លើយតប ឬប្រភេទផលិតផលដែលគួរផ្ដល់អាទិភាព។',
+  customerUrl: 'តំណទំព័រអតិថិជន',
+  customerUrlHint: 'កំណត់ផ្លូវសាធារណៈនៅទីនេះ ហើយបោះផ្សាយផ្លូវនោះតាម Funnel ដាច់ដោយឡែក ដើម្បីឲ្យតំណអតិថិជនមិនងាយស្មានពីផ្នែកគ្រប់គ្រង។',
+  publicPathInput: 'ផ្លូវសាធារណៈផ្ទាល់ខ្លួន',
+  publicUrlLabel: 'តំណសាធារណៈរបស់អតិថិជន',
+  publicUrlHint: 'ប្រើដូមែន ឬ Funnel URL ផ្សេងនៅទីនេះ នៅពេលអ្នកបោះផ្សាយផតថលអតិថិជនខាងក្រៅតំណអ្នកគ្រប់គ្រង។',
+  translateWidget: 'បើកប្រអប់បកប្រែសាធារណៈ',
+  openEmbeddedPreview: 'បើកការមើលជាមុនសាធារណៈ',
+  portalCatalogSettings: 'ការកំណត់កាតាឡុក',
+  stockThresholdMode: 'របៀបស្លាកស្តុក',
+  stockThresholdModeProduct: 'ប្រើកម្រិតរបស់ផលិតផលនីមួយៗ',
+  stockThresholdModeGlobal: 'ប្រើកម្រិតទូទៅរបស់ផតថល',
+  lowStockThreshold: 'កម្រិតស្តុកទាប',
+  outOfStockThreshold: 'កម្រិតអស់ស្តុក',
+  stockThresholdHint: 'កម្រិតទូទៅនឹងជំនួសស្លាកស្តុកតាមផលិតផលនៅលើផតថលអតិថិជនប៉ុណ្ណោះ។',
+  portalMembershipSettings: 'ការកំណត់សមាជិកភាព',
+  pointsPageHint: 'ច្បាប់រកពិន្ទុ តម្លៃប្ដូរ កំណត់ចំណាំពិន្ទុរបស់អតិថិជន និងពិន្ទុលំនាំដើម ត្រូវបានគ្រប់គ្រងនៅទំព័រ Loyalty Points ដើម្បីឲ្យផតថលនេះផ្តោតលើមាតិកាសម្រាប់អតិថិជន។',
+  openPointsPage: 'បើក Loyalty Points',
+  submissionFeature: 'បើកសំណើចែករំលែក',
+  submissionInstructions: 'សេចក្ដីណែនាំសំណើ',
+  submissionInstructionsHint: 'អតិថិជនអាចដាក់បានតែរូបថតអេក្រង់ប៉ុណ្ណោះ។ បុគ្គលិកនឹងពិនិត្យ និងផ្តល់ពិន្ទុខាងក្នុង Business OS។',
+  reviewQueue: 'ជួរពិនិត្យ',
+  reviewQueueHint: 'អនុម័ត បដិសេធ និងផ្តល់ពិន្ទុសម្រាប់សំណើចែករំលែករបស់អតិថិជន។',
+  approve: 'អនុម័ត',
+  reject: 'បដិសេធ',
+  pending: 'កំពុងរង់ចាំ',
+  rewardPoints: 'ផ្តល់ពិន្ទុ',
+  reviewNotePlaceholder: 'កំណត់ចំណាំពិនិត្យខាងក្នុង',
+  reviewSaved: 'បានរក្សាទុកការពិនិត្យ។',
+  logoImage: 'រូបសញ្ញា',
+  faviconImage: 'រូបសញ្ញាតាប Browser',
+  coverImage: 'រូបគម្រប',
+  uploadImage: 'បង្ហោះរូបភាព',
+  clearImage: 'សម្អាត',
+  portalImageUploadHint: 'ការបង្ហោះនឹងរក្សាទុកផ្លូវឯកសារខ្លី ដើម្បីឲ្យការកំណត់ផតថលស្អាត និងងាយគ្រប់គ្រង។',
+  faviconHint: 'បង្ហាញក្នុងតាប Browser និង shortcut ដែលបានរក្សាទុក។ បើទទេ នឹងប្រើរូបសញ្ញារង្វង់ដោយស្វ័យប្រវត្តិ។',
+  showLogo: 'បង្ហាញរូបសញ្ញា',
+  showCover: 'បង្ហាញរូបគម្រប',
+  logoSize: 'ទំហំរូបសញ្ញា',
+  logoFit: 'របៀបដាក់រូបសញ្ញា',
+  fitContain: 'ដាក់ឲ្យសមក្នុងស៊ុម',
+  fitCover: 'បំពេញស៊ុម',
+  logoZoom: 'ពង្រីករូបសញ្ញា',
+  logoPositionX: 'ទីតាំងផ្ដេក',
+  logoPositionY: 'ទីតាំងបញ្ឈរ',
+  logoPreview: 'មើលជាមុនរូបសញ្ញា',
+  contactVisibility: 'ការបង្ហាញព័ត៌មានទំនាក់ទំនង',
+  socialVisibility: 'ការបង្ហាញបណ្ដាញសង្គម',
+  showPhone: 'បង្ហាញលេខទូរស័ព្ទ',
+  showEmail: 'បង្ហាញអ៊ីមែល',
+  showAddress: 'បង្ហាញអាសយដ្ឋាន',
+  showWebsite: 'បង្ហាញវេបសាយ',
+  showFacebook: 'បង្ហាញ Facebook',
+  showInstagram: 'បង្ហាញ Instagram',
+  showTelegram: 'បង្ហាញ Telegram',
+  mapCard: 'ផែនទីហាង',
+  mapEmbed: 'តំណបង្កប់ Google Map',
+  mapEmbedHint: 'បិទភ្ជាប់តំណ Google Maps ឬ embed URL។ ផតថលនឹងបង្ហាញវាជាកាតផែនទីអាចប្រើបាន។',
+  showGoogleMap: 'បង្ហាញ Google Map',
+  pointsEarned: 'ពិន្ទុដែលទទួលបាន',
+  pointsRedeemed: 'ពិន្ទុដែលបានប្ដូរ',
+  pointsRewarded: 'ពិន្ទុរង្វាន់',
+})
+
 /** Resolve a portal-localized string with fallback order: extra -> base -> English -> provided fallback. */
-function tt(lang, key, fallback) {
+function tt(lang, key, fallback, fallbackKm = fallback) {
   const localized = PORTAL_TEXT_EXTRA[lang]?.[key] || PORTAL_TEXT[lang]?.[key]
   if (localized && !isBrokenLocalizedString(localized)) return localized
+  if (lang === 'km') {
+    const khmerFallback = PORTAL_KM_FALLBACKS[key] || fallbackKm
+    if (khmerFallback && !isBrokenLocalizedString(khmerFallback)) return khmerFallback
+  }
   const english = PORTAL_TEXT_EXTRA.en?.[key] || PORTAL_TEXT.en?.[key]
   if (english && !isBrokenLocalizedString(english)) return english
   return fallback
@@ -1144,7 +1354,7 @@ function applyGoogleTranslateSelection(sourceLang, targetLang) {
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }) {
-  const { hasPermission, navigateTo, saveSettings, notify, theme, user } = useApp()
+  const { hasPermission, navigateTo, saveSettings, notify, theme, user, t, language: appLanguage } = useApp()
   const { syncChannel } = useSync()
   const cachedPortalRef = useRef(readPortalCache())
   const cachedPortal = cachedPortalRef.current
@@ -1214,7 +1424,12 @@ export default function CatalogPage({ publicView = false }) {
     [canEdit, config, editorDraft]
   )
   const language = previewConfig.language === 'km' ? 'km' : 'en'
-  const copy = (key, fallback) => tt(language, key, fallback)
+  const editorLanguage = appLanguage === 'km' ? 'km' : 'en'
+  const copy = (key, fallback, fallbackKm = fallback) => {
+    const global = typeof t === 'function' ? t(key) : ''
+    if (global && global !== key && !isBrokenLocalizedString(global)) return global
+    return tt(editorLanguage, key, fallback, fallbackKm)
+  }
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
     : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
@@ -2237,18 +2452,18 @@ export default function CatalogPage({ publicView = false }) {
             ))}
           </div>
           <div className="grid grid-cols-2 gap-2 lg:flex lg:justify-end">
-            <button
-              type="button"
-              className="btn-secondary min-w-0 text-xs sm:text-sm"
-              onClick={() => previewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            >
-              <Eye className="mr-1 inline h-4 w-4" />
-              {copy('jumpToPreview', 'Jump to preview')}
-            </button>
-            <button className="btn-primary min-w-0 text-xs sm:text-sm" disabled={editorSaving || !editorDirty} onClick={savePortalDraft}>
-              <Save className="mr-1 inline h-4 w-4" />
-              {copy('saveChanges', 'Save changes')}
-            </button>
+              <button
+                type="button"
+                className="btn-secondary inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs sm:text-sm"
+                onClick={() => previewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              >
+                <Eye className="mr-1 inline h-4 w-4" />
+                {copy('jumpToPreview', 'Jump to preview', 'ទៅកាន់ការមើលជាមុន')}
+              </button>
+              <button className="btn-primary inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs sm:text-sm" disabled={editorSaving || !editorDirty} onClick={savePortalDraft}>
+                <Save className="mr-1 inline h-4 w-4" />
+                {copy('saveChanges', 'Save changes', 'រក្សាទុកការកែប្រែ')}
+              </button>
           </div>
         </div>
       </div>
@@ -2291,7 +2506,7 @@ export default function CatalogPage({ publicView = false }) {
                 </select>
               </div>
               <div>
-                <label htmlFor="portal-refresh-seconds" className="block text-sm font-medium text-slate-700">{copy('refreshSeconds', 'Public refresh interval (seconds)')}</label>
+                  <label htmlFor="portal-refresh-seconds" className="block text-sm font-medium text-slate-700">{copy('refreshSeconds', 'Public refresh interval (seconds)', 'ចន្លោះពេលស្រស់ថ្មីសាធារណៈ (វិនាទី)')}</label>
                 <input id="portal-refresh-seconds" name="customer_portal_refresh_seconds" className="input" type="number" min="5" max="120" step="1" value={editorDraft.customer_portal_refresh_seconds || '20'} onChange={(event) => setDraft('customer_portal_refresh_seconds', event.target.value)} />
               </div>
               <div>
@@ -2388,21 +2603,21 @@ export default function CatalogPage({ publicView = false }) {
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">About blocks</div>
-                  <p className="mt-1 text-xs text-slate-500">Add text, image, and video sections, then move them into the order you want customers to see.</p>
+                  <div className="text-sm font-semibold text-slate-900">{copy('aboutBlocks', 'About blocks')}</div>
+                  <p className="mt-1 text-xs text-slate-500">{copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('text')}>
                     <Plus className="h-4 w-4" />
-                    Text
+                    {copy('addTextBlock', 'Text')}
                   </button>
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('image')}>
                     <Images className="h-4 w-4" />
-                    Image
+                    {copy('addImageBlock', 'Image')}
                   </button>
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('video')}>
                     <Plus className="h-4 w-4" />
-                    Video
+                    {copy('addVideoBlock', 'Video')}
                   </button>
                 </div>
               </div>
@@ -2422,7 +2637,7 @@ export default function CatalogPage({ publicView = false }) {
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-slate-900">
-                        <button type="button" className="cursor-grab rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500" title="Drag to reorder">
+                        <button type="button" className="cursor-grab rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500" title={copy('dragToReorder', 'Drag to reorder')}>
                           ::
                         </button>
                         <span>
@@ -2430,22 +2645,22 @@ export default function CatalogPage({ publicView = false }) {
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeAboutBlock(block.id)}>Remove</button>
+                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeAboutBlock(block.id)}>{copy('remove', 'Remove')}</button>
                       </div>
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
                       <div className="space-y-4">
                         <div>
-                          <label htmlFor={`portal-about-block-title-${block.id}`} className="block text-sm font-medium text-slate-700">Section title</label>
+                          <label htmlFor={`portal-about-block-title-${block.id}`} className="block text-sm font-medium text-slate-700">{copy('sectionTitle', 'Section title')}</label>
                           <input id={`portal-about-block-title-${block.id}`} className="input" value={block.title} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
                         </div>
                         <div>
-                          <label htmlFor={`portal-about-block-body-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'text' ? 'Text content' : 'Caption / description'}</label>
+                          <label htmlFor={`portal-about-block-body-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'text' ? copy('textContent', 'Text content') : copy('captionDescription', 'Caption / description')}</label>
                           <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} value={block.body} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-3">
-                        <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? 'Video URL' : 'Image URL'}</label>
+                        <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? copy('videoUrl', 'Video URL') : copy('imageUrl', 'Image URL')}</label>
                         <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
                         <div className="flex flex-wrap gap-2">
                           <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)}>
@@ -2478,7 +2693,7 @@ export default function CatalogPage({ publicView = false }) {
                   </article>
                 )) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                    Add your first About block to build a richer page with reorderable text, images, and video.
+                    {copy('aboutEmpty', 'Add your first About block to build a richer page with reorderable text, images, and video.')}
                   </div>
                 )}
               </div>
@@ -2521,7 +2736,7 @@ export default function CatalogPage({ publicView = false }) {
                     <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-semibold text-slate-900">#{index + 1}</div>
-                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>Remove</button>
+                        <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>{copy('remove', 'Remove')}</button>
                       </div>
                       <div className="mt-3 grid gap-3">
                         <div>
@@ -2547,8 +2762,8 @@ export default function CatalogPage({ publicView = false }) {
           <div id="portal-section-assistant" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'assistant' ? '' : 'hidden'}`}>
             <div className="space-y-5">
               <div>
-                <div className="text-sm font-semibold text-slate-900">{copy('portalAssistantSettings', 'AI assistant settings')}</div>
-                <p className="mt-2 text-sm text-slate-600">{copy('portalAssistantHint', 'This customer-facing AI page suggests products from your live catalog and can include online references when the selected provider supports them.')}</p>
+                  <div className="text-sm font-semibold text-slate-900">{copy('portalAssistantSettings', 'AI assistant settings', 'ការកំណត់ជំនួយការ AI')}</div>
+                  <p className="mt-2 text-sm text-slate-600">{copy('portalAssistantHint', 'This customer-facing AI page suggests products from your live catalog and can include online references when the selected provider supports them.', 'ជំនួយការ AI សម្រាប់អតិថិជននេះនឹងណែនាំផលិតផលពីកាតាឡុកបច្ចុប្បន្ន ហើយអាចបន្ថែមប្រភពអនឡាញបាន បើ provider ដែលបានជ្រើសគាំទ្រ។')}</p>
               </div>
 
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
@@ -2562,12 +2777,12 @@ export default function CatalogPage({ publicView = false }) {
                   <input className="input mt-1" value={editorDraft.customer_portal_ai_title || ''} onChange={(event) => setDraft('customer_portal_ai_title', event.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry')}</label>
+                  <label className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry', 'AI provider')}</label>
                   <select className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
-                    <option value="">{copy('assistantProviderAuto', 'Automatic (best available)')}</option>
+                    <option value="">{copy('assistantProviderAuto', 'Automatic (best available)', 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)')}</option>
                     {aiProviders.map((provider) => (
                       <option key={provider.id} value={String(provider.id)}>
-                        {provider.name} | {provider.provider_label || provider.provider} | {provider.default_model || 'No model'}
+                        {provider.name} | {provider.provider_label || provider.provider} | {provider.default_model || copy('noModel', 'No model')}
                       </option>
                     ))}
                   </select>
@@ -2863,7 +3078,7 @@ export default function CatalogPage({ publicView = false }) {
                 </select>
               </label>
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Logo zoom</span>
+                <span className="text-sm font-medium text-slate-700">{copy('logoZoom', 'Logo zoom')}</span>
                 <input
                   id="portal-logo-zoom"
                   name="customer_portal_logo_zoom"
@@ -2878,7 +3093,7 @@ export default function CatalogPage({ publicView = false }) {
                 <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_zoom || '100'}%</span>
               </label>
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Horizontal position</span>
+                <span className="text-sm font-medium text-slate-700">{copy('logoPositionX', 'Horizontal position')}</span>
                 <input
                   id="portal-logo-position-x"
                   name="customer_portal_logo_position_x"
@@ -2893,7 +3108,7 @@ export default function CatalogPage({ publicView = false }) {
                 <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_logo_position_x || '50'}%</span>
               </label>
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Vertical position</span>
+                <span className="text-sm font-medium text-slate-700">{copy('logoPositionY', 'Vertical position')}</span>
                 <input
                   id="portal-logo-position-y"
                   name="customer_portal_logo_position_y"
@@ -2910,7 +3125,7 @@ export default function CatalogPage({ publicView = false }) {
               </div>
               {editorDraft.customer_portal_logo_image ? (
                 <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Logo preview</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('logoPreview', 'Logo preview')}</div>
                   <div
                     className="mt-3 rounded-[28px] p-4 text-white"
                     style={{
@@ -2996,9 +3211,9 @@ export default function CatalogPage({ publicView = false }) {
               <p className="mt-2 text-sm text-sky-800">
                 {copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so this portal page can stay focused on customer-facing content.')}
               </p>
-              <button type="button" className="btn-secondary mt-3 text-sm" onClick={() => navigateTo('loyalty_points')}>
-                {copy('openPointsPage', 'Open Loyalty Points')}
-              </button>
+                <button type="button" className="btn-secondary mt-3 text-sm" onClick={() => navigateTo('loyalty_points')}>
+                  {copy('openPointsPage', 'Open Loyalty Points', 'បើកទំព័រពិន្ទុស្មោះត្រង់')}
+                </button>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

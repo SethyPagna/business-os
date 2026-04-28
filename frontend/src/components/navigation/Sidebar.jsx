@@ -160,7 +160,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className={`sticky top-0 hidden h-screen w-[220px] flex-shrink-0 flex-col border-r min-h-0 md:flex ${!sidebarBg ? 'border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-transparent'}`}>
+      <aside className={`sticky top-14 hidden h-[calc(100vh-3.5rem)] w-[220px] flex-shrink-0 flex-col border-r min-h-0 md:flex ${!sidebarBg ? 'border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-transparent'}`}>
         <nav className="flex-1 overflow-y-auto p-3 pt-4">
           <div className="space-y-0.5">
             {visibleItems.map((item) => {
@@ -237,12 +237,12 @@ export default function Sidebar() {
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <QuickPreferenceToggles />
-          <button type="button" onClick={() => setProfileOpen(true)} className="flex items-center justify-center">
-            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+          <button type="button" onClick={() => setProfileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
               {user?.avatar_path ? (
-                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 object-cover" />
+                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" />
               ) : (
-                <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                <span className="text-base font-bold text-blue-600 dark:text-blue-400">
                   {user?.name?.[0]?.toUpperCase()}
                 </span>
               )}

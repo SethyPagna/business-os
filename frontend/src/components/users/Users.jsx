@@ -82,6 +82,7 @@ export default function Users() {
   const [saving, setSaving] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(null)
 
   /**
    * 2. Authorization Guards
@@ -99,10 +100,12 @@ export default function Users() {
     if (!canManage) {
       setUsers([])
       setRoles([])
+      setLoadError(null)
       loadedOnceRef.current = true
       return
     }
     setLoading(true)
+    setLoadError(null)
     try {
       const result = await settleLoaderMap({
         users: () => window.api.getUsers(),
@@ -127,6 +130,7 @@ export default function Users() {
       }
       loadedOnceRef.current = true
     } catch (error) {
+      setLoadError(error?.message || 'Failed to load users')
       notify(error?.message || 'Failed to load users', 'error')
     } finally {
       setLoading(false)
@@ -136,10 +140,10 @@ export default function Users() {
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (page !== 'users') return
-    if (!loadedOnceRef.current || (!loading && users.length === 0 && roles.length === 0 && canManage)) {
+    if (!loadedOnceRef.current || (!loading && loadError && canManage)) {
       load()
     }
-  }, [canManage, loading, page, roles.length, users.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canManage, loadError, loading, page]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!syncChannel) return
     if (syncChannel.channel === 'users' || syncChannel.channel === 'roles') load()

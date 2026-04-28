@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarRange, Download, Eye, FileSpreadsheet } from 'lucide-react'
+import { CalendarRange, Eye, FileSpreadsheet, Upload } from 'lucide-react'
 import Modal from '../shared/Modal'
 import StatusBadge from './StatusBadge'
 
@@ -168,7 +168,7 @@ export default function ExportModal({ onClose, t, fmtUSD }) {
             {loading ? tr('loading', 'Loading...') : tr('preview_summary', 'Preview Summary')}
           </button>
           <button type="button" onClick={handleExportCSV} disabled={loading} className="btn-primary flex-1 text-sm disabled:opacity-50">
-            <Download className="mr-2 inline h-4 w-4" />
+            <Upload className="mr-2 inline h-4 w-4" />
             {loading ? tr('loading', 'Loading...') : tr('export_csv_btn', 'Export CSV')}
           </button>
         </div>

@@ -78,7 +78,7 @@ export default function Contacts() {
       const delivery = Array.isArray(result.values.delivery) ? result.values.delivery : []
       const today = new Date().toISOString().slice(0, 10)
 
-      if (Array.isArray(customers) && customers.length > 0) {
+      if (customers.length > 0) {
         downloadCSV(`contacts-customers-${today}.csv`, customers.map((c) => ({
           Name: c.name || '',
           Membership_Number: c.membership_number || '',
@@ -90,7 +90,7 @@ export default function Contacts() {
           Created: c.created_at || '',
         })))
       }
-      if (Array.isArray(suppliers) && suppliers.length > 0) {
+      if (suppliers.length > 0) {
         downloadCSV(`contacts-suppliers-${today}.csv`, suppliers.map((s) => ({
           Name: s.name || '',
           Phone: s.phone || '',
@@ -102,7 +102,7 @@ export default function Contacts() {
           Created: s.created_at || '',
         })))
       }
-      if (Array.isArray(delivery) && delivery.length > 0) {
+      if (delivery.length > 0) {
         downloadCSV(`contacts-delivery-${today}.csv`, delivery.map((d) => ({
           Name: d.name || '',
           Phone: d.phone || '',
@@ -113,7 +113,7 @@ export default function Contacts() {
         })))
       }
 
-      const total = (customers?.length || 0) + (suppliers?.length || 0) + (delivery?.length || 0)
+      const total = customers.length + suppliers.length + delivery.length
       if (!result.hasAnySuccess) {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to export contacts'))
       }
@@ -145,33 +145,35 @@ export default function Contacts() {
         icon={BookUser}
         tone="blue"
         title={t('contacts')}
-        subtitle={t('perm_contacts') || 'Manage customers, suppliers, and delivery contacts from one workspace.'}
+        subtitle=""
         className="mb-4"
+        stackOnMobile={false}
+        actionsClassName="min-w-0"
         actions={(
-          <div className="flex min-w-0 flex-shrink gap-1.5 overflow-x-auto pb-0.5">
-          <button
-            className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
-            onClick={openImportPicker}
-            title={t('import_all_contacts_title') || 'Import contacts'}
-            aria-label={t('import_contacts') || 'Import'}
-          >
-            <Upload className="h-4 w-4" />
-            <span>{t('import_contacts') || 'Import'}</span>
-          </button>
-          <button
-            className="btn-secondary flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
-            onClick={handleExportAll}
-            title={t('export_all_contacts') || 'Export all contacts as CSVs'}
-            aria-label={t('export') || 'Export'}
-          >
-            <Download className="h-4 w-4" />
-            <span>{t('export') || 'Export'}</span>
-          </button>
+          <div className="ml-auto flex min-w-0 flex-shrink gap-1 overflow-x-auto pb-0.5">
+            <button
+              className="btn-secondary flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-1.5 text-xs sm:text-sm"
+              onClick={openImportPicker}
+              title={t('import_all_contacts_title') || 'Import contacts'}
+              aria-label={t('import_contacts') || 'Import'}
+            >
+              <Upload className="h-4 w-4" />
+              <span>{t('import_contacts') || 'Import'}</span>
+            </button>
+            <button
+              className="btn-secondary flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-1.5 text-xs sm:text-sm"
+              onClick={handleExportAll}
+              title={t('export_all_contacts') || 'Export all contacts as CSVs'}
+              aria-label={t('export') || 'Export'}
+            >
+              <Download className="h-4 w-4" />
+              <span>{t('export') || 'Export'}</span>
+            </button>
           </div>
         )}
       />
 
-      <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-700">
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {TABS(t).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -183,7 +185,7 @@ export default function Contacts() {
             }`}
           >
             <Icon className="h-4 w-4" />
-            {label}
+            <span className="truncate">{label}</span>
           </button>
         ))}
       </div>

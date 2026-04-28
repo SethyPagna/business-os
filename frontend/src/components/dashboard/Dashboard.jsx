@@ -1,12 +1,13 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import PortalMenu from '../shared/PortalMenu'
-import { Download, LayoutDashboard, RefreshCw } from 'lucide-react'
+import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
 import { downloadCSV } from '../../utils/csv'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 export default function Dashboard() {
   const { t, fmtUSD, fmtKHR } = useApp()
@@ -17,6 +18,8 @@ export default function Dashboard() {
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+  const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
+  const refreshLabel = translateOr('refresh', 'Refresh', 'ស្រស់ថ្មី')
 
   // Range presets use t() for labels inside the component so t() is in scope.
   const RANGE_PRESETS = [
@@ -51,7 +54,7 @@ export default function Dashboard() {
   const [kpiDetail, setKpiDetail]               = useState(null)
 
   useEffect(() => {
-    window.api.getDashboard()
+    withLoaderTimeout(() => window.api.getDashboard(), 'Dashboard summary')
       .then(d => { setSummary(d); setLoading(false) })
       .catch(e => {
         console.error('[Dashboard] getDashboard failed:', e.message)
@@ -66,7 +69,10 @@ export default function Dashboard() {
     const preset = RANGE_PRESETS.find(r => r.id === rangeId)
     if (preset?.getRange) { const r = preset.getRange(); start = r.start; end = r.end; gran = r.gran }
     else { start = customStart; end = customEnd; gran = granularity }
-    return window.api.getAnalytics({ startDate: start, endDate: end, granularity: gran })
+    return withLoaderTimeout(
+      () => window.api.getAnalytics({ startDate: start, endDate: end, granularity: gran }),
+      'Dashboard analytics',
+    )
       .then(d => { setAnalytics(d); if (!silent) setALoading(false) })
       .catch(e => {
         console.error('[Dashboard] getAnalytics failed:', e.message)
@@ -82,7 +88,7 @@ export default function Dashboard() {
     if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory') {
       setSilentRefresh(true)
       Promise.allSettled([
-        window.api.getDashboard().then(d => setSummary(d)),
+        withLoaderTimeout(() => window.api.getDashboard(), 'Dashboard summary refresh').then(d => setSummary(d)),
         loadAnalytics(true),
       ]).finally(() => setSilentRefresh(false))
     }
@@ -273,11 +279,11 @@ export default function Dashboard() {
           {silentRefresh && <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>}
           <button onClick={() => { window.api.getDashboard().then(d => setSummary(d)); loadAnalytics() }} className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
-            {t('refresh')||'Refresh'}
+            {refreshLabel}
           </button>
           <PortalMenu
             align="right"
-            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"><Download className="h-4 w-4" />Export</button>}
+            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"><Upload className="h-4 w-4" />{exportLabel}</button>}
             items={[
               { label: t('export_all_report'), onClick: buildExportAll },
               'divider',

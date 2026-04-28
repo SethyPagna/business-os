@@ -5,6 +5,7 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 export function parseContactOptions(raw) {
   if (!raw) return []
@@ -215,7 +216,7 @@ function CustomersTab({ t, notify }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await window.api.getCustomers()
+      const data = await withLoaderTimeout(() => window.api.getCustomers(), 'Customers')
       setCustomers(Array.isArray(data) ? data : [])
     } catch (error) {
       setCustomers([])
@@ -301,7 +302,7 @@ function CustomersTab({ t, notify }) {
             </button>
           ) : null}
           <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr(t, 'import_contacts', 'Import')}>
-            <Upload className="h-4 w-4" />
+            <Download className="h-4 w-4" />
             <span className="hidden sm:inline">{tr(t, 'import_contacts', 'Import')}</span>
           </button>
           <button
@@ -323,7 +324,7 @@ function CustomersTab({ t, notify }) {
               downloadCSV(`customers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
           >
-            <Download className="h-4 w-4" />
+            <Upload className="h-4 w-4" />
             <span className="hidden sm:inline">{tr(t, 'export', 'Export')}</span>
           </button>
           <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={tr(t, 'add_customer', 'Add Customer')}>

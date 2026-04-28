@@ -7,6 +7,7 @@ import ReturnDetailModal from './ReturnDetailModal'
 import EditReturnModal from './EditReturnModal'
 import NewReturnModal from './NewReturnModal'
 import NewSupplierReturnModal from './NewSupplierReturnModal'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -17,6 +18,12 @@ function normalizeScope(value) {
 
 export default function Returns() {
   const { t, fmtUSD, fmtKHR, notify } = useApp()
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = t(key)
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }, [isKhmer, t])
   const { syncChannel } = useSync()
   const [scope, setScope] = useState(CUSTOMER_SCOPE)
   const [rows, setRows] = useState([])
@@ -27,16 +34,11 @@ export default function Returns() {
   const [editRet, setEditRet] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const tr = (key, fallback) => {
-    const value = t?.(key)
-    return value && value !== key ? value : fallback
-  }
-
   const loadReturns = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
       const params = { scope }
-      const result = await window.api.getReturns(params)
+      const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns')
       setRows(Array.isArray(result) ? result : [])
     } catch (error) {
       console.error('[Returns] load failed:', error?.message)
@@ -144,11 +146,11 @@ export default function Returns() {
           <button
             onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
             className="btn-secondary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
-            aria-label="Export"
+            aria-label={tr('export', 'Export', 'នាំចេញ')}
           >
-            <Download className="h-4 w-4" />
-            <span>Export</span>
-          </button>
+              <Download className="h-4 w-4" />
+            <span>{tr('export', 'Export', 'នាំចេញ')}</span>
+            </button>
           {scope === SUPPLIER_SCOPE ? (
             <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
               <Undo2 className="h-4 w-4" />

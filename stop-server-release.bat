@@ -19,6 +19,7 @@ set "LOG_DIR=%RUNTIME_DIR%\logs"
 set "RUN_LOG=%LOG_DIR%\stop-server.log"
 set "ENV_FILE=%ROOT%\.env"
 set "PORT=4000"
+set "TAILSCALE_CMD="
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
@@ -26,6 +27,17 @@ if exist "%ENV_FILE%" (
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>&1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] STOP requested port=%PORT%>>"%RUN_LOG%"
+
+for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
+    if not defined TAILSCALE_CMD (
+        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
+    )
+)
+if not defined TAILSCALE_CMD (
+    for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
+        if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+    )
+)
 
 title Business OS  ^|  Stop Server
 
@@ -85,11 +97,10 @@ if not errorlevel 1 (
     powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'pm2' -or $_.CommandLine -match 'Daemon\\.js' -or $_.CommandLine -match 'backend[\\/]+server\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 )
 
-where tailscale >nul 2>&1
-if not errorlevel 1 (
+if defined TAILSCALE_CMD (
     echo.
     echo [INFO] Stopping Tailscale Funnel...
-    tailscale funnel --bg 0 >nul 2>&1
+    call "!TAILSCALE_CMD!" funnel --bg 0 >nul 2>&1
     echo [OK] Tailscale Funnel stopped.
 )
 

@@ -66,6 +66,20 @@ function collectUsedKeys(files) {
     .sort()
 }
 
+function flattenTranslationTree(input, target = {}) {
+  if (!input || typeof input !== 'object') return target
+  for (const [key, value] of Object.entries(input)) {
+    if (value == null) continue
+    if (typeof value === 'string') {
+      target[key] = value
+      continue
+    }
+    if (Array.isArray(value)) continue
+    flattenTranslationTree(value, target)
+  }
+  return target
+}
+
 function listMissing(sourceKeys, targetMap) {
   // 3.1 Return keys required by source usage but missing from a translation map.
   return sourceKeys.filter((key) => !(key in targetMap))
@@ -87,8 +101,8 @@ function printList(title, items) {
 
 function main() {
   // 5.1 Load dictionaries + source files, then compute coverage differences.
-  const en = readJson(EN_PATH, {})
-  const km = readJson(KM_PATH, {})
+  const en = flattenTranslationTree(readJson(EN_PATH, {}))
+  const km = flattenTranslationTree(readJson(KM_PATH, {}))
   const files = walkFilesRecursive(SRC_DIR, {
     excludeDirs: new Set(['node_modules', 'dist', 'release']),
     extensions: new Set(['.js', '.jsx', '.ts', '.tsx']),

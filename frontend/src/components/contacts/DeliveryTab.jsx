@@ -6,6 +6,7 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 // ?? Options helpers ????????????????????????????????????????????????????????????
 // Options stored as JSON array in the 'address' TEXT column.
@@ -143,6 +144,12 @@ function OptionsBadge({ raw }) {
 function DeliveryTab({ t, notify }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = typeof t === 'function' ? t(key) : null
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }
   const [contacts, setContacts] = useState([])
   const [search,   setSearch]   = useState('')
   const [modal,    setModal]    = useState(null)
@@ -159,7 +166,7 @@ function DeliveryTab({ t, notify }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await window.api.getDeliveryContacts()
+      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), 'Delivery contacts')
       setContacts(Array.isArray(data) ? data : [])
     } catch (error) {
       setContacts([])
@@ -215,20 +222,20 @@ function DeliveryTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           )}
-          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => setModal('import')} title={t('import_contacts') || 'Import'}>
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('import_contacts') || 'Import'}</span>
+          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => setModal('import')} title={tr('import_contacts', 'Import', 'នាំចូល')}>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
           </button>
           <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => {
             const rows = filtered.map(c => ({ Name: c.name||'', Phone: c.phone||'', Area: c.area||'', Notes: c.notes||'', Created: c.created_at||'' }))
             downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
-          }} title="Export">
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export</span>
+          }} title={tr('export', 'Export', 'នាំចេញ')}>
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">{tr('export', 'Export', 'នាំចេញ')}</span>
           </button>
-          <button className="btn-primary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => { setSelected(null); setModal('form') }} title={t('add_delivery_contact') || 'Add Delivery'}>
+          <button className="btn-primary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => { setSelected(null); setModal('form') }} title={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}>
             <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('add_delivery_contact') || 'Add Delivery'}</span>
+            <span className="hidden sm:inline">{tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}</span>
           </button>
         </div>
       </div>

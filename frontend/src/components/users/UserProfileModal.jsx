@@ -4,7 +4,7 @@ import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
 import { STORAGE_KEYS } from '../../constants'
-import { useApp } from '../../AppContext'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 /**
@@ -50,11 +50,217 @@ function ProfileSectionButton({ active, children, onClick }) {
   )
 }
 
+const PROFILE_KM_FALLBACKS = {
+  profile: 'ប្រវត្តិរូប',
+  loading_account: 'កំពុងផ្ទុកគណនី...',
+  personal_details: 'ព័ត៌មានផ្ទាល់ខ្លួន',
+  sign_in_methods: 'វិធីចូលប្រើ',
+  security: 'សុវត្ថិភាព',
+  organization: 'អង្គភាព',
+  full_name: 'ឈ្មោះពេញ',
+  username: 'ឈ្មោះអ្នកប្រើ',
+  phone: 'លេខទូរស័ព្ទ',
+  email: 'អ៊ីមែល',
+  avatar_image: 'រូបភាពប្រវត្តិរូប',
+  upload_image: 'បង្ហោះរូបភាព',
+  open_files: 'ឯកសារ',
+  choose_image_file: 'សូមជ្រើសរើសឯកសាររូបភាព',
+  uploading: 'កំពុងបង្ហោះ...',
+  saving: 'កំពុងរក្សាទុក...',
+  avatar_uploaded: 'បានបង្ហោះរូបភាពប្រវត្តិរូប',
+  avatar_upload_failed: 'បរាជ័យក្នុងការបង្ហោះរូបភាពប្រវត្តិរូប',
+  no_avatar_uploaded: 'មិនទាន់មានរូបភាពប្រវត្តិរូបនៅឡើយទេ។',
+  save_profile: 'រក្សាទុកប្រវត្តិរូប',
+  profile_updated: 'បានធ្វើបច្ចុប្បន្នភាពប្រវត្តិរូប',
+  profile_updated_email_changed: 'បានធ្វើបច្ចុប្បន្នភាពប្រវត្តិរូប ហើយអ៊ីមែលថ្មីត្រូវបានភ្ជាប់ទៅគណនីនេះ។',
+  name_username_required: 'ត្រូវការឈ្មោះ និងឈ្មោះអ្នកប្រើ',
+  current_password_required_save: 'ត្រូវការពាក្យសម្ងាត់បច្ចុប្បន្ន ដើម្បីរក្សាទុកការផ្លាស់ប្ដូរគណនី',
+  profile_partial_load: 'ព័ត៌មានចូលប្រើខ្លះកំពុងធ្វើសមកាលកម្ម។ ប្រវត្តិរូបសំខាន់រួចរាល់ហើយ។',
+  admin_profile_override_hint: 'អ្នកគ្រប់គ្រងអាចកែប្រែព័ត៌មានគណនីដោយផ្ទាល់ ខណៈដែលវិធីចូលប្រើនៅតែភ្ជាប់នឹងគណនីដដែល។',
+  self_service_profile_hint: 'ការកែប្រែដោយខ្លួនឯងត្រូវការពាក្យសម្ងាត់បច្ចុប្បន្ន។ OTP និងអ្នកផ្តល់សេវាដែលបានភ្ជាប់នៅតែជាវិធីស្ដារគណនីសំខាន់។',
+  phone_contact_only_hint: 'លេខទូរស័ព្ទត្រូវបានរក្សាទុកជាព័ត៌មានទំនាក់ទំនងប៉ុណ្ណោះ។ ការផ្ទៀងផ្ទាត់តាមទូរស័ព្ទត្រូវបានផ្អាកសិន។',
+  profile_email_note: 'ប្រើសម្រាប់ការចូលប្រើតាមអ៊ីមែល ការប្ដូរពាក្យសម្ងាត់ សេចក្តីជូនដំណឹងគណនី និងការភ្ជាប់ជាមួយអ្នកផ្តល់សេវាដែលមានអ៊ីមែលដូចគ្នា។ Google នៅតែអាចភ្ជាប់ដោយឡែកបាន។',
+  account_email_usage: 'អ៊ីមែលគណនី',
+  saved: 'បានរក្សាទុក',
+  optional: 'ស្រេចចិត្ត',
+  email_login_simple_note: 'មិនត្រូវការការផ្ទៀងផ្ទាត់អ៊ីមែលដាច់ដោយឡែកនៅទីនេះទេ។ រក្សាទុកអ៊ីមែលម្តង ហើយបន្ទាប់មកអាចប្រើ OTP, Google ឬពាក្យសម្ងាត់ដើម្បីចូលប្រើ និងស្ដារគណនី។',
+  email_login_ready_note_simple: 'ការចូលប្រើតាមអ៊ីមែលរួចរាល់ហើយ បន្ទាប់ពីរក្សាទុកអ៊ីមែលនេះក្នុងគណនី។',
+  sign_in_methods_desc: 'រក្សាទុកគណនីមូលដ្ឋានដែលបង្កើតដោយអ្នកគ្រប់គ្រង ហើយបន្ថែមការចូលតាមអ៊ីមែល ឬ Google នៅពេលណាក៏បាន។',
+  email_login: 'ចូលតាមអ៊ីមែល',
+  setup_needed: 'ត្រូវការរៀបចំ',
+  add_email_for_login_note: 'សូមបន្ថែមអ៊ីមែលគណនីជាមុនសិន ដើម្បីប្រើការចូលតាមអ៊ីមែលនៅលើទំព័រចូល។',
+  google_signin: 'Google',
+  connected: 'បានភ្ជាប់',
+  ready_on_login: 'រួចរាល់ពេលចូល',
+  google_login_ready_note: 'ភ្ជាប់ Google ម្តងនៅទីនេះ បន្ទាប់មកអ្នកអាចបន្តចូលប្រើដោយគណនី Google នោះបាន។',
+  google_provider_disabled_note: 'មិនទាន់បើក Google sign-in នៅក្នុង Supabase នៅឡើយទេ។',
+  current_password: 'ពាក្យសម្ងាត់បច្ចុប្បន្ន',
+  disconnect_google_password_hint: 'ប្រើពាក្យសម្ងាត់បច្ចុប្បន្ន មុនពេលផ្ដាច់ Google ចេញពីគណនីនេះ។',
+  disconnect_google: 'ផ្ដាច់ Google',
+  connecting: 'កំពុងភ្ជាប់...',
+  disconnecting: 'កំពុងផ្ដាច់...',
+  connect_google: 'ភ្ជាប់ Google',
+  provider_email_match_note: 'នៅពេលភ្ជាប់រួច Google នឹងនៅតែភ្ជាប់ជាមួយគណនីមូលដ្ឋាននេះ។ អ្នកប្រើដែលត្រូវបានបិទ ឬលុប មិនអាចចូលប្រើកម្មវិធីបានទេ។',
+  provider_change_note: 'បើចង់ប្តូរទៅគណនី Google ផ្សេង សូមផ្ដាច់គណនីបច្ចុប្បន្នជាមុន ហើយបន្ទាប់មកភ្ជាប់គណនីថ្មី។',
+  profile_security_desc: 'គ្រប់គ្រងពាក្យសម្ងាត់ ការការពារ OTP និងរយៈពេលចូលប្រើលំនាំដើម។',
+  username_login: 'ចូលតាមឈ្មោះអ្នកប្រើ',
+  otp_enabled: 'OTP បានបើក',
+  otp_not_enabled: 'OTP មិនទាន់បើក',
+  on: 'បើក',
+  off: 'បិទ',
+  current_password_sensitive_note: 'ត្រូវការ មុនពេលប្តូរពាក្យសម្ងាត់ ឬផ្ដាច់ Google ពីគណនីនេះ។',
+  new_password: 'ពាក្យសម្ងាត់ថ្មី',
+  confirm_new_password: 'បញ្ជាក់ពាក្យសម្ងាត់ថ្មី',
+  change_password: 'ប្តូរពាក្យសម្ងាត់',
+  updating: 'កំពុងធ្វើបច្ចុប្បន្នភាព...',
+  enable_otp_login: 'បើក OTP login',
+  disable_otp_login: 'បិទ OTP login',
+  session_duration: 'រយៈពេលចូលប្រើលំនាំដើម',
+  until_browser_closes: 'រហូតដល់បិទកម្មវិធីរុករក',
+  for_1_day: 'រយៈពេល ១ ថ្ងៃ',
+  for_3_days: 'រយៈពេល ៣ ថ្ងៃ',
+  for_7_days: 'រយៈពេល ៧ ថ្ងៃ',
+  for_14_days: 'រយៈពេល ១៤ ថ្ងៃ',
+  for_30_days: 'រយៈពេល ៣០ ថ្ងៃ',
+  save_login_duration: 'រក្សាទុករយៈពេលចូលប្រើ',
+  sign_out: 'ចាកចេញ',
+  sign_out_profile_hint: 'ប្រើវា ដើម្បីបញ្ចប់សម័យប្រើប្រាស់នៅលើឧបករណ៍បច្ចុប្បន្ន នៅពេលអ្នករួចរាល់។',
+  logout: 'ចេញ',
+  organization_privacy_hint: 'អត្តសញ្ញាណអង្គភាពត្រូវបានលាក់នៅទីនេះ។ បង្ហាញតែឈ្មោះអង្គភាព និងតួនាទីប៉ុណ្ណោះ។',
+  organization_name: 'ឈ្មោះអង្គភាព',
+  workspace: 'កន្លែងការងារ',
+  role: 'តួនាទី',
+  branch: 'សាខា',
+  no_role: 'គ្មានតួនាទី',
+  organization_not_selected: 'មិនទាន់ជ្រើសរើសអង្គភាព',
+  avatar_editor: 'កែតម្រូវរូបភាពប្រវត្តិរូប',
+  avatar_editor_hint: 'អូសគ្រាប់រំកិល ដើម្បីពង្រីក និងកំណត់ទីតាំងរូបភាព មុនពេលរក្សាទុក។',
+  crop_zoom: 'កម្រិតពង្រីក',
+  crop_horizontal: 'ទីតាំងផ្ដេក',
+  crop_vertical: 'ទីតាំងបញ្ឈរ',
+  adjust_image: 'កែតម្រូវរូបភាព',
+  save_avatar: 'រក្សាទុករូបភាព',
+  avatar_preview: 'មើលជាមុន',
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Failed to load image for editing'))
+    img.src = src
+  })
+}
+
+async function renderAvatarCropBlob({ src, zoom = 100, positionX = 50, positionY = 50, size = 512 }) {
+  const image = await loadImageElement(src)
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas is not available for avatar editing')
+
+  const baseScale = Math.max(size / image.width, size / image.height)
+  const zoomScale = clamp(Number(zoom || 100) / 100, 1, 2.4)
+  const drawWidth = image.width * baseScale * zoomScale
+  const drawHeight = image.height * baseScale * zoomScale
+  const left = (size - drawWidth) * (clamp(Number(positionX || 50), 0, 100) / 100)
+  const top = (size - drawHeight) * (clamp(Number(positionY || 50), 0, 100) / 100)
+
+  context.clearRect(0, 0, size, size)
+  context.drawImage(image, left, top, drawWidth, drawHeight)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('Failed to render cropped avatar'))
+    }, 'image/png', 0.95)
+  })
+}
+
+function AvatarEditorModal({
+  open,
+  src,
+  zoom,
+  positionX,
+  positionY,
+  onZoomChange,
+  onPositionXChange,
+  onPositionYChange,
+  onClose,
+  onSave,
+  saving,
+  tr,
+}) {
+  if (!open || !src) return null
+
+  return (
+    <Modal title={tr('avatar_editor', 'Edit avatar image')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-500 dark:text-gray-400">{tr('avatar_editor_hint', 'Use the sliders to zoom and position the image before saving.')}</p>
+        <div className="flex justify-center rounded-2xl bg-gray-100 p-4 dark:bg-zinc-900/70">
+          <div className="relative h-56 w-56 overflow-hidden rounded-[28px] bg-white shadow-inner dark:bg-zinc-800">
+            <img
+              src={src}
+              alt={tr('avatar_preview', 'Avatar preview')}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{
+                objectPosition: `${positionX}% ${positionY}%`,
+                transform: `scale(${clamp(Number(zoom || 100) / 100, 1, 2.4)})`,
+                transformOrigin: 'center',
+              }}
+            />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_zoom', 'Zoom')}</span>
+            <input type="range" min="100" max="240" step="5" value={zoom} onChange={(event) => onZoomChange(event.target.value)} className="w-full accent-blue-600" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_horizontal', 'Horizontal position')}</span>
+            <input type="range" min="0" max="100" step="1" value={positionX} onChange={(event) => onPositionXChange(event.target.value)} className="w-full accent-blue-600" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('crop_vertical', 'Vertical position')}</span>
+            <input type="range" min="0" max="100" step="1" value={positionY} onChange={(event) => onPositionYChange(event.target.value)} className="w-full accent-blue-600" />
+          </label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+            {tr('cancel', 'Cancel', 'បោះបង់')}
+          </button>
+          <button type="button" className="btn-primary" onClick={onSave} disabled={saving}>
+            {saving ? tr('saving', 'Saving...') : tr('save_avatar', 'Save avatar')}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function UserProfileModal({ onClose }) {
   const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
-  const tr = (key, fallback) => {
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
-    return value && value !== key ? value : fallback
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
+    const khmerFallback = PROFILE_KM_FALLBACKS[key] || fallbackKm
+    return isKhmer ? khmerFallback : fallbackEn
   }
   const [loading, setLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
@@ -62,6 +268,8 @@ export default function UserProfileModal({ onClose }) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [profile, setProfile] = useState(null)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false)
+  const [avatarEditorSrc, setAvatarEditorSrc] = useState('')
   const [otpEnabled, setOtpEnabled] = useState(false)
   const [otpMode, setOtpMode] = useState(null)
   const [oauthConnecting, setOauthConnecting] = useState('')
@@ -83,6 +291,9 @@ export default function UserProfileModal({ onClose }) {
       return 'session'
     }
   })
+  const [avatarZoom, setAvatarZoom] = useState(100)
+  const [avatarPositionX, setAvatarPositionX] = useState(50)
+  const [avatarPositionY, setAvatarPositionY] = useState(50)
   const avatarFileInputRef = useRef(null)
 
   /**
@@ -272,6 +483,26 @@ export default function UserProfileModal({ onClose }) {
 
   const handleAvatarPick = () => avatarFileInputRef.current?.click()
 
+  const resetAvatarEditor = () => {
+    setAvatarZoom(100)
+    setAvatarPositionX(50)
+    setAvatarPositionY(50)
+  }
+
+  const openAvatarEditor = (src) => {
+    const cleanSrc = String(src || '').trim()
+    if (!cleanSrc) return
+    resetAvatarEditor()
+    setAvatarEditorSrc(cleanSrc)
+    setAvatarEditorOpen(true)
+  }
+
+  const closeAvatarEditor = () => {
+    setAvatarEditorOpen(false)
+    setAvatarEditorSrc('')
+    resetAvatarEditor()
+  }
+
   const handleStartOauthLink = async (provider) => {
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
@@ -357,14 +588,31 @@ export default function UserProfileModal({ onClose }) {
       notify(tr('choose_image_file', 'Please choose an image file'), 'error')
       return
     }
+    try {
+      const src = await readFileAsDataUrl(file)
+      openAvatarEditor(src)
+    } catch (error) {
+      notify(error?.message || tr('choose_image_file', 'Please choose an image file'), 'error')
+    }
+  }
+
+  const saveAvatarFromEditor = async () => {
     setUploadingAvatar(true)
     try {
+      const blob = await renderAvatarCropBlob({
+        src: avatarEditorSrc,
+        zoom: avatarZoom,
+        positionX: avatarPositionX,
+        positionY: avatarPositionY,
+      })
+      const file = new File([blob], 'avatar.png', { type: 'image/png' })
       const uploadResult = await window.api.uploadUserAvatar({ file })
       if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
       setProfile((current) => ({ ...current, avatar_path: uploadResult.path }))
       notify(tr('avatar_uploaded', 'Avatar uploaded'), 'success')
+      closeAvatarEditor()
     } catch (error) {
-      notify(error?.message || 'Avatar upload failed', 'error')
+      notify(error?.message || tr('avatar_upload_failed', 'Avatar upload failed'), 'error')
     } finally {
       setUploadingAvatar(false)
     }
@@ -383,7 +631,7 @@ export default function UserProfileModal({ onClose }) {
                 <div className="truncate text-lg font-semibold text-gray-900 dark:text-white">{profile.name}</div>
                 <div className="truncate text-sm text-gray-500 dark:text-gray-400">@{profile.username}</div>
                 <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  {profile.role_name || (t('no_role') || 'No role')} {' | '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
+                  {profile.role_name || tr('no_role', 'No role')} {' | '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
                 </div>
               </div>
             </div>
@@ -472,8 +720,11 @@ export default function UserProfileModal({ onClose }) {
                     <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={handleAvatarPick} disabled={uploadingAvatar}>
                       {uploadingAvatar ? tr('uploading', 'Uploading...') : tr('upload_image', 'Upload image')}
                     </button>
+                    <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openAvatarEditor(profile.avatar_path)} disabled={uploadingAvatar || !profile.avatar_path}>
+                      {tr('adjust_image', 'Adjust image')}
+                    </button>
                     <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => setFilePickerOpen(true)}>
-                      Files
+                      {tr('open_files', 'Files')}
                     </button>
                   </div>
                 </div>
@@ -739,12 +990,29 @@ export default function UserProfileModal({ onClose }) {
           t={t}
         />
       ) : null}
+      <AvatarEditorModal
+        open={avatarEditorOpen}
+        src={avatarEditorSrc}
+        zoom={avatarZoom}
+        positionX={avatarPositionX}
+        positionY={avatarPositionY}
+        onZoomChange={setAvatarZoom}
+        onPositionXChange={setAvatarPositionX}
+        onPositionYChange={setAvatarPositionY}
+        onClose={closeAvatarEditor}
+        onSave={saveAvatarFromEditor}
+        saving={uploadingAvatar}
+        tr={tr}
+      />
       <FilePickerModal
         open={filePickerOpen}
         mediaType="image"
         title={tr('avatar_image', 'Avatar image')}
         onClose={() => setFilePickerOpen(false)}
-        onSelect={(publicPath) => setProfile((current) => ({ ...current, avatar_path: publicPath }))}
+        onSelect={(publicPath) => {
+          setFilePickerOpen(false)
+          openAvatarEditor(publicPath)
+        }}
       />
     </>
   )

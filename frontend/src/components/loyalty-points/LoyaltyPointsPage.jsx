@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
-import PageHeader from '../shared/PageHeader'
 
 const COPY = {
   en: {
     pageTitle: 'Loyalty Points',
     pageSubtitle: 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.',
-    policyTitle: 'Point policy',
+    policyTitle: 'Loyalty Points',
     policyHint: 'These rules affect POS membership discounts, customer portal balances, and point deductions after refunds.',
     customerTitle: 'Customer point lookup',
     customerHint: 'Look up a membership number to review balance, history totals, and how the current rules apply.',
@@ -54,7 +53,7 @@ const COPY = {
   km: {
     pageTitle: 'ពិន្ទុសមាជិក',
     pageSubtitle: 'កំណត់ច្បាប់ពិន្ទុ ការប្តូរពិន្ទុ និងការបង្ហាញសម្រាប់អតិថិជន ដោយឡែកពីការរចនាទំព័រ Customer Portal។',
-    policyTitle: 'ច្បាប់ពិន្ទុ',
+    policyTitle: 'ពិន្ទុស្មោះត្រង់',
     policyHint: 'ការកំណត់ទាំងនេះប៉ះពាល់ដល់ POS ការបញ្ចុះតម្លៃសមាជិក Customer Portal និងការកាត់ពិន្ទុពេលមាន Refund។',
     customerTitle: 'ស្វែងរកពិន្ទុអតិថិជន',
     customerHint: 'បញ្ចូលលេខសមាជិក ដើម្បីពិនិត្យសមតុល្យ ប្រវត្តិ និងរបៀបគណនាពិន្ទុតាមច្បាប់បច្ចុប្បន្ន។',
@@ -240,12 +239,6 @@ export default function LoyaltyPointsPage() {
   return (
     <div className="page-scroll p-4 sm:p-6">
       <div className="mx-auto max-w-7xl space-y-5">
-        <PageHeader
-          icon={Ticket}
-          tone="amber"
-          title={copy('pageTitle', 'Loyalty Points')}
-        />
-
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_380px] 2xl:grid-cols-[minmax(0,1.55fr)_420px]">
           <div className="space-y-5">
             <section className="card p-4 sm:p-5">

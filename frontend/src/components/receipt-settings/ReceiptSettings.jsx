@@ -136,11 +136,11 @@ export default function ReceiptSettings() {
 
   return (
     <ErrorBoundary>
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+    <div className="flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-zinc-950 lg:flex-row">
 
       {/* ?? Editor panel ?? */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-gray-200 bg-white/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:px-6 sm:pt-6">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50 dark:bg-zinc-950">
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50/95 px-4 pb-3 pt-4 backdrop-blur dark:border-gray-800 dark:bg-zinc-950/95 sm:px-6 sm:pt-6">
           <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-lg font-bold text-gray-900 dark:text-white sm:text-2xl">
             <Printer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('receipt_template')}
@@ -158,7 +158,7 @@ export default function ReceiptSettings() {
           </div>
         </div>
 
-        <div className="mb-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:flex-wrap sm:px-6 sm:overflow-visible">
+        <div className="mb-4 flex gap-1 overflow-x-auto bg-gray-50 px-4 pb-1 dark:bg-zinc-950 sm:flex-wrap sm:px-6 sm:overflow-visible">
           {SECTIONS.map((section) => {
             const Icon = section.icon
             return (
@@ -312,8 +312,8 @@ export default function ReceiptSettings() {
       </div>
 
       {/* ?? Live Preview (desktop sidebar) ?? */}
-      <div className="hidden lg:flex w-96 bg-gray-100 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex-col min-h-0 flex-shrink-0">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
+      <div className="hidden min-h-0 w-96 flex-shrink-0 flex-col border-l border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-zinc-900 lg:flex">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-100 p-4 dark:border-gray-800 dark:bg-zinc-900">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white">
             <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             {t('live_preview')}

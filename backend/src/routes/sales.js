@@ -8,6 +8,14 @@ const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 
+function normalizeImportedTimestamp(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
+
 function getSaleItemCosts(item, product = null) {
   // First try item's own cost prices
   let unitCostUsd = item.cost_price_usd ?? item.purchase_price_usd
@@ -220,6 +228,9 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req)
+  const saleCreatedAt = normalizeImportedTimestamp(d.created_at ?? d.sale_date ?? d.date)
+  const cashierId = Number.isFinite(parseInt(d.cashier_id, 10)) ? parseInt(d.cashier_id, 10) : actor.userId
+  const cashierName = String(d.cashier_name || actor.userName || '').trim() || actor.userName
   if (!Array.isArray(d.items) || d.items.length === 0) return err(res, 'Sale items required')
   const clientRequestId = normalizeClientRequestId(d.client_request_id)
 
@@ -259,7 +270,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           sale_status, notes, device_tz, device_name
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
-        receiptNumber, clientRequestId, actor.userId, actor.userName,
+        receiptNumber, clientRequestId, cashierId, cashierName,
         d.customer_name || null, d.customer_phone || null, d.customer_address || null,
         d.customer_id || null,
         saleBranch.branchId, saleBranch.branchName,
@@ -281,6 +292,11 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         d.notes || null,
         d.device_tz || null, d.device_name || null,
       ).lastInsertRowid
+
+      if (saleCreatedAt) {
+        db.prepare('UPDATE sales SET created_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(saleCreatedAt, sid)
+      }
 
       const insertItem = db.prepare(`
         INSERT INTO sale_items
@@ -323,7 +339,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           }
           touchedProductIds.add(productId)
 
-          db.prepare(`
+          const movementId = db.prepare(`
             INSERT INTO inventory_movements
               (product_id, product_name, branch_id, branch_name, movement_type, quantity,
                unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
@@ -343,7 +359,12 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
             sid,
             actor.userId,
             actor.userName,
-          )
+          ).lastInsertRowid
+
+          if (saleCreatedAt) {
+            db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
+              .run(saleCreatedAt, movementId)
+          }
         }
       }
 

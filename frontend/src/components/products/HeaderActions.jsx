@@ -10,93 +10,105 @@ export default function ProductsHeaderActions({
   onAdd,
   t,
 }) {
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = t(key)
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }
+
+  const manageLabel = tr('manage', 'Manage', 'គ្រប់គ្រង')
+  const importLabel = tr('import', 'Import', 'នាំចូល')
+  const exportLabel = tr('export', 'Export', 'នាំចេញ')
+  const productLabel = tr('product', 'Product', 'ផលិតផល')
   const manageItems = [
-    { label: `Categories`, onClick: onManageCats },
-    { label: `${t('brand') || 'Brand'}`, onClick: onManageBrands },
-    { label: `Units`, onClick: onManageUnits },
+    { label: tr('categories', 'Categories', 'ប្រភេទ'), onClick: onManageCats },
+    { label: tr('brand', 'Brand', 'ម៉ាក'), onClick: onManageBrands },
+    { label: tr('units', 'Units', 'ឯកតា'), onClick: onManageUnits },
     'divider',
-    { label: 'Import CSV', onClick: onImport, color: 'blue' },
-    { label: 'Export CSV', onClick: onExport, color: 'green' },
+    { label: importLabel, onClick: onImport, color: 'blue' },
+    { label: exportLabel, onClick: onExport, color: 'green' },
   ]
 
   return (
     <>
-      <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 sm:hidden">
+      <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-1 sm:hidden">
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium"
-          title="Import CSV"
-          aria-label="Import"
+          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
+          title={importLabel}
+          aria-label={importLabel}
         >
           <Upload className="h-3.5 w-3.5" />
-          <span>Import</span>
+          <span>{importLabel}</span>
         </button>
         <button
           onClick={onExport}
-          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium"
-          title="Export CSV"
-          aria-label="Export"
+          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
+          title={exportLabel}
+          aria-label={exportLabel}
         >
           <Download className="h-3.5 w-3.5" />
-          <span>Export</span>
+          <span>{exportLabel}</span>
         </button>
         <PortalMenu
           align="right"
-          trigger={
-            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium" aria-label={t('manage') || 'Manage'}>
+          trigger={(
+            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium" aria-label={manageLabel}>
               <Settings2 className="h-3.5 w-3.5" />
-              <span>{t('manage') || 'Manage'}</span>
+              <span>{manageLabel}</span>
             </button>
-          }
-          items={manageItems.slice(0, 5)}
+          )}
+          items={manageItems}
         />
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex shrink-0 items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium"
-          aria-label={t('add_product') || 'Add product'}
+          className="btn-primary inline-flex shrink-0 items-center justify-center gap-1 px-2.5 py-2 text-[11px] font-medium"
+          aria-label={productLabel}
         >
           <PackagePlus className="h-3.5 w-3.5" />
-          <span>{t('add_product') || 'Add Product'}</span>
+          <span>{productLabel}</span>
         </button>
       </div>
 
-      <div className="hidden sm:flex items-center gap-1.5 flex-nowrap">
+      <div className="hidden flex-nowrap items-center gap-1.5 sm:flex">
         <PortalMenu
           align="right"
-          trigger={
+          trigger={(
             <button className="btn-secondary inline-flex items-center gap-1.5 text-sm" aria-haspopup="true">
               <Settings2 className="h-4 w-4" />
-              {t('manage') || 'Manage'}
+              {manageLabel}
             </button>
-          }
+          )}
           items={[
-            { label: 'Categories', onClick: onManageCats },
-            { label: `${t('brand') || 'Brand'}`, onClick: onManageBrands },
-            { label: 'Units', onClick: onManageUnits },
+            { label: tr('categories', 'Categories', 'ប្រភេទ'), onClick: onManageCats },
+            { label: tr('brand', 'Brand', 'ម៉ាក'), onClick: onManageBrands },
+            { label: tr('units', 'Units', 'ឯកតា'), onClick: onManageUnits },
           ]}
         />
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex items-center gap-1.5 text-sm"
-          title="Import CSV"
+          className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+          title={importLabel}
         >
           <Upload className="h-4 w-4" />
-          Import
+          {importLabel}
         </button>
         <button
           onClick={onExport}
-          className="btn-secondary inline-flex items-center gap-1.5 text-sm"
-          title="Export CSV"
+          className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+          title={exportLabel}
         >
           <Download className="h-4 w-4" />
-          Export
+          {exportLabel}
         </button>
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex items-center gap-1.5 text-sm"
+          className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+          aria-label={productLabel}
         >
           <PackagePlus className="h-4 w-4" />
-          {t('add_product')}
+          {productLabel}
         </button>
       </div>
     </>

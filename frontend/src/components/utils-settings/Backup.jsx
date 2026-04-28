@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArchiveRestore, Cloud, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
-import { useApp } from '../../AppContext'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
 import { refreshAppData } from '../../utils/appRefresh'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import PageHeader from '../shared/PageHeader'
 
 const BACKUP_SECTION_CONFIG = [
@@ -27,6 +28,42 @@ const QUICK_BACKUP_SECTIONS = [
   'Contacts + users',
   'Portal + files',
 ]
+
+const BACKUP_LOCAL_COPY = {
+  km: {
+    backup: 'បម្រុងទុក',
+    export_backup_desc: 'នាំចេញបម្រុងទុកពេញលេញ ឬទាញយក JSON ចាស់នៅពេលចាំបាច់។',
+    export_backup_title: 'នាំចេញបម្រុងទុក',
+    folder_backup_placeholder: 'ជ្រើសថតមេ សម្រាប់ចម្លង backup',
+    browse_folder: 'ជ្រើសថត',
+    browse: 'ថតនៅម៉ាស៊ីនមេ',
+    hide_advanced_browser: 'លាក់',
+    export_backup_btn: 'នាំចេញ',
+    download_json_backup: 'JSON',
+    exporting: 'កំពុងនាំចេញ...',
+    import_backup_title: 'ស្តារបម្រុងទុក',
+    import_backup_desc: 'ស្តារបម្រុងទុកជាថតទាំងមូល ឬជ្រើសឯកសារ JSON ចាស់បើចាំបាច់។',
+    folder_restore_placeholder: 'ជ្រើសថត backup ឬថត business-os-data',
+    restore_backup_btn: 'ស្តារ',
+    legacy_json_backup: 'JSON ចាស់',
+    import_backup_btn: 'នាំចូល JSON',
+    importing_backup: 'កំពុងនាំចូល...',
+    folder_restore_note: 'ការស្តារជាថតនឹងជំនួសទិន្នន័យបច្ចុប្បន្នដោយមាតិកា backup ដែលបានជ្រើស។',
+    rows: 'ជួរ',
+    uploads: 'ឯកសារផ្ទុកឡើង',
+    custom_tables: 'តារាងផ្ទាល់ខ្លួន',
+    exported: 'បាននាំចេញ',
+    clear: 'សម្អាត',
+    choose_folder_first: 'សូមជ្រើសថតជាមុន',
+    server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ បើអ្នកភ្ជាប់ពីចម្ងាយ សូមជ្រើស ឬបិទភ្ជាប់ path ដែលមាននៅលើម៉ាស៊ីនមេនោះ។',
+    server_restore_note: 'ការស្តារប្រើថតពីម៉ាស៊ីនមេ Business OS។ Browser ពីចម្ងាយមិនអាចរុករកថាសក្នុងម៉ាស៊ីនរបស់ខ្លួនចូល runtime ម៉ាស៊ីនមេបានទេ។',
+    host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ប្រើ Browse folders ឬវាយ path របស់ម៉ាស៊ីនមេដោយដៃ នៅពេលភ្ជាប់ពីចម្ងាយ។',
+    restore: 'ស្តារ',
+    export: 'នាំចេញ',
+    refresh: 'ស្រស់ថ្មី',
+    save: 'រក្សាទុក',
+  },
+}
 
 function PathActionButton({ children, ...props }) {
   return (
@@ -53,9 +90,12 @@ function PrimaryActionButton({ children, ...props }) {
 }
 
 function useCopy(t) {
-  return (key, fallback) => {
+  const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
+  return (key, fallback, fallbackKm = fallback) => {
     const value = t?.(key)
-    return value && value !== key ? value : fallback
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
+    if (isKhmer) return BACKUP_LOCAL_COPY.km?.[key] || fallbackKm
+    return fallback
   }
 }
 
@@ -307,8 +347,8 @@ function DataFolderLocation({ t, notify }) {
   const load = async () => {
     try {
       const [resultState, configState] = await Promise.allSettled([
-        window.api.getDataPath(),
-        window.api.getSystemConfig?.().catch(() => null),
+        withLoaderTimeout(() => window.api.getDataPath(), 'Backup data path'),
+        withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup system config').catch(() => null),
       ])
 
       const result = resultState.status === 'fulfilled' ? resultState.value : null
@@ -583,7 +623,7 @@ function GoogleDriveSyncSection({ t, notify }) {
 
   const load = async () => {
     try {
-      const result = await window.api.getGoogleDriveSyncStatus?.()
+      const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
       const item = result?.item || result || null
       setStatus(item)
       setForm((current) => ({
@@ -840,7 +880,7 @@ export default function Backup() {
 
   useEffect(() => {
     let cancelled = false
-    window.api.getSystemConfig?.()
+    withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
       .then((config) => {
         if (!cancelled) setHostUiAvailable(!!config?.hostUiAvailable)
       })

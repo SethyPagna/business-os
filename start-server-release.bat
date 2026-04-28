@@ -22,6 +22,7 @@ set "EXE=%ROOT%\business-os-server.exe"
 set "DATA_DIR=%ROOT%\business-os-data"
 set "PKG_NATIVE_CACHE_DIR=%DATA_DIR%\pkg-native-cache"
 set "ENV_FILE=%ROOT%\.env"
+set "TAILSCALE_CMD="
 
 title Business OS  ^|  Server
 
@@ -95,6 +96,17 @@ set "LOCAL_API=http://127.0.0.1:4000"
 for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 
+for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
+    if not defined TAILSCALE_CMD (
+        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
+    )
+)
+if not defined TAILSCALE_CMD (
+    for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
+        if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+    )
+)
+
 echo [INFO] Checking if port %PORT% is available...
 
 set "PORT_PID="
@@ -130,14 +142,14 @@ echo.
 echo [INFO] Checking Tailscale for remote access...
 set "TAILSCALE_URL_FOUND="
 
-where tailscale >nul 2>&1
-if not errorlevel 1 (
+if defined TAILSCALE_CMD (
+    echo [INFO] Using Tailscale CLI: !TAILSCALE_CMD!
     echo [INFO] Starting Tailscale Funnel on port %PORT%...
-    tailscale funnel --bg %PORT% >nul 2>&1
+    call "!TAILSCALE_CMD!" funnel --bg %PORT% >nul 2>&1
     if not errorlevel 1 (
         for /l %%N in (1,1,6) do (
             if "!TAILSCALE_URL_FOUND!"=="" (
-                powershell -Command "$url=''; $port='%PORT%'; try { $lines=@(tailscale funnel status 2>$null); $current=''; foreach($raw in $lines){ $line=[string]$raw; if($line -match '^(https://\S+)\s+\(Funnel on\)\s*$'){ $current=$matches[1].TrimEnd('/'); continue } if($current -and $line -match '^\|--\s+/\s+proxy\s+http://(?:127\.0\.0\.1|localhost):(\d+)\s*$'){ $mapped=[int]$matches[1]; if($mapped -eq [int]$port){ $url=$current; break }; $current='' } } } catch {}; try { if(-not $url){ $status=tailscale status --json 2>$null | ConvertFrom-Json; $dns=[string]$status.Self.DNSName; if($dns){ $url=('https://'+$dns.TrimEnd('.')).TrimEnd('/') } } } catch {}; if($url){ [Console]::WriteLine($url.TrimEnd('/')) }" > "%TEMP%\ts_url.txt" 2>nul
+                powershell -Command "$tailscale='!TAILSCALE_CMD!'; $url=''; $port='%PORT%'; try { $lines=@(& $tailscale funnel status 2>$null); $current=''; foreach($raw in $lines){ $line=[string]$raw; if($line -match '^(https://\S+)\s+\(Funnel on\)\s*$'){ $current=$matches[1].TrimEnd('/'); continue } if($current -and $line -match '^\|--\s+/\s+proxy\s+http://(?:127\.0\.0\.1|localhost):(\d+)\s*$'){ $mapped=[int]$matches[1]; if($mapped -eq [int]$port){ $url=$current; break }; $current='' } } } catch {}; try { if(-not $url){ $status=(& $tailscale status --json 2>$null | ConvertFrom-Json); $dns=[string]$status.Self.DNSName; if($dns){ $url=('https://'+$dns.TrimEnd('.')).TrimEnd('/') } } } catch {}; if($url){ [Console]::WriteLine($url.TrimEnd('/')) }" > "%TEMP%\ts_url.txt" 2>nul
                 if exist "%TEMP%\ts_url.txt" (
                     set /p TAILSCALE_URL_FOUND=<"%TEMP%\ts_url.txt"
                     del "%TEMP%\ts_url.txt" 2>nul
@@ -161,7 +173,7 @@ if not errorlevel 1 (
         echo      If output shows "Access is denied", run this script as Administrator.
     )
 ) else (
-    echo [INFO] Tailscale not installed. Local access only.
+    echo [INFO] Tailscale CLI not found. Local access only.
 )
 
 echo.

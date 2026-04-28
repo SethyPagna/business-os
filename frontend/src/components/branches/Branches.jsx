@@ -196,6 +196,8 @@ export default function Branches() {
         tone="blue"
         title={t('branches') || 'Branches'}
         className="mb-4"
+        stackOnMobile={false}
+        actionsClassName="self-start pl-2 sm:pl-0"
         actions={(
           <div className="flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {selectedCount > 0 ? (
