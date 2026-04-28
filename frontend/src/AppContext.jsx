@@ -550,6 +550,9 @@ export function AppProvider({ children }) {
       } else if (entity === 'ai_provider_config') {
         message = 'This AI provider changed on another device. Latest data is loading now.'
         entityLabel = 'AI provider'
+      } else if (entity === 'unit') {
+        message = 'This unit changed on another device. Latest data is loading now.'
+        entityLabel = 'Unit'
       }
       setNotification({ message, type: 'error', id: Date.now() })
       setWriteConflict({

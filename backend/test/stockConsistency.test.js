@@ -228,6 +228,12 @@ async function getCategories(baseUrl, authToken) {
   return rows
 }
 
+async function getUnits(baseUrl, authToken) {
+  const rows = await fetchJson(baseUrl, '/api/units', { authToken })
+  assert.ok(Array.isArray(rows), 'Expected units list')
+  return rows
+}
+
 async function getAiProviders(baseUrl, authToken) {
   const result = await fetchJson(baseUrl, '/api/ai/providers', { authToken })
   const items = Array.isArray(result?.items) ? result.items : []
@@ -1255,6 +1261,63 @@ runTest('ai provider writes reject stale expectedUpdatedAt values', async () => 
     const saved = providers.find((row) => Number(row.id) === Number(created.id))
     assert.equal(saved.name, 'QA Provider Updated')
     assert.equal(saved.priority, 10)
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('unit writes reject stale expectedUpdatedAt values')
+runTest('unit writes reject stale expectedUpdatedAt values', async () => {
+  const runtimeDir = makeTempRoot('bos-unit-conflict-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const created = await fetchJson(server.baseUrl, '/api/units', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({ name: 'QA Conflict Unit', color: '#123456' }),
+    })
+    assert.ok(created?.id, 'Expected created unit id')
+    assert.ok(created?.updated_at, 'Expected unit updated_at after create')
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+
+    const firstWrite = await fetchJson(server.baseUrl, `/api/units/${created.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Conflict Unit Updated',
+        color: '#654321',
+      }),
+    })
+    assert.equal(firstWrite.name, 'QA Conflict Unit Updated')
+    assert.notEqual(firstWrite.updated_at, created.updated_at)
+
+    const staleResponse = await fetch(`${server.baseUrl}/api/units/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        expectedUpdatedAt: created.updated_at,
+        name: 'QA Conflict Unit Stale',
+        color: '#999999',
+      }),
+    })
+    const staleJson = JSON.parse(await staleResponse.text())
+    assert.equal(staleResponse.status, 409)
+    assert.equal(staleJson.code, 'write_conflict')
+    assert.equal(staleJson.entity, 'unit')
+
+    const units = await getUnits(server.baseUrl, authToken)
+    const saved = units.find((row) => Number(row.id) === Number(created.id))
+    assert.equal(saved.name, 'QA Conflict Unit Updated')
+    assert.equal(saved.color, '#654321')
   } finally {
     await stopServer(server?.child)
   }

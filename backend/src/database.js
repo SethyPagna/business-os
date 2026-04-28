@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS units (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
   color      TEXT DEFAULT '#6366f1',
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS branches (
@@ -736,7 +737,7 @@ if (ensureColumn('customers', 'membership_number', 'TEXT')) {
   }
 }
 
-;['categories', 'custom_tables'].forEach((tableName) => {
+;['categories', 'units', 'custom_tables'].forEach((tableName) => {
   if (ensureColumn(tableName, 'updated_at', 'TEXT')) {
     try {
       db.exec(`

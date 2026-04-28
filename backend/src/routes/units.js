@@ -4,6 +4,7 @@ const express = require('express')
 const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const unitsRouter = express.Router()
 const DEFAULT_UNIT_COLOR = '#6366f1'
@@ -26,10 +27,10 @@ unitsRouter.post('/', authToken, requirePermission('products'), (req, res) => {
 
   try {
     const normalizedColor = normalizeUnitColor(color)
-    const result = db.prepare('INSERT INTO units (name, color) VALUES (?, ?)').run(trimmedName, normalizedColor)
+    const result = db.prepare('INSERT INTO units (name, color, updated_at) VALUES (?, ?, ?)').run(trimmedName, normalizedColor, new Date().toISOString())
     audit(actor.userId, actor.userName, 'create', 'unit', result.lastInsertRowid, { name: trimmedName, color: normalizedColor })
     broadcast('units')
-    ok(res, { id: result.lastInsertRowid })
+    ok(res, db.prepare('SELECT * FROM units WHERE id = ?').get(result.lastInsertRowid))
   } catch {
     err(res, 'Unit already exists')
   }
@@ -43,12 +44,16 @@ function updateUnitHandler(req, res) {
   if (!trimmedName) return err(res, 'Name required')
 
   try {
+    const current = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId)
+    if (!current) return err(res, 'Unit not found', 404)
+    assertUpdatedAtMatch('unit', current, getExpectedUpdatedAt(req.body || {}))
     const normalizedColor = normalizeUnitColor(req.body?.color)
-    db.prepare('UPDATE units SET name = ?, color = ? WHERE id = ?').run(trimmedName, normalizedColor, unitId)
+    db.prepare('UPDATE units SET name = ?, color = ?, updated_at = ? WHERE id = ?').run(trimmedName, normalizedColor, new Date().toISOString(), unitId)
     audit(actor.userId, actor.userName, 'update', 'unit', unitId, { name: trimmedName, color: normalizedColor })
     broadcast('units')
-    ok(res, {})
-  } catch {
+    ok(res, db.prepare('SELECT * FROM units WHERE id = ?').get(unitId))
+  } catch (error) {
+    if (error instanceof WriteConflictError) return sendWriteConflict(res, error)
     err(res, 'Unit already exists')
   }
 }
@@ -58,10 +63,18 @@ unitsRouter.patch('/:id', authToken, requirePermission('products'), updateUnitHa
 
 unitsRouter.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   const actor = getAuditActor(req)
-  db.prepare('DELETE FROM units WHERE id = ?').run(req.params.id)
-  audit(actor.userId, actor.userName, 'delete', 'unit', req.params.id)
-  broadcast('units')
-  ok(res, {})
+  try {
+    const current = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id)
+    if (!current) return err(res, 'Unit not found', 404)
+    assertUpdatedAtMatch('unit', current, getExpectedUpdatedAt(req.body || req.query || {}))
+    db.prepare('DELETE FROM units WHERE id = ?').run(req.params.id)
+    audit(actor.userId, actor.userName, 'delete', 'unit', req.params.id)
+    broadcast('units')
+    ok(res, {})
+  } catch (error) {
+    if (error instanceof WriteConflictError) return sendWriteConflict(res, error)
+    err(res, error?.message || 'Failed to delete unit')
+  }
 })
 
 module.exports = { unitsRouter }

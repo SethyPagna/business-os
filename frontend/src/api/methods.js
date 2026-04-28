@@ -347,8 +347,8 @@ export const deleteCategory = (id, payload) => route('categories:delete', async 
 // ─── Units ────────────────────────────────────────────────────────────────────
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
 export const createUnit = d   => route('units:create', () => apiFetch('POST', '/api/units', d),       null, true)
-export const updateUnit = (id, d) => route('units:update', () => apiFetch('PATCH', `/api/units/${id}`, d), null, true)
-export const deleteUnit = id  => route('units:delete', () => apiFetch('DELETE', `/api/units/${id}`),  null, true)
+export const updateUnit = (id, d) => route('units:update', async () => apiFetch('PATCH', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, d)), null, true)
+export const deleteUnit = (id, payload)  => route('units:delete', async () => apiFetch('DELETE', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, payload)),  null, true)
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))

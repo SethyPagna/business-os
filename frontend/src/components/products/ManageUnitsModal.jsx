@@ -10,10 +10,24 @@ export default function ManageUnitsModal({ onClose, t }) {
   const [newColor, setNewColor] = useState(DEFAULT_UNIT_COLOR)
   const [editing, setEditing] = useState(null)
   const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const { notify } = useApp()
   const { syncChannel } = useSync()
 
-  const load = () => window.api.getUnits().then((data) => setUnits(Array.isArray(data) ? data : []))
+  const load = async () => {
+    setLoading(true)
+    try {
+      const data = await window.api.getUnits()
+      setUnits(Array.isArray(data) ? data : [])
+      setErr('')
+    } catch (error) {
+      setErr(error?.message || 'Failed to load units')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -21,8 +35,9 @@ export default function ManageUnitsModal({ onClose, t }) {
   }, [syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAdd = async () => {
-    if (!newName.trim()) return
+    if (!newName.trim() || saving) return
     setErr('')
+    setSaving(true)
     try {
       const res = await window.api.createUnit({ name: newName.trim(), color: newColor })
       if (res?.success === false) {
@@ -34,13 +49,17 @@ export default function ManageUnitsModal({ onClose, t }) {
       load()
     } catch (error) {
       setErr(error.message || 'Failed')
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleUpdate = async (unit) => {
+    if (saving) return
     setErr('')
+    setSaving(true)
     try {
-      const res = await window.api.updateUnit(unit.id, { name: unit.name, color: unit.color })
+      const res = await window.api.updateUnit(unit.id, { name: unit.name, color: unit.color, expectedUpdatedAt: unit.updated_at || undefined })
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
@@ -49,16 +68,23 @@ export default function ManageUnitsModal({ onClose, t }) {
       load()
     } catch (error) {
       setErr(error.message || 'Failed')
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleDelete = async (id) => {
+    if (saving || deletingId) return
     if (!confirm(t('confirm_delete'))) return
+    setDeletingId(id)
     try {
-      await window.api.deleteUnit(id)
+      const unit = units.find((item) => Number(item.id) === Number(id))
+      await window.api.deleteUnit(id, { expectedUpdatedAt: unit?.updated_at || undefined })
       load()
     } catch (error) {
       notify(error.message || 'Failed', 'error')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -91,10 +117,11 @@ export default function ManageUnitsModal({ onClose, t }) {
               className="h-10 w-10 cursor-pointer rounded-lg border border-gray-300"
             />
           </div>
-          <button className="btn-primary" onClick={handleAdd}>{t('add') || 'Add'}</button>
+          <button className="btn-primary" onClick={handleAdd} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('add') || 'Add')}</button>
         </div>
 
         <div className="max-h-80 space-y-2 overflow-auto">
+          {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
           {units.map((unit) => (
             <div key={unit.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-2 dark:border-gray-700">
               {editing?.id === unit.id ? (
@@ -114,10 +141,10 @@ export default function ManageUnitsModal({ onClose, t }) {
                     value={editing.name}
                     onChange={(event) => setEditing((current) => ({ ...current, name: event.target.value }))}
                   />
-                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => handleUpdate(editing)}>
-                    {t('save') || 'Save'}
+                  <button className="btn-primary px-3 py-1 text-xs" onClick={() => handleUpdate(editing)} disabled={saving}>
+                    {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
                   </button>
-                  <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setEditing(null)}>
+                  <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setEditing(null)} disabled={saving}>
                     {t('cancel') || 'Cancel'}
                   </button>
                 </>
@@ -128,8 +155,8 @@ export default function ManageUnitsModal({ onClose, t }) {
                   <button onClick={() => setEditing({ ...unit, color: unit.color || DEFAULT_UNIT_COLOR })} className="text-xs text-blue-500 hover:underline">
                     {t('edit') || 'Edit'}
                   </button>
-                  <button onClick={() => handleDelete(unit.id)} className="text-xs text-red-500 hover:underline">
-                    {t('delete') || 'Delete'}
+                  <button onClick={() => handleDelete(unit.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId}>
+                    {deletingId === unit.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
                   </button>
                 </>
               )}

@@ -13,8 +13,36 @@ export default function CustomTables() {
   const [rowModal, setRowModal] = useState(null)
   const [rowForm, setRowForm] = useState({})
   const [newTable, setNewTable] = useState({ display_name: '', schema: [] })
+  const [loadingTables, setLoadingTables] = useState(true)
+  const [loadingRows, setLoadingRows] = useState(false)
+  const [savingTable, setSavingTable] = useState(false)
+  const [savingRow, setSavingRow] = useState(false)
+  const [deletingRowId, setDeletingRowId] = useState(null)
 
-  const loadTables = () => window.api.getCustomTables().then(setTables)
+  const loadTables = async () => {
+    setLoadingTables(true)
+    try {
+      const nextTables = await window.api.getCustomTables()
+      setTables(Array.isArray(nextTables) ? nextTables : [])
+    } catch (error) {
+      notify(error?.message || 'Failed to load custom tables', 'error')
+    } finally {
+      setLoadingTables(false)
+    }
+  }
+
+  const loadTableData = async (tableName) => {
+    if (!tableName) return
+    setLoadingRows(true)
+    try {
+      const rows = await window.api.getCustomTableData({ tableName })
+      setTableData(Array.isArray(rows) ? rows : [])
+    } catch (error) {
+      notify(error?.message || 'Failed to load table rows', 'error')
+    } finally {
+      setLoadingRows(false)
+    }
+  }
 
   useEffect(() => { loadTables() }, [])
 
@@ -25,16 +53,16 @@ export default function CustomTables() {
       loadTables()
       // Also refresh active table's rows if one is open
       if (activeTable) {
-        window.api.getCustomTableData({ tableName: activeTable.name }).then(setTableData)
+        loadTableData(activeTable.name)
       }
     }
   }, [syncChannel]) // eslint-disable-line
 
   useEffect(() => {
     if (activeTable) {
-      window.api.getCustomTableData({ tableName: activeTable.name }).then(setTableData)
+      loadTableData(activeTable.name)
     }
-  }, [activeTable])
+  }, [activeTable]) // eslint-disable-line
 
   const addColumn = () => {
     setNewTable(t => ({ ...t, schema: [...t.schema, { name: '', type: 'text', required: false }] }))
@@ -49,37 +77,60 @@ export default function CustomTables() {
   }
 
   const handleCreateTable = async () => {
+    if (savingTable) return
     if (!newTable.display_name) return notify(t('table_name_required')||'Table name required', 'error')
     if (newTable.schema.length === 0) return notify(t('add_at_least_one_column')||'Add at least one column', 'error')
     if (newTable.schema.some(c => !c.name)) return notify(t('all_columns_need_name')||'All columns need a name', 'error')
-    const result = await window.api.createCustomTable({ ...newTable, name: newTable.display_name })
-    if (result.success) {
-      notify(t('table_created')||'Table created')
-      setCreateModal(false)
-      setNewTable({ display_name: '', schema: [] })
-      loadTables()
+    setSavingTable(true)
+    try {
+      const result = await window.api.createCustomTable({ ...newTable, name: newTable.display_name })
+      if (result.success) {
+        notify(t('table_created')||'Table created')
+        setCreateModal(false)
+        setNewTable({ display_name: '', schema: [] })
+        loadTables()
+      }
+    } catch (error) {
+      notify(error?.message || 'Failed to create table', 'error')
+    } finally {
+      setSavingTable(false)
     }
   }
 
   const handleSaveRow = async () => {
-    if (!activeTable) return
-    if (rowModal === 'create') {
-      await window.api.insertCustomRow({ tableName: activeTable.name, data: rowForm })
-      notify('Row added')
-    } else {
-      await window.api.updateCustomRow({ tableName: activeTable.name, id: rowModal.id, data: rowForm })
-      notify('Row updated')
+    if (!activeTable || savingRow) return
+    setSavingRow(true)
+    try {
+      if (rowModal === 'create') {
+        await window.api.insertCustomRow({ tableName: activeTable.name, data: rowForm })
+        notify('Row added')
+      } else {
+        await window.api.updateCustomRow({ tableName: activeTable.name, id: rowModal.id, data: rowForm })
+        notify('Row updated')
+      }
+      setRowModal(null)
+      setRowForm({})
+      loadTableData(activeTable.name)
+    } catch (error) {
+      notify(error?.message || 'Failed to save row', 'error')
+    } finally {
+      setSavingRow(false)
     }
-    setRowModal(null)
-    setRowForm({})
-    window.api.getCustomTableData({ tableName: activeTable.name }).then(setTableData)
   }
 
   const handleDeleteRow = async (id) => {
+    if (deletingRowId) return
     if (!confirm(t('confirm_delete_row')||'Delete this row?')) return
-    const row = tableData.find((entry) => Number(entry.id) === Number(id))
-    await window.api.deleteCustomRow({ tableName: activeTable.name, id, payload: { expectedUpdatedAt: row?.updated_at || undefined } })
-    window.api.getCustomTableData({ tableName: activeTable.name }).then(setTableData)
+    setDeletingRowId(id)
+    try {
+      const row = tableData.find((entry) => Number(entry.id) === Number(id))
+      await window.api.deleteCustomRow({ tableName: activeTable.name, id, payload: { expectedUpdatedAt: row?.updated_at || undefined } })
+      loadTableData(activeTable.name)
+    } catch (error) {
+      notify(error?.message || 'Failed to delete row', 'error')
+    } finally {
+      setDeletingRowId(null)
+    }
   }
 
   const openAddRow = () => {
@@ -101,10 +152,11 @@ export default function CustomTables() {
       {/* Sidebar - tables list */}
       <div className="w-56 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
         <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-          <button className="btn-primary w-full text-sm py-2" onClick={() => setCreateModal(true)}>+ {t('new_table')||'New Table'}</button>
+          <button className="btn-primary w-full text-sm py-2" onClick={() => setCreateModal(true)} disabled={savingTable}>+ {t('new_table')||'New Table'}</button>
         </div>
             <div className="flex-1 overflow-auto p-2">
-          {tables.length === 0 ? <p className="text-xs text-gray-400 text-center mt-4">{t('no_tables_yet')||'No tables yet'}</p>
+          {loadingTables ? <p className="text-xs text-gray-400 text-center mt-4">{t('loading')||'Loading...'}</p>
+          : tables.length === 0 ? <p className="text-xs text-gray-400 text-center mt-4">{t('no_tables_yet')||'No tables yet'}</p>
           : tables.map(tb => (
             <button key={tb.id} onClick={() => setActiveTable(tb)} className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 transition-colors ${activeTable?.id === tb.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
               🧱 {tb.display_name}
@@ -127,7 +179,7 @@ export default function CustomTables() {
           <>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <h2 className="font-bold text-gray-900 dark:text-white text-lg">🧱 {activeTable.display_name}</h2>
-              <button className="btn-primary text-sm" onClick={openAddRow}>+ {t('add_row')||'Add Row'}</button>
+              <button className="btn-primary text-sm" onClick={openAddRow} disabled={savingRow || !!deletingRowId}>+ {t('add_row')||'Add Row'}</button>
             </div>
             <div className="flex-1 overflow-auto p-4">
               <div className="card overflow-hidden">
@@ -141,7 +193,8 @@ export default function CustomTables() {
                       </tr>
                     </thead>
                     <tbody>
-                      {tableData.length === 0 ? <tr><td colSpan={schema.length + 2} className="text-center py-8 text-gray-400">{t('no_data_add_row')||'No data yet. Add a row!'}</td></tr>
+                      {loadingRows ? <tr><td colSpan={schema.length + 2} className="text-center py-8 text-gray-400">{t('loading')||'Loading...'}</td></tr>
+                        : tableData.length === 0 ? <tr><td colSpan={schema.length + 2} className="text-center py-8 text-gray-400">{t('no_data_add_row')||'No data yet. Add a row!'}</td></tr>
                         : tableData.map((row, i) => (
                         <tr key={row.id} className="table-row">
                           <td className="px-3 py-2 text-gray-400 text-xs">{i + 1}</td>
@@ -153,7 +206,7 @@ export default function CustomTables() {
                           <td className="px-3 py-2">
                             <div className="flex gap-2">
                                       <button onClick={() => openEditRow(row)} className="text-xs text-blue-500 hover:underline">{t('edit')||'Edit'}</button>
-                                      <button onClick={() => handleDeleteRow(row.id)} className="text-xs text-red-500 hover:underline">{t('delete')||'Del'}</button>
+                                      <button onClick={() => handleDeleteRow(row.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingRowId}>{deletingRowId === row.id ? (t('deleting')||'Deleting...') : (t('delete')||'Del')}</button>
                             </div>
                           </td>
                         </tr>
@@ -200,8 +253,8 @@ export default function CustomTables() {
               </div>
             </div>
             <div className="p-5 border-t border-gray-200 dark:border-gray-700 flex gap-3">
-              <button className="btn-primary flex-1" onClick={handleCreateTable}>{t('create_table')||'Create Table'}</button>
-              <button className="btn-secondary" onClick={() => setCreateModal(false)}>{t('cancel')}</button>
+              <button className="btn-primary flex-1" onClick={handleCreateTable} disabled={savingTable}>{savingTable ? (t('saving') || 'Saving...') : (t('create_table')||'Create Table')}</button>
+              <button className="btn-secondary" onClick={() => setCreateModal(false)} disabled={savingTable}>{t('cancel')}</button>
             </div>
           </div>
         </div>
@@ -229,8 +282,8 @@ export default function CustomTables() {
               ))}
             </div>
             <div className="flex gap-3 mt-5">
-              <button className="btn-primary flex-1" onClick={handleSaveRow}>{t('save')||'Save'}</button>
-              <button className="btn-secondary" onClick={() => setRowModal(null)}>{t('cancel')}</button>
+              <button className="btn-primary flex-1" onClick={handleSaveRow} disabled={savingRow}>{savingRow ? (t('saving') || 'Saving...') : (t('save')||'Save')}</button>
+              <button className="btn-secondary" onClick={() => setRowModal(null)} disabled={savingRow}>{t('cancel')}</button>
             </div>
           </div>
         </div>
