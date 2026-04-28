@@ -6,6 +6,7 @@ const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
 const router = express.Router()
+const CUSTOM_TABLE_COLUMN_TYPES = new Set(['text', 'long_text', 'number', 'decimal', 'boolean', 'date', 'timestamp', 'dropdown'])
 
 function humanizeTableName(tableName = '') {
   return String(tableName || '')
@@ -41,6 +42,27 @@ function resolveCustomTableRow(name) {
 
 function escapeIdentifier(value = '') {
   return String(value || '').replace(/"/g, '""')
+}
+
+function normalizeCustomTableSchema(schema = []) {
+  if (!Array.isArray(schema) || schema.length === 0) {
+    throw new Error('At least one column is required')
+  }
+  const seenNames = new Set()
+  return schema.map((column) => {
+    const name = String(column?.name || '').trim()
+    const type = String(column?.type || 'text').trim().toLowerCase()
+    if (!name) throw new Error('Every column needs a name')
+    const normalizedName = name.toLowerCase()
+    if (seenNames.has(normalizedName)) throw new Error(`Duplicate column name: ${name}`)
+    seenNames.add(normalizedName)
+    if (!CUSTOM_TABLE_COLUMN_TYPES.has(type)) throw new Error(`Unsupported column type: ${type}`)
+    return {
+      name,
+      type,
+      required: !!column?.required,
+    }
+  })
 }
 
 function tableHasColumn(tableName, columnName) {
@@ -83,15 +105,23 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     timestamp: 'TEXT',
     dropdown: 'TEXT',
   }
-  const columns = schema
-    .map((col) => `"${String(col?.name || '').replace(/"/g, '')}" ${typeMap[col?.type] || 'TEXT'}`)
+
+  let normalizedSchema = null
+  try {
+    normalizedSchema = normalizeCustomTableSchema(schema)
+  } catch (error) {
+    return err(res, error.message || 'Invalid custom table schema')
+  }
+
+  const columns = normalizedSchema
+    .map((col) => `"${escapeIdentifier(col.name)}" ${typeMap[col.type] || 'TEXT'}`)
     .join(', ')
 
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (id INTEGER PRIMARY KEY AUTOINCREMENT, ${columns}, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))` )
     const now = new Date().toISOString()
     const r = db.prepare('INSERT INTO custom_tables (name, columns, updated_at) VALUES (?,?,?)')
-      .run(tableName, JSON.stringify(schema), now)
+      .run(tableName, JSON.stringify(normalizedSchema), now)
     audit(actor.userId, actor.userName, 'create', 'custom_table', r.lastInsertRowid, {
       name: tableName,
       display_name: String(display_name || name || '').trim() || humanizeTableName(tableName),
@@ -101,10 +131,11 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
       id: r.lastInsertRowid,
       name: tableName,
       display_name: String(display_name || name || '').trim() || humanizeTableName(tableName),
-      schema: JSON.stringify(schema),
+      schema: JSON.stringify(normalizedSchema),
+      updated_at: now,
     })
   } catch (e) {
-    err(res, e.message)
+    err(res, e.message.includes('UNIQUE') ? 'Custom table already exists' : e.message)
   }
 })
 
@@ -150,7 +181,7 @@ router.put('/:name/rows/:id', authToken, requirePermission('settings'), (req, re
     if (!table) return err(res, 'Custom table not found', 404)
     const current = db.prepare(`SELECT * FROM "${table.name}" WHERE id = ?`).get(req.params.id)
     if (!current) return err(res, 'Custom table row not found', 404)
-    assertUpdatedAtMatch('custom table row', current, getExpectedUpdatedAt(data || req.body || {}))
+    assertUpdatedAtMatch('custom table row', current, getExpectedUpdatedAt({ ...(req.body || {}), ...(data || {}) }))
     const keys = Object.keys(data).filter((k) => !['id', 'created_at', 'updated_at', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt'].includes(k))
     const sets = [...keys.map((k) => `"${escapeIdentifier(k)}" = ?`), '"updated_at" = ?'].join(', ')
     db.prepare(`UPDATE "${table.name}" SET ${sets} WHERE id = ?`)

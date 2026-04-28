@@ -779,7 +779,7 @@ export const getCustomTables    = ()                      => route('customTables
 export const createCustomTable  = d                       => route('customTables:create',    () => apiFetch('POST', '/api/custom-tables', d),                                         null, true)
 export const getCustomTableData = ({ tableName })         => route('customTables:data',      () => apiFetch('GET', `/api/custom-tables/${tableName}/data`),                           () => [])
 export const insertCustomRow    = ({ tableName, data })   => route('customTables:insertRow', () => apiFetch('POST', `/api/custom-tables/${tableName}/rows`, { data }),                null, true)
-export const updateCustomRow    = ({ tableName, id, data }) => route('customTables:updateRow', () => apiFetch('PUT', `/api/custom-tables/${tableName}/rows/${id}`, { data }),         null, true)
+export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) => route('customTables:updateRow', () => apiFetch('PUT', `/api/custom-tables/${tableName}/rows/${id}`, { data, expectedUpdatedAt }),         null, true)
 export const deleteCustomRow    = ({ tableName, id, payload })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`, payload),                  null, true)
 
 // ─── Audit log ────────────────────────────────────────────────────────────────

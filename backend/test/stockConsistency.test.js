@@ -1150,6 +1150,21 @@ runTest('custom table row writes reject stale expectedUpdatedAt values', async (
     assert.equal(firstWrite.title, 'Updated row')
     assert.notEqual(firstWrite.updated_at, created.updated_at)
 
+    const secondWrite = await fetchJson(server.baseUrl, `/api/custom-tables/${table.name}/rows/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        data: {
+          id: created.id,
+          title: 'Updated row again',
+        },
+        expectedUpdatedAt: firstWrite.updated_at,
+      }),
+    })
+    assert.equal(secondWrite.title, 'Updated row again')
+    assert.notEqual(secondWrite.updated_at, firstWrite.updated_at)
+
     const staleResponse = await fetch(`${server.baseUrl}/api/custom-tables/${table.name}/rows/${created.id}`, {
       method: 'PUT',
       headers: {
@@ -1171,7 +1186,54 @@ runTest('custom table row writes reject stale expectedUpdatedAt values', async (
 
     const rows = await fetchJson(server.baseUrl, `/api/custom-tables/${table.name}/data`, { authToken })
     const saved = rows.find((row) => Number(row.id) === Number(created.id))
-    assert.equal(saved.title, 'Updated row')
+    assert.equal(saved.title, 'Updated row again')
+  } finally {
+    await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('custom table schema rejects duplicate or invalid column definitions')
+runTest('custom table schema rejects duplicate or invalid column definitions', async () => {
+  const runtimeDir = makeTempRoot('bos-custom-table-schema-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const duplicateResponse = await fetch(`${server.baseUrl}/api/custom-tables`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        name: 'QA Duplicate Columns',
+        schema: [
+          { name: 'Label', type: 'text' },
+          { name: 'label', type: 'number' },
+        ],
+      }),
+    })
+    const duplicateJson = JSON.parse(await duplicateResponse.text())
+    assert.equal(duplicateResponse.status, 400)
+    assert.match(String(duplicateJson.error || ''), /Duplicate column name/i)
+
+    const invalidTypeResponse = await fetch(`${server.baseUrl}/api/custom-tables`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-session': authToken,
+      },
+      body: JSON.stringify({
+        name: 'QA Invalid Type',
+        schema: [
+          { name: 'Label', type: 'script' },
+        ],
+      }),
+    })
+    const invalidTypeJson = JSON.parse(await invalidTypeResponse.text())
+    assert.equal(invalidTypeResponse.status, 400)
+    assert.match(String(invalidTypeJson.error || ''), /Unsupported column type/i)
   } finally {
     await stopServer(server?.child)
   }
