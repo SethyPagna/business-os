@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArchiveRestore, Cloud, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
 import { refreshAppData } from '../../utils/appRefresh'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 import PageHeader from '../shared/PageHeader'
 
 const BACKUP_SECTION_CONFIG = [
@@ -343,8 +348,10 @@ function DataFolderLocation({ t, notify }) {
   const [showAdvancedBrowser, setShowAdvancedBrowser] = useState(false)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef(null)
+  const loadRequestRef = useRef(0)
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     try {
       const [resultState, configState] = await Promise.allSettled([
         withLoaderTimeout(() => window.api.getDataPath(), 'Backup data path'),
@@ -354,6 +361,7 @@ function DataFolderLocation({ t, notify }) {
       const result = resultState.status === 'fulfilled' ? resultState.value : null
       const config = configState.status === 'fulfilled' ? configState.value : null
 
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       if (result) {
         setInfo(result)
         setInputPath(result?.storageRootParent || result?.dataRootParent || result?.storageRoot || result?.dataRoot || '')
@@ -364,11 +372,13 @@ function DataFolderLocation({ t, notify }) {
         throw resultState.reason || new Error('Failed to load data folder information')
       }
     } catch (error) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notify(`${copy('data_folder_load_failed', 'Failed to load data folder information')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     }
-  }
+  }, [copy, notify])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [load])
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const folderName = info?.dataFolderName || 'business-os-data'
   const currentSummary = info?.summary || {}
@@ -620,11 +630,14 @@ function GoogleDriveSyncSection({ t, notify }) {
     enabled: true,
     syncIntervalSeconds: 120,
   })
+  const loadRequestRef = useRef(0)
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const requestId = beginTrackedRequest(loadRequestRef)
     try {
       const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
       const item = result?.item || result || null
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setStatus(item)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
@@ -635,11 +648,13 @@ function GoogleDriveSyncSection({ t, notify }) {
         syncIntervalSeconds: Number(item?.syncIntervalSeconds || current.syncIntervalSeconds || 120),
       }))
     } catch (error) {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     }
-  }
+  }, [copy, notify])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [load])
+  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   useEffect(() => {
     const handler = (event) => {
@@ -656,7 +671,7 @@ function GoogleDriveSyncSection({ t, notify }) {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [copy, load, notify])
 
   const savePreferences = async () => {
     setBusy('save')
@@ -877,18 +892,21 @@ export default function Backup() {
   const [exportBrowser, setExportBrowser] = useState(null)
   const [restoreBrowser, setRestoreBrowser] = useState(null)
   const [browserBusy, setBrowserBusy] = useState('')
+  const hostConfigRequestRef = useRef(0)
 
   useEffect(() => {
-    let cancelled = false
+    const requestId = beginTrackedRequest(hostConfigRequestRef)
     withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
       .then((config) => {
-        if (!cancelled) setHostUiAvailable(!!config?.hostUiAvailable)
+        if (!isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
+        setHostUiAvailable(!!config?.hostUiAvailable)
       })
       .catch(() => {
-        if (!cancelled) setHostUiAvailable(false)
+        if (!isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
+        setHostUiAvailable(false)
       })
-    return () => { cancelled = true }
   }, [])
+  useEffect(() => () => invalidateTrackedRequest(hostConfigRequestRef), [])
 
   const browseServerFolders = async (target, dir) => {
     try {

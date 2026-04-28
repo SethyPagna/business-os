@@ -11,7 +11,12 @@ import {
 } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function useLocalCopy() {
   const { settings, t } = useApp()
@@ -51,6 +56,7 @@ function InfoTab({ syncUrl, syncConnected }) {
   const [drift, setDrift] = useState(null)
   const [fetching, setFetching] = useState(false)
   const [lastFetch, setLastFetch] = useState(null)
+  const fetchRequestRef = useRef(0)
 
   useEffect(() => {
     const timer = setInterval(() => setClientTime(new Date()), 1000)
@@ -59,6 +65,7 @@ function InfoTab({ syncUrl, syncConnected }) {
 
   const fetchServerTime = useCallback(async () => {
     if (!syncUrl) return
+    const requestId = beginTrackedRequest(fetchRequestRef)
     setFetching(true)
     setServerErr(null)
     const startedAt = Date.now()
@@ -72,18 +79,22 @@ function InfoTab({ syncUrl, syncConnected }) {
       const data = await res.json()
       const raw = data?.serverTime || res.headers.get('date')
       if (!raw) {
+        if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
         setServerTime(null)
         setServerErr('Server did not return time')
       } else {
         const serverDate = new Date(raw)
         const adjusted = new Date(serverDate.getTime() + rtt / 2)
+        if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
         setServerTime(adjusted)
         setDrift(Math.round(Date.now() - adjusted.getTime()))
       }
     } catch (error) {
+      if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
       setServerErr(error?.message || 'Fetch failed')
       setServerTime(null)
     }
+    if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
     setLastFetch(new Date())
     setFetching(false)
   }, [syncUrl])
@@ -93,6 +104,7 @@ function InfoTab({ syncUrl, syncConnected }) {
     const timer = setInterval(fetchServerTime, 15000)
     return () => clearInterval(timer)
   }, [fetchServerTime])
+  useEffect(() => () => invalidateTrackedRequest(fetchRequestRef), [])
 
   const fmt = (value) => formatDateTime(value)
   const appliedTimezone = settings?.display_timezone || displayTimezone
@@ -406,6 +418,8 @@ export default function ServerPage() {
   const [testResult, setTestResult] = useState(null)
   const [onlineCount, setOnlineCount] = useState(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const onlineCheckRequestRef = useRef(0)
+  const securityConfigRequestRef = useRef(0)
 
   const autoDetected = isAutoDetected(syncUrl)
   const hasServer = !!(syncUrl?.trim())
@@ -417,40 +431,43 @@ export default function ServerPage() {
   useEffect(() => {
     if (!syncUrl) {
       setOnlineCount(null)
+      invalidateTrackedRequest(onlineCheckRequestRef)
       return
     }
 
-    let cancelled = false
     const check = async () => {
+      const requestId = beginTrackedRequest(onlineCheckRequestRef)
       try {
         const res = await fetch(`${syncUrl}/health`, {
           signal: AbortSignal.timeout?.(4000),
           headers: { 'bypass-tunnel-reminder': 'true' },
         })
-        if (!cancelled && res.ok) {
+        if (res.ok) {
           const data = await res.json().catch(() => ({}))
+          if (!isTrackedRequestCurrent(onlineCheckRequestRef, requestId)) return
           setOnlineCount(data?.clients ?? null)
         }
-      } catch {}
+      } catch (_) {}
     }
 
     check()
     const timer = setInterval(check, 10000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
+    return () => clearInterval(timer)
   }, [syncUrl, syncConnected])
+  useEffect(() => () => invalidateTrackedRequest(onlineCheckRequestRef), [])
 
   useEffect(() => {
     const loadSecurityConfig = async () => {
+      const requestId = beginTrackedRequest(securityConfigRequestRef)
       try {
         const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Sync settings')
+        if (!isTrackedRequestCurrent(securityConfigRequestRef, requestId)) return
         if (config) setSecurityConfig(config)
       } catch (_) {}
     }
     loadSecurityConfig()
   }, [syncUrl, syncConnected])
+  useEffect(() => () => invalidateTrackedRequest(securityConfigRequestRef), [])
 
   async function handleTest() {
     const url = urlInput.trim().replace(/\/$/, '')
