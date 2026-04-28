@@ -443,7 +443,7 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
 // ?? POST /api/products/upload-image ??????????????????????????????????????????
 router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
-  registerUploadFromRequest(req.file, req.body || {})
+  registerUploadFromRequest(req.file, getAuditActor(req))
     .then((asset) => ok(res, { path: asset.public_path, asset }))
     .catch((error) => err(res, error.message || 'Image upload failed'))
 })

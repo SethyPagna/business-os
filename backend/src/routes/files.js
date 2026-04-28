@@ -10,21 +10,41 @@ const {
 } = require('../fileAssets')
 
 const router = express.Router()
+const ALLOWED_MEDIA_TYPES = new Set(['all', 'image', 'video', 'document', 'file'])
+const MAX_FILE_SEARCH_LENGTH = 120
+
+function parseFileAssetId(value) {
+  const id = Number.parseInt(String(value || ''), 10)
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('Invalid file id')
+  }
+  return id
+}
+
+function getFileListFilters(req) {
+  const search = String(req.query?.search || '').trim()
+  if (search.length > MAX_FILE_SEARCH_LENGTH) {
+    throw new Error(`Search must be ${MAX_FILE_SEARCH_LENGTH} characters or fewer`)
+  }
+  const mediaType = String(req.query?.mediaType || 'all').trim().toLowerCase()
+  if (!ALLOWED_MEDIA_TYPES.has(mediaType)) {
+    throw new Error('Invalid media type filter')
+  }
+  return { search, mediaType }
+}
 
 function getDeviceMeta(req) {
   return {
-    deviceName: String(req.body?.deviceName || req.body?.device_name || req.headers['x-device-name'] || '').trim() || null,
-    deviceTz: String(req.body?.deviceTz || req.body?.device_tz || req.headers['x-device-tz'] || '').trim() || null,
-    clientTime: String(req.body?.clientTime || req.body?.client_time || req.headers['x-client-time'] || '').trim() || null,
+    deviceName: String(req.body?.deviceName || req.body?.device_name || req.headers['x-device-name'] || '').trim().slice(0, 120) || null,
+    deviceTz: String(req.body?.deviceTz || req.body?.device_tz || req.headers['x-device-tz'] || '').trim().slice(0, 80) || null,
+    clientTime: String(req.body?.clientTime || req.body?.client_time || req.headers['x-client-time'] || '').trim().slice(0, 80) || null,
   }
 }
 
 router.get('/', authToken, requirePermission('settings'), async (req, res) => {
   try {
-    const files = await listFileAssets({
-      search: req.query?.search || '',
-      mediaType: req.query?.mediaType || 'all',
-    })
+    const filters = getFileListFilters(req)
+    const files = await listFileAssets(filters)
     ok(res, { items: files })
   } catch (error) {
     err(res, error.message || 'Failed to load files')
@@ -52,7 +72,7 @@ router.post('/upload', authToken, requirePermission('settings'), routeRateLimit(
 router.delete('/:id', authToken, requirePermission('settings'), (req, res) => {
   try {
     const actor = getAuditActor(req)
-    const asset = deleteFileAsset(Number(req.params.id))
+    const asset = deleteFileAsset(parseFileAssetId(req.params.id))
     audit(actor.userId, actor.userName, 'delete', 'file_asset', asset.id, {
       original_name: asset.original_name,
       public_path: asset.public_path,

@@ -4,19 +4,31 @@ const assert = require('node:assert/strict')
 const {
   detectBufferKind,
   getExpectedUploadedKind,
+  validateUploadedBuffer,
 } = require('../src/uploadSecurity')
+const { sanitizeOriginalFileName } = require('../src/fileAssets')
 
 let failed = 0
+const pendingTests = new Set()
 
 function runTest(name, fn) {
-  try {
-    fn()
-    console.log(`PASS ${name}`)
-  } catch (error) {
-    failed += 1
-    console.error(`FAIL ${name}`)
-    console.error(error)
-  }
+  pendingTests.add(name)
+  Promise.resolve()
+    .then(fn)
+    .then(() => {
+      console.log(`PASS ${name}`)
+    })
+    .catch((error) => {
+      failed += 1
+      console.error(`FAIL ${name}`)
+      console.error(error)
+    })
+    .finally(() => {
+      pendingTests.delete(name)
+      if (pendingTests.size === 0 && failed > 0) {
+        process.exitCode = 1
+      }
+    })
 }
 
 runTest('detectBufferKind identifies basic file signatures', () => {
@@ -31,6 +43,16 @@ runTest('getExpectedUploadedKind maps file metadata to supported classes', () =>
   assert.equal(getExpectedUploadedKind({ mimetype: 'application/pdf', originalname: 'paper.pdf' }), 'document')
 })
 
-if (failed > 0) {
-  process.exitCode = 1
-}
+runTest('validateUploadedBuffer rejects file-type mismatches', async () => {
+  await assert.rejects(
+    validateUploadedBuffer(Buffer.from('%PDF-1.7', 'ascii'), { mimetype: 'image/png', originalname: 'photo.png' }),
+    /do not match the selected file type/i,
+  )
+})
+
+runTest('sanitizeOriginalFileName removes traversal noise and caps length', () => {
+  const result = sanitizeOriginalFileName('..\\..\\very-long-name-'.repeat(20) + '.png')
+  assert.equal(result.includes('..'), false)
+  assert.equal(result.endsWith('.png'), true)
+  assert.equal(result.length <= 184, true)
+})

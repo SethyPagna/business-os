@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
@@ -36,6 +37,8 @@ const MIME_TO_EXT = {
   ...DOCUMENT_MIME_TO_EXT,
 }
 
+const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
+
 const ASSET_EXT_TO_MIME = Object.entries(MIME_TO_EXT).reduce((map, [mime, ext]) => {
   map[ext] = mime
   return map
@@ -68,12 +71,14 @@ function sanitizeOriginalFileName(originalName = '') {
     .replace(/\s+/g, ' ')
     .replace(/^\.+|\.+$/g, '')
     .trim()
+    .slice(0, MAX_ORIGINAL_FILE_NAME_LENGTH)
   return `${base || 'file'}${fallbackExt}`
 }
 
 function preserveOriginalDisplayName(originalName = '') {
   const raw = path.basename(String(originalName || '').trim())
     .replace(/[\u0000-\u001f]/g, '')
+    .slice(0, MAX_ORIGINAL_FILE_NAME_LENGTH)
     .trim()
   return raw || sanitizeOriginalFileName(originalName)
 }
@@ -81,13 +86,10 @@ function preserveOriginalDisplayName(originalName = '') {
 function buildUniqueStoredName(originalName = '') {
   ensureUploadsDirectory()
   const safeName = sanitizeOriginalFileName(originalName)
-  const ext = path.extname(safeName)
-  const base = path.basename(safeName, ext)
-  let candidate = safeName
-  let index = 2
+  const ext = path.extname(safeName) || '.bin'
+  let candidate = `${crypto.randomUUID()}${ext}`
   while (fs.existsSync(path.join(UPLOADS_PATH, candidate))) {
-    candidate = `${base} (${index})${ext}`
-    index += 1
+    candidate = `${crypto.randomUUID()}${ext}`
   }
   return candidate
 }
