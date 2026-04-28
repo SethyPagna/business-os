@@ -34,6 +34,12 @@ import FilterPanel from './FilterPanel'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import { getStatusLabel } from '../sales/StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 // ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -219,53 +225,113 @@ export default function POS() {
   const [receiptQueue, setReceiptQueue] = useState([])
 
   const searchRef = useRef()
+  const catalogRequestRef = useRef(0)
+  const customerRequestRef = useRef(0)
+  const deliveryRequestRef = useRef(0)
   const taxRate   = parseFloat(settings.tax_rate || '0') / 100
   const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
   const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_usd || '1') || 1))
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_khr || String(exchangeRate)) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
 
+  const applyCatalogData = useCallback((prods, cats, brs) => {
+    setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
+    setCategories(Array.isArray(cats) ? cats : [])
+    const activeBranches = Array.isArray(brs) ? brs.filter((branch) => branch?.is_active) : []
+    setBranches(activeBranches)
+    setDefaultBranchId((current) => {
+      if (current && activeBranches.some((branch) => Number(branch.id) === Number(current))) {
+        return current
+      }
+      const fallbackBranch = activeBranches.find((branch) => branch.is_default) || activeBranches[0]
+      return fallbackBranch ? fallbackBranch.id : null
+    })
+  }, [])
+
+  const loadCatalogData = useCallback(async (label = 'POS catalog data') => {
+    const requestId = beginTrackedRequest(catalogRequestRef)
+    try {
+      const [prods, cats, brs] = await withLoaderTimeout(
+        () => Promise.all([
+          window.api.getProducts(),
+          window.api.getCategories(),
+          window.api.getBranches(),
+        ]),
+        label,
+      )
+      if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+      applyCatalogData(prods, cats, brs)
+      return { prods, cats, brs }
+    } catch (error) {
+      if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+      console.error('[POS] catalog load failed:', error.message)
+      return null
+    }
+  }, [applyCatalogData])
+
+  const loadCustomers = useCallback(async (label = 'POS customers') => {
+    const requestId = beginTrackedRequest(customerRequestRef)
+    try {
+      const data = await withLoaderTimeout(() => window.api.getCustomers(), label)
+      if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
+      const nextCustomers = Array.isArray(data) ? data : []
+      setCustomers(nextCustomers)
+      return nextCustomers
+    } catch (error) {
+      if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
+      console.error('[POS] customers load failed:', error.message)
+      return null
+    }
+  }, [])
+
+  const loadDeliveryContacts = useCallback(async (label = 'POS delivery contacts') => {
+    const requestId = beginTrackedRequest(deliveryRequestRef)
+    try {
+      const data = await withLoaderTimeout(
+        () => window.api.getDeliveryContacts().catch(() => []),
+        label,
+      )
+      if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
+      const nextContacts = Array.isArray(data) ? data : []
+      setDeliveryContacts(nextContacts)
+      return nextContacts
+    } catch (error) {
+      if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
+      console.error('[POS] delivery contacts load failed:', error.message)
+      return null
+    }
+  }, [])
+
   // ?�?� Initial data load ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
-    Promise.all([
-      window.api.getProducts(),
-      window.api.getCategories(),
-      window.api.getCustomers(),
-      window.api.getBranches(),
-      window.api.getDeliveryContacts().catch(() => []),
-    ]).then(([prods, cats, custs, brs, dlv]) => {
-      setProducts(prods.filter(p => p.is_active))
-      setCategories(cats)
-      setCustomers(custs)
-      setDeliveryContacts(Array.isArray(dlv) ? dlv : [])
-      const active = brs.filter(b => b.is_active)
-      setBranches(active)
-      const def = active.find(b => b.is_default) || active[0]
-      if (def) setDefaultBranchId(def.id)
-    })
+    void Promise.allSettled([
+      loadCatalogData('POS initial catalog'),
+      loadCustomers('POS initial customers'),
+      loadDeliveryContacts('POS initial delivery contacts'),
+    ])
     searchRef.current?.focus()
-  }, [])
+  }, [loadCatalogData, loadCustomers, loadDeliveryContacts])
 
   // ?�?� Sync-push: reload when another device changes data ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
     if (!syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
-      Promise.all([
-        window.api.getProducts(),
-        window.api.getBranches(),
-        window.api.getCategories(),
-      ]).then(([p, b, cats]) => {
-        setProducts(p.filter(x => x.is_active))
-        setBranches(b.filter(x => x.is_active))
-        setCategories(cats)
-      })
+      void loadCatalogData('POS sync catalog')
     }
-    if (channel === 'customers')
-      window.api.getCustomers().then(d => setCustomers(Array.isArray(d) ? d : []))
-    if (channel === 'deliveryContacts')
-      window.api.getDeliveryContacts().catch(() => []).then(d => setDeliveryContacts(Array.isArray(d) ? d : []))
-  }, [syncChannel])
+    if (channel === 'customers') {
+      void loadCustomers('POS sync customers')
+    }
+    if (channel === 'deliveryContacts') {
+      void loadDeliveryContacts('POS sync delivery contacts')
+    }
+  }, [loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
+
+  useEffect(() => () => {
+    invalidateTrackedRequest(catalogRequestRef)
+    invalidateTrackedRequest(customerRequestRef)
+    invalidateTrackedRequest(deliveryRequestRef)
+  }, [])
 
   // ?�?� Customer autocomplete ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
@@ -405,8 +471,7 @@ export default function POS() {
       selectCustomer({ ...newCustomerForm, id: created?.id || null })
       setShowAddCustomer(false)
       setNewCustomerForm({ name: '', phone: '', address: '' })
-      const updated = await window.api.getCustomers()
-      setCustomers(Array.isArray(updated) ? updated : [])
+      await loadCustomers('POS refresh customers after create')
     } catch (e) { notify(e.message || 'Failed', 'error') }
     setSavingCustomer(false)
   }
@@ -796,7 +861,7 @@ export default function POS() {
         const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
         closeOrder(resolvedActiveId)
-        window.api.getProducts().then(d => setProducts(Array.isArray(d) ? d.filter(p => p.is_active) : []))
+        void loadCatalogData('POS catalog after checkout')
         // Trigger local inventory refresh immediately
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
