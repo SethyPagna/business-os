@@ -34,7 +34,7 @@ export default function ProductsHeaderActions({
 
   return (
     <>
-      <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-1 sm:hidden">
+      <div className="flex w-full flex-wrap items-center justify-end gap-1.5 pb-1 sm:hidden">
         <button
           onClick={onImport}
           className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
@@ -77,7 +77,7 @@ export default function ProductsHeaderActions({
         </button>
       </div>
 
-      <div className="hidden flex-nowrap items-center gap-1.5 sm:flex">
+      <div className="hidden flex-wrap items-center justify-end gap-1.5 sm:flex">
         <PortalMenu
           align="right"
           trigger={(
