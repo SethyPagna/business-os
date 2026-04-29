@@ -8,6 +8,7 @@ import FieldOrderManager from './FieldOrderManager'
 import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
+import { withLoaderTimeout } from '../../utils/loaders.mjs'
 
 // ----- Shared primitives (defined locally to avoid circular imports) ----------
 function Section({ title, children }) {
@@ -60,9 +61,16 @@ export default function ReceiptSettings() {
   const saveTimerRef     = useRef(null)
   const isMountedRef     = useRef(false)   // guard: skip auto-save on first render
   const loadSettingsRef  = useRef(loadSettings)
+  const saveInFlightRef  = useRef(false)
+  const queuedSaveRef    = useRef(null)
+  const aliveRef         = useRef(true)
 
   // Keep loadSettings ref current without re-triggering effects
   useEffect(() => { loadSettingsRef.current = loadSettings }, [loadSettings])
+  useEffect(() => () => {
+    aliveRef.current = false
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+  }, [])
 
   // Initialise tpl once persisted settings arrive from the server
   useEffect(() => {
@@ -73,6 +81,52 @@ export default function ReceiptSettings() {
 
   // Shallow field updater
   const setT = useCallback((key, val) => setTpl(prev => ({ ...prev, [key]: val })), [])
+
+  const persistTemplate = useCallback(async ({ silent = false, showToast = false } = {}) => {
+    const options = { silent: !!silent, showToast: !!showToast }
+    if (saveInFlightRef.current) {
+      queuedSaveRef.current = {
+        silent: Boolean(queuedSaveRef.current?.silent && options.silent),
+        showToast: Boolean(queuedSaveRef.current?.showToast || options.showToast),
+      }
+      if (!options.silent && aliveRef.current) setSaving(true)
+      return
+    }
+
+    saveInFlightRef.current = true
+    if (!options.silent && aliveRef.current) setSaving(true)
+
+    try {
+      await withLoaderTimeout(
+        () => window.api.saveSettings({ receipt_template: JSON.stringify(tpl) }),
+        'Receipt settings save',
+      )
+
+      if (options.showToast) {
+        try {
+          await withLoaderTimeout(() => loadSettingsRef.current(), 'Receipt settings refresh')
+        } catch (_) {}
+        notify((t('receipt_settings') || 'Receipt settings') + ' ' + (t('success') || 'saved'))
+      } else {
+        Promise.resolve(loadSettingsRef.current()).catch(() => {})
+      }
+    } catch (error) {
+      if (options.showToast) {
+        notify(error?.message || 'Save failed - check server connection', 'error')
+      }
+    } finally {
+      saveInFlightRef.current = false
+      if (!options.silent && aliveRef.current) setSaving(false)
+
+      const queued = queuedSaveRef.current
+      queuedSaveRef.current = null
+      if (queued && aliveRef.current) {
+        window.setTimeout(() => {
+          if (aliveRef.current) persistTemplate(queued)
+        }, 0)
+      }
+    }
+  }, [notify, t, tpl])
 
   // ?? Auto-save (debounced 900 ms, completely silent) ????????????????????????
   // KEY FIX: The `isMountedRef` guard prevents this effect from firing on the
@@ -91,20 +145,11 @@ export default function ReceiptSettings() {
       return
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        await window.api.saveSettings({ receipt_template: JSON.stringify(tpl) })
-        // The backend broadcasts 'settings' via WebSocket after every successful save,
-        // which triggers AppContext.loadSettings() automatically. Call it directly only
-        // as a fallback for clients where the WS connection isn't established yet.
-        loadSettingsRef.current().catch(() => {})
-      } catch (_) {
-        // Silently ignore ??server may be momentarily unreachable.
-        // The user can always press ? to retry.
-      }
+    saveTimerRef.current = setTimeout(() => {
+      persistTemplate({ silent: true, showToast: false })
     }, 900)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [tpl]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [persistTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ?? Manual save with user feedback ????????????????????????????????????????
   // Calls window.api.saveSettings directly (not AppContext.saveSettings) to avoid
@@ -112,16 +157,7 @@ export default function ReceiptSettings() {
   // and the old code called notify() again after it returned, producing two toasts.
   const handleSave = async () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    setSaving(true)
-    try {
-      await window.api.saveSettings({ receipt_template: JSON.stringify(tpl) })
-      await loadSettingsRef.current()
-      notify((t('receipt_settings') || 'Receipt settings') + ' ' + (t('success') || 'saved'))
-    } catch (e) {
-      notify(e?.message || 'Save failed - check server connection', 'error')
-    } finally {
-      setSaving(false)
-    }
+    await persistTemplate({ silent: false, showToast: true })
   }
 
   const SECTIONS = [

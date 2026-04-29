@@ -203,16 +203,25 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
   const [tab, setTab] = useState('client')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const mounted = useRef(true)
+  const queueRequestRef = useRef(0)
+  const serverLogRequestRef = useRef(0)
+
+  const loadQueueState = useCallback(async () => {
+    const requestId = beginTrackedRequest(queueRequestRef)
+    try {
+      const state = await withLoaderTimeout(
+        () => window.api?.getPendingSyncState?.(),
+        'Pending sync queue',
+      )
+      if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && state) {
+        setPendingSync(state)
+      }
+    } catch (_) {}
+  }, [])
 
   useEffect(() => {
     mounted.current = true
     if (window.api?.getCallLog) setClientLog(window.api.getCallLog())
-    const loadQueueState = async () => {
-      try {
-        const state = await window.api?.getPendingSyncState?.()
-        if (mounted.current && state) setPendingSync(state)
-      } catch (_) {}
-    }
     loadQueueState()
     const onErr = (event) => {
       if (!mounted.current) return
@@ -226,17 +235,20 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
     window.addEventListener('sync:queue-changed', onQueueChanged)
     return () => {
       mounted.current = false
+      invalidateTrackedRequest(queueRequestRef)
+      invalidateTrackedRequest(serverLogRequestRef)
       window.removeEventListener('sync:error', onErr)
       window.removeEventListener('sync:write-blocked', onErr)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
-  }, [])
+  }, [loadQueueState])
 
   const fetchServerLog = useCallback(async () => {
     if (!syncUrl) return
+    const requestId = beginTrackedRequest(serverLogRequestRef)
     try {
-      const data = await window.api.getSystemDebugLog()
-      if (mounted.current) {
+      const data = await withLoaderTimeout(() => window.api.getSystemDebugLog(), 'Server diagnostics')
+      if (mounted.current && isTrackedRequestCurrent(serverLogRequestRef, requestId)) {
         setServerLog(data.entries || [])
         setServerInfo({ clients: data.clients, uptime: data.uptime })
       }
@@ -262,6 +274,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
     setRetryingQueue(true)
     try {
       await window.api.discardPendingSyncQueue()
+      await loadQueueState()
     } finally {
       setRetryingQueue(false)
     }
