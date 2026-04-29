@@ -28,6 +28,12 @@ import {
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilePickerModal from '../files/FilePickerModal'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 import { SectionShell } from './catalogUi'
 import {
   createAboutBlock,
@@ -1417,6 +1423,9 @@ export default function CatalogPage({ publicView = false }) {
   const loadRequestRef = useRef(0)
   const syncReloadTimerRef = useRef(null)
   const previewSectionRef = useRef(null)
+  const membershipLookupRequestRef = useRef(0)
+  const submissionSavingRef = useRef(false)
+  const reviewSavingRef = useRef(false)
 
   const canEdit = !publicView && hasPermission('settings')
   const previewConfig = useMemo(
@@ -1646,6 +1655,10 @@ export default function CatalogPage({ publicView = false }) {
       window.clearInterval(timer)
     }
   }, [publicView, previewConfig.refreshSeconds])
+
+  useEffect(() => () => {
+    invalidateTrackedRequest(membershipLookupRequestRef)
+  }, [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
@@ -2125,30 +2138,61 @@ export default function CatalogPage({ publicView = false }) {
     }
   }
 
+  async function refreshMembershipData(
+    membershipNumberValue,
+    {
+      clearOnMissing = true,
+      label = 'Catalog membership lookup',
+      showLoading = true,
+    } = {},
+  ) {
+    const value = String(membershipNumberValue || '').trim()
+    if (!value) return null
+
+    const requestId = beginTrackedRequest(membershipLookupRequestRef)
+    if (showLoading) setMembershipLoading(true)
+    setMembershipError('')
+
+    try {
+      const result = await withLoaderTimeout(
+        () => window.api.lookupPortalMembership(value),
+        label,
+      )
+      if (!isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) return null
+      if (!result) {
+        if (clearOnMissing) {
+          setMembershipData(null)
+          setMembershipError(copy('membershipNotFound', 'Membership number not found.'))
+        }
+        return null
+      }
+      setMembershipData(result)
+      return result
+    } catch (error) {
+      if (!isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) return null
+      if (clearOnMissing) {
+        setMembershipData(null)
+      }
+      setMembershipError(error?.message || 'Lookup failed')
+      return null
+    } finally {
+      if (showLoading && isTrackedRequestCurrent(membershipLookupRequestRef, requestId)) {
+        setMembershipLoading(false)
+      }
+    }
+  }
+
   async function handleMembershipLookup() {
     const value = membershipNumber.trim()
     if (!value) {
+      invalidateTrackedRequest(membershipLookupRequestRef)
+      setMembershipLoading(false)
       setMembershipError(copy('membershipRequired', 'Please enter a membership number.'))
       setMembershipData(null)
       return
     }
 
-    try {
-      setMembershipLoading(true)
-      setMembershipError('')
-      const result = await window.api.lookupPortalMembership(value)
-      if (!result) {
-        setMembershipData(null)
-        setMembershipError(copy('membershipNotFound', 'Membership number not found.'))
-        return
-      }
-      setMembershipData(result)
-    } catch (error) {
-      setMembershipData(null)
-      setMembershipError(error?.message || 'Lookup failed')
-    } finally {
-      setMembershipLoading(false)
-    }
+    await refreshMembershipData(value, { label: 'Catalog membership lookup' })
   }
 
   async function addSubmissionImages(images) {
@@ -2191,7 +2235,10 @@ export default function CatalogPage({ publicView = false }) {
       return
     }
 
+    if (submissionSavingRef.current) return
+
     try {
+      submissionSavingRef.current = true
       setSubmissionSaving(true)
       await window.api.createPortalSubmission({
         membershipNumber: membershipNumberValue,
@@ -2201,18 +2248,25 @@ export default function CatalogPage({ publicView = false }) {
       })
       notify(copy('shareSubmitted', 'Submission sent for review.'), 'success')
       setSubmissionDraft({ platform: '', note: '', screenshots: [] })
-      const refreshed = await window.api.lookupPortalMembership(membershipNumberValue)
-      if (refreshed) setMembershipData(refreshed)
+      await refreshMembershipData(membershipNumberValue, {
+        clearOnMissing: false,
+        label: 'Catalog membership refresh after submission',
+        showLoading: false,
+      })
       if (canEdit) loadPortal().catch(() => {})
     } catch (error) {
       notify(error?.message || 'Submission failed', 'error')
     } finally {
+      submissionSavingRef.current = false
       setSubmissionSaving(false)
     }
   }
 
   async function handleReviewSubmission(item, status) {
+    if (reviewSavingRef.current) return
+
     try {
+      reviewSavingRef.current = true
       setReviewSavingId(item.id)
       await window.api.reviewPortalSubmission(item.id, {
         status,
@@ -2224,12 +2278,16 @@ export default function CatalogPage({ publicView = false }) {
       notify(copy('reviewSaved', 'Review saved.'), 'success')
       await loadPortal()
       if (membershipData?.customer?.membership_number) {
-        const refreshed = await window.api.lookupPortalMembership(membershipData?.customer?.membership_number)
-        if (refreshed) setMembershipData(refreshed)
+        await refreshMembershipData(membershipData.customer.membership_number, {
+          clearOnMissing: false,
+          label: 'Catalog membership refresh after review',
+          showLoading: false,
+        })
       }
     } catch (error) {
       notify(error?.message || 'Failed to save review', 'error')
     } finally {
+      reviewSavingRef.current = false
       setReviewSavingId(null)
     }
   }
