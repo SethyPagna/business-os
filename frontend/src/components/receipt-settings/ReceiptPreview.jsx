@@ -10,22 +10,27 @@ export default function ReceiptPreview({ tpl, settings }) {
   const [ReceiptComp, setReceiptComp] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const previewRequestRef = useRef(0)
+  const aliveRef = useRef(true)
 
   useEffect(() => {
+    aliveRef.current = true
     const requestId = beginTrackedRequest(previewRequestRef)
     setLoadError(null)
     setReceiptComp(null)
-    withLoaderTimeout(() => import('../receipt/Receipt'), 'Receipt preview')
-      .then((mod) => {
-        if (!isTrackedRequestCurrent(previewRequestRef, requestId)) return
+    async function loadPreview() {
+      try {
+        const mod = await withLoaderTimeout(() => import('../receipt/Receipt'), 'Receipt preview')
+        if (!aliveRef.current || !isTrackedRequestCurrent(previewRequestRef, requestId)) return
         setReceiptComp(() => mod.default)
-      })
-      .catch((error) => {
-        if (!isTrackedRequestCurrent(previewRequestRef, requestId)) return
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(previewRequestRef, requestId)) return
         console.error('[ReceiptPreview] import Receipt failed', error)
         setLoadError(error)
-      })
+      }
+    }
+    loadPreview()
     return () => {
+      aliveRef.current = false
       invalidateTrackedRequest(previewRequestRef)
     }
   }, [])
