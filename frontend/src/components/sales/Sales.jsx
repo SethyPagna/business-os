@@ -1,14 +1,17 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Download, Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
+import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Receipt from '../receipt/Receipt'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
+import ExportMenu from '../shared/ExportMenu'
+import FilterMenu from '../shared/FilterMenu'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import SaleDetailModal from './SaleDetailModal'
 import ExportModal from './ExportModal'
 import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
+import { buildTimeActionSections, getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -28,6 +31,10 @@ function getSaleBranchLabel(sale) {
   return ''
 }
 
+function getTimeGroupingMode(yearFilter) {
+  return yearFilter === 'all' ? 'year' : 'month'
+}
+
 function getSaleDateParts(sale) {
   const parsed = new Date(sale?.created_at || '')
   if (Number.isNaN(parsed.getTime())) return null
@@ -43,8 +50,6 @@ function getSaleDateParts(sale) {
 }
 
 function buildGroupedSales(sales, groupMode) {
-  if (groupMode === 'none') return [{ id: 'all', label: 'All sales', items: sales }]
-
   const groups = new Map()
   sales.forEach((sale) => {
     const parts = getSaleDateParts(sale)
@@ -69,7 +74,6 @@ export default function Sales() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
-  const [groupMode, setGroupMode] = useState('month')
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [selectedSale, setSelectedSale] = useState(null)
   const [detailSale, setDetailSale] = useState(null)
@@ -83,6 +87,8 @@ export default function Sales() {
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
   const aliveRef = useRef(true)
+  const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter), [yearFilter])
+  const groupMode = timeGroupingMode
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -184,41 +190,52 @@ export default function Sales() {
     }
   }
 
-  const availableYears = useMemo(() => {
-    const years = new Set()
-    sales.forEach((sale) => {
-      const parts = getSaleDateParts(sale)
-      if (parts?.yearLabel) years.add(parts.yearLabel)
-    })
-    return [...years].sort((left, right) => Number(right) - Number(left))
-  }, [sales])
+  const availableYears = useMemo(
+    () => getAvailableYears(sales, (sale) => sale?.created_at),
+    [sales],
+  )
 
   const searchTerms = search.trim().split(/\s+/).filter(Boolean)
   const filtered = useMemo(() => sales.filter((sale) => {
     if (statusFilter !== 'all' && (sale.sale_status || 'completed') !== statusFilter) return false
-    const parts = getSaleDateParts(sale)
-    if (yearFilter !== 'all' && parts?.yearLabel !== yearFilter) return false
-    if (monthFilter !== 'all' && String(parts?.month || '') !== monthFilter) return false
+    const createdAt = sale?.created_at || ''
+    const createdDate = new Date(createdAt)
+    if (yearFilter !== 'all' && String(createdDate.getFullYear()) !== String(yearFilter)) return false
+    if (monthFilter !== 'all' && String(createdDate.getMonth() + 1) !== String(monthFilter)) return false
     if (!searchTerms.length) return true
     const haystack = `${sale.receipt_number || ''} ${sale.cashier_name || ''} ${sale.payment_method || ''} ${sale.notes || ''} ${sale.customer_name || ''} ${sale.customer_membership_number || ''} ${getSaleBranchLabel(sale) || ''}`
     return multiMatch(haystack, searchTerms)
   }), [monthFilter, sales, searchTerms, statusFilter, yearFilter])
 
-  const groupedSales = useMemo(() => buildGroupedSales(filtered, groupMode), [filtered, groupMode])
+  const salesSections = useMemo(
+    () => buildTimeActionSections(filtered, {
+      getDate: (sale) => sale?.created_at,
+      getItemId: (sale) => Number(sale?.id),
+      getActionKey: (sale) => sale?.sale_status || 'completed',
+      getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+      timeMode: groupMode,
+    }),
+    [filtered, groupMode, t],
+  )
+
+  const visibleSales = useMemo(
+    () => salesSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+    [salesSections],
+  )
 
   useEffect(() => {
-    const validIds = new Set(filtered.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(visibleSales.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)))
     setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
-  }, [filtered])
+  }, [visibleSales])
 
   const filteredIds = useMemo(
-    () => filtered.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)),
-    [filtered],
+    () => visibleSales.map((sale) => Number(sale.id)).filter((id) => Number.isFinite(id)),
+    [visibleSales],
   )
 
   const selectedSales = useMemo(
-    () => filtered.filter((sale) => selectedIds.has(Number(sale.id))),
-    [filtered, selectedIds],
+    () => visibleSales.filter((sale) => selectedIds.has(Number(sale.id))),
+    [selectedIds, visibleSales],
   )
 
   useEffect(() => {
@@ -237,12 +254,7 @@ export default function Sales() {
   const toggleSelected = (saleId) => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(numericId)) next.delete(numericId)
-      else next.add(numericId)
-      return next
-    })
+    setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
   }
 
   const toggleSelectAll = (checked) => {
@@ -252,6 +264,20 @@ export default function Sales() {
     }
     setSelectedIds(new Set(filteredIds))
   }
+
+  const toggleSelectionScope = useCallback((ids, checked) => {
+    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+  }, [])
+
+  const isSelectionScopeFullySelected = useCallback(
+    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    [selectedIds],
+  )
+
+  const isSelectionScopePartiallySelected = useCallback(
+    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
+    [isSelectionScopeFullySelected, selectedIds],
+  )
 
   const handleExportSelected = () => {
     if (!selectedSales.length) return
@@ -296,6 +322,86 @@ export default function Sales() {
     }
   }
 
+  const exportVisibleSales = useCallback((rows = filtered, filePrefix = 'sales-visible') => {
+    const exportRows = rows.map((sale) => ({
+      Receipt: sale.receipt_number || '',
+      Date: sale.created_at || '',
+      Status: sale.sale_status || 'completed',
+      Cashier: sale.cashier_name || '',
+      Payment_Method: sale.payment_method || '',
+      Branch: getSaleBranchLabel(sale) || '',
+      Customer: sale.customer_name || '',
+      Total_USD: sale.total_usd || 0,
+      Net_Total_USD: sale.net_total_usd ?? sale.total_usd ?? 0,
+      Items: Array.isArray(sale.items) ? sale.items.length : 0,
+      Notes: sale.notes || '',
+    }))
+    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)
+  }, [filtered])
+
+  const salesExportItems = useMemo(() => ([
+    { label: 'Export visible sales', onClick: () => exportVisibleSales(filtered, 'sales-visible') },
+    selectedSales.length ? { label: 'Export selected sales', onClick: handleExportSelected, color: 'blue' } : null,
+    statusFilter !== 'all' ? { label: `Export ${getStatusLabel(statusFilter, t)}`, onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
+    'divider',
+    { label: 'Detailed sales report', onClick: () => setShowExport(true), color: 'green' },
+  ].filter(Boolean)), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, yearFilter])
+
+  const salesFilterSections = useMemo(() => ([
+    {
+      id: 'status',
+      label: t('status') || 'Status',
+      options: [
+        { id: 'all', label: t('all_statuses') || 'All statuses', active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+        ...ALL_STATUSES.map((status) => ({
+          id: status,
+          label: getStatusLabel(status, t),
+          active: statusFilter === status,
+          onClick: () => setStatusFilter(statusFilter === status ? 'all' : status),
+        })),
+      ],
+    },
+    {
+      id: 'year',
+      label: 'Year',
+      options: [
+        { id: 'all', label: 'All years', active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: 'Month',
+      options: [
+        { id: 'all', label: 'All months', active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+  ]), [availableYears, monthFilter, statusFilter, t, yearFilter])
+
+  const activeSalesFilterCount = useMemo(
+    () => [statusFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all'].filter(Boolean).length,
+    [monthFilter, statusFilter, yearFilter],
+  )
+
   if (selectedSale) return <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
 
   return (
@@ -308,14 +414,11 @@ export default function Sales() {
           </h1>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <button onClick={() => setShowImport(true)} className="btn-secondary inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium">
+          <button onClick={() => setShowImport(true)} className="btn-secondary inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:text-sm">
             <Upload className="h-4 w-4" />
             <span>{translateOr('import', 'Import')}</span>
           </button>
-          <button onClick={() => setShowExport(true)} className="btn-primary inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium">
-            <Download className="h-4 w-4" />
-            <span>{exportLabel}</span>
-          </button>
+          <ExportMenu label={exportLabel} items={salesExportItems} compact primary />
         </div>
       </div>
 
@@ -332,51 +435,17 @@ export default function Sales() {
             aria-label={t('search') || 'Search sales'}
           />
         </label>
-        <select
-          id="sales-status-filter"
-          name="sales_status_filter"
-          className="input w-[11.5rem] max-w-full flex-shrink-0"
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-          aria-label={t('all_statuses') || 'Filter by status'}
-        >
-          <option value="all">{t('all_statuses') || 'All Statuses'}</option>
-          {ALL_STATUSES.map((status) => (
-            <option key={status} value={status}>{getStatusLabel(status, t)}</option>
-          ))}
-        </select>
-        <select
-          className="input w-[9rem] max-w-full flex-shrink-0"
-          value={yearFilter}
-          onChange={(event) => setYearFilter(event.target.value)}
-          aria-label="Filter by year"
-        >
-          <option value="all">All years</option>
-          {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
-        </select>
-        <select
-          className="input w-[10rem] max-w-full flex-shrink-0"
-          value={monthFilter}
-          onChange={(event) => setMonthFilter(event.target.value)}
-          aria-label="Filter by month"
-        >
-          <option value="all">All months</option>
-          {Array.from({ length: 12 }, (_, index) => {
-            const month = index + 1
-            const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
-            return <option key={month} value={String(month)}>{label}</option>
-          })}
-        </select>
-        <select
-          className="input w-[9rem] max-w-full flex-shrink-0"
-          value={groupMode}
-          onChange={(event) => setGroupMode(event.target.value)}
-          aria-label="Group sales"
-        >
-          <option value="month">Group by month</option>
-          <option value="year">Group by year</option>
-          <option value="none">No grouping</option>
-        </select>
+        <FilterMenu
+          label={t('filters') || 'Filters'}
+          activeCount={activeSalesFilterCount}
+          sections={salesFilterSections}
+          onClear={() => {
+            setStatusFilter('all')
+            setYearFilter('all')
+            setMonthFilter('all')
+          }}
+          compact
+        />
       </div>
 
       {selectedSales.length > 0 ? (

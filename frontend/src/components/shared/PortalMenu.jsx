@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { cloneElement, isValidElement, useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
 
@@ -8,7 +8,14 @@ import { MoreHorizontal } from 'lucide-react'
  * 1.2 Computes viewport-safe positioning from the trigger coordinates.
  * 1.3 Closes on outside interactions and scroll/resize events.
  */
-export default function PortalMenu({ trigger, items, align = 'right' }) {
+export default function PortalMenu({
+  trigger,
+  items,
+  align = 'right',
+  content = null,
+  menuClassName = '',
+  closeOnContentClick = false,
+}) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const triggerRef = useRef(null)
@@ -76,39 +83,57 @@ export default function PortalMenu({ trigger, items, align = 'right' }) {
     gray: 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700',
   }
 
+  const closeMenu = useCallback(() => setOpen(false), [])
+
+  const resolvedContent = typeof content === 'function'
+    ? content({ closeMenu, open })
+    : content
+
+  const triggerNode = isValidElement(trigger)
+    ? cloneElement(trigger, {
+        'aria-expanded': open,
+        'aria-haspopup': true,
+      })
+    : trigger
+
   return (
     <>
       <div ref={triggerRef} onClickCapture={toggleOpen} style={{ display: 'inline-flex' }}>
-        {trigger}
+        {triggerNode}
       </div>
 
       {open && createPortal(
         <div
           ref={menuRef}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (closeOnContentClick) setOpen(false)
+          }}
           style={{ position: 'fixed', top: position.top, left: position.left, zIndex: 9999 }}
-          className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[170px] py-1 fade-in"
+          className={`bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[170px] py-1 fade-in ${menuClassName}`.trim()}
         >
-          {items.filter(Boolean).map((item, index) => (
-            item === 'divider'
-              ? <div key={`divider-${index}`} className="border-t border-gray-100 dark:border-gray-700 my-1" />
-              : (
-                <button
-                  key={`item-${index}`}
-                  type="button"
-                  onClick={() => {
-                    item.onClick?.()
-                    setOpen(false)
-                  }}
-                  disabled={item.disabled}
-                  className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    colorClassByType[item.color] || colorClassByType.gray
-                  }`}
-                >
-                  {item.label}
-                </button>
-              )
-          ))}
+          {resolvedContent
+            ? resolvedContent
+            : items.filter(Boolean).map((item, index) => (
+              item === 'divider'
+                ? <div key={`divider-${index}`} className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                : (
+                  <button
+                    key={`item-${index}`}
+                    type="button"
+                    onClick={() => {
+                      item.onClick?.()
+                      setOpen(false)
+                    }}
+                    disabled={item.disabled}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      colorClassByType[item.color] || colorClassByType.gray
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                )
+            ))}
         </div>,
         document.body,
       )}

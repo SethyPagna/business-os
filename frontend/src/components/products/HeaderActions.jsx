@@ -1,5 +1,6 @@
 import { Download, PackagePlus, Settings2, Upload } from 'lucide-react'
 import PortalMenu from '../shared/PortalMenu'
+import ExportMenu from '../shared/ExportMenu'
 
 export default function ProductsHeaderActions({
   onManageCats,
@@ -7,6 +8,7 @@ export default function ProductsHeaderActions({
   onManageUnits,
   onImport,
   onExport,
+  exportMenuItems = null,
   onAdd,
   t,
 }) {
@@ -42,15 +44,19 @@ export default function ProductsHeaderActions({
           <Upload className="h-3.5 w-3.5" />
           <span>{importLabel}</span>
         </button>
-        <button
-          onClick={onExport}
-          className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
-          title={exportLabel}
-          aria-label={exportLabel}
-        >
-          <Download className="h-3.5 w-3.5" />
-          <span>{exportLabel}</span>
-        </button>
+        {Array.isArray(exportMenuItems) && exportMenuItems.length ? (
+          <ExportMenu label={exportLabel} items={exportMenuItems} compact />
+        ) : (
+          <button
+            onClick={onExport}
+            className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
+            title={exportLabel}
+            aria-label={exportLabel}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>{exportLabel}</span>
+          </button>
+        )}
         <PortalMenu
           align="right"
           trigger={(
@@ -94,14 +100,18 @@ export default function ProductsHeaderActions({
           <Upload className="h-4 w-4" />
           {importLabel}
         </button>
-        <button
-          onClick={onExport}
-          className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
-          title={exportLabel}
-        >
-          <Download className="h-4 w-4" />
-          {exportLabel}
-        </button>
+        {Array.isArray(exportMenuItems) && exportMenuItems.length ? (
+          <ExportMenu label={exportLabel} items={exportMenuItems} compact />
+        ) : (
+          <button
+            onClick={onExport}
+            className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+            title={exportLabel}
+          >
+            <Download className="h-4 w-4" />
+            {exportLabel}
+          </button>
+        )}
         <button
           onClick={onAdd}
           className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"

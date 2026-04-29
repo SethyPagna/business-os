@@ -15,12 +15,11 @@ function buildGroupKey(movement) {
 
   const reason = normalizeText(movement.reason)
   const user = normalizeText(movement.user_id || movement.user_name)
-  const branch = normalizeText(movement.branch_id || movement.branch_name)
   const time = minuteBucket(movement.created_at)
 
-  if (reason) return `${movement.movement_type}|reason:${reason}|user:${user}|branch:${branch}|time:${time}`
+  if (reason) return `${movement.movement_type}|reason:${reason}|user:${user}|time:${time}`
   if (['purchase', 'adjustment', 'supplier_return', 'return_reversal', 'transfer'].includes(String(movement.movement_type || '').toLowerCase())) {
-    return `${movement.movement_type}|user:${user}|branch:${branch}|time:${time}`
+    return `${movement.movement_type}|user:${user}|time:${time}`
   }
   return `${movement.movement_type}|id:${movement.id}`
 }

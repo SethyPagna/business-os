@@ -18,6 +18,7 @@ import VariantFormModal      from './VariantFormModal'
 import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
+import { getAvailableYears, matchesYearMonthFilters } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -47,6 +48,8 @@ export default function Products() {
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
   const [filterOpen,   setFilterOpen]   = useState(false)
+  const [createdYearFilter, setCreatedYearFilter] = useState('all')
+  const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
   const [search,       setSearch]       = useState('')
   const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
   const [selectedIds,    setSelectedIds]    = useState(new Set())
@@ -342,6 +345,10 @@ export default function Products() {
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [products, settings?.product_brand_options])
   const [lightbox, setLightbox] = useState(null)
+  const availableCreatedYears = useMemo(
+    () => getAvailableYears(products, (product) => product?.created_at),
+    [products],
+  )
 
   const resolveImageUrl = (src) => {
     const raw = String(src || '').trim()
@@ -401,6 +408,7 @@ export default function Products() {
     const matchBrand    = brandFilter==='all' || (p.brand||'').toLowerCase() === brandFilter.toLowerCase()
     const matchBranch   = branchFilter==='all' || (p.branch_stock||[]).some(bs=>String(bs.branch_id)===branchFilter)
     const matchSupplier = supplierFilter==='all' || (p.supplier||'').toLowerCase() === supplierFilter.toLowerCase()
+    const matchCreated = matchesYearMonthFilters(p.created_at, { year: createdYearFilter, month: createdMonthFilter })
     const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
 
     // When a branch is selected, fully hide products with no stock at that branch
@@ -412,8 +420,65 @@ export default function Products() {
       stockFilter === 'out'      ? qty <= (p.out_of_stock_threshold||0) :
       stockFilter === 'low'      ? qty > (p.out_of_stock_threshold||0) && qty <= (p.low_stock_threshold||10) :
       stockFilter === 'in_stock' ? qty > (p.low_stock_threshold||10) : true
-    return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchStock
+    return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchCreated && matchStock
   })
+
+  const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
+    const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
+    const toImageUrl = (value) => String(value || '').trim()
+    const rows = rowsToExport.map((p) => ({
+      Name: p.name || '', SKU: p.sku || '', Barcode: p.barcode || '',
+      Category: p.category || '', Brand: p.brand || '', Unit: p.unit || '', Description: p.description || '',
+      Created_At: p.created_at || '',
+      Selling_Price_USD: p.selling_price_usd || 0, Selling_Price_KHR: p.selling_price_khr || 0,
+      Purchase_Price_USD: p.purchase_price_usd || 0, Purchase_Price_KHR: p.purchase_price_khr || 0, Stock_Quantity: p.stock_quantity || 0,
+      Low_Stock_Threshold: p.low_stock_threshold || 0, Supplier: p.supplier || '',
+      Image_Filename_1: toImageName((p.image_gallery || [])[0] || p.image_path || ''),
+      Image_Filename_2: toImageName((p.image_gallery || [])[1] || ''),
+      Image_Filename_3: toImageName((p.image_gallery || [])[2] || ''),
+      Image_Filename_4: toImageName((p.image_gallery || [])[3] || ''),
+      Image_Filename_5: toImageName((p.image_gallery || [])[4] || ''),
+      Image_URL_1: toImageUrl((p.image_gallery || [])[0] || p.image_path || ''),
+      Image_URL_2: toImageUrl((p.image_gallery || [])[1] || ''),
+      Image_URL_3: toImageUrl((p.image_gallery || [])[2] || ''),
+      Image_URL_4: toImageUrl((p.image_gallery || [])[3] || ''),
+      Image_URL_5: toImageUrl((p.image_gallery || [])[4] || ''),
+      Image_Filenames: (p.image_gallery || []).map((entry) => toImageName(entry)).filter(Boolean).join('|'),
+      Image_URLs: (p.image_gallery || []).map((entry) => toImageUrl(entry)).filter(Boolean).join('|'),
+      Image_Conflict_Mode: '',
+      Branch: (() => {
+        const primary = (p.branch_stock || []).find(bs => (bs.quantity || 0) > 0)
+        return primary?.branch_name || ''
+      })(),
+      Branch_Stock_JSON: JSON.stringify((p.branch_stock || []).map(bs => ({
+        branch_id: bs.branch_id,
+        branch_name: bs.branch_name,
+        quantity: bs.quantity || 0,
+      }))),
+      Parent_ID: p.parent_id || '',
+      Is_Group: p.is_group ? 'Yes' : 'No',
+      Active: p.is_active ? 'Yes' : 'No',
+    }))
+    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, rows)
+  }, [filtered])
+
+  const selectedProducts = useMemo(
+    () => filtered.filter((product) => selectedIds.has(product.id)),
+    [filtered, selectedIds],
+  )
+
+  const productExportItems = useMemo(() => ([
+    { label: 'Export visible products', onClick: () => exportProductsCsv(filtered, 'products-visible') },
+    selectedProducts.length ? { label: 'Export selected products', onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
+    stockFilter !== 'all' ? { label: 'Export current stock filter', onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
+    catFilter !== 'all' ? { label: 'Export current category', onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
+    brandFilter !== 'all' ? { label: 'Export current brand', onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
+    supplierFilter !== 'all' ? { label: 'Export current supplier', onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
+    branchFilter !== 'all' ? { label: 'Export current branch', onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
+    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
+    'divider',
+    { label: 'Export full product list', onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
+  ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter])
 
   if (loadError) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -437,43 +502,8 @@ export default function Products() {
             onManageBrands={()=>setModal('brands')}
             onManageUnits={()=>setModal('units')}
             onImport={()=>setModal('bulk')}
-            onExport={() => {
-              const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
-              const toImageUrl = (value) => String(value || '').trim()
-              const rows = filtered.map(p => ({
-                Name: p.name || '', SKU: p.sku || '', Barcode: p.barcode || '',
-                Category: p.category || '', Brand: p.brand || '', Unit: p.unit || '', Description: p.description || '',
-                Selling_Price_USD: p.selling_price_usd || 0, Selling_Price_KHR: p.selling_price_khr || 0,
-                Purchase_Price_USD: p.purchase_price_usd || 0, Purchase_Price_KHR: p.purchase_price_khr || 0, Stock_Quantity: p.stock_quantity || 0,
-                Low_Stock_Threshold: p.low_stock_threshold || 0, Supplier: p.supplier || '',
-                Image_Filename_1: toImageName((p.image_gallery || [])[0] || p.image_path || ''),
-                Image_Filename_2: toImageName((p.image_gallery || [])[1] || ''),
-                Image_Filename_3: toImageName((p.image_gallery || [])[2] || ''),
-                Image_Filename_4: toImageName((p.image_gallery || [])[3] || ''),
-                Image_Filename_5: toImageName((p.image_gallery || [])[4] || ''),
-                Image_URL_1: toImageUrl((p.image_gallery || [])[0] || p.image_path || ''),
-                Image_URL_2: toImageUrl((p.image_gallery || [])[1] || ''),
-                Image_URL_3: toImageUrl((p.image_gallery || [])[2] || ''),
-                Image_URL_4: toImageUrl((p.image_gallery || [])[3] || ''),
-                Image_URL_5: toImageUrl((p.image_gallery || [])[4] || ''),
-                Image_Filenames: (p.image_gallery || []).map((entry) => toImageName(entry)).filter(Boolean).join('|'),
-                Image_URLs: (p.image_gallery || []).map((entry) => toImageUrl(entry)).filter(Boolean).join('|'),
-                Image_Conflict_Mode: '',
-                Branch: (() => {
-                  const primary = (p.branch_stock || []).find(bs => (bs.quantity || 0) > 0)
-                  return primary?.branch_name || ''
-                })(),
-                Branch_Stock_JSON: JSON.stringify((p.branch_stock || []).map(bs => ({
-                  branch_id: bs.branch_id,
-                  branch_name: bs.branch_name,
-                  quantity: bs.quantity || 0,
-                }))),
-                Parent_ID: p.parent_id || '',
-                Is_Group: p.is_group ? 'Yes' : 'No',
-                Active: p.is_active ? 'Yes' : 'No',
-              }))
-              downloadCSV(`products-${new Date().toISOString().slice(0,10)}.csv`, rows)
-            }}
+            onExport={() => exportProductsCsv(filtered)}
+            exportMenuItems={productExportItems}
             onAdd={()=>{setSelected(null);setModal('form')}}
             t={t}
           />

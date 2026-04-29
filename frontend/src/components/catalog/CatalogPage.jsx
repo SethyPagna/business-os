@@ -3035,25 +3035,6 @@ export default function CatalogPage({ publicView = false }) {
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="portal-title" className="block text-sm font-medium text-slate-700">{copy('portalTitle', 'Portal title')}</label>
-                  <input id="portal-title" name="customer_portal_title" autoComplete="off" className="input" value={editorDraft.customer_portal_title || ''} onChange={(event) => setDraft('customer_portal_title', event.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="portal-title-size" className="block text-sm font-medium text-slate-700">{copy('portalTitleSize', 'Portal title size')}</label>
-                  <input
-                    id="portal-title-size"
-                    name="customer_portal_title_size"
-                    className="mt-2 w-full accent-slate-950"
-                    type="range"
-                    min="28"
-                    max="64"
-                    step="2"
-                    value={editorDraft.customer_portal_title_size || '40'}
-                    onChange={(event) => setDraft('customer_portal_title_size', event.target.value)}
-                  />
-                  <span className="mt-1 block text-xs text-slate-500">{editorDraft.customer_portal_title_size || '40'}px</span>
-                </div>
-                <div>
                   <label htmlFor="portal-intro" className="block text-sm font-medium text-slate-700">{copy('portalIntro', 'Portal intro')}</label>
                   <textarea id="portal-intro" name="customer_portal_intro" autoComplete="off" className="input resize-none" rows={3} value={editorDraft.customer_portal_intro || ''} onChange={(event) => setDraft('customer_portal_intro', event.target.value)} />
                 </div>
@@ -3454,7 +3435,7 @@ export default function CatalogPage({ publicView = false }) {
     )
   }
 
-  const previewTitle = String(previewConfig.title || previewConfig.businessName || '').trim()
+  const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const showHeroToolsPanel = false

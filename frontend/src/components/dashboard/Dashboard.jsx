@@ -1,13 +1,13 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import { useRef } from 'react'
-import PortalMenu from '../shared/PortalMenu'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
 import { downloadCSV } from '../../utils/csv'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
+import ExportMenu from '../shared/ExportMenu'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
@@ -321,6 +321,71 @@ export default function Dashboard() {
     downloadCSV(`dashboard-full-${new Date().toISOString().slice(0,10)}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
   }
 
+  const dashboardExportItems = [
+    { label: t('export_all_report'), onClick: buildExportAll, color: 'green' },
+    { label: t('export_kpi_summary'), onClick: () => {
+      if (!summary || !analytics) return
+      const rows = [{
+        Period: rangeLabel,
+        Gross_Sales: aGrossSales,
+        Discounts: aDiscounts,
+        Store_Discounts: aStoreDiscounts,
+        Membership_Discounts: aMembershipDiscounts,
+        Tax: aTax,
+        Delivery: aDelivery,
+        Revenue: aRevenue,
+        COGS: aCost,
+        Profit: aProfit,
+        Tx: aTxCount,
+        Avg_Order: aAvgOrder.toFixed(2),
+        Returns: aReturns,
+        Refunded: aRefundUsd,
+      }]
+      downloadCSV(`dashboard-kpi-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+    'divider',
+    { label: t('export_sales_chart'), onClick: () => {
+      const rows = chartData.map(d => ({
+        Period: d.date || d.period || '',
+        Gross_Sales_USD: d.gross_sales_usd || 0,
+        Discounts_USD: d.discount_usd || 0,
+        Tax_USD: d.tax_usd || 0,
+        Delivery_USD: d.delivery_usd || 0,
+        Refund_USD: d.refund_usd || 0,
+        Revenue_USD: d.revenue_usd || 0,
+        COGS_USD: d.cost_usd || 0,
+        Profit_USD: d.profit_usd || 0,
+        Tx: d.count || 0,
+      }))
+      downloadCSV(`dashboard-sales-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+    { label: t('export_top_products'), onClick: () => {
+      const rows = topList.map((p, i) => ({ Rank: i + 1, Product: p.product_name || '', Revenue_USD: p.revenue_usd || 0, Qty: p.qty_sold || 0 }))
+      downloadCSV(`dashboard-top-products-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+    { label: t('export_top_customers'), onClick: () => {
+      const rows = (analytics?.topCustomers || []).map((c, i) => ({
+        Rank: i + 1,
+        Customer: c.customer_name || '',
+        Sales: c.sale_count || 0,
+        Gross: c.gross_revenue_usd || 0,
+        Store_Discounts: c.store_discount_usd || 0,
+        Membership_Discounts: c.membership_discount_usd || 0,
+        Returns: c.total_refund_usd || 0,
+        Net: c.net_revenue_usd || 0,
+      }))
+      downloadCSV(`dashboard-top-customers-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+    { label: t('export_payment_methods'), onClick: () => {
+      const rows = (analytics?.byPayment || []).map(p => ({ Method: p.payment_method, Count: p.count || 0, Revenue: p.revenue_usd || 0 }))
+      downloadCSV(`dashboard-payments-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+    { label: t('export_branch_performance'), onClick: () => {
+      const rows = (analytics?.byBranch || []).map(b => ({ Branch: b.branch_name, Tx: b.count || 0, Revenue: b.revenue_usd || 0 }))
+      downloadCSV(`dashboard-branches-${new Date().toISOString().slice(0,10)}.csv`, rows)
+    } },
+  ]
+
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
@@ -343,20 +408,7 @@ export default function Dashboard() {
             <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
             {refreshLabel}
           </button>
-          <PortalMenu
-            align="right"
-            trigger={<button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"><Upload className="h-4 w-4" />{exportLabel}</button>}
-            items={[
-              { label: t('export_all_report'), onClick: buildExportAll },
-              'divider',
-              { label: t('export_sales_chart'), onClick: () => { const rows = chartData.map(d => ({ Period:d.date||d.period||'', Gross_Sales_USD:d.gross_sales_usd||0, Discounts_USD:d.discount_usd||0, Tax_USD:d.tax_usd||0, Delivery_USD:d.delivery_usd||0, Refund_USD:d.refund_usd||0, Revenue_USD:d.revenue_usd||0, COGS_USD:d.cost_usd||0, Profit_USD:d.profit_usd||0, Tx:d.count||0 })); downloadCSV(`dashboard-sales-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-              { label: t('export_top_products'), onClick: () => { const rows = topList.map((p, i) => ({ Rank:i+1, Product:p.product_name||'', Revenue_USD:p.revenue_usd||0, Qty:p.qty_sold||0 })); downloadCSV(`dashboard-top-products-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-              { label: t('export_top_customers'), onClick: () => { const rows = (analytics?.topCustomers||[]).map((c, i) => ({ Rank:i+1, Customer:c.customer_name||'', Sales:c.sale_count||0, Gross:c.gross_revenue_usd||0, Store_Discounts:c.store_discount_usd||0, Membership_Discounts:c.membership_discount_usd||0, Returns:c.total_refund_usd||0, Net:c.net_revenue_usd||0 })); downloadCSV(`dashboard-top-customers-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-              { label: t('export_payment_methods'), onClick: () => { const rows = (analytics?.byPayment||[]).map(p => ({ Method:p.payment_method, Count:p.count||0, Revenue:p.revenue_usd||0 })); downloadCSV(`dashboard-payments-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-              { label: t('export_branch_performance'), onClick: () => { const rows = (analytics?.byBranch||[]).map(b => ({ Branch:b.branch_name, Tx:b.count||0, Revenue:b.revenue_usd||0 })); downloadCSV(`dashboard-branches-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-              { label: t('export_kpi_summary'), onClick: () => { if (!summary || !analytics) return; const rows = [{ Period:rangeLabel, Gross_Sales:aGrossSales, Discounts:aDiscounts, Store_Discounts:aStoreDiscounts, Membership_Discounts:aMembershipDiscounts, Tax:aTax, Delivery:aDelivery, Revenue:aRevenue, COGS:aCost, Profit:aProfit, Tx:aTxCount, Avg_Order:aAvgOrder.toFixed(2), Returns:aReturns, Refunded:aRefundUsd }]; downloadCSV(`dashboard-kpi-${new Date().toISOString().slice(0,10)}.csv`, rows) } },
-            ]}
-          />
+          <ExportMenu label={exportLabel} items={dashboardExportItems} compact />
         </div>
       </div>
 

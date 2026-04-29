@@ -4,6 +4,7 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
 import { refreshAppData } from '../../utils/appRefresh'
+import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -339,7 +340,7 @@ function FolderBrowserPanel({
   )
 }
 
-function DataFolderLocation({ t, notify }) {
+function DataFolderLocation({ t, notify, active = true }) {
   const copy = useCopy(t)
   const [info, setInfo] = useState(null)
   const [systemConfig, setSystemConfig] = useState(null)
@@ -377,7 +378,13 @@ function DataFolderLocation({ t, notify }) {
     }
   }, [copy, notify])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!active) {
+      invalidateTrackedRequest(loadRequestRef)
+      return
+    }
+    load()
+  }, [active, load])
   useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const folderName = info?.dataFolderName || 'business-os-data'
@@ -618,7 +625,7 @@ function DataFolderLocation({ t, notify }) {
   )
 }
 
-function GoogleDriveSyncSection({ t, notify }) {
+function GoogleDriveSyncSection({ t, notify, active = true }) {
   const copy = useCopy(t)
   const [busy, setBusy] = useState('')
   const [status, setStatus] = useState(null)
@@ -631,13 +638,17 @@ function GoogleDriveSyncSection({ t, notify }) {
     syncIntervalSeconds: 120,
   })
   const loadRequestRef = useRef(0)
+  const retryTimerRef = useRef(null)
+  const failureCountRef = useRef(0)
 
   const load = useCallback(async () => {
+    if (!active) return
     const requestId = beginTrackedRequest(loadRequestRef)
     try {
       const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
       const item = result?.item || result || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      failureCountRef.current = 0
       setStatus(item)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
@@ -649,14 +660,31 @@ function GoogleDriveSyncSection({ t, notify }) {
       }))
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      failureCountRef.current += 1
+      const nextDelayMs = Math.min(30000, 2000 * (2 ** Math.min(failureCountRef.current - 1, 4)))
+      window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = window.setTimeout(() => {
+        if (active) load()
+      }, nextDelayMs)
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     }
-  }, [copy, notify])
-
-  useEffect(() => { load() }, [load])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  }, [active, copy, notify])
 
   useEffect(() => {
+    if (!active) {
+      window.clearTimeout(retryTimerRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      return
+    }
+    load()
+  }, [active, load])
+  useEffect(() => () => {
+    window.clearTimeout(retryTimerRef.current)
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
+
+  useEffect(() => {
+    if (!active) return undefined
     const handler = (event) => {
       if (event?.data?.type !== 'business-os-drive-sync') return
       if (event.data.status === 'connected') {
@@ -671,7 +699,7 @@ function GoogleDriveSyncSection({ t, notify }) {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [copy, load, notify])
+  }, [active, copy, load, notify])
 
   const savePreferences = async () => {
     setBusy('save')
@@ -884,6 +912,7 @@ function GoogleDriveSyncSection({ t, notify }) {
 export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
+  const isActive = useIsPageActive('backup')
   const [loading, setLoading] = useState('')
   const [pendingImport, setPendingImport] = useState(null)
   const [folderExportPath, setFolderExportPath] = useState('')
@@ -908,6 +937,10 @@ export default function Backup() {
   }, [])
 
   useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(hostConfigRequestRef)
+      return
+    }
     async function loadHostConfig() {
       const requestId = beginTrackedRequest(hostConfigRequestRef)
       try {
@@ -920,7 +953,7 @@ export default function Backup() {
       }
     }
     loadHostConfig()
-  }, [])
+  }, [isActive])
 
   const browseServerFolders = async (target, dir) => {
     const requestRef = target === 'export' ? exportBrowseRequestRef : restoreBrowseRequestRef
@@ -1268,8 +1301,8 @@ export default function Backup() {
           ) : null}
         </div>
 
-        <GoogleDriveSyncSection t={t} notify={notify} />
-        <DataFolderLocation t={t} notify={notify} />
+        {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} /> : null}
+        {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} /> : null}
         <ResetData />
         <FactoryReset />
       </div>
