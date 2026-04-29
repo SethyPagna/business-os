@@ -1429,6 +1429,9 @@ export default function CatalogPage({ publicView = false }) {
   const assistantRequestRef = useRef(0)
   const assistantStatusRequestRef = useRef(0)
   const assistantInFlightRef = useRef(false)
+  const portalBootstrapRequestRef = useRef(0)
+  const portalFaviconRequestRef = useRef(0)
+  const aliveRef = useRef(true)
 
   const canEdit = !publicView && hasPermission('settings')
   const previewConfig = useMemo(
@@ -1637,9 +1640,8 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   useEffect(() => {
-    let cancelled = false
-
-    async function run() {
+    async function run(showSpinner = true) {
+      const requestId = beginTrackedRequest(portalBootstrapRequestRef)
       try {
         const hasCachedData = !!(
           products.length
@@ -1648,31 +1650,48 @@ export default function CatalogPage({ publicView = false }) {
           || branches.length
           || cachedPortal
         )
-        if (!hasCachedData) setLoading(true)
-        setPortalError('')
-        await loadPortal()
+        if (showSpinner && !hasCachedData && aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
+          setLoading(true)
+        }
+        if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
+          setPortalError('')
+        }
+        await withLoaderTimeout(() => loadPortal(), 'Customer portal')
       } catch (error) {
-        if (!cancelled) setPortalError(error?.message || 'Failed to load customer portal')
+        if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) return
+        setPortalError(error?.message || 'Failed to load customer portal')
       } finally {
-        if (!cancelled) setLoading(false)
+        if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
+          setLoading(false)
+        }
       }
     }
 
     run()
 
-    if (!publicView) return () => { cancelled = true }
+    if (!publicView) {
+      return () => {
+        invalidateTrackedRequest(portalBootstrapRequestRef)
+        invalidateTrackedRequest(loadRequestRef)
+      }
+    }
 
     const timer = window.setInterval(() => {
-      loadPortal().catch(() => {})
+      run(false).catch(() => {})
     }, Math.max(5, Number(previewConfig.refreshSeconds || 20)) * 1000)
 
     return () => {
-      cancelled = true
+      invalidateTrackedRequest(portalBootstrapRequestRef)
+      invalidateTrackedRequest(loadRequestRef)
       window.clearInterval(timer)
     }
   }, [publicView, previewConfig.refreshSeconds])
 
   useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(portalBootstrapRequestRef)
+    invalidateTrackedRequest(portalFaviconRequestRef)
+    invalidateTrackedRequest(loadRequestRef)
     invalidateTrackedRequest(membershipLookupRequestRef)
     invalidateTrackedRequest(assistantRequestRef)
     invalidateTrackedRequest(assistantStatusRequestRef)
@@ -1718,22 +1737,27 @@ export default function CatalogPage({ publicView = false }) {
           positionX: previewConfig.logoPositionX,
           positionY: previewConfig.logoPositionY,
         }
-    let cancelled = false
-
     if (iconSource) {
-      createCircularFaviconDataUrl(iconSource, faviconOptions)
+      const requestId = beginTrackedRequest(portalFaviconRequestRef)
+      withLoaderTimeout(
+        () => createCircularFaviconDataUrl(iconSource, faviconOptions),
+        'Portal favicon',
+        8000,
+      )
         .then((faviconHref) => {
-          if (cancelled || !iconEl) return
+          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId) || !iconEl) return
           iconEl.setAttribute('href', faviconHref || iconSource)
         })
         .catch(() => {
-          if (cancelled || !iconEl) return
+          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId) || !iconEl) return
           iconEl.setAttribute('href', iconSource)
         })
+    } else {
+      invalidateTrackedRequest(portalFaviconRequestRef)
     }
 
     return () => {
-      cancelled = true
+      invalidateTrackedRequest(portalFaviconRequestRef)
       document.title = previousTitle
       if (createdIcon && iconEl) {
         iconEl.remove()
