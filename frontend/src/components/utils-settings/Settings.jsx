@@ -1,11 +1,13 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
+import { useRef } from 'react'
 import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import PageHeader from '../shared/PageHeader'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
 
 const FALLBACK_COPY = {
   en: {
@@ -308,6 +310,7 @@ export default function Settings() {
   const [form, setForm] = useState({})
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState(null)
+  const otpStatusRequestRef = useRef(0)
 
   const uiLanguage = form.language || settings.language || 'en'
   const copy = useCopy(uiLanguage, t)
@@ -347,8 +350,24 @@ export default function Settings() {
       }
 
   useEffect(() => {
-    if (user?.id) {
-      window.api.otpStatus(user.id).then((result) => setOtpStatus(!!result?.otpEnabled)).catch(() => {})
+    if (!user?.id) {
+      invalidateTrackedRequest(otpStatusRequestRef)
+      setOtpStatus(false)
+      return
+    }
+
+    const requestId = beginTrackedRequest(otpStatusRequestRef)
+    withLoaderTimeout(() => window.api.otpStatus(user.id), 'OTP status')
+      .then((result) => {
+        if (!isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
+        setOtpStatus(!!result?.otpEnabled)
+      })
+      .catch(() => {
+        if (!isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
+      })
+
+    return () => {
+      invalidateTrackedRequest(otpStatusRequestRef)
     }
   }, [user])
 
