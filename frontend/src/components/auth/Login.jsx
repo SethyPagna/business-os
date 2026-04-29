@@ -97,6 +97,9 @@ export default function Login() {
   const capabilityRequestRef = useRef(0)
   const organizationBootstrapRequestRef = useRef(0)
   const organizationSearchRequestRef = useRef(0)
+  const oauthCallbackRequestRef = useRef(0)
+  const passwordResetActionRef = useRef(false)
+  const oauthStartInFlightRef = useRef(false)
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -251,6 +254,7 @@ export default function Login() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
+    const requestId = beginTrackedRequest(oauthCallbackRequestRef)
     const url = new URL(window.location.href)
     const mode = String(url.searchParams.get('auth_mode') || '').trim().toLowerCase()
 
@@ -261,7 +265,6 @@ export default function Login() {
     const errorDescription = hash.get('error_description') || url.searchParams.get('error_description') || ''
     if (!accessToken && !errorDescription) return undefined
 
-    let cancelled = false
     const clearCallbackUrl = () => {
       const cleanUrl = `${url.origin}${url.pathname}`
       window.history.replaceState({}, document.title, cleanUrl)
@@ -271,13 +274,12 @@ export default function Login() {
       if (tokenType === 'recovery' && accessToken) {
         clearPendingOauthLogin()
         clearCallbackUrl()
-        if (!cancelled) {
-          setRecoveryAccessToken(accessToken)
-          setShowEmailReset(false)
-          setShowOtpReset(false)
-          setError('')
-          setResetInfo(tr('set_new_password_from_email', 'Set your new password below to finish email recovery.'))
-        }
+        if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
+        setRecoveryAccessToken(accessToken)
+        setShowEmailReset(false)
+        setShowOtpReset(false)
+        setError('')
+        setResetInfo(tr('set_new_password_from_email', 'Set your new password below to finish email recovery.'))
         return
       }
 
@@ -290,7 +292,7 @@ export default function Login() {
       if (errorDescription) {
         clearPendingOauthLogin()
         clearCallbackUrl()
-        if (!cancelled) setError(errorDescription)
+        if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) setError(errorDescription)
         return
       }
 
@@ -310,7 +312,7 @@ export default function Login() {
             return ''
           }
         })()
-        const result = await window.api.completeSupabaseOauth({
+        const result = await withLoaderTimeout(() => window.api.completeSupabaseOauth({
           accessToken,
           provider: pendingOauth?.provider || provider,
           mode: 'login',
@@ -319,10 +321,10 @@ export default function Login() {
           clientTime: new Date().toISOString(),
           deviceTz: device.deviceTz,
           deviceName: device.deviceName,
-        })
+        }), 'OAuth sign-in completion')
         clearCallbackUrl()
         clearPendingOauthLogin()
-        if (cancelled) return
+        if (!isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) return
 
         if (result?.otpRequired) {
           setOtpRequired(true)
@@ -337,16 +339,16 @@ export default function Login() {
       } catch (oauthError) {
         clearCallbackUrl()
         clearPendingOauthLogin()
-        if (!cancelled) {
+        if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) {
           setError(oauthError?.message || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (isTrackedRequestCurrent(oauthCallbackRequestRef, requestId)) setLoading(false)
       }
     }
 
     run()
-    return () => { cancelled = true }
+    return () => { invalidateTrackedRequest(oauthCallbackRequestRef) }
   }, [persistAuthenticatedUser, sessionDuration, t])
 
   const getDeviceContext = () => getClientDeviceInfo()
@@ -407,6 +409,7 @@ export default function Login() {
   }
 
   const handleResetWithOtp = async () => {
+    if (passwordResetActionRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
     if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
@@ -415,14 +418,15 @@ export default function Login() {
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
 
     setError('')
+    passwordResetActionRef.current = true
     setLoading(true)
     try {
-      const result = await window.api.resetPasswordWithOtp({
+      const result = await withLoaderTimeout(() => window.api.resetPasswordWithOtp({
         identifier: resetIdentifier.trim(),
         organization: resolvedOrganization,
         otp: resetOtp.trim(),
         newPassword: resetNewPassword,
-      })
+      }), 'OTP password reset')
       if (result?.success === false) {
         setError(result.error || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
         return
@@ -436,24 +440,27 @@ export default function Login() {
     } catch (resetError) {
       setError(resetError?.message || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
     } finally {
+      passwordResetActionRef.current = false
       setLoading(false)
     }
   }
 
   const handleResetWithEmail = async () => {
+    if (passwordResetActionRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
     if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username, name, email, or phone first.'))
 
     setError('')
+    passwordResetActionRef.current = true
     setLoading(true)
     try {
       const redirectTo = `${window.location.origin}${window.location.pathname}`
-      const result = await window.api.requestPasswordResetEmail({
+      const result = await withLoaderTimeout(() => window.api.requestPasswordResetEmail({
         identifier: resetIdentifier.trim(),
         organization: resolvedOrganization,
         redirectTo,
-      })
+      }), 'Email password reset')
       if (result?.success === false) {
         setError(result.error || tr('email_reset_failed', 'Failed to send password reset email.'))
         return
@@ -462,11 +469,13 @@ export default function Login() {
     } catch (resetError) {
       setError(resetError?.message || tr('email_reset_failed', 'Failed to send password reset email.'))
     } finally {
+      passwordResetActionRef.current = false
       setLoading(false)
     }
   }
 
   const handleCompleteEmailReset = async () => {
+    if (passwordResetActionRef.current) return
     if (!recoveryAccessToken) {
       setError(tr('recovery_link_missing', 'Recovery link is missing or expired. Please request a new email reset link.'))
       return
@@ -475,12 +484,13 @@ export default function Login() {
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
 
     setError('')
+    passwordResetActionRef.current = true
     setLoading(true)
     try {
-      const result = await window.api.completePasswordReset({
+      const result = await withLoaderTimeout(() => window.api.completePasswordReset({
         accessToken: recoveryAccessToken,
         newPassword: resetNewPassword,
-      })
+      }), 'Complete email password reset')
       if (result?.success === false) {
         setError(result.error || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
         return
@@ -492,17 +502,20 @@ export default function Login() {
     } catch (resetError) {
       setError(resetError?.message || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
     } finally {
+      passwordResetActionRef.current = false
       setLoading(false)
     }
   }
 
   const handleStartOauth = async (provider) => {
+    if (oauthStartInFlightRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) {
       setError(tr('enter_organization_first', 'Please choose your organization first.'))
       return
     }
     setError('')
+    oauthStartInFlightRef.current = true
     setOauthLoading(provider)
     try {
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=login&auth_provider=${encodeURIComponent(provider)}`
@@ -521,12 +534,12 @@ export default function Login() {
           startedAt: Date.now(),
         }))
       } catch (_) {}
-      const result = await window.api.startSupabaseOauth({
+      const result = await withLoaderTimeout(() => window.api.startSupabaseOauth({
         provider,
         mode: 'login',
         organization: resolvedOrganization,
         redirectTo,
-      })
+      }), 'Start OAuth sign-in')
       if (result?.success === false || !result?.url) {
         clearPendingOauthLogin()
         setError(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'))
@@ -537,6 +550,7 @@ export default function Login() {
       clearPendingOauthLogin()
       setError(oauthError?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'))
     } finally {
+      oauthStartInFlightRef.current = false
       setOauthLoading('')
     }
   }
