@@ -229,6 +229,9 @@ export default function POS() {
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
+  const savingCustomerRef = useRef(false)
+  const savingDeliveryRef = useRef(false)
+  const checkoutInFlightRef = useRef(false)
   const taxRate   = parseFloat(settings.tax_rate || '0') / 100
   const redeemPointsStep = Math.max(1, parseInt(settings.customer_portal_redeem_points || '100', 10) || 100)
   const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_usd || '1') || 1))
@@ -476,6 +479,8 @@ export default function POS() {
 
   const handleAddCustomer = async () => {
     if (!newCustomerForm.name.trim()) return notify('Name required', 'error')
+    if (savingCustomerRef.current) return
+    savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
       const created = await window.api.createCustomer(newCustomerForm)
@@ -484,8 +489,12 @@ export default function POS() {
       setShowAddCustomer(false)
       setNewCustomerForm({ name: '', phone: '', address: '' })
       await loadCustomers('POS refresh customers after create')
-    } catch (e) { notify(e.message || 'Failed', 'error') }
-    setSavingCustomer(false)
+    } catch (e) {
+      notify(e.message || 'Failed', 'error')
+    } finally {
+      savingCustomerRef.current = false
+      setSavingCustomer(false)
+    }
   }
 
   // ?�?� Delivery actions ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -500,6 +509,8 @@ export default function POS() {
     if (!newDeliveryForm.name.trim() && !newDeliveryForm.phone.trim()) {
       return notify('Driver name or phone is required', 'error')
     }
+    if (savingDeliveryRef.current) return
+    savingDeliveryRef.current = true
     setSavingDelivery(true)
     try {
       const payload = {
@@ -513,8 +524,12 @@ export default function POS() {
       selectDelivery(created)
       setShowAddDelivery(false)
       setNewDeliveryForm({ name: '', phone: '', area: '' })
-    } catch (e) { notify(e.message || 'Failed', 'error') }
-    setSavingDelivery(false)
+    } catch (e) {
+      notify(e.message || 'Failed', 'error')
+    } finally {
+      savingDeliveryRef.current = false
+      setSavingDelivery(false)
+    }
   }
 
   // ?�?� Product filter ??comma-separated terms, AND/OR mode (same as Products page) ?�
@@ -788,10 +803,32 @@ export default function POS() {
   }, [membershipRedeemUnits, maxMembershipUnits]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ?�?� Checkout ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+  const openStatusPicker = useCallback(() => {
+    if (loading || checkoutInFlightRef.current || active.cart.length === 0) return
+    setShowStatusPicker(true)
+  }, [active.cart.length, loading])
+
+  const closeStatusPicker = useCallback(() => {
+    if (loading || checkoutInFlightRef.current) return
+    setShowStatusPicker(false)
+  }, [loading])
+
+  const closeAddCustomerModal = useCallback(() => {
+    if (savingCustomerRef.current) return
+    setShowAddCustomer(false)
+    setNewCustomerForm({ name: '', phone: '', address: '' })
+  }, [])
+
+  const closeAddDeliveryModal = useCallback(() => {
+    if (savingDeliveryRef.current) return
+    setShowAddDelivery(false)
+    setNewDeliveryForm({ name: '', phone: '', area: '' })
+  }, [])
+
   const handleCheckout = async (saleStatus = 'completed') => {
     if (active.cart.length === 0)        return notify(t('cart_empty'), 'error')
     if (totalPaid < totalUsd - 0.005)    return notify(t('insufficient_amount'), 'error')
-    if (loading) return
+    if (loading || checkoutInFlightRef.current) return
 
     const branchIds = new Set(branches.map((branch) => Number(branch.id)))
     const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchIds.has(Number(item.branch_id)))
@@ -809,6 +846,7 @@ export default function POS() {
       }
     }
 
+    checkoutInFlightRef.current = true
     setLoading(true)
 
     const uniqueBranches = [...new Set(active.cart.map(i => Number(i.branch_id)).filter(Boolean))]
@@ -882,8 +920,10 @@ export default function POS() {
       }
     } catch (e) {
       notify(e?.message || t('error'), 'error')
+    } finally {
+      checkoutInFlightRef.current = false
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   // ?�?� Render ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -1329,7 +1369,7 @@ export default function POS() {
 
           {/* ?�?� Checkout button ??always pinned at the bottom ?�?�?�?�?�?�?�?�?�?�?� */}
           <div className="flex-shrink-0 px-3 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            <button className="btn-success w-full py-3 text-sm font-bold" onClick={() => active.cart.length > 0 && setShowStatusPicker(true)} disabled={loading || active.cart.length === 0}>
+            <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0}>
               {loading ? t('loading') : `${t('done') || 'Done'}${active.isDelivery ? ` - ${t('pos_delivery') || 'Delivery'}` : ''}`}
             </button>
           </div>
@@ -1343,7 +1383,7 @@ export default function POS() {
           <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm fade-in">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <h3 className="font-bold text-gray-900 dark:text-white">Record Sale As</h3>
-              <button onClick={() => setShowStatusPicker(false)} className="text-gray-400 hover:text-gray-600 text-sm leading-none w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={closeStatusPicker} disabled={loading} className="text-gray-400 hover:text-gray-600 text-sm leading-none w-8 h-8 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">Close</button>
             </div>
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
@@ -1353,7 +1393,7 @@ export default function POS() {
                 ['awaiting_delivery', getStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
               ].map(([status, label, desc]) => (
                 <button key={status}
-                  onClick={() => { setShowStatusPicker(false); handleCheckout(status) }}
+                  onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
                   disabled={loading}
                   className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50">
                   <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{label}</div>
@@ -1367,7 +1407,7 @@ export default function POS() {
 
       {/* ?�?� Quick-add Customer modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
       {showAddCustomer && (
-        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={() => { setShowAddCustomer(false); setNewCustomerForm({ name: '', phone: '', address: '' }) }}>
+        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
           <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
           <div className="grid grid-cols-2 gap-2">
             <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('phone')}</label><input className="input" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} /></div>
@@ -1378,7 +1418,7 @@ export default function POS() {
 
       {/* ?�?� Quick-add Delivery Contact modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
       {showAddDelivery && (
-        <QuickAddModal title={t('add_delivery_contact')||'Add Delivery Contact'} saving={savingDelivery} onSave={handleAddDelivery} t={t} onClose={() => { setShowAddDelivery(false); setNewDeliveryForm({ name: '', phone: '', area: '' }) }}>
+        <QuickAddModal title={t('add_delivery_contact')||'Add Delivery Contact'} saving={savingDelivery} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
           <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Driver / Rider Name</label><input className="input" value={newDeliveryForm.name} onChange={e => setNewDeliveryForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
           <div className="grid grid-cols-2 gap-2">
             <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Phone</label><input className="input" value={newDeliveryForm.phone} onChange={e => setNewDeliveryForm(f => ({ ...f, phone: e.target.value }))} placeholder="012 345 678" /></div>
