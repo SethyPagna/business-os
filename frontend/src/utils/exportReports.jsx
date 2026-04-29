@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BarChart, DonutChart, LineChart } from '../components/dashboard/charts'
-import { buildCSV } from './csv'
 import { fmtTime } from './formatters'
 
 const REPORT_STYLES = `
@@ -325,37 +324,6 @@ function renderNotes(notes = []) {
       </ul>
     </section>
   `
-}
-
-export function buildReportManifestRows(rows = []) {
-  return (rows || []).map((row, index) => ({
-    Section: row.section || 'Report Manifest',
-    Metric: row.metric || row.label || `Item ${index + 1}`,
-    Value: row.value ?? '',
-  }))
-}
-
-export function buildReportPackageFiles({
-  baseName,
-  exportStamp,
-  manifestRows = [],
-  csvFiles = [],
-  report = null,
-}) {
-  const files = [...csvFiles]
-  if (manifestRows.length) {
-    files.push({
-      name: `${baseName}-manifest-${exportStamp}.csv`,
-      content: buildCSV(manifestRows),
-    })
-  }
-  if (report) {
-    files.push({
-      name: report.fileName || `${baseName}-report.html`,
-      content: buildStandaloneReportHtml(report),
-    })
-  }
-  return files
 }
 
 export function buildStandaloneReportHtml({

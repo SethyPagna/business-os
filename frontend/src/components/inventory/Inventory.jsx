@@ -6,7 +6,8 @@ import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } f
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
-import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportReports'
+import { buildStandaloneReportHtml } from '../../utils/exportReports'
+import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import DualMoney from './DualMoney'
@@ -888,6 +889,89 @@ export default function Inventory() {
       metric: row.Metric,
       value: row.Value,
     })))
+    const reportContent = buildStandaloneReportHtml({
+      fileName: 'inventory-report.html',
+      title: 'Inventory Report',
+      subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} • ${movementDateRangeLabel}`,
+      exportedAt: new Date().toISOString(),
+      summaryCards: [
+        { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
+        { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
+        { label: 'Stock Value', value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
+        { label: 'Revenue', value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'ថ្លៃដើម')} ${fmtUSD(totalCOGS)}` },
+        { label: 'Low Stock', value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
+        { label: 'Returns', value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
+      ],
+      metadataGroups: [
+        {
+          title: 'Active Filters',
+          subtitle: 'Visible inventory scope captured in this export',
+          rows: [
+            { label: 'View', value: mode },
+            { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+            { label: 'Brand', value: brandFilter === 'all' ? 'All brands' : brandFilter },
+            { label: 'Stock status', value: stockFilter },
+            { label: 'Search', value: search || 'None' },
+          ],
+        },
+        {
+          title: 'Movement Filters',
+          subtitle: 'Grouping and date metadata for the visible movement set',
+          rows: [
+            { label: 'Date range', value: movementDateRangeLabel },
+            { label: 'Year filter', value: movementYearFilter },
+            { label: 'Month filter', value: movementMonthFilter },
+            { label: 'Activity type', value: movFilter },
+            { label: 'Group mode', value: movementGroupMode },
+            { label: 'Sort direction', value: movementSortDirection },
+          ],
+        },
+      ],
+      charts: [
+        {
+          type: 'donut',
+          title: 'Stock status distribution',
+          subtitle: 'Visible products by current stock state',
+          props: { data: stockStatusRows, valueKey: 'value' },
+        },
+        {
+          type: 'bar',
+          title: 'Top stock-value products',
+          subtitle: 'Highest stock value in the visible set',
+          props: { data: topStockValueRows.map((row) => ({ product_name: row.Product, stock_value_usd: row.Stock_Value_USD })), valueKey: 'stock_value_usd', labelKey: 'product_name', color: '#2563eb' },
+        },
+        {
+          type: 'donut',
+          title: 'Movement activity mix',
+          subtitle: 'Visible movement groups by activity type',
+          props: { data: movementActivityRows.map((row) => ({ name: row.name, value: row.quantity })), valueKey: 'value' },
+        },
+        {
+          type: 'bar',
+          title: 'Movement volume over time',
+          subtitle: 'Visible movement quantity by period bucket',
+          props: { data: movementVolumeRows, valueKey: 'quantity', labelKey: 'period', color: '#7c3aed', isCount: true },
+        },
+        ...(branchComparisonRows.length > 1 ? [{
+          type: 'bar',
+          title: 'Branch comparison',
+          subtitle: 'Stock value by branch',
+          props: { data: branchComparisonRows, valueKey: 'stock_value_usd', labelKey: 'branch_name', color: '#0891b2' },
+        }] : []),
+      ],
+      tables: [
+        { title: 'Inventory stats', subtitle: 'Core figures and active filters', rows: statsRows },
+        { title: 'Inventory calculations', subtitle: 'Formula reference used in the visible summary', rows: formulaRows },
+        { title: 'Top stock-value products', subtitle: 'Visible product leaders by stock value', rows: topStockValueRows, limit: 10 },
+        { title: 'Movement activity mix', subtitle: 'Visible grouped movements by type', rows: movementActivityRows.map((row) => ({ Activity: row.name, Groups: row.groups, Quantity: row.quantity, Total_Cost_USD: row.total_cost_usd })), limit: 10 },
+        { title: 'Movement volume timeline', subtitle: 'Visible movement quantity over the current time window', rows: movementVolumeRows, limit: 12 },
+        ...(branchComparisonRows.length > 1 ? [{ title: 'Branch comparison', subtitle: 'Visible branch stock totals', rows: branchComparisonRows, limit: 10 }] : []),
+      ],
+      notes: [
+        'Package includes raw CSV data, calculations, active filter metadata, and this self-contained HTML report.',
+        'Single CSV exports remain available from the Export menu when you only need one dataset.',
+      ],
+    })
     const files = buildReportPackageFiles({
       baseName: 'inventory',
       exportStamp,
@@ -908,89 +992,8 @@ export default function Inventory() {
             { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(productRows) },
             { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(movementRows) },
           ],
-      report: {
-        fileName: 'inventory-report.html',
-        title: 'Inventory Report',
-        subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} • ${movementDateRangeLabel}`,
-        exportedAt: new Date().toISOString(),
-        summaryCards: [
-          { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
-          { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
-          { label: 'Stock Value', value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
-          { label: 'Revenue', value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'ថ្លៃដើម')} ${fmtUSD(totalCOGS)}` },
-          { label: 'Low Stock', value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
-          { label: 'Returns', value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
-        ],
-        metadataGroups: [
-          {
-            title: 'Active Filters',
-            subtitle: 'Visible inventory scope captured in this export',
-            rows: [
-              { label: 'View', value: mode },
-              { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
-              { label: 'Brand', value: brandFilter === 'all' ? 'All brands' : brandFilter },
-              { label: 'Stock status', value: stockFilter },
-              { label: 'Search', value: search || 'None' },
-            ],
-          },
-          {
-            title: 'Movement Filters',
-            subtitle: 'Grouping and date metadata for the visible movement set',
-            rows: [
-              { label: 'Date range', value: movementDateRangeLabel },
-              { label: 'Year filter', value: movementYearFilter },
-              { label: 'Month filter', value: movementMonthFilter },
-              { label: 'Activity type', value: movFilter },
-              { label: 'Group mode', value: movementGroupMode },
-              { label: 'Sort direction', value: movementSortDirection },
-            ],
-          },
-        ],
-        charts: [
-          {
-            type: 'donut',
-            title: 'Stock status distribution',
-            subtitle: 'Visible products by current stock state',
-            props: { data: stockStatusRows, valueKey: 'value' },
-          },
-          {
-            type: 'bar',
-            title: 'Top stock-value products',
-            subtitle: 'Highest stock value in the visible set',
-            props: { data: topStockValueRows.map((row) => ({ product_name: row.Product, stock_value_usd: row.Stock_Value_USD })), valueKey: 'stock_value_usd', labelKey: 'product_name', color: '#2563eb' },
-          },
-          {
-            type: 'donut',
-            title: 'Movement activity mix',
-            subtitle: 'Visible movement groups by activity type',
-            props: { data: movementActivityRows.map((row) => ({ name: row.name, value: row.quantity })), valueKey: 'value' },
-          },
-          {
-            type: 'bar',
-            title: 'Movement volume over time',
-            subtitle: 'Visible movement quantity by period bucket',
-            props: { data: movementVolumeRows, valueKey: 'quantity', labelKey: 'period', color: '#7c3aed', isCount: true },
-          },
-          ...(branchComparisonRows.length > 1 ? [{
-            type: 'bar',
-            title: 'Branch comparison',
-            subtitle: 'Stock value by branch',
-            props: { data: branchComparisonRows, valueKey: 'stock_value_usd', labelKey: 'branch_name', color: '#0891b2' },
-          }] : []),
-        ],
-        tables: [
-          { title: 'Inventory stats', subtitle: 'Core figures and active filters', rows: statsRows },
-          { title: 'Inventory calculations', subtitle: 'Formula reference used in the visible summary', rows: formulaRows },
-          { title: 'Top stock-value products', subtitle: 'Visible product leaders by stock value', rows: topStockValueRows, limit: 10 },
-          { title: 'Movement activity mix', subtitle: 'Visible grouped movements by type', rows: movementActivityRows.map((row) => ({ Activity: row.name, Groups: row.groups, Quantity: row.quantity, Total_Cost_USD: row.total_cost_usd })), limit: 10 },
-          { title: 'Movement volume timeline', subtitle: 'Visible movement quantity over the current time window', rows: movementVolumeRows, limit: 12 },
-          ...(branchComparisonRows.length > 1 ? [{ title: 'Branch comparison', subtitle: 'Visible branch stock totals', rows: branchComparisonRows, limit: 10 }] : []),
-        ],
-        notes: [
-          'Package includes raw CSV data, calculations, active filter metadata, and this self-contained HTML report.',
-          'Single CSV exports remain available from the Export menu when you only need one dataset.',
-        ],
-      },
+      reportFileName: 'inventory-report.html',
+      reportContent,
     })
     downloadZipFiles(`inventory-report-${mode}-${exportStamp}.zip`, files)
   }, [

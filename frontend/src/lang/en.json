@@ -1502,6 +1502,7 @@
   "download_pdf": "Download PDF",
   "unable_generate_receipt_pdf": "Unable to generate receipt PDF",
   "receipt_pdf_layout_note": "PDF export uses this exact receipt layout.",
+  "receipt_pdf_preview_fallback": "PDF export was unavailable, so a printable receipt preview was opened instead.",
   "print_test_desc_pdf": "Generate a sample PDF to verify sizing, margins, and readability.",
   "receipt_test_pdf": "Receipt Test",
   "pdf_preview_failed": "PDF preview failed",

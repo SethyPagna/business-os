@@ -7,7 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "smoke:local": "vite --host 127.0.0.1 --port 4173",
-    "test:utils": "node tests/appShellUtils.test.mjs && node tests/portalEditorUtils.test.mjs && node tests/loaders.test.mjs && node tests/csvImport.test.mjs && node tests/groupedRecords.test.mjs && node tests/receiptTemplate.test.mjs",
+    "test:utils": "node tests/appShellUtils.test.mjs && node tests/portalEditorUtils.test.mjs && node tests/loaders.test.mjs && node tests/csvImport.test.mjs && node tests/groupedRecords.test.mjs && node tests/receiptTemplate.test.mjs && node tests/exportPackages.test.mjs",
     "verify:i18n": "node ../ops/scripts/frontend/verify-i18n.js"
   },
   "dependencies": {

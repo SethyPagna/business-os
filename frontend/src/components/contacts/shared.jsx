@@ -53,6 +53,7 @@ export function useContactSelection(rows = []) {
 
   return {
     selectedIds,
+    setSelectedIds,
     toggleOne,
     clearSelection,
     selectAllProp,

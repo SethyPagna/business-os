@@ -117,7 +117,6 @@ export default function ManageBrandsModal({
         const chunk = affected.slice(index, index + chunkSize)
         await Promise.all(chunk.map((product) => (
           window.api.updateProduct(product.id, {
-            ...product,
             brand: to,
             userId: user?.id,
             userName: user?.name,
@@ -161,7 +160,6 @@ export default function ManageBrandsModal({
     try {
       for (const product of affected) {
         await window.api.updateProduct(product.id, {
-          ...product,
           brand: '',
           userId: user?.id,
           userName: user?.name,

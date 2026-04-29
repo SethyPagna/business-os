@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Download, FileText, Printer } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { downloadReceiptPdf, openReceiptPdf } from '../../utils/printReceipt'
+import { downloadReceiptPdf, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
 
@@ -343,11 +343,19 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
         await downloadReceiptPdf(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
+          previewFallback: true,
+          previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
+        })
+      } else if (mode === 'print') {
+        await printReceipt(printRef.current, {
+          title: receiptTitle,
         })
       } else {
         await openReceiptPdf(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
+          previewFallback: true,
+          previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
         })
       }
     } catch (error) {
@@ -360,25 +368,33 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
   const shellStyle = {
     fontFamily: actualFont,
     fontSize: fs,
-    background: 'white',
-    color: '#111',
-    padding: '16px 14px',
-    borderRadius: 10,
-    lineHeight: 1.45,
+    background: '#ffffff',
+    color: '#111827',
+    padding: '18px 16px 20px',
+    borderRadius: 12,
+    lineHeight: 1.55,
     overflowWrap: 'anywhere',
     wordBreak: 'break-word',
+    boxSizing: 'border-box',
   }
 
   if (_previewMode) {
-    return <div style={shellStyle}>{renderedSections}</div>
+    return <div data-receipt-export-root="true" style={shellStyle}>{renderedSections}</div>
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-800">
-        <button type="button" className="btn-primary px-4 py-2" onClick={() => exportReceiptPdf('open')} disabled={pdfBusy !== ''}>
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+        <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-primary px-4 py-2" onClick={() => exportReceiptPdf('print')} disabled={pdfBusy !== ''}>
           <span className="inline-flex items-center gap-2">
             <Printer className="h-4 w-4" />
+            {pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print_receipt') || 'Print Receipt')}
+          </span>
+        </button>
+        <button type="button" className="btn-secondary px-4 py-2" onClick={() => exportReceiptPdf('open')} disabled={pdfBusy !== ''}>
+          <span className="inline-flex items-center gap-2">
+            <FileText className="h-4 w-4" />
             {pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}
           </span>
         </button>
@@ -388,6 +404,8 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
             {pdfBusy === 'download' ? (t?.('saving_pdf') || 'Saving PDF...') : (t?.('download_pdf') || 'Download PDF')}
           </span>
         </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn-secondary flex-1 py-2" onClick={onClose}>
           <span className="inline-flex items-center gap-2">
             <ArrowLeft className="h-4 w-4" />
@@ -410,12 +428,15 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       <div className="flex flex-1 justify-center overflow-auto p-4">
         <div style={{ width: '100%', maxWidth: 520 }}>
-          <div ref={printRef} style={shellStyle}>
+          <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
+          <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
             {renderedSections}
+          </div>
           </div>
           <p className="mt-3 inline-flex w-full items-center justify-center gap-2 text-center text-xs text-gray-400">
             <FileText className="h-3.5 w-3.5" />

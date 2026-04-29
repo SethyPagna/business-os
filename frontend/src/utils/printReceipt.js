@@ -105,6 +105,15 @@ function cloneElementWithInlineStyles(node) {
   return cloned
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -175,6 +184,23 @@ async function inlineStyleAssetUrls(root) {
 
     node.setAttribute('style', nextStyle)
   }))
+}
+
+function normalizePrintableRoot(root, widthMm) {
+  if (!root || !(root instanceof HTMLElement)) return root
+  root.style.position = 'static'
+  root.style.left = 'auto'
+  root.style.top = 'auto'
+  root.style.right = 'auto'
+  root.style.bottom = 'auto'
+  root.style.pointerEvents = 'auto'
+  root.style.width = `${widthMm}mm`
+  root.style.maxWidth = `${widthMm}mm`
+  root.style.minHeight = '0'
+  root.style.margin = '0 auto'
+  root.style.boxSizing = 'border-box'
+  root.style.background = '#ffffff'
+  return root
 }
 
 function mmToPt(mm) {
@@ -382,6 +408,16 @@ async function renderElementToCanvas(element) {
   const scale = Math.min(2.25, Math.max(1.5, window.devicePixelRatio || 1.75))
   const cloned = cloneElementWithInlineStyles(element)
   if (!cloned) throw new Error('Receipt preview element is unavailable')
+  cloned.style.position = 'static'
+  cloned.style.left = 'auto'
+  cloned.style.top = 'auto'
+  cloned.style.right = 'auto'
+  cloned.style.bottom = 'auto'
+  cloned.style.pointerEvents = 'auto'
+  cloned.style.width = `${width}px`
+  cloned.style.maxWidth = `${width}px`
+  cloned.style.minHeight = '0'
+  cloned.style.margin = '0'
   await inlineImageNodeSources(cloned)
   await inlineStyleAssetUrls(cloned)
   const markup = cloned.outerHTML
@@ -461,6 +497,176 @@ async function withReceiptElement(content, widthMm, action, printSettings = getP
   }
 }
 
+async function createPrintableReceiptMarkup(content, options = {}) {
+  const printSettings = options.printSettings || getPrintSettings()
+  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  return withReceiptElement(content, widthMm, async (host) => {
+    await waitForElementAssets(host)
+    const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
+    if (!clone) throw new Error('Receipt preview element is unavailable')
+    clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
+    await inlineImageNodeSources(clone)
+    await inlineStyleAssetUrls(clone)
+    return clone.outerHTML
+  }, printSettings)
+}
+
+function buildPrintablePreviewDocument(markup, options = {}) {
+  const printSettings = options.printSettings || getPrintSettings()
+  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  const title = options.title || 'Receipt'
+  const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
+  const autoPrintScript = options.autoPrint
+    ? `<script>window.addEventListener('load',()=>{window.setTimeout(()=>window.print(),240)})</script>`
+    : ''
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #eef2f7;
+        color: #111827;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .receipt-shell {
+        min-height: 100vh;
+        padding: 24px 12px 40px;
+      }
+      .receipt-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 0 auto 16px;
+        width: min(100%, 860px);
+        padding: 14px 16px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(14px);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+      }
+      .receipt-toolbar-copy {
+        min-width: 0;
+      }
+      .receipt-toolbar-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .receipt-toolbar-subtitle {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .receipt-toolbar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .receipt-toolbar button {
+        appearance: none;
+        border: 1px solid rgba(37, 99, 235, 0.16);
+        border-radius: 12px;
+        background: #ffffff;
+        color: #1d4ed8;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+        padding: 11px 14px;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .receipt-toolbar button:hover {
+        background: #eff6ff;
+        border-color: rgba(37, 99, 235, 0.28);
+      }
+      .receipt-note {
+        margin: 0 auto 14px;
+        width: min(100%, 860px);
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: #fff7ed;
+        border: 1px solid #fdba74;
+        color: #9a3412;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .receipt-stage {
+        display: flex;
+        justify-content: center;
+      }
+      .receipt-frame {
+        width: min(calc(${widthMm}mm + 44px), 100%);
+        padding: 22px;
+        border-radius: 22px;
+        background: #ffffff;
+        box-shadow: 0 22px 58px rgba(15, 23, 42, 0.16);
+      }
+      .receipt-frame > * {
+        margin: 0 auto;
+      }
+      @media print {
+        body { background: #ffffff; }
+        .receipt-shell { padding: 0; }
+        .receipt-toolbar, .receipt-note { display: none !important; }
+        .receipt-frame {
+          width: auto;
+          padding: 0;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+    ${autoPrintScript}
+  </head>
+  <body>
+    <div class="receipt-shell">
+      <div class="receipt-toolbar">
+        <div class="receipt-toolbar-copy">
+          <h1 class="receipt-toolbar-title">${escapeHtml(title)}</h1>
+          <p class="receipt-toolbar-subtitle">Printable receipt preview. Use Print to print now or Save as PDF from your browser.</p>
+        </div>
+        <div class="receipt-toolbar-actions">
+          <button type="button" onclick="window.print()">Print / Save PDF</button>
+          <button type="button" onclick="window.close()">Close</button>
+        </div>
+      </div>
+      ${note}
+      <div class="receipt-stage">
+        <div class="receipt-frame">
+          ${markup}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`
+}
+
+export async function openPrintableReceiptPreview(content, options = {}) {
+  const markup = await createPrintableReceiptMarkup(content, options)
+  const html = buildPrintablePreviewDocument(markup, options)
+  const previewWindow = window.open('', '_blank')
+  if (!previewWindow) throw new Error('Popup blocked. Allow popups for this page and try again.')
+  previewWindow.document.open()
+  previewWindow.document.write(html)
+  previewWindow.document.close()
+  previewWindow.focus?.()
+  return { opened: true, mode: 'preview' }
+}
+
 function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -501,6 +707,7 @@ export async function createReceiptPdfBlob(content, options = {}) {
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const title = options.title || 'Receipt'
   const pageWidthPt = mmToPt(widthMm)
+  const allowTextFallback = Boolean(options.allowTextFallback || options.preferTextOnly)
   const buildTextOnlyReceiptBlob = () => {
     const fallbackLines = extractReceiptLines(content)
     const pdfBytes = buildTextOnlyPdf({
@@ -536,9 +743,11 @@ export async function createReceiptPdfBlob(content, options = {}) {
       await new Promise((resolve) => window.setTimeout(resolve, 180))
       return await renderPdfBlob()
     } catch (secondError) {
-      try {
-        return buildTextOnlyReceiptBlob()
-      } catch (_) {}
+      if (allowTextFallback) {
+        try {
+          return buildTextOnlyReceiptBlob()
+        } catch (_) {}
+      }
       throw new Error(
         secondError?.message
         || firstError?.message
@@ -567,31 +776,53 @@ function extractReceiptLines(content) {
 }
 
 export async function downloadReceiptPdf(content, options = {}) {
-  const blob = await createReceiptPdfBlob(content, options)
-  const fileName = buildReceiptFileName(options.fileName || options.title || 'receipt')
-  const url = downloadBlob(blob, fileName)
-  return { blob, fileName, url }
+  try {
+    const blob = await createReceiptPdfBlob(content, options)
+    const fileName = buildReceiptFileName(options.fileName || options.title || 'receipt')
+    const url = downloadBlob(blob, fileName)
+    return { blob, fileName, url, mode: 'pdf' }
+  } catch (error) {
+    if (options.previewFallback !== false) {
+      await openPrintableReceiptPreview(content, {
+        ...options,
+        autoPrint: options.autoPrintOnPreviewFallback ?? true,
+        note: options.previewFallbackNote || 'PDF export could not be generated automatically, so a printable receipt preview was opened instead.',
+      })
+      return { blob: null, fileName: null, url: null, mode: 'preview-fallback' }
+    }
+    throw error
+  }
 }
 
 export async function openReceiptPdf(content, options = {}) {
-  const blob = await createReceiptPdfBlob(content, options)
-  const fileName = buildReceiptFileName(options.fileName || options.title || 'receipt')
-  const url = URL.createObjectURL(blob)
-  const opened = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!opened) {
-    downloadBlob(blob, fileName)
-    return { blob, fileName, url, opened: false }
+  try {
+    const blob = await createReceiptPdfBlob(content, options)
+    const fileName = buildReceiptFileName(options.fileName || options.title || 'receipt')
+    const url = URL.createObjectURL(blob)
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      downloadBlob(blob, fileName)
+      return { blob, fileName, url, opened: false, mode: 'pdf' }
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    return { blob, fileName, url, opened: true, mode: 'pdf' }
+  } catch (error) {
+    if (options.previewFallback !== false) {
+      return openPrintableReceiptPreview(content, {
+        ...options,
+        autoPrint: false,
+        note: options.previewFallbackNote || 'PDF export could not be generated automatically, so a printable receipt preview was opened instead.',
+      })
+    }
+    throw error
   }
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  return { blob, fileName, url, opened: true }
 }
 
 export function printReceipt(content, options = {}) {
-  const printSettings = getPrintSettings()
-  return openReceiptPdf(content, {
+  return openPrintableReceiptPreview(content, {
     ...options,
-    printSettings,
+    printSettings: options.printSettings || getPrintSettings(),
     title: options.title || 'Receipt',
-    fileName: options.fileName || options.title || 'receipt',
+    autoPrint: true,
   })
 }

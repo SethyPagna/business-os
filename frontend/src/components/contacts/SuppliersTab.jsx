@@ -78,21 +78,27 @@ function SuppliersTab({ t, notify }) {
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
-  }
+  }, [isKhmer, t])
   const [suppliers, setSuppliers] = useState([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const syncChannelName = String(syncChannel?.channel || '')
+  const syncChannelTs = Number(syncChannel?.ts || 0)
 
   const filteredBySearch = suppliers.filter((supplier) => {
     const query = search.toLowerCase().trim()
@@ -137,7 +143,7 @@ function SuppliersTab({ t, notify }) {
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleSuppliers)
+  const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleSuppliers)
   const supplierColumns = [t('name'), t('phone'), t('email'), t('company'), t('contact_person') || 'Contact']
   const contactFilterSections = useMemo(() => ([
     {
@@ -200,30 +206,64 @@ function SuppliersTab({ t, notify }) {
   }
 
   const load = useCallback(async ({ silent = false, label = 'Suppliers' } = {}) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoading(true)
-    try {
-      const data = await withLoaderTimeout(() => window.api.getSuppliers(), label)
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setSuppliers(Array.isArray(data) ? data : [])
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (!loadedOnceRef.current) setSuppliers([])
-      notify(error?.message || 'Failed to load suppliers', silent ? 'warning' : 'error')
-    } finally {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoading(false)
-    }
-  }, [notify])
+    const promise = (async () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoading(true)
+        setLoadError('')
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(tr('suppliers_load_slow', 'Suppliers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
+        }, 10000)
+      }
+      try {
+        const data = await withLoaderTimeout(() => window.api.getSuppliers(), label, 8000)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setSuppliers(Array.isArray(data) ? data : [])
+        loadedOnceRef.current = true
+        setLoadError('')
+      } catch (error) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const message = error?.message || 'Failed to load suppliers'
+        if (!loadedOnceRef.current) {
+          setSuppliers([])
+          setLoadError(message)
+          notify(message, 'error')
+          loadedOnceRef.current = true
+        } else {
+          const refreshMessage = tr('suppliers_refresh_failed', 'Unable to refresh suppliers right now. Showing the latest loaded data.')
+          setLoadError((current) => current || refreshMessage)
+          notify(refreshMessage, 'warning')
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLoading(false)
+      }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
+      }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [notify, t, tr])
 
   useEffect(() => {
-    load()
-    return () => invalidateTrackedRequest(loadRequestRef)
+    load({ silent: loadedOnceRef.current })
+    return () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+    }
   }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'suppliers') load({ silent: true, label: 'Suppliers refresh' })
-  }, [syncChannel?.channel, syncChannel?.ts, load])
+    if (syncChannelName === 'suppliers') load({ silent: true, label: 'Suppliers refresh' })
+  }, [load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) return notify(t('name_required') || 'Name required', 'error')
@@ -259,14 +299,31 @@ function SuppliersTab({ t, notify }) {
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size) return
+    if (!selectedIds.size || bulkActionBusy) return
     if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) return
-    for (const id of selectedIds) {
-      try { await window.api.deleteSupplier(id) } catch (_) {}
+    const ids = [...selectedIds]
+    const failedIds = []
+    let deletedCount = 0
+    setBulkActionBusy(true)
+    try {
+      for (const id of ids) {
+        try {
+          await window.api.deleteSupplier(id)
+          deletedCount += 1
+        } catch (_) {
+          failedIds.push(Number(id))
+        }
+      }
+      setSelectedIds(new Set(failedIds))
+      await load({ silent: true, label: 'Suppliers refresh after delete' })
+      if (failedIds.length) {
+        notify(`Deleted ${deletedCount} supplier(s), ${failedIds.length} failed`, 'warning')
+      } else {
+        notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
+      }
+    } finally {
+      setBulkActionBusy(false)
     }
-    clearSelection()
-    load()
-    notify(`${selectedIds.size} ${t('deleted') || 'deleted'}`)
   }
 
   return (
@@ -284,8 +341,21 @@ function SuppliersTab({ t, notify }) {
           <span className="whitespace-nowrap text-sm text-gray-400">{visibleSuppliers.length}</span>
         </div>
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
+          {loadError ? (
+            <button
+              type="button"
+              className="btn-secondary whitespace-nowrap text-sm text-amber-700 dark:text-amber-300"
+              onClick={() => load({ silent: false, label: 'Suppliers retry' })}
+            >
+              {tr('retry', 'Retry')}
+            </button>
+          ) : null}
           {selectedIds.size > 0 ? (
-            <button className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleBulkDelete}>
+            <button
+              className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={handleBulkDelete}
+              disabled={bulkActionBusy}
+            >
               Delete {selectedIds.size}
             </button>
           ) : null}
@@ -330,6 +400,12 @@ function SuppliersTab({ t, notify }) {
           </button>
         </div>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+          {loadError}
+        </div>
+      ) : null}
 
       <ContactTable
         loading={loading}

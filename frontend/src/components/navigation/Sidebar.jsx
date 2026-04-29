@@ -220,9 +220,9 @@ export default function Sidebar() {
 
       <header className="fixed left-0 right-0 top-0 z-40 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900 md:hidden">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">
             {brandLogo ? (
-              <img src={brandLogo} alt={brandName} className="h-full w-full object-contain p-0.5" />
+              <img src={brandLogo} alt={brandName} className="h-full w-full object-cover" />
             ) : (
               <span className="grid h-full w-full place-items-center text-base font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
                 {brandName.slice(0, 2).toUpperCase()}

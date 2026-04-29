@@ -167,21 +167,27 @@ function DeliveryTab({ t, notify }) {
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
-  }
+  }, [isKhmer, t])
   const [contacts, setContacts] = useState([])
   const [search,   setSearch]   = useState('')
   const [modal,    setModal]    = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading,  setLoading]  = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const syncChannelName = String(syncChannel?.channel || '')
+  const syncChannelTs = Number(syncChannel?.ts || 0)
 
   const filteredBySearch = contacts.filter(c => {
     const q = search.toLowerCase()
@@ -214,7 +220,7 @@ function DeliveryTab({ t, notify }) {
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleContacts)
+  const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleContacts)
   const deliveryColumns = [t('name'), t('phone'), t('area_zone')||'Area / Zone']
   const contactFilterSections = useMemo(() => ([
     {
@@ -277,29 +283,63 @@ function DeliveryTab({ t, notify }) {
   }
 
   const load = useCallback(async ({ silent = false, label = 'Delivery contacts' } = {}) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoading(true)
-    try {
-      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label)
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setContacts(Array.isArray(data) ? data : [])
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (!loadedOnceRef.current) setContacts([])
-      notify(error?.message || 'Failed to load delivery contacts', silent ? 'warning' : 'error')
-    } finally {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoading(false)
-    }
-  }, [notify])
+    const promise = (async () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoading(true)
+        setLoadError('')
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(tr('delivery_contacts_load_slow', 'Delivery contacts are taking longer than expected. Tap Retry or revisit the page in a moment.'))
+        }, 10000)
+      }
+      try {
+        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, 8000)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setContacts(Array.isArray(data) ? data : [])
+        loadedOnceRef.current = true
+        setLoadError('')
+      } catch (error) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const message = error?.message || 'Failed to load delivery contacts'
+        if (!loadedOnceRef.current) {
+          setContacts([])
+          setLoadError(message)
+          notify(message, 'error')
+          loadedOnceRef.current = true
+        } else {
+          const refreshMessage = tr('delivery_contacts_refresh_failed', 'Unable to refresh delivery contacts right now. Showing the latest loaded data.')
+          setLoadError((current) => current || refreshMessage)
+          notify(refreshMessage, 'warning')
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLoading(false)
+      }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
+      }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [notify, t, tr])
   useEffect(() => {
-    load()
-    return () => invalidateTrackedRequest(loadRequestRef)
+    load({ silent: loadedOnceRef.current })
+    return () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+    }
   }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'deliveryContacts') load({ silent: true, label: 'Delivery contacts refresh' })
-  }, [syncChannel?.channel, syncChannel?.ts, load])
+    if (syncChannelName === 'deliveryContacts') load({ silent: true, label: 'Delivery contacts refresh' })
+  }, [load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {
@@ -323,11 +363,31 @@ function DeliveryTab({ t, notify }) {
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size) return
+    if (!selectedIds.size || bulkActionBusy) return
     if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) return
-    for (const id of selectedIds) { try { await window.api.deleteDeliveryContact(id) } catch {} }
-    clearSelection(); load()
-    notify(`${selectedIds.size} ${t('deleted')||'deleted'}`)
+    const ids = [...selectedIds]
+    const failedIds = []
+    let deletedCount = 0
+    setBulkActionBusy(true)
+    try {
+      for (const id of ids) {
+        try {
+          await window.api.deleteDeliveryContact(id)
+          deletedCount += 1
+        } catch (_) {
+          failedIds.push(Number(id))
+        }
+      }
+      setSelectedIds(new Set(failedIds))
+      await load({ silent: true, label: 'Delivery contacts refresh after delete' })
+      if (failedIds.length) {
+        notify(`Deleted ${deletedCount} delivery contact(s), ${failedIds.length} failed`, 'warning')
+      } else {
+        notify(`${deletedCount} ${t('deleted') || 'deleted'}`)
+      }
+    } finally {
+      setBulkActionBusy(false)
+    }
   }
 
   return (
@@ -341,8 +401,21 @@ function DeliveryTab({ t, notify }) {
           <span className="text-sm text-gray-400 whitespace-nowrap">{visibleContacts.length}</span>
         </div>
         <div className="flex gap-1.5 items-center overflow-x-auto flex-nowrap flex-shrink-0">
+          {loadError ? (
+            <button
+              type="button"
+              className="btn-secondary whitespace-nowrap text-sm text-amber-700 dark:text-amber-300"
+              onClick={() => load({ silent: false, label: 'Delivery contacts retry' })}
+            >
+              {tr('retry', 'Retry')}
+            </button>
+          ) : null}
           {selectedIds.size > 0 && (
-            <button className="btn-secondary text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 whitespace-nowrap" onClick={handleBulkDelete}>
+            <button
+              className="btn-secondary text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={handleBulkDelete}
+              disabled={bulkActionBusy}
+            >
               Delete {selectedIds.size}
             </button>
           )}
@@ -374,6 +447,12 @@ function DeliveryTab({ t, notify }) {
           </button>
         </div>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+          {loadError}
+        </div>
+      ) : null}
 
       <ContactTable
         loading={loading}

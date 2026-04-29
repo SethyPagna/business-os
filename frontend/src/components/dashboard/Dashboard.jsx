@@ -6,7 +6,8 @@ import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
-import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportReports'
+import { buildStandaloneReportHtml } from '../../utils/exportReports'
+import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
@@ -515,6 +516,96 @@ export default function Dashboard() {
     const lowRows = buildDashboardLowStockRows()
     const recentRows = buildDashboardRecentRows()
     const manifestRows = buildDashboardManifestRows()
+    const reportContent = buildStandaloneReportHtml({
+      title: 'Dashboard Analytics Report',
+      subtitle: `${periodShort} • ${rangeLabel}`,
+      exportedAt: new Date().toISOString(),
+      summaryCards: periodKpis.slice(0, 6).map((kpi) => ({
+        label: kpi.label,
+        value: kpi.value,
+        sub: kpi.sub,
+      })),
+      metadataGroups: [
+        {
+          title: 'Active Range',
+          subtitle: 'Filters and export context for this package',
+          rows: [
+            { label: 'Range preset', value: periodShort },
+            { label: 'Date range', value: rangeLabel },
+            { label: 'Chart mode', value: activeChart },
+            { label: 'Top ranking mode', value: topMode },
+          ],
+        },
+        {
+          title: 'Visible Data',
+          subtitle: 'Counts for the exported data slices',
+          rows: [
+            { label: 'Sales periods', value: chartData.length },
+            { label: 'Payment methods', value: paymentRows.length },
+            { label: 'Branches', value: branchRows.length },
+            { label: 'Low-stock items', value: lowRows.length },
+          ],
+        },
+      ],
+      charts: [
+        {
+          type: 'line',
+          title: 'Revenue over time',
+          subtitle: periodShort,
+          props: { data: chartData, lines: [{ key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' }] },
+        },
+        {
+          type: 'line',
+          title: 'Revenue vs COGS vs Profit',
+          subtitle: 'Visible period comparison',
+          props: {
+            data: chartData,
+            lines: [
+              { key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' },
+              { key: 'cost_usd', color: '#dc2626', label: t('cogs') || 'COGS' },
+              { key: 'profit_usd', color: '#16a34a', label: t('profit') || 'Profit' },
+            ],
+          },
+        },
+        {
+          type: 'bar',
+          title: 'Transactions over time',
+          subtitle: 'Sales activity volume',
+          props: { data: chartData, valueKey: 'count', labelKey: 'period', color: '#7c3aed', isCount: true },
+        },
+        {
+          type: 'donut',
+          title: 'Payment distribution',
+          subtitle: 'Revenue share by payment method',
+          props: { data: analytics?.byPayment || [], valueKey: 'revenue_usd' },
+        },
+        {
+          type: 'bar',
+          title: 'Branch performance',
+          subtitle: 'Revenue by branch',
+          props: { data: analytics?.byBranch || [], valueKey: 'revenue_usd', labelKey: 'branch_name', color: '#0891b2' },
+        },
+        {
+          type: 'bar',
+          title: 'Top products by revenue',
+          subtitle: 'Current visible ranking',
+          props: { data: analytics?.topProducts || [], valueKey: 'revenue_usd', labelKey: 'product_name', color: '#ea580c' },
+        },
+      ],
+      tables: [
+        { title: 'Top products', subtitle: 'Revenue leaders in the selected range', rows: topProductRows, limit: 10 },
+        { title: 'Top customers', subtitle: 'Highest-value customers in the selected range', rows: topCustomerRows, limit: 10 },
+        { title: 'Payment methods', subtitle: 'Count and revenue by payment type', rows: paymentRows },
+        { title: 'Branch performance', subtitle: 'Transaction and revenue totals', rows: branchRows },
+        { title: 'Low-stock summary', subtitle: 'Current low-stock items from all-time inventory state', rows: lowRows, limit: 12 },
+        { title: 'Recent sales', subtitle: 'Latest receipts included in the dashboard summary', rows: recentRows, limit: 12 },
+      ],
+      notes: [
+        revenueFormulaText,
+        collectedFormulaText,
+        'Package includes raw CSV exports, formulas, and this self-contained HTML report.',
+      ],
+    })
     const files = buildReportPackageFiles({
       baseName: 'dashboard',
       exportStamp,
@@ -531,97 +622,8 @@ export default function Dashboard() {
         { name: `dashboard-low-stock-${exportStamp}.csv`, content: buildCSV(lowRows) },
         { name: `dashboard-recent-sales-${exportStamp}.csv`, content: buildCSV(recentRows) },
       ],
-      report: {
-        fileName: 'dashboard-report.html',
-        title: 'Dashboard Analytics Report',
-        subtitle: `${periodShort} • ${rangeLabel}`,
-        exportedAt: new Date().toISOString(),
-        summaryCards: periodKpis.slice(0, 6).map((kpi) => ({
-          label: kpi.label,
-          value: kpi.value,
-          sub: kpi.sub,
-        })),
-        metadataGroups: [
-          {
-            title: 'Active Range',
-            subtitle: 'Filters and export context for this package',
-            rows: [
-              { label: 'Range preset', value: periodShort },
-              { label: 'Date range', value: rangeLabel },
-              { label: 'Chart mode', value: activeChart },
-              { label: 'Top ranking mode', value: topMode },
-            ],
-          },
-          {
-            title: 'Visible Data',
-            subtitle: 'Counts for the exported data slices',
-            rows: [
-              { label: 'Sales periods', value: chartData.length },
-              { label: 'Payment methods', value: paymentRows.length },
-              { label: 'Branches', value: branchRows.length },
-              { label: 'Low-stock items', value: lowRows.length },
-            ],
-          },
-        ],
-        charts: [
-          {
-            type: 'line',
-            title: 'Revenue over time',
-            subtitle: periodShort,
-            props: { data: chartData, lines: [{ key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' }] },
-          },
-          {
-            type: 'line',
-            title: 'Revenue vs COGS vs Profit',
-            subtitle: 'Visible period comparison',
-            props: {
-              data: chartData,
-              lines: [
-                { key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' },
-                { key: 'cost_usd', color: '#dc2626', label: t('cogs') || 'COGS' },
-                { key: 'profit_usd', color: '#16a34a', label: t('profit') || 'Profit' },
-              ],
-            },
-          },
-          {
-            type: 'bar',
-            title: 'Transactions over time',
-            subtitle: 'Sales activity volume',
-            props: { data: chartData, valueKey: 'count', labelKey: 'period', color: '#7c3aed', isCount: true },
-          },
-          {
-            type: 'donut',
-            title: 'Payment distribution',
-            subtitle: 'Revenue share by payment method',
-            props: { data: analytics?.byPayment || [], valueKey: 'revenue_usd' },
-          },
-          {
-            type: 'bar',
-            title: 'Branch performance',
-            subtitle: 'Revenue by branch',
-            props: { data: analytics?.byBranch || [], valueKey: 'revenue_usd', labelKey: 'branch_name', color: '#0891b2' },
-          },
-          {
-            type: 'bar',
-            title: 'Top products by revenue',
-            subtitle: 'Current visible ranking',
-            props: { data: analytics?.topProducts || [], valueKey: 'revenue_usd', labelKey: 'product_name', color: '#ea580c' },
-          },
-        ],
-        tables: [
-          { title: 'Top products', subtitle: 'Revenue leaders in the selected range', rows: topProductRows, limit: 10 },
-          { title: 'Top customers', subtitle: 'Highest-value customers in the selected range', rows: topCustomerRows, limit: 10 },
-          { title: 'Payment methods', subtitle: 'Count and revenue by payment type', rows: paymentRows },
-          { title: 'Branch performance', subtitle: 'Transaction and revenue totals', rows: branchRows },
-          { title: 'Low-stock summary', subtitle: 'Current low-stock items from all-time inventory state', rows: lowRows, limit: 12 },
-          { title: 'Recent sales', subtitle: 'Latest receipts included in the dashboard summary', rows: recentRows, limit: 12 },
-        ],
-        notes: [
-          revenueFormulaText,
-          collectedFormulaText,
-          'Package includes raw CSV exports, formulas, and this self-contained HTML report.',
-        ],
-      },
+      reportFileName: 'dashboard-report.html',
+      reportContent,
     })
     downloadZipFiles(`dashboard-report-${exportStamp}.zip`, files)
   }, [

@@ -232,15 +232,21 @@ function CustomersTab({ t, notify }) {
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const syncChannelName = String(syncChannel?.channel || '')
+  const syncChannelTs = Number(syncChannel?.ts || 0)
 
   const filteredBySearch = customers.filter((customer) => {
     const query = search.toLowerCase().trim()
@@ -287,7 +293,7 @@ function CustomersTab({ t, notify }) {
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleCustomers)
+  const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleCustomers)
   const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']
   const contactFilterSections = useMemo(() => ([
     {
@@ -350,30 +356,64 @@ function CustomersTab({ t, notify }) {
   }
 
   const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoading(true)
-    try {
-      const data = await withLoaderTimeout(() => window.api.getCustomers(), label)
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setCustomers(Array.isArray(data) ? data : [])
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (!loadedOnceRef.current) setCustomers([])
-      notify(error?.message || 'Failed to load customers', silent ? 'warning' : 'error')
-    } finally {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoading(false)
-    }
-  }, [notify])
+    const promise = (async () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoading(true)
+        setLoadError('')
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(tr(t, 'customers_load_slow', 'Customers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
+        }, 10000)
+      }
+      try {
+        const data = await withLoaderTimeout(() => window.api.getCustomers(), label, 8000)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setCustomers(Array.isArray(data) ? data : [])
+        loadedOnceRef.current = true
+        setLoadError('')
+      } catch (error) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const message = error?.message || 'Failed to load customers'
+        if (!loadedOnceRef.current) {
+          setCustomers([])
+          setLoadError(message)
+          notify(message, 'error')
+          loadedOnceRef.current = true
+        } else {
+          const refreshMessage = tr(t, 'customers_refresh_failed', 'Unable to refresh customers right now. Showing the latest loaded data.')
+          setLoadError((current) => current || refreshMessage)
+          notify(refreshMessage, 'warning')
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLoading(false)
+      }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
+      }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [notify, t])
 
   useEffect(() => {
-    load()
-    return () => invalidateTrackedRequest(loadRequestRef)
+    load({ silent: loadedOnceRef.current })
+    return () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+    }
   }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'customers') load({ silent: true, label: 'Customers refresh' })
-  }, [syncChannel?.channel, syncChannel?.ts, load])
+    if (syncChannelName === 'customers') load({ silent: true, label: 'Customers refresh' })
+  }, [load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) {
@@ -417,14 +457,31 @@ function CustomersTab({ t, notify }) {
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size) return
+    if (!selectedIds.size || bulkActionBusy) return
     if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) return
-    for (const id of selectedIds) {
-      try { await window.api.deleteCustomer(id) } catch (_) {}
+    const ids = [...selectedIds]
+    const failedIds = []
+    let deletedCount = 0
+    setBulkActionBusy(true)
+    try {
+      for (const id of ids) {
+        try {
+          await window.api.deleteCustomer(id)
+          deletedCount += 1
+        } catch (_) {
+          failedIds.push(Number(id))
+        }
+      }
+      setSelectedIds(new Set(failedIds))
+      await load({ silent: true, label: 'Customers refresh after delete' })
+      if (failedIds.length) {
+        notify(`Deleted ${deletedCount} customer(s), ${failedIds.length} failed`, 'warning')
+      } else {
+        notify(`${deletedCount} ${tr(t, 'deleted', 'deleted')}`)
+      }
+    } finally {
+      setBulkActionBusy(false)
     }
-    clearSelection()
-    load()
-    notify(`${selectedIds.size} ${tr(t, 'deleted', 'deleted')}`)
   }
 
   return (
@@ -444,8 +501,21 @@ function CustomersTab({ t, notify }) {
         </div>
 
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
+          {loadError ? (
+            <button
+              type="button"
+              className="btn-secondary whitespace-nowrap text-sm text-amber-700 dark:text-amber-300"
+              onClick={() => load({ silent: false, label: 'Customers retry' })}
+            >
+              {tr(t, 'retry', 'Retry')}
+            </button>
+          ) : null}
           {selectedIds.size > 0 ? (
-            <button className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleBulkDelete}>
+            <button
+              className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={handleBulkDelete}
+              disabled={bulkActionBusy}
+            >
               Delete {selectedIds.size}
             </button>
           ) : null}
@@ -492,6 +562,12 @@ function CustomersTab({ t, notify }) {
           </button>
         </div>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+          {loadError}
+        </div>
+      ) : null}
 
       <ContactTable
         loading={loading}

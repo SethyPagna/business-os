@@ -227,9 +227,16 @@ export default function BarcodeScannerModal({
       const name = String(scanError?.name || '')
       const denied = /denied|permission|notallowed/i.test(`${name} ${message}`)
       const blocked = denied && nextPermissionState === 'denied'
-      setPermissionState(denied ? 'denied' : nextPermissionState)
-      setStatus('manual')
-      setError(blocked ? labels.cameraPermissionBlocked : (denied ? labels.scanPermissionDenied : labels.scanFailed))
+      const dismissed = denied && !blocked
+      setPermissionState(blocked ? 'denied' : nextPermissionState)
+      setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
+      setError(
+        blocked
+          ? labels.cameraPermissionBlocked
+          : dismissed
+            ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
+            : (denied ? labels.scanPermissionDenied : labels.scanFailed),
+      )
     }
   }, [
     cleanup,
@@ -238,6 +245,7 @@ export default function BarcodeScannerModal({
     labels.scanPermissionDenied,
     labels.scanUnsupported,
     scanFrame,
+    tr,
   ])
 
   const prepareScanner = useCallback(async () => {
@@ -288,7 +296,7 @@ export default function BarcodeScannerModal({
       }
       if (nextState === 'denied' && status === 'scanning') {
         cleanup()
-        setStatus('manual')
+        setStatus('blocked')
         setError(labels.cameraPermissionBlocked)
       }
     }).then((dispose) => {
@@ -307,25 +315,29 @@ export default function BarcodeScannerModal({
 
   if (!open) return null
 
-  const requestCameraLabel = permissionState === 'denied'
+  const requestCameraLabel = permissionState === 'denied' || status === 'dismissed'
     ? labels.tryCameraAgain
     : labels.requestCameraAccess
   const statusMessage = status === 'scanning'
     ? labels.scanReady
-    : (
-        error
-        || (
-          permissionState === 'unsupported'
-            ? labels.scanUnsupported
-            : permissionState === 'granted'
-              ? labels.requestingCamera
-              : labels.cameraPermissionNeeded
+    : status === 'starting'
+      ? labels.requestingCamera
+      : (
+          error
+          || (
+            permissionState === 'unsupported'
+              ? labels.scanUnsupported
+              : permissionState === 'granted'
+                ? labels.requestingCamera
+                : labels.cameraPermissionNeeded
+          )
         )
-      )
   const showCameraAction = permissionState !== 'unsupported' && status !== 'scanning'
   const emptyStateMessage = error || (
-    permissionState === 'denied'
+    permissionState === 'denied' || status === 'blocked'
       ? labels.cameraPermissionBlocked
+      : status === 'dismissed'
+        ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
       : labels.cameraPermissionNeeded
   )
 
@@ -383,6 +395,7 @@ export default function BarcodeScannerModal({
               className="input flex-1"
               value={manualValue}
               onChange={(event) => setManualValue(event.target.value)}
+              autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
@@ -401,6 +414,9 @@ export default function BarcodeScannerModal({
               {labels.useValue}
             </button>
           </div>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {tr('manual_entry_hint', 'Manual entry stays available if the camera is unavailable.', 'ការបញ្ចូលដោយដៃនៅតែអាចប្រើបាន ប្រសិនបើកាមេរ៉ាមិនអាចប្រើបាន។')}
+          </p>
         </div>
       </div>
     </Modal>

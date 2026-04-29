@@ -1491,6 +1491,7 @@
   "download_pdf": "ទាញយក PDF",
   "unable_generate_receipt_pdf": "មិនអាចបង្កើត PDF បង្កាន់ដៃបានទេ។",
   "receipt_pdf_layout_note": "ការនាំចេញជា PDF ប្រើប្លង់បង្កាន់ដៃនេះដូចគ្នា។",
+  "receipt_pdf_preview_fallback": "មិនអាចបង្កើត PDF ដោយស្វ័យប្រវត្តិបានទេ ដូច្នេះបានបើកទិដ្ឋភាពបង្កាន់ដៃសម្រាប់បោះពុម្ពជំនួសវិញ។",
   "print_test_desc_pdf": "បង្កើត PDF គំរូ ដើម្បីពិនិត្យទំហំ គែម និងភាពងាយស្រួលអាន។",
   "receipt_test_pdf": "សាកល្បងបង្កាន់ដៃ PDF",
   "pdf_preview_failed": "ការមើល PDF ជាមុនបានបរាជ័យ",

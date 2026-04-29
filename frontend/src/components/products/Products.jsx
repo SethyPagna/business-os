@@ -225,7 +225,7 @@ export default function Products() {
         const res = await window.api.createProduct(data)
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
       } else {
-        const res = await window.api.updateProduct(selected.id, data, user.id, user.name)
+        const res = await window.api.updateProduct(selected.id, data)
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
@@ -292,7 +292,7 @@ export default function Products() {
         const res = await window.api.createProduct(payload)
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
       } else {
-        const res = await window.api.updateProduct(selected.id, payload, user.id, user.name)
+        const res = await window.api.updateProduct(selected.id, payload)
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
@@ -311,6 +311,7 @@ export default function Products() {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
     setBulkActionBusy(true)
+    const failedIds = []
     let failed = 0
     let done = 0
     try {
@@ -321,9 +322,10 @@ export default function Products() {
           done++
         } catch {
           failed++
+          failedIds.push(Number(id))
         }
       }
-      setSelectedIds(new Set())
+      setSelectedIds(new Set(failedIds))
       await load(true)
       if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
       else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
@@ -336,6 +338,7 @@ export default function Products() {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
     setBulkActionBusy(true)
+    const failedIds = []
     let done = 0
     let failed = 0
     try {
@@ -346,9 +349,10 @@ export default function Products() {
           done++
         } catch {
           failed++
+          failedIds.push(Number(id))
         }
       }
-      setSelectedIds(new Set())
+      setSelectedIds(new Set(failedIds))
       await load(true)
       notify(
         failed
@@ -367,6 +371,7 @@ export default function Products() {
     if (!branch) return
     if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
     setBulkActionBusy(true)
+    const failedIds = []
     let done = 0
     let failed = 0
     try {
@@ -393,9 +398,10 @@ export default function Products() {
           done++
         } catch {
           failed++
+          failedIds.push(Number(id))
         }
       }
-      setSelectedIds(new Set())
+      setSelectedIds(new Set(failedIds))
       await load(true)
       notify(
         failed
@@ -738,6 +744,7 @@ export default function Products() {
       return
     }
     setBulkActionBusy(true)
+    const failedIds = []
     let done = 0
     let failed = 0
     try {
@@ -748,9 +755,10 @@ export default function Products() {
           done++
         } catch {
           failed++
+          failedIds.push(Number(id))
         }
       }
-      setSelectedIds(new Set())
+      setSelectedIds(new Set(failedIds))
       setBulkEditMode(null)
       setBulkEditForm({})
       await load(true)

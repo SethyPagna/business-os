@@ -37,19 +37,7 @@ function buildSafePreviewSource(previewNode, printSettings, T) {
     return buildFallbackPreviewHtml(printSettings, T)
   }
   try {
-    const clone = previewNode.cloneNode(true)
-    if (!(clone instanceof HTMLElement)) {
-      return buildFallbackPreviewHtml(printSettings, T)
-    }
-    clone.querySelectorAll('img, svg image, video, canvas').forEach((node) => node.remove())
-    clone.querySelectorAll('*').forEach((node) => {
-      if (!(node instanceof HTMLElement)) return
-      node.style.backgroundImage = 'none'
-      node.style.maskImage = 'none'
-      node.removeAttribute('class')
-      node.removeAttribute('crossorigin')
-    })
-    return clone
+    return previewNode.querySelector('[data-receipt-export-root="true"]') || previewNode
   } catch (_) {
     return buildFallbackPreviewHtml(printSettings, T)
   }
@@ -184,7 +172,8 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await openReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
-                  preferTextOnly: true,
+                  previewFallback: true,
+                  previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF preview failed:', error)
@@ -203,7 +192,8 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await downloadReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
-                  preferTextOnly: true,
+                  previewFallback: true,
+                  previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF download failed:', error)

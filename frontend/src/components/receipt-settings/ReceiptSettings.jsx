@@ -253,13 +253,13 @@ export default function ReceiptSettings() {
               <Section title={t('discount_settings') || 'Discount Settings'}>
                 <Toggle label={t('show_discount_receipt') || 'Show Discount on Receipt'} desc={t('rfd_show_discount') || 'Display discount line when a discount was applied'} value={!!tpl.show_discount} onChange={v => setT('show_discount', v)} />
                 <div className="mt-4">
-                  <label htmlFor="receipt-discount-position-before-tax" className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">{t('discount_position') || 'Discount Position'}</label>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">{t('discount_position') || 'Discount Position'}</div>
                   <div className="space-y-2">
                     {[
                       ['before_tax',     t('discount_before_tax') || 'Before Tax',             t('discount_before_tax_desc') || 'Discount -> Tax -> Total (standard)'],
                       ['after_subtotal', t('discount_after_subtotal') || 'Right After Subtotal', t('discount_after_subtotal_desc') || 'Subtotal -> Discount -> Tax -> Total'],
                     ].map(([val, label, desc]) => (
-                      <button id={val === 'before_tax' ? 'receipt-discount-position-before-tax' : undefined} key={val} onClick={() => setT('discount_position', val)}
+                      <button key={val} onClick={() => setT('discount_position', val)}
                         className={`w-full p-3 rounded-xl border-2 text-left ${(tpl.discount_position || 'before_tax') === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
                         <div className={`text-sm font-medium ${(tpl.discount_position || 'before_tax') === val ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{label}</div>
                         <div className="text-xs text-gray-400 mt-0.5">{desc}</div>
@@ -274,10 +274,10 @@ export default function ReceiptSettings() {
           {activeSection === 'style' && (
             <>
               <Section title={t('receipt_font') || 'Font'}>
-                <label htmlFor="receipt-font-family-monospace" className="text-sm text-gray-700 dark:text-gray-300 block mb-2">{t('font_family_label') || 'Font Family'}</label>
+                <div className="text-sm text-gray-700 dark:text-gray-300 block mb-2">{t('font_family_label') || 'Font Family'}</div>
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   {[['monospace', t('font_monospace') || 'Monospace'], ['sans', t('font_sans') || 'Sans-serif'], ['serif', t('font_serif') || 'Serif']].map(([val, label]) => (
-                    <button id={val === 'monospace' ? 'receipt-font-family-monospace' : undefined} key={val} onClick={() => setT('font_family', val)}
+                    <button key={val} onClick={() => setT('font_family', val)}
                       className={`py-2 rounded-lg text-xs font-medium border-2 ${tpl.font_family === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
                       {label}
                     </button>
@@ -298,9 +298,9 @@ export default function ReceiptSettings() {
               </Section>
               <Section title={t('separator_chars') || 'Separator Characters'}>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label htmlFor="receipt-header-separator" className="text-xs text-gray-500 mb-1 block">{t('header_separator') || 'Header Separator'}</label><input id="receipt-header-separator" className="input w-24" value={tpl.header_separator} onChange={e => setT('header_separator', e.target.value)} maxLength={2} placeholder="==" autoComplete="off" /></div>
-                  <div><label htmlFor="receipt-footer-separator" className="text-xs text-gray-500 mb-1 block">{t('footer_separator') || 'Footer Separator'}</label><input id="receipt-footer-separator" className="input w-24" value={tpl.footer_separator} onChange={e => setT('footer_separator', e.target.value)} maxLength={2} placeholder="--" autoComplete="off" /></div>
-                  <div><label htmlFor="receipt-line-separator" className="text-xs text-gray-500 mb-1 block">{t('separator') || 'Item Separator'}</label><input id="receipt-line-separator" className="input w-24" value={tpl.line_char} onChange={e => setT('line_char', e.target.value)} maxLength={2} placeholder="-" autoComplete="off" /></div>
+                  <div><label htmlFor="receipt-header-separator" className="text-xs text-gray-500 mb-1 block">{t('header_separator') || 'Header Separator'}</label><input id="receipt-header-separator" name="receipt_header_separator" className="input w-24" value={tpl.header_separator} onChange={e => setT('header_separator', e.target.value)} maxLength={2} placeholder="==" autoComplete="off" /></div>
+                  <div><label htmlFor="receipt-footer-separator" className="text-xs text-gray-500 mb-1 block">{t('footer_separator') || 'Footer Separator'}</label><input id="receipt-footer-separator" name="receipt_footer_separator" className="input w-24" value={tpl.footer_separator} onChange={e => setT('footer_separator', e.target.value)} maxLength={2} placeholder="--" autoComplete="off" /></div>
+                  <div><label htmlFor="receipt-line-separator" className="text-xs text-gray-500 mb-1 block">{t('separator') || 'Item Separator'}</label><input id="receipt-line-separator" name="receipt_line_separator" className="input w-24" value={tpl.line_char} onChange={e => setT('line_char', e.target.value)} maxLength={2} placeholder="-" autoComplete="off" /></div>
                 </div>
               </Section>
             </>
@@ -327,7 +327,7 @@ export default function ReceiptSettings() {
             <>
               <Section title={t('footer_message_title') || 'Footer Message'}>
                 <label htmlFor="receipt-custom-footer" className="text-xs text-gray-500 mb-1 block">{t('custom_footer_text') || 'Custom footer text'}</label>
-                <textarea id="receipt-custom-footer" className="input resize-none" rows={3}
+                <textarea id="receipt-custom-footer" name="receipt_custom_footer" className="input resize-none" rows={3}
                   value={tpl.custom_footer}
                   onChange={e => setT('custom_footer', e.target.value)}
                   placeholder={settings.receipt_footer || 'Thank you for your business!'}
