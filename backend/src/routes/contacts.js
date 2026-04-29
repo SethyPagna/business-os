@@ -12,6 +12,12 @@ function cleanMembershipNumber(value) {
   return normalized || null
 }
 
+function requireMembershipNumber(value) {
+  const normalized = cleanMembershipNumber(value)
+  if (!normalized) throw new Error('Membership number is required')
+  return normalized
+}
+
 function assertUniqueMembershipNumber(membershipNumber, excludeId = null) {
   const normalized = cleanMembershipNumber(membershipNumber)
   if (!normalized) return null
@@ -26,21 +32,9 @@ function assertUniqueMembershipNumber(membershipNumber, excludeId = null) {
   return normalized
 }
 
-function generateMembershipNumberCandidate() {
-  const stamp = Date.now().toString().slice(-8)
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `MEM-${stamp}-${rand}`
-}
-
 function ensureMembershipNumber(value, excludeId = null) {
-  const normalized = cleanMembershipNumber(value)
-  if (normalized) return assertUniqueMembershipNumber(normalized, excludeId)
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      return assertUniqueMembershipNumber(generateMembershipNumberCandidate(), excludeId)
-    } catch (_) {}
-  }
-  throw new Error('Could not generate a unique membership number')
+  const normalized = requireMembershipNumber(value)
+  return assertUniqueMembershipNumber(normalized, excludeId)
 }
 
 function normalizeFieldRule(value, fallback) {
@@ -185,6 +179,7 @@ router.post('/customers', authToken, requirePermission('contacts'), (req, res) =
   const d = req.body || {}
   const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
+  if (!cleanMembershipNumber(d.membership_number)) return err(res, 'Membership number is required')
   try {
     const membershipNumber = ensureMembershipNumber(d.membership_number)
     const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
@@ -202,6 +197,8 @@ router.put('/customers/:id', authToken, requirePermission('contacts'), (req, res
     const current = db.prepare('SELECT id, updated_at FROM customers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Customer not found', 404)
     assertUpdatedAtMatch('customer', current, getExpectedUpdatedAt(d))
+    if (!String(d.name || '').trim()) return err(res, 'Name required')
+    if (!cleanMembershipNumber(d.membership_number)) return err(res, 'Membership number is required')
     const membershipNumber = ensureMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
     db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(d.name, membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null, req.params.id)
@@ -291,6 +288,10 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
       const rowNumber = entry.rowNumber
       if (!String(row.name || '').trim()) {
         errors.push(`Row ${rowNumber}: name is required`)
+        continue
+      }
+      if (!cleanMembershipNumber(row.membership_number)) {
+        errors.push(`Row ${rowNumber}: membership number is required`)
         continue
       }
 

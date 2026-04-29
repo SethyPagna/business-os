@@ -31,7 +31,7 @@ function ThreeDot({ onDetails, onEdit, onResetPw, canManage }) {
   const items = [
     { label: t('view_details') || 'View details', onClick: onDetails },
     canManage ? { label: t('edit') || 'Edit', onClick: onEdit, color: 'blue' } : null,
-    canManage ? { label: t('reset_password') || 'Reset password', onClick: onResetPw, color: 'blue' } : null,
+    canManage ? { label: t('change_password') || 'Change password', onClick: onResetPw, color: 'blue' } : null,
   ].filter(Boolean)
 
   return (
@@ -86,7 +86,11 @@ export default function Users() {
   const [search, setSearch] = useState('')
   const [userForm, setUserForm] = useState(INITIAL_USER_FORM)
   const [roleForm, setRoleForm] = useState(INITIAL_ROLE_FORM)
-  const [newPw, setNewPw] = useState('')
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  })
   const [saving, setSaving] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -306,26 +310,49 @@ export default function Users() {
       notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
       return
     }
-    if (!newPw.trim()) {
+    const currentPassword = String(passwordForm.currentPassword || '')
+    const newPassword = String(passwordForm.newPassword || '')
+    const confirmPassword = String(passwordForm.confirmPassword || '')
+    const allowAdminOverride = Number(selectedUser.id) !== Number(currentUser?.id) && canManageTargetUser(selectedUser)
+
+    if (!newPassword.trim()) {
       notify(tr('enter_new_password', 'Enter new password'), 'error')
+      return
+    }
+    if (newPassword.length < 4) {
+      notify(tr('new_password_min_length', 'Use at least 4 characters for the new password'), 'error')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
+      return
+    }
+    if (!allowAdminOverride && !currentPassword.trim()) {
+      notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
       return
     }
 
     try {
-      const result = await window.api.resetPassword(selectedUser.id, {
-        newPassword: newPw,
+      const result = await window.api.changeUserPassword(selectedUser.id, {
+        currentPassword: allowAdminOverride ? undefined : currentPassword,
+        newPassword,
+        adminOverride: allowAdminOverride,
         userId: currentUser?.id,
         userName: currentUser?.name,
       })
       if (result?.success === false) {
-        notify(result.error || 'Failed to reset password', 'error')
+        notify(result.error || 'Failed to change password', 'error')
         return
       }
-      notify(tr('password_reset', 'Password reset'), 'success')
-      setNewPw('')
+      notify(tr('password_updated', 'Password updated'), 'success')
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      })
       setModal(null)
     } catch (error) {
-      notify(error?.message || 'Failed to reset password', 'error')
+      notify(error?.message || 'Failed to change password', 'error')
     }
   }
 
@@ -495,7 +522,11 @@ export default function Users() {
                           canManage={canManageTargetUser(user)}
                           onDetails={() => { setSelectedUser(user); setModal('userDetail') }}
                           onEdit={() => openEditUser(user)}
-                          onResetPw={() => { setSelectedUser(user); setNewPw(''); setModal('resetPw') }}
+                          onResetPw={() => {
+                            setSelectedUser(user)
+                            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+                            setModal('resetPw')
+                          }}
                         />
                       </td>
                     </tr>
@@ -524,7 +555,11 @@ export default function Users() {
                     canManage={canManageTargetUser(user)}
                     onDetails={() => { setSelectedUser(user); setModal('userDetail') }}
                     onEdit={() => openEditUser(user)}
-                    onResetPw={() => { setSelectedUser(user); setNewPw(''); setModal('resetPw') }}
+                    onResetPw={() => {
+                      setSelectedUser(user)
+                      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+                      setModal('resetPw')
+                    }}
                   />
                 </div>
               </div>
@@ -575,7 +610,10 @@ export default function Users() {
           canManage={canManageTargetUser(selectedUser)}
           t={t}
           onEdit={() => openEditUser(selectedUser)}
-          onResetPw={() => { setNewPw(''); setModal('resetPw') }}
+          onResetPw={() => {
+            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+            setModal('resetPw')
+          }}
           onClose={() => { setModal(null); setSelectedUser(null) }}
         />
       ) : null}
@@ -636,15 +674,58 @@ export default function Users() {
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
-        <Modal title={`${tr('reset_password', 'Reset password')}: ${selectedUser.name}`} onClose={() => setModal(null)}>
+        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)}>
           <div className="space-y-4">
+            {Number(selectedUser.id) === Number(currentUser?.id) ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+                {tr('current_password_required_change', 'Current password is required to change password')}
+              </div>
+            ) : null}
+            {Number(selectedUser.id) !== Number(currentUser?.id) && canManageTargetUser(selectedUser) ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                {tr('admin_password_override_note', 'Current password can be left blank when an administrator updates another non-admin account.')}
+              </div>
+            ) : null}
             <div>
-              <label htmlFor="reset-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
-              <input id="reset-password" name="new_password" type="password" className="input" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoFocus />
+              <label htmlFor="reset-password-current" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('current_password', 'Current password')}</label>
+              <input
+                id="reset-password-current"
+                name="current_password"
+                type="password"
+                autoComplete="current-password"
+                className="input"
+                value={passwordForm.currentPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label htmlFor="reset-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
+              <input
+                id="reset-password-new"
+                name="new_password"
+                type="password"
+                autoComplete="new-password"
+                className="input"
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label htmlFor="reset-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
+              <input
+                id="reset-password-confirm"
+                name="confirm_password"
+                type="password"
+                autoComplete="new-password"
+                className="input"
+                value={passwordForm.confirmPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+              />
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="button" className="btn-primary" onClick={handleResetPassword}>{t('save') || 'Save'}</button>
+              <button type="button" className="btn-primary" onClick={handleResetPassword}>{tr('change_password', 'Change password')}</button>
             </div>
           </div>
         </Modal>

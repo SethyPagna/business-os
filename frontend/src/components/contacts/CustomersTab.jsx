@@ -46,12 +46,6 @@ export function serializeContactOptions(options) {
 
 const BLANK_OPTION = () => ({ label: '', name: '', phone: '', email: '', address: '' })
 
-function generateMembershipNumber() {
-  const stamp = Date.now().toString().slice(-8)
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `MEM-${stamp}-${rand}`
-}
-
 function tr(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
@@ -119,6 +113,7 @@ function CustomerForm({ customer, onSave, onClose, t }) {
     return parsed.length ? parsed : [BLANK_OPTION()]
   })
   const [saving, setSaving] = useState(false)
+  const [localError, setLocalError] = useState('')
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => [...current, BLANK_OPTION()])
@@ -126,9 +121,25 @@ function CustomerForm({ customer, onSave, onClose, t }) {
   const updateOption = (index, nextOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
   const handleSubmit = async () => {
     if (saving) return
+    const name = String(form.name || '').trim()
+    const membershipNumber = String(form.membership_number || '').trim()
+    if (!name) {
+      setLocalError(tr(t, 'name_required', 'Name is required'))
+      return
+    }
+    if (!membershipNumber) {
+      setLocalError(tr(t, 'membership_number_required', 'Membership number is required'))
+      return
+    }
+    setLocalError('')
     setSaving(true)
     try {
-      await Promise.resolve(onSave({ ...form, address: serializeContactOptions(options) }))
+      await Promise.resolve(onSave({
+        ...form,
+        name,
+        membership_number: membershipNumber.toUpperCase(),
+        address: serializeContactOptions(options),
+      }))
     } finally {
       setSaving(false)
     }
@@ -143,13 +154,17 @@ function CustomerForm({ customer, onSave, onClose, t }) {
         </div>
 
         <div>
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <label htmlFor="customer-form-membership" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Membership Number</label>
-            <button type="button" className="text-xs text-blue-500 hover:text-blue-700" onClick={() => setField('membership_number', generateMembershipNumber())}>
-              Generate
-            </button>
-          </div>
-          <input id="customer-form-membership" name="customer_membership_number" className="input" value={form.membership_number || ''} onChange={(event) => setField('membership_number', event.target.value.toUpperCase())} placeholder="MEM-00000000-ABCD" />
+          <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {tr(t, 'membership_number', 'Membership number')} *
+          </label>
+          <input
+            id="customer-form-membership"
+            name="customer_membership_number"
+            className="input"
+            value={form.membership_number || ''}
+            onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
+            placeholder="MEM-00000000-ABCD"
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -196,6 +211,12 @@ function CustomerForm({ customer, onSave, onClose, t }) {
           <label htmlFor="customer-form-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'notes', 'Notes')}</label>
           <textarea id="customer-form-notes" name="customer_notes" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => setField('notes', event.target.value)} />
         </div>
+
+        {localError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+            {localError}
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-3 pt-1 sm:flex-row">
           <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? (t('saving') || 'Saving...') : tr(t, 'save', 'Save')}</button>
@@ -357,6 +378,10 @@ function CustomersTab({ t, notify }) {
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) {
       notify(tr(t, 'name_required', 'Name required'), 'error')
+      return
+    }
+    if (!String(form.membership_number || '').trim()) {
+      notify(tr(t, 'membership_number_required', 'Membership number is required'), 'error')
       return
     }
 

@@ -448,29 +448,38 @@ function CatalogFaqSection(props) {
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
     >
-      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {publicFaqItems.length ? publicFaqItems.map((item, index) => {
           const open = expandedFaqId === item.id
+          const accentClass = index % 2 === 0
+            ? 'from-cyan-50 to-white border-cyan-200/80'
+            : 'from-amber-50 to-white border-amber-200/80'
+          const iconClass = index % 2 === 0
+            ? 'bg-cyan-100 text-cyan-700'
+            : 'bg-amber-100 text-amber-700'
           return (
-            <article key={item.id || index} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <article key={item.id || index} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm ${accentClass}`}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+                className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"
                 onClick={() => setExpandedFaqId((current) => current === item.id ? null : item.id)}
               >
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                  <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClass}`}>
                     <HelpCircle className="h-4 w-4" />
                   </span>
-                  <div className="text-sm font-semibold text-slate-900">{item.question}</div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{copy('faq', 'FAQ')}</div>
+                    <div className="mt-1 text-sm font-semibold leading-6 text-slate-900">{item.question}</div>
+                  </div>
                 </div>
-                <span className="rounded-full bg-slate-100 p-2 text-slate-500">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+                <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
               </button>
-              {open ? <div className="border-t border-slate-100 px-5 py-4 text-sm leading-7 text-slate-600">{item.answer}</div> : null}
+              {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700">{item.answer}</div> : null}
             </article>
           )
         }) : (
-          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 sm:col-span-2">
             {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
           </div>
         )}

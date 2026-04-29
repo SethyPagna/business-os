@@ -14,6 +14,7 @@ import {
   Instagram,
   Mail,
   MapPin,
+  Moon,
   Phone,
   Plus,
   RotateCcw,
@@ -22,6 +23,7 @@ import {
   ShoppingBag,
   Sparkles,
   Store,
+  Sun,
   Ticket,
   Upload,
 } from 'lucide-react'
@@ -1377,7 +1379,7 @@ function applyGoogleTranslateSelection(sourceLang, targetLang) {
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }) {
-  const { hasPermission, navigateTo, saveSettings, notify, theme, user, t, language: appLanguage } = useApp()
+  const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp()
   const { syncChannel } = useSync()
   const cachedPortalRef = useRef(readPortalCache())
   const cachedPortal = cachedPortalRef.current
@@ -1465,6 +1467,7 @@ export default function CatalogPage({ publicView = false }) {
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
     : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
+  const darkMode = theme === 'dark'
   const resolveVisibleTab = (candidate, cfg = previewConfig) => {
     const visible = [
       cfg.showCatalog ? 'products' : null,
@@ -3675,22 +3678,33 @@ export default function CatalogPage({ publicView = false }) {
                         <div className={`${mobileHeroToolsOpen ? 'block' : 'hidden'} border-t border-white/15 px-4 py-3 lg:block`}>
                           {publicView && previewConfig.translateWidgetEnabled ? (
                             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/90">
-                              <label className="block">
-                                <span className="sr-only">{copy('language', 'Portal language')}</span>
-                                <select
-                                  id="portal-language-tools-hero"
-                                  name="portal_language_tools"
-                                  className="w-full rounded-xl border border-white/20 bg-slate-950/30 px-3 py-2 text-sm text-white outline-none"
-                                  value={translateTarget}
-                                  onChange={(event) => changeTranslateTarget(event.target.value)}
+                              <div className="flex items-center gap-2">
+                                <label className="block min-w-0 flex-1">
+                                  <span className="sr-only">{copy('language', 'Portal language')}</span>
+                                  <select
+                                    id="portal-language-tools-hero"
+                                    name="portal_language_tools"
+                                    className="w-full rounded-xl border border-white/20 bg-slate-950/30 px-3 py-2 text-sm text-white outline-none"
+                                    value={translateTarget}
+                                    onChange={(event) => changeTranslateTarget(event.target.value)}
+                                  >
+                                    {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value} className="text-slate-900">
+                                        {option.value === 'original' ? copy('followApp', 'Original') : option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-slate-950/30 text-white transition hover:bg-slate-950/45"
+                                  onClick={toggleTheme}
+                                  aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                                  title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                                 >
-                                  {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value} className="text-slate-900">
-                                      {option.value === 'original' ? copy('followApp', 'Original') : option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                                  {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                                </button>
+                              </div>
                               {!translateReady ? <div className="mt-2 text-xs text-white/70">{copy('preparingTranslations', 'Preparing translation tools...')}</div> : null}
                               <div className="mt-2 text-xs text-white/70">{copy('publicTranslation', 'Language tools')}</div>
                             </div>
