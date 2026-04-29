@@ -215,6 +215,7 @@ const NOTIFICATION_SUMMARY_MISSING_TTL_MS = 60 * 60 * 1000
 const DRIVE_SYNC_STATUS_COOLDOWN_KEY = 'businessos_drive_sync_status_cooldown_until'
 const DRIVE_SYNC_STATUS_COOLDOWN_MS = 5 * 60 * 1000
 let notificationSummaryMissingUntilMemory = 0
+let notificationSummaryRequestPromise = null
 
 function getNotificationSummaryFallback(extra = {}) {
   return {
@@ -308,28 +309,34 @@ export async function getSystemConfig() {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
 export async function getNotificationSummary() {
-  const missingUntil = readNotificationSummaryMissingUntil()
   return route('notifications:summary', async () => {
+    const missingUntil = readNotificationSummaryMissingUntil()
     if (missingUntil > Date.now()) {
       return getNotificationSummaryFallback({
         unavailable: true,
         cooldownUntil: missingUntil,
       })
     }
-    try {
-      const result = await apiFetch('GET', '/api/notifications/summary')
-      clearNotificationSummaryMissing()
-      return result
-    } catch (error) {
-      if (Number(error?.status) === 404) {
-        markNotificationSummaryMissing()
-        return getNotificationSummaryFallback({
-          unavailable: true,
-          cooldownUntil: readNotificationSummaryMissingUntil(),
-        })
+    if (notificationSummaryRequestPromise) return await notificationSummaryRequestPromise
+    notificationSummaryRequestPromise = (async () => {
+      try {
+        const result = await apiFetch('GET', '/api/notifications/summary')
+        clearNotificationSummaryMissing()
+        return result
+      } catch (error) {
+        if (Number(error?.status) === 404) {
+          markNotificationSummaryMissing()
+          return getNotificationSummaryFallback({
+            unavailable: true,
+            cooldownUntil: readNotificationSummaryMissingUntil(),
+          })
+        }
+        throw error
+      } finally {
+        notificationSummaryRequestPromise = null
       }
-      throw error
-    }
+    })()
+    return await notificationSummaryRequestPromise
   }, () => getNotificationSummaryFallback())
 }
 export async function getSystemDebugLog() {

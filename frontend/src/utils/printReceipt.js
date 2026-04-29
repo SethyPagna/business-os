@@ -137,6 +137,46 @@ async function inlineImageNodeSources(root) {
   }))
 }
 
+function extractUrlsFromCssValue(value) {
+  return Array.from(String(value || '').matchAll(/url\((['"]?)(.*?)\1\)/gi))
+    .map((match) => String(match[2] || '').trim())
+    .filter(Boolean)
+}
+
+async function inlineStyleAssetUrls(root) {
+  if (!root || !(root instanceof HTMLElement)) return
+  const nodes = [root, ...root.querySelectorAll('*')]
+  await Promise.all(nodes.map(async (node) => {
+    if (!(node instanceof HTMLElement)) return
+    const style = node.getAttribute('style') || ''
+    const urls = extractUrlsFromCssValue(style)
+    if (!urls.length) return
+
+    let nextStyle = style
+    for (const src of urls) {
+      if (/^data:/i.test(src)) continue
+      try {
+        const absoluteSrc = new URL(src, window.location.href).toString()
+        const response = await fetch(absoluteSrc, {
+          mode: 'cors',
+          credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
+        })
+        if (!response.ok) throw new Error(`Asset fetch failed with ${response.status}`)
+        const blob = await response.blob()
+        const dataUrl = await blobToDataUrl(blob)
+        nextStyle = nextStyle.split(src).join(dataUrl)
+      } catch (_) {
+        const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        nextStyle = nextStyle
+          .replace(new RegExp(`background-image\\s*:\\s*url\\((['"]?)${escaped}\\1\\)\\s*;?`, 'gi'), 'background-image:none;')
+          .replace(new RegExp(`background\\s*:[^;]*url\\((['"]?)${escaped}\\1\\)[^;]*;?`, 'gi'), 'background:none;')
+      }
+    }
+
+    node.setAttribute('style', nextStyle)
+  }))
+}
+
 function mmToPt(mm) {
   return mm * (72 / 25.4)
 }
@@ -343,6 +383,7 @@ async function renderElementToCanvas(element) {
   const cloned = cloneElementWithInlineStyles(element)
   if (!cloned) throw new Error('Receipt preview element is unavailable')
   await inlineImageNodeSources(cloned)
+  await inlineStyleAssetUrls(cloned)
   const markup = cloned.outerHTML
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
@@ -482,6 +523,15 @@ export async function createReceiptPdfBlob(content, options = {}) {
       await new Promise((resolve) => window.setTimeout(resolve, 180))
       return await renderPdfBlob()
     } catch (secondError) {
+      const fallbackLines = extractReceiptLines(content)
+      if (fallbackLines.length) {
+        const pdfBytes = buildTextOnlyPdf({
+          lines: fallbackLines,
+          pageWidthPt,
+          title,
+        })
+        return new Blob([pdfBytes], { type: 'application/pdf' })
+      }
       throw new Error(
         secondError?.message
         || firstError?.message
@@ -489,6 +539,24 @@ export async function createReceiptPdfBlob(content, options = {}) {
       )
     }
   }
+}
+
+function extractReceiptLines(content) {
+  if (typeof document === 'undefined') return []
+  let root = null
+  if (typeof HTMLElement !== 'undefined' && content instanceof HTMLElement) {
+    root = content.cloneNode(true)
+  } else {
+    const holder = document.createElement('div')
+    holder.innerHTML = String(content || '')
+    root = holder
+  }
+  const text = String(root?.innerText || root?.textContent || '')
+  const lines = text
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  return lines.length ? lines : ['Receipt preview', 'Open the PDF after it downloads to view or print it.']
 }
 
 export async function downloadReceiptPdf(content, options = {}) {

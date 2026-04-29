@@ -90,36 +90,36 @@ function CatalogMembershipSection(props) {
               subtitle={membershipData.customer?.name || ''}
             >
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('membership', 'Membership')}</div>
-                  <div className="mt-2 text-sm font-semibold text-slate-900">{membershipData.customer?.membership_number || '-'}</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{membershipData.customer?.membership_number || '-'}</div>
                 </div>
-                <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('memberSince', 'Member since')}</div>
-                  <div className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(membershipData.customer?.created_at)}</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{formatDateTime(membershipData.customer?.created_at)}</div>
                 </div>
                 {membershipData.customer?.phone ? (
-                  <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('phone', 'Phone')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{membershipData.customer.phone}</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{membershipData.customer.phone}</div>
                   </div>
                 ) : null}
                 {membershipData.customer?.email ? (
-                  <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('email', 'Email')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{membershipData.customer.email}</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{membershipData.customer.email}</div>
                   </div>
                 ) : null}
                 {membershipData.customer?.company ? (
-                  <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('company', 'Company')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{membershipData.customer.company}</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{membershipData.customer.company}</div>
                   </div>
                 ) : null}
                 {membershipData.customer?.notes ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 sm:col-span-2">
+                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/80 sm:col-span-2">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('note', 'Note')}</div>
-                    <div className="mt-2 text-sm text-slate-700">{membershipData.customer.notes}</div>
+                    <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{membershipData.customer.notes}</div>
                   </div>
                 ) : null}
               </div>
@@ -169,11 +169,11 @@ function CatalogMembershipSection(props) {
             <SectionShell title={copy('purchaseHistory', 'Purchase history')} subtitle={copy('readOnly', 'Read-only for customers')}>
               <div className="space-y-3">
                 {membershipData.sales?.length ? membershipData.sales.map((entry) => (
-                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-slate-900">{entry.receipt_number || `#${entry.id}`}</div>
-                        <div className="mt-1 text-xs text-slate-500">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{entry.receipt_number || `#${entry.id}`}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                           {formatDateTime(entry.created_at)}
                           {entry.branch_name ? ` | ${entry.branch_name}` : ''}
                         </div>
@@ -183,22 +183,22 @@ function CatalogMembershipSection(props) {
                     <div className="mt-3 grid gap-3">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('items', 'Items')}</div>
-                        <div className="mt-1 text-sm text-slate-700">{entry.items_summary || '-'}</div>
+                        <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{entry.items_summary || '-'}</div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('branchView', 'Branch view')}</div>
-                          <div className="mt-1 text-sm text-slate-700">{entry.branch_name || '-'}</div>
+                          <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{entry.branch_name || '-'}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('totalSales', 'Sales total')}</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900">{formatPortalPrice(entry.total_usd, entry.total_khr, previewConfig)}</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{formatPortalPrice(entry.total_usd, entry.total_khr, previewConfig)}</div>
                         </div>
                       </div>
                     </div>
                   </article>
                 )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
                     {copy('noSales', 'No sales found for this membership yet.')}
                   </div>
                 )}
@@ -208,11 +208,11 @@ function CatalogMembershipSection(props) {
             <SectionShell title={copy('returnHistory', 'Return history')} subtitle={copy('readOnly', 'Read-only for customers')}>
               <div className="space-y-3">
                 {membershipData.returns?.length ? membershipData.returns.map((entry) => (
-                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-slate-900">{entry.return_number || `#${entry.id}`}</div>
-                        <div className="mt-1 text-xs text-slate-500">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{entry.return_number || `#${entry.id}`}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                           {formatDateTime(entry.created_at)}
                           {entry.branch_name ? ` | ${entry.branch_name}` : ''}
                         </div>
@@ -222,22 +222,22 @@ function CatalogMembershipSection(props) {
                     <div className="mt-3 grid gap-3">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('items', 'Items')}</div>
-                        <div className="mt-1 text-sm text-slate-700">{entry.items_summary || '-'}</div>
+                        <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{entry.items_summary || '-'}</div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('reason', 'Reason')}</div>
-                          <div className="mt-1 text-sm text-slate-700">{entry.reason || '-'}</div>
+                          <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{entry.reason || '-'}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('refund', 'Refund')}</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900">{formatPortalPrice(entry.total_refund_usd, entry.total_refund_khr, previewConfig)}</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{formatPortalPrice(entry.total_refund_usd, entry.total_refund_khr, previewConfig)}</div>
                         </div>
                       </div>
                     </div>
                   </article>
                 )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
                     {copy('noReturns', 'No returns found for this membership yet.')}
                   </div>
                 )}
@@ -249,7 +249,7 @@ function CatalogMembershipSection(props) {
             <div className="grid gap-5 xl:grid-cols-[1.2fr,1fr]">
               <div className="space-y-4">
                 {previewConfig.submissionInstructions ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
                     <div className="font-semibold text-slate-900">{copy('submissionInstructions', 'Submission instructions')}</div>
                     <div className="mt-1">{previewConfig.submissionInstructions}</div>
                   </div>
@@ -264,9 +264,9 @@ function CatalogMembershipSection(props) {
                     <label htmlFor="portal-share-platform" className="block text-sm font-medium text-slate-700">{copy('sharePlatform', 'Platform')}</label>
                     <input id="portal-share-platform" name="share_platform" autoComplete="off" className="input" disabled={!previewConfig.submissionEnabled} value={submissionDraft.platform} placeholder={copy('sharePlatformPlaceholder', 'Facebook post, Instagram story, Telegram status...')} onChange={(event) => setSubmissionDraft((current) => ({ ...current, platform: event.target.value }))} />
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('shareStatus', 'Status')}</div>
-                    <div className="mt-2 font-medium text-slate-900">{copy('pending', 'Pending')}</div>
+                    <div className="mt-2 font-medium text-slate-900 dark:text-slate-100">{copy('pending', 'Pending')}</div>
                   </div>
                 </div>
                 <div>
@@ -295,7 +295,7 @@ function CatalogMembershipSection(props) {
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {submissionDraft.screenshots.map((image, index) => (
-                    <div key={`${image.slice(0, 24)}-${index}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <div key={`${image.slice(0, 24)}-${index}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/80">
                       <button
                         type="button"
                         className="block w-full"
@@ -305,7 +305,7 @@ function CatalogMembershipSection(props) {
                       </button>
                       <button
                         type="button"
-                        className="w-full border-t border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white"
+                        className="w-full border-t border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900/70"
                         onClick={() => setSubmissionDraft((current) => ({ ...current, screenshots: current.screenshots.filter((_, imageIndex) => imageIndex !== index) }))}
                       >
                         {copy('clearImage', 'Clear')}
@@ -317,13 +317,13 @@ function CatalogMembershipSection(props) {
 
               <div className="space-y-3">
                 {(membershipData?.submissions?.length || 0) ? membershipData.submissions.map((submission) => (
-                  <article key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <article key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-slate-900">{submission.platform || copy('shareProofs', 'Share & reward')}</div>
-                        <div className="mt-1 text-xs text-slate-500">{formatDateTime(submission.created_at)}</div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{submission.platform || copy('shareProofs', 'Share & reward')}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatDateTime(submission.created_at)}</div>
                       </div>
-                      <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                      <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-200">
                         {submission.status === 'approved'
                           ? copy('shareApproved', 'Approved')
                           : submission.status === 'rejected'
@@ -331,26 +331,26 @@ function CatalogMembershipSection(props) {
                             : copy('sharePending', 'Pending review')}
                       </div>
                     </div>
-                    {submission.note ? <p className="mt-3 text-sm text-slate-700">{submission.note}</p> : null}
+                    {submission.note ? <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">{submission.note}</p> : null}
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       {(submission.screenshots || []).map((image, index) => (
                         <button
                           key={`${submission.id}-${index}`}
                           type="button"
-                          className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                          className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
                           onClick={() => openPortalImage(submission.platform || copy('shareProofs', 'Share & reward'), submission.screenshots || [], index)}
                         >
                           <img src={image} alt={`submission-${submission.id}-${index + 1}`} className="h-28 w-full object-cover" />
                         </button>
                       ))}
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
                       <span>{copy('shareReward', 'Reward')}: {(submission.reward_points || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts</span>
                       {submission.review_note ? <span>{copy('shareReviewNote', 'Review note')}: {submission.review_note}</span> : null}
                     </div>
                   </article>
                 )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
                     {copy('noSubmissions', 'No share submissions yet.')}
                   </div>
                 )}
@@ -379,12 +379,12 @@ function CatalogAboutSection(props) {
     >
       <div className="grid gap-4 lg:grid-cols-2">
         {previewConfig.aboutContent ? (
-          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6">
-            <p className="whitespace-pre-line text-sm leading-7 text-slate-700">{previewConfig.aboutContent}</p>
+          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
+            <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{previewConfig.aboutContent}</p>
           </div>
         ) : null}
         {previewConfig.aboutBlocks?.length ? previewConfig.aboutBlocks.map((block) => (
-          <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
             {block.mediaUrl ? (
               <button
                 type="button"
@@ -399,20 +399,20 @@ function CatalogAboutSection(props) {
               </button>
             ) : null}
             <div className="space-y-3 p-6">
-              {block.title ? <h3 className="text-lg font-semibold text-slate-900">{block.title}</h3> : null}
-              {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700">{block.body}</p> : null}
+              {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{block.title}</h3> : null}
+              {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{block.body}</p> : null}
             </div>
           </div>
         )) : null}
         {mapEmbedUrl ? (
-          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 <MapPin className="h-4 w-4" />
               </span>
               <div>
-                <div className="text-sm font-semibold text-slate-900">{copy('mapCard', 'Store map')}</div>
-                {addressFact?.value ? <div className="text-xs text-slate-500">{addressFact.value}</div> : null}
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{copy('mapCard', 'Store map')}</div>
+                {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-slate-400">{addressFact.value}</div> : null}
               </div>
             </div>
             <iframe
@@ -425,8 +425,8 @@ function CatalogAboutSection(props) {
           </div>
         ) : null}
         {!previewConfig.aboutContent && !previewConfig.aboutBlocks?.length && !mapEmbedUrl ? (
-          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6">
-            <p className="text-sm text-slate-500">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
+          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
           </div>
         ) : null}
       </div>
@@ -458,7 +458,7 @@ function CatalogFaqSection(props) {
             ? 'bg-cyan-100 text-cyan-700'
             : 'bg-amber-100 text-amber-700'
           return (
-            <article key={item.id || index} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm ${accentClass}`}>
+            <article key={item.id || index} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-800 ${accentClass}`}>
               <button
                 type="button"
                 className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"
@@ -469,17 +469,17 @@ function CatalogFaqSection(props) {
                     <HelpCircle className="h-4 w-4" />
                   </span>
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{copy('faq', 'FAQ')}</div>
-                    <div className="mt-1 text-sm font-semibold leading-6 text-slate-900">{item.question}</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{copy('faq', 'FAQ')}</div>
+                    <div className="mt-1 text-sm font-semibold leading-6 text-slate-900 dark:text-slate-100">{item.question}</div>
                   </div>
                 </div>
-                <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+                <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
               </button>
-              {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700">{item.answer}</div> : null}
+              {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-slate-700 dark:text-slate-300">{item.answer}</div> : null}
             </article>
           )
         }) : (
-          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 sm:col-span-2">
+          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400 sm:col-span-2">
             {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
           </div>
         )}
@@ -524,7 +524,7 @@ function CatalogAiSection(props) {
     >
       <div className="space-y-4">
         <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand')}</label>
@@ -577,14 +577,14 @@ function CatalogAiSection(props) {
           </div>
 
           <div className="space-y-3">
-            <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-600">
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300">
               {replaceVars(copy('assistantUsageCompact', '{users} user(s) are using this right now. Each visitor can send {searches} search(es) per minute.'), {
                 users: aiUsageSummary?.activeVisitors || 1,
                 searches: assistantRequestPolicy?.perUserPerMinute || aiUsageSummary?.perUserPerMinute || 1,
               })}
             </div>
 
-            <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900">
+            <div className="rounded-[28px] border border-amber-200 bg-amber-50 px-4 py-4 text-xs leading-6 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
               {previewConfig.aiDisclaimer || copy('assistantNotice', 'AI generated, for reference only.')}
             </div>
           </div>
@@ -593,15 +593,15 @@ function CatalogAiSection(props) {
         {assistantError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{assistantError}</div> : null}
 
         {assistantResponse?.summary ? (
-          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+          <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantResults', 'Suggested matches')}</div>
-            <p className="mt-2 text-sm leading-7 text-slate-700">{assistantResponse.summary}</p>
+            <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">{assistantResponse.summary}</p>
             {assistantResponse.followUpQuestions?.length ? (
               <div className="mt-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {assistantResponse.followUpQuestions.map((question) => (
-                    <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm" onClick={() => setAssistantQuestion(question)}>
+                    <button key={question} type="button" className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-200" onClick={() => setAssistantQuestion(question)}>
                       {question}
                     </button>
                   ))}
@@ -616,7 +616,7 @@ function CatalogAiSection(props) {
             {assistantResponse.recommendations.map((item) => {
               const open = assistantExpandedProductId === item.product_id
               return (
-                <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
                   <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
                     {item.image_path ? (
                       <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
@@ -627,29 +627,29 @@ function CatalogAiSection(props) {
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-slate-900">{item.name}</div>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">{item.brand || 'No brand'}</span>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.name}</div>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-200">{item.brand || 'No brand'}</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">{item.category || 'No category'} | {previewConfig.priceDisplay === 'KHR' ? `${item.selling_price_khr || 0} KHR` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
-                      {item.reason ? <div className="mt-2 text-sm text-slate-600">{item.reason}</div> : null}
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.category || 'No category'} | {previewConfig.priceDisplay === 'KHR' ? `${item.selling_price_khr || 0} KHR` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
+                      {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">{item.reason}</div> : null}
                     </div>
-                    <span className="rounded-full bg-slate-100 p-2 text-slate-500">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+                    <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-slate-800 dark:text-slate-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
                   </button>
                   {open ? (
-                    <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700">
-                      {item.fit_summary ? <div><span className="font-semibold text-slate-900">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
-                      {item.how_to_use ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantUse', 'How to use')}:</span> {item.how_to_use}</div> : null}
-                      {item.cautions ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantCaution', 'Caution')}:</span> {item.cautions}</div> : null}
-                      {item.ingredients_focus?.length ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantIngredients', 'Ingredients focus')}:</span> {item.ingredients_focus.join(', ')}</div> : null}
-                      {item.online_review_summary ? <div className="mt-2"><span className="font-semibold text-slate-900">{copy('assistantReviews', 'Online review summary')}:</span> {item.online_review_summary}</div> : null}
+                    <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700 dark:border-slate-800 dark:text-slate-300">
+                      {item.fit_summary ? <div><span className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</div> : null}
+                      {item.how_to_use ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantUse', 'How to use')}:</span> {item.how_to_use}</div> : null}
+                      {item.cautions ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantCaution', 'Caution')}:</span> {item.cautions}</div> : null}
+                      {item.ingredients_focus?.length ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantIngredients', 'Ingredients focus')}:</span> {item.ingredients_focus.join(', ')}</div> : null}
+                      {item.online_review_summary ? <div className="mt-2"><span className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantReviews', 'Online review summary')}:</span> {item.online_review_summary}</div> : null}
                       {item.online_references?.length ? (
                         <div className="mt-3">
-                          <div className="font-semibold text-slate-900">{copy('assistantEvidence', 'Online references')}:</div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">{copy('assistantEvidence', 'Online references')}:</div>
                           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                             {item.online_references.map((reference, index) => (
                               <li key={`${item.product_id}-${index}`}>
                                 {reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline">{reference.title || reference.url}</a> : (reference.title || reference.snippet || 'Reference')}
-                                {reference.snippet ? <span className="text-slate-500"> - {reference.snippet}</span> : null}
+                                {reference.snippet ? <span className="text-slate-500 dark:text-slate-400"> - {reference.snippet}</span> : null}
                               </li>
                             ))}
                           </ul>

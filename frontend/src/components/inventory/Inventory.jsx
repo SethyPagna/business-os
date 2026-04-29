@@ -503,10 +503,17 @@ export default function Inventory() {
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   const buildInventoryStatsRows = useCallback(() => ([
+    { Section: 'Inventory Stats', Metric: 'View Tab', Value: tab },
     { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
     { Section: 'Inventory Stats', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
     { Section: 'Inventory Stats', Metric: 'Stock Filter', Value: stockFilter },
     { Section: 'Inventory Stats', Metric: 'Search', Value: search || '' },
+    { Section: 'Inventory Stats', Metric: 'Movement Year Filter', Value: movementYearFilter },
+    { Section: 'Inventory Stats', Metric: 'Movement Month Filter', Value: movementMonthFilter },
+    { Section: 'Inventory Stats', Metric: 'Movement Type Filter', Value: movFilter },
+    { Section: 'Inventory Stats', Metric: 'Movement Group Mode', Value: movementGroupMode },
+    { Section: 'Inventory Stats', Metric: 'Movement Sort Direction', Value: movementSortDirection },
+    { Section: 'Inventory Stats', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
     { Section: 'Inventory Stats', Metric: 'Visible Products', Value: filteredSummary.length },
     { Section: 'Inventory Stats', Metric: 'Total Products', Value: totalProducts },
     { Section: 'Inventory Stats', Metric: 'Low Stock Count', Value: lowStockCount },
@@ -528,11 +535,17 @@ export default function Inventory() {
     brandFilter,
     filteredSummary.length,
     lowStockCount,
+    movFilter,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementYearFilter,
     outStockCount,
     returnStats?.count,
     returnStats?.refund_usd,
     search,
     stockFilter,
+    tab,
     taxDelivery.delivery,
     taxDelivery.tax,
     totalCOGS,
@@ -543,6 +556,7 @@ export default function Inventory() {
     totalRevenue,
     totalStoreDiscounts,
     totalValue,
+    visibleMovementGroups.length,
   ])
 
   const buildMovementFilterRows = useCallback(() => ([

@@ -960,11 +960,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       } catch (e) { errors.push(`${p.name || '?'}: ${e.message}`) }
     }
     if (brandsChanged) {
-      const cleanBrands = Array.from(new Set(
-        brandOptions
-          .map((value) => String(value || '').trim())
-          .filter(Boolean)
-      ))
+      const cleanBrandMap = new Map()
+      brandOptions
+        .map((value) => String(value || '').trim().replace(/\s+/g, ' '))
+        .filter(Boolean)
+        .forEach((value) => {
+          const lookup = normalizeLookup(value)
+          if (!cleanBrandMap.has(lookup)) cleanBrandMap.set(lookup, value)
+        })
+      const cleanBrands = Array.from(cleanBrandMap.values()).sort((left, right) => left.localeCompare(right))
       upsertSetting.run('product_brand_options', JSON.stringify(cleanBrands))
     }
   })()

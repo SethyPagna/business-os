@@ -79,7 +79,7 @@ export default function ManageBrandsModal({
   const addLibraryBrand = async () => {
     const clean = toTitleCase(newBrand)
     if (!clean) return
-    if (brandsWithUsage.some((entry) => entry.name.toLowerCase() === clean.toLowerCase())) {
+    if (brandsWithUsage.some((entry) => normalizeLookup(entry.name) === normalizeLookup(clean))) {
       setError('Brand already exists')
       return
     }
@@ -104,11 +104,6 @@ export default function ManageBrandsModal({
     if (!from || !to) return
     const fromLookup = normalizeLookup(from)
     const toLookup = normalizeLookup(to)
-    if (fromLookup === toLookup) {
-      setRenamingBrand('')
-      setRenameValue('')
-      return
-    }
 
     setBusy(true)
     setError('')
@@ -117,13 +112,17 @@ export default function ManageBrandsModal({
         const brandLookup = normalizeLookup(product?.brand)
         return brandLookup === fromLookup || brandLookup === toLookup
       })
-      for (const product of affected) {
-        await window.api.updateProduct(product.id, {
-          ...product,
-          brand: to,
-          userId: user?.id,
-          userName: user?.name,
-        })
+      const chunkSize = 20
+      for (let index = 0; index < affected.length; index += chunkSize) {
+        const chunk = affected.slice(index, index + chunkSize)
+        await Promise.all(chunk.map((product) => (
+          window.api.updateProduct(product.id, {
+            ...product,
+            brand: to,
+            userId: user?.id,
+            userName: user?.name,
+          })
+        )))
       }
 
       const nextLibrary = [...libraryBrands, to]

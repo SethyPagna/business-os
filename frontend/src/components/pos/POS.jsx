@@ -1233,7 +1233,7 @@ export default function POS() {
                     <div className="flex gap-2 items-center">
                       <div className="relative flex-1">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
-                        <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} />
+                        <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} autoComplete="off" />
                       </div>
                       {feeUsd > 0 && <span className="text-xs text-gray-400 whitespace-nowrap">= {fmtKHR(feeKhr)}</span>}
                     </div>
@@ -1241,7 +1241,7 @@ export default function POS() {
 
                   {/* Who pays the fee */}
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">{t('fee_paid_by')||'Fee paid by'}</label>
+                    <div className="text-xs text-gray-400 block mb-1">{t('fee_paid_by')||'Fee paid by'}</div>
                     <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
                       <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER })} className={`flex-1 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_customer')||'Customer'}</button>
                       <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.STORE })}    className={`flex-1 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.STORE    ? 'bg-blue-600 text-white'   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_store')||'Store'}</button>
@@ -1265,13 +1265,13 @@ export default function POS() {
               <div>
                 <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
                 <div className="grid grid-cols-2 gap-1 mt-1">
-                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} /></div>
-                  <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
+                  <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs text-gray-500 font-medium">{posCopy('Membership discount')}</label>
+                <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount')}</div>
                 <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
                   {!active.customer?.membership_number ? (
                     <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.')}</p>
@@ -1332,7 +1332,7 @@ export default function POS() {
 
               {/* Payment method */}
               <div>
-                <label className="text-xs text-gray-500 font-medium">{t('payment_method')}</label>
+                <div className="text-xs text-gray-500 font-medium">{t('payment_method')}</div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {((() => { try { const p=JSON.parse(settings.pos_payment_methods||'[]'); return p.length?p:['Cash','Card','ABA Bank','Wing','KHQR','Pi Pay','Transfer'] } catch { return ['Cash','Card','ABA Bank','Wing','KHQR','Pi Pay','Transfer'] } })()).map(m => (
                     <button key={m} onClick={() => patchActive({ paymentMethod: m, customPayment: false })}

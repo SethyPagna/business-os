@@ -101,12 +101,12 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
         {ps.paperSize === 'custom' ? (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_width_mm', 'Width (mm)')}</label>
-              <input className="input text-sm" type="number" min="30" max="300" value={ps.customWidth || '80'} onChange={(event) => setValue('customWidth', event.target.value)} />
+              <label htmlFor="print-custom-width" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_width_mm', 'Width (mm)')}</label>
+              <input id="print-custom-width" name="print_custom_width" autoComplete="off" className="input text-sm" type="number" min="30" max="300" value={ps.customWidth || '80'} onChange={(event) => setValue('customWidth', event.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_height_mm', 'Height (mm)')}</label>
-              <input className="input text-sm" type="number" min="50" max="1000" value={ps.customHeight || '297'} onChange={(event) => setValue('customHeight', event.target.value)} />
+              <label htmlFor="print-custom-height" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{T('print_height_mm', 'Height (mm)')}</label>
+              <input id="print-custom-height" name="print_custom_height" autoComplete="off" className="input text-sm" type="number" min="50" max="1000" value={ps.customHeight || '297'} onChange={(event) => setValue('customHeight', event.target.value)} />
             </div>
           </div>
         ) : null}
@@ -121,8 +121,8 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
             ['marginLeft', T('print_left', 'Left')],
           ].map(([key, label]) => (
             <div key={key}>
-              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{label}</label>
-              <input className="input text-sm" type="number" min="0" max="30" value={ps[key] || '4'} onChange={(event) => setValue(key, event.target.value)} />
+              <label htmlFor={`print-${key}`} className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{label}</label>
+              <input id={`print-${key}`} name={`print_${key}`} autoComplete="off" className="input text-sm" type="number" min="0" max="30" value={ps[key] || '4'} onChange={(event) => setValue(key, event.target.value)} />
             </div>
           ))}
         </div>

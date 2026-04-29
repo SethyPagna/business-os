@@ -8,6 +8,34 @@ const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 
 const router = express.Router()
 
+function normalizeLookup(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeBrandOptionsValue(rawValue) {
+  if (rawValue === undefined || rawValue === null) return rawValue
+  let parsed = rawValue
+  if (typeof rawValue === 'string') {
+    try {
+      parsed = JSON.parse(rawValue)
+    } catch (_) {
+      return rawValue
+    }
+  }
+  if (!Array.isArray(parsed)) return rawValue
+  const normalized = new Map()
+  parsed
+    .map((entry) => String(entry || '').trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .forEach((entry) => {
+      const key = normalizeLookup(entry)
+      if (!normalized.has(key)) normalized.set(key, entry)
+    })
+  return JSON.stringify(
+    Array.from(normalized.values()).sort((left, right) => left.localeCompare(right)),
+  )
+}
+
 function settingsHasUpdatedAt() {
   try {
     const columns = db.prepare(`PRAGMA table_info(settings)`).all()
@@ -71,7 +99,12 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
 
       Object.entries(updates)
         .filter(([k]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(k))
-        .forEach(([k, v]) => upsert.run(k, String(v)))
+        .forEach(([k, v]) => {
+          const normalizedValue = k === 'product_brand_options'
+            ? normalizeBrandOptionsValue(v)
+            : v
+          upsert.run(k, String(normalizedValue))
+        })
     })()
     const updatedAt = getSettingsUpdatedAt()
     logOp('settings:set', Date.now() - t0)

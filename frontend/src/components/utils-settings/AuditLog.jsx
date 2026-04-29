@@ -163,6 +163,7 @@ export default function AuditLog() {
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
   const aliveRef = useRef(true)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
@@ -228,6 +229,12 @@ export default function AuditLog() {
     if (!silent && aliveRef.current) {
       setLoading(true)
       setError(null)
+      if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
+      loadWatchdogRef.current = window.setTimeout(() => {
+        if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId) || loadedOnceRef.current) return
+        setLoading(false)
+        setError('Audit log is taking longer than expected. Tap Refresh to try again.')
+      }, 15000)
     }
     try {
       const data = await withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
@@ -242,6 +249,10 @@ export default function AuditLog() {
       }
     } finally {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (loadWatchdogRef.current) {
+        window.clearTimeout(loadWatchdogRef.current)
+        loadWatchdogRef.current = null
+      }
       loadedOnceRef.current = true
       if (!silent) setLoading(false)
     }
@@ -264,6 +275,10 @@ export default function AuditLog() {
 
   useEffect(() => () => {
     aliveRef.current = false
+    if (loadWatchdogRef.current) {
+      window.clearTimeout(loadWatchdogRef.current)
+      loadWatchdogRef.current = null
+    }
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
@@ -398,16 +413,8 @@ export default function AuditLog() {
     [isSelectionScopeFullySelected, selectedIds],
   )
 
-  const rowNumberById = useMemo(() => {
-    const next = new Map()
-    orderedLogs.forEach((log, index) => {
-      next.set(log.id, index + 1)
-    })
-    return next
-  }, [orderedLogs])
-
   function sessionEntryLabel(log) {
-    return `#${rowNumberById.get(log.id) || 0}`
+    return `#${Number(log?.id || 0)}`
   }
 
   const exportRows = useCallback((rows, prefix = 'audit-log') => {
@@ -421,7 +428,7 @@ export default function AuditLog() {
       Timezone: log.device_tz || '',
       Summary: readableSummary(log) || '',
     })))
-  }, [actionLabel, rowNumberById])
+  }, [actionLabel])
 
   const exportItems = useMemo(() => ([
     { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },

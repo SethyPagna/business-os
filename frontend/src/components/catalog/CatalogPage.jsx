@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilePickerModal from '../files/FilePickerModal'
+import PortalMenu from '../shared/PortalMenu'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import {
   beginTrackedRequest,
@@ -1363,18 +1364,43 @@ function applyGoogleTranslateSelection(sourceLang, targetLang) {
   const cookieValue = target === 'original' || target === from
     ? `/${from}/${from}`
     : `/${from}/${target}`
-  document.cookie = `googtrans=${cookieValue}; path=/`
+  document.cookie = `googtrans=${cookieValue}; path=/; SameSite=Lax`
   try {
     window.localStorage?.setItem('business-os:portal-translate-target', target)
   } catch (_) {}
 
-  const select = document.querySelector('.goog-te-combo')
-  if (!select) return false
+  const selects = Array.from(document.querySelectorAll('.goog-te-combo'))
+  if (!selects.length) return false
   const nextValue = target === 'original' ? from : target
-  if (String(select.value || '').toLowerCase() === nextValue) return true
-  select.value = nextValue
-  select.dispatchEvent(new Event('change', { bubbles: true }))
+  selects.forEach((select) => {
+    if (String(select.value || '').toLowerCase() === nextValue) return
+    select.value = nextValue
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   return true
+}
+
+function readStoredTranslateTarget(sourceLang) {
+  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
+  if (typeof document !== 'undefined') {
+    const cookie = document.cookie
+      .split(';')
+      .map((entry) => entry.trim())
+      .find((entry) => entry.startsWith('googtrans='))
+    if (cookie) {
+      const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
+      const parts = cookieValue.split('/').filter(Boolean)
+      const target = String(parts[1] || '').trim().toLowerCase()
+      if (target && target !== from) return target
+    }
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = String(window.localStorage?.getItem('business-os:portal-translate-target') || '').trim().toLowerCase()
+      if (stored) return stored
+    } catch (_) {}
+  }
+  return 'original'
 }
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
@@ -1416,8 +1442,7 @@ export default function CatalogPage({ publicView = false }) {
   const [reviewSavingId, setReviewSavingId] = useState(null)
   const [aiProviders, setAiProviders] = useState([])
   const [translateReady, setTranslateReady] = useState(false)
-  const [translateTarget, setTranslateTarget] = useState('original')
-  const [mobileHeroToolsOpen, setMobileHeroToolsOpen] = useState(false)
+  const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
   const [productGalleryView, setProductGalleryView] = useState({ open: false, title: '', items: [], index: 0 })
   const [portalImageView, setPortalImageView] = useState({ open: false, title: '', images: [], index: 0 })
   const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
@@ -1594,8 +1619,13 @@ export default function CatalogPage({ publicView = false }) {
     const applied = applyGoogleTranslateSelection(language, nextTarget)
     if (!applied && typeof window !== 'undefined') {
       window.setTimeout(() => {
-        applyGoogleTranslateSelection(language, nextTarget)
+        const retryApplied = applyGoogleTranslateSelection(language, nextTarget)
+        if (!retryApplied) window.location.reload()
       }, 180)
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => window.location.reload(), 140)
     }
   }
 
@@ -1829,6 +1859,11 @@ export default function CatalogPage({ publicView = false }) {
   }, [publicView, previewConfig.translateWidgetEnabled, language])
 
   useEffect(() => {
+    if (!publicView || !previewConfig.translateWidgetEnabled) return
+    setTranslateTarget(readStoredTranslateTarget(language))
+  }, [language, previewConfig.translateWidgetEnabled, publicView])
+
+  useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || typeof window === 'undefined' || typeof document === 'undefined') {
       return undefined
     }
@@ -1839,6 +1874,7 @@ export default function CatalogPage({ publicView = false }) {
     const initWidget = () => {
       if (cancelled || !window.google?.translate?.TranslateElement) return
       try {
+        setTranslateReady(false)
         container.innerHTML = ''
         window.google.translate.TranslateElement(
           {
@@ -1852,7 +1888,19 @@ export default function CatalogPage({ publicView = false }) {
           },
           'business-os-portal-translate-widget',
         )
-        setTranslateReady(true)
+        let widgetChecks = 0
+        const waitForWidget = () => {
+          if (cancelled) return
+          const combo = container.querySelector('.goog-te-combo')
+          if (combo) {
+            setTranslateReady(true)
+            return
+          }
+          widgetChecks += 1
+          if (widgetChecks >= 80) return
+          window.setTimeout(waitForWidget, 120)
+        }
+        waitForWidget()
       } catch (_) {}
     }
 
@@ -3524,7 +3572,7 @@ export default function CatalogPage({ publicView = false }) {
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
-  const showHeroToolsPanel = publicView && previewConfig.translateWidgetEnabled
+  const showHeroToolsPanel = publicView
   const showPortalToolsBar = false
 
   return (
@@ -3615,13 +3663,18 @@ export default function CatalogPage({ publicView = false }) {
                     {previewTitle ? (
                       <h1
                         className="notranslate mt-5 font-semibold tracking-tight text-white"
-                        style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05 }}
+                        style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
                         translate="no"
                       >
                         {previewTitle}
                       </h1>
                     ) : null}
-                    <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-100 sm:text-base">{previewConfig.intro}</p>
+                    <p
+                      className="mt-3 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base"
+                      style={{ textShadow: '0 6px 18px rgba(15, 23, 42, 0.28)' }}
+                    >
+                      {previewConfig.intro}
+                    </p>
 
                     {businessFacts.length || socialLinks.length ? (
                       <div className="mt-5 flex flex-wrap gap-2">
@@ -3634,11 +3687,11 @@ export default function CatalogPage({ publicView = false }) {
                             </>
                           )
                           return item.href ? (
-                            <a key={item.key} href={item.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/15">
+                            <a key={item.key} href={item.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm transition hover:bg-slate-950/50">
                               {content}
                             </a>
                           ) : (
-                            <span key={item.key} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90">
+                            <span key={item.key} className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm">
                               {content}
                             </span>
                           )
@@ -3651,7 +3704,7 @@ export default function CatalogPage({ publicView = false }) {
                               href={item.value}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/15"
+                              className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm transition hover:bg-slate-950/50"
                             >
                               <Icon className="h-4 w-4" />
                               {item.label}
@@ -3662,54 +3715,65 @@ export default function CatalogPage({ publicView = false }) {
                     ) : null}
                   </div>
                   {showHeroToolsPanel ? (
-                    <div className="w-full lg:w-[320px] xl:w-[360px]">
-                      <div className="overflow-hidden rounded-3xl border border-white/15 bg-slate-900/35 shadow-xl backdrop-blur">
+                    <div className="flex w-full items-start justify-end lg:w-auto">
+                      <div className="flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/35 px-2 py-2 shadow-xl backdrop-blur">
+                        {previewConfig.translateWidgetEnabled ? (
+                          <PortalMenu
+                            align="right"
+                            trigger={(
+                              <button
+                                type="button"
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
+                                aria-label={copy('publicTranslation', 'Language tools')}
+                                title={copy('publicTranslation', 'Language tools')}
+                              >
+                                <Globe className="h-4 w-4" />
+                              </button>
+                            )}
+                            content={({ closeMenu }) => (
+                              <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
+                                <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                  {copy('publicTranslation', 'Language tools')}
+                                </div>
+                                {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => {
+                                  const active = translateTarget === option.value
+                                  return (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                        active
+                                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                          : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                                      }`}
+                                      onClick={() => {
+                                        changeTranslateTarget(option.value)
+                                        closeMenu()
+                                      }}
+                                    >
+                                      <span>{option.value === 'original' ? copy('followApp', 'Original') : option.label}</span>
+                                      {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                    </button>
+                                  )
+                                })}
+                                {!translateReady ? (
+                                  <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                                    {copy('preparingTranslations', 'Preparing translation tools...')}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          />
+                        ) : null}
                         <button
                           type="button"
-                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left lg:cursor-default" aria-expanded={mobileHeroToolsOpen}
-                          onClick={() => setMobileHeroToolsOpen((current) => !current)}
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
+                          onClick={toggleTheme}
+                          aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                          title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                         >
-                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
-                            <Globe className="h-4 w-4" />
-                            {copy('publicTranslation', 'Language tools')}
-                          </div>
-                          <span className="text-xs text-white/70 lg:hidden">{mobileHeroToolsOpen ? copy('showLess', 'Hide') : copy('viewMore', 'Open')}</span>
+                          {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                         </button>
-                        <div className={`${mobileHeroToolsOpen ? 'block' : 'hidden'} border-t border-white/15 px-4 py-3 lg:block`}>
-                          {publicView && previewConfig.translateWidgetEnabled ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/90">
-                              <div className="flex items-center gap-2">
-                                <label className="block min-w-0 flex-1">
-                                  <span className="sr-only">{copy('language', 'Portal language')}</span>
-                                  <select
-                                    id="portal-language-tools-hero"
-                                    name="portal_language_tools"
-                                    className="w-full rounded-xl border border-white/20 bg-slate-950/30 px-3 py-2 text-sm text-white outline-none"
-                                    value={translateTarget}
-                                    onChange={(event) => changeTranslateTarget(event.target.value)}
-                                  >
-                                    {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => (
-                                      <option key={option.value} value={option.value} className="text-slate-900">
-                                        {option.value === 'original' ? copy('followApp', 'Original') : option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <button
-                                  type="button"
-                                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-slate-950/30 text-white transition hover:bg-slate-950/45"
-                                  onClick={toggleTheme}
-                                  aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                                  title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                                >
-                                  {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                                </button>
-                              </div>
-                              {!translateReady ? <div className="mt-2 text-xs text-white/70">{copy('preparingTranslations', 'Preparing translation tools...')}</div> : null}
-                              <div className="mt-2 text-xs text-white/70">{copy('publicTranslation', 'Language tools')}</div>
-                            </div>
-                          ) : null}
-                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -3719,7 +3783,7 @@ export default function CatalogPage({ publicView = false }) {
 
               {showPortalToolsBar ? (
                 <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-8">
-                  <div className="flex justify-end">
+                  <div className="portal-tools-bar flex flex-col items-end gap-2">
                     <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                       <Globe className="h-4 w-4 shrink-0 text-slate-500" />
                       <select
@@ -3736,33 +3800,39 @@ export default function CatalogPage({ publicView = false }) {
                         ))}
                       </select>
                     </label>
+                    <div
+                      id="business-os-portal-translate-widget"
+                      className="notranslate"
+                      translate="no"
+                    />
                   </div>
                 </div>
               ) : null}
 
-              {publicView && previewConfig.translateWidgetEnabled ? (
+              {previewConfig.translateWidgetEnabled ? (
                 <div
                   aria-hidden="true"
                   style={{
-                    position: 'absolute',
-                    left: '-9999px',
-                    top: '0',
-                    width: '1px',
-                    height: '1px',
+                    position: 'fixed',
+                    left: '12px',
+                    bottom: '12px',
+                    width: '180px',
+                    height: '44px',
                     overflow: 'hidden',
-                    opacity: 0,
+                    opacity: 0.01,
                     pointerEvents: 'none',
+                    zIndex: -1,
                   }}
                 >
-                  <div id="business-os-portal-translate-widget" />
+                  <div id="business-os-portal-translate-widget" className="notranslate" translate="no" />
                 </div>
               ) : null}
 
-              <div className="border-t border-slate-200 bg-white px-6 py-4 sm:px-8">
+              <div className="border-t border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-900/95 sm:px-8">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                   {previewConfig.showCatalog ? (
                     <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('products')}
                     >
                       <ShoppingBag className="h-4 w-4" />
@@ -3771,7 +3841,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showMembership ? (
                     <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('membership')}
                     >
                       <Ticket className="h-4 w-4" />
@@ -3780,7 +3850,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showAbout ? (
                     <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('about')}
                     >
                       <Store className="h-4 w-4" />
@@ -3789,7 +3859,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.showFaq ? (
                     <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('faq')}
                     >
                       <HelpCircle className="h-4 w-4" />
@@ -3798,7 +3868,7 @@ export default function CatalogPage({ publicView = false }) {
                   ) : null}
                   {previewConfig.aiEnabled ? (
                     <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('ai')}
                     >
                       <Bot className="h-4 w-4" />

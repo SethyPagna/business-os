@@ -26,7 +26,7 @@ export function SectionShell({ title, subtitle, action, children }) {
 export function SummaryTile({ icon: Icon, label, value, tone }) {
   const tones = {
     blue: 'from-sky-600 to-blue-700 text-white',
-    dark: 'from-slate-900 to-slate-700 text-white',
+    dark: 'from-slate-900 to-slate-700 text-white dark:from-slate-800 dark:to-slate-950',
     green: 'from-emerald-600 to-teal-600 text-white',
     amber: 'from-amber-500 to-orange-500 text-white',
   }

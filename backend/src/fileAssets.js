@@ -2,7 +2,6 @@
 
 const fs = require('fs')
 const path = require('path')
-const crypto = require('crypto')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
@@ -87,9 +86,12 @@ function buildUniqueStoredName(originalName = '') {
   ensureUploadsDirectory()
   const safeName = sanitizeOriginalFileName(originalName)
   const ext = path.extname(safeName) || '.bin'
-  let candidate = `${crypto.randomUUID()}${ext}`
+  const base = path.basename(safeName, ext) || 'file'
+  let candidate = `${base}${ext}`
+  let suffix = 2
   while (fs.existsSync(path.join(UPLOADS_PATH, candidate))) {
-    candidate = `${crypto.randomUUID()}${ext}`
+    candidate = `${base}-${suffix}${ext}`
+    suffix += 1
   }
   return candidate
 }
