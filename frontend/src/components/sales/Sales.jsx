@@ -82,6 +82,7 @@ export default function Sales() {
   const loadRequestRef = useRef(0)
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
+  const aliveRef = useRef(true)
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -90,26 +91,25 @@ export default function Sales() {
   }, [settings?.language, t])
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
 
-  const loadSales = useCallback((silent = false) => {
+  const loadSales = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoading(true)
-    return withLoaderTimeout(() => window.api.getSales(), 'Sales')
-      .then((result) => {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        if (Array.isArray(result)) {
-          setSales(result)
-          loadedOnceRef.current = true
-          return
-        }
-      })
-      .catch((error) => {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        console.error('[Sales] load failed:', error.message)
-        if (!silent) setSales([])
-      })
-      .finally(() => {
-        if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
-      })
+    if (!silent && aliveRef.current) setLoading(true)
+    try {
+      const result = await withLoaderTimeout(() => window.api.getSales(), 'Sales')
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (Array.isArray(result)) {
+        setSales(result)
+        loadedOnceRef.current = true
+      }
+    } catch (error) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      console.error('[Sales] load failed:', error.message)
+      if (!silent) setSales([])
+    } finally {
+      if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
+        setLoading(false)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -124,7 +124,10 @@ export default function Sales() {
     if (page !== 'sales' || !syncChannel) return
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
   }, [page, syncChannel, loadSales])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
   const handleStatusChange = async (saleId, newStatus, notes) => {
     const numericId = Number(saleId)
