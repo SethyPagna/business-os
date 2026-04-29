@@ -23,8 +23,10 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
   const setupRequestRef = useRef(0)
   const actionRequestRef = useRef(0)
   const actionInFlightRef = useRef(false)
+  const aliveRef = useRef(true)
 
   useEffect(() => () => {
+    aliveRef.current = false
     invalidateTrackedRequest(setupRequestRef)
     invalidateTrackedRequest(actionRequestRef)
   }, [])
@@ -42,9 +44,10 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
     setSecret(null)
     const requestId = beginTrackedRequest(setupRequestRef)
 
-    withLoaderTimeout(() => window.api.otpSetup({ userId }), 'OTP setup')
-      .then((result) => {
-        if (!isTrackedRequestCurrent(setupRequestRef, requestId)) return
+    async function loadSetup() {
+      try {
+        const result = await withLoaderTimeout(() => window.api.otpSetup({ userId }), 'OTP setup')
+        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
         if (result?.success) {
           setQrDataUrl(result.qrDataUrl || null)
           setSecret(result.secret || null)
@@ -53,12 +56,14 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         }
         setError(result?.error || 'Setup failed')
         setStep('error')
-      })
-      .catch((setupError) => {
-        if (!isTrackedRequestCurrent(setupRequestRef, requestId)) return
+      } catch (setupError) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
         setError(setupError?.message || 'Setup failed')
         setStep('error')
-      })
+      }
+    }
+
+    loadSetup()
 
     return () => {
       invalidateTrackedRequest(setupRequestRef)
@@ -81,17 +86,17 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         () => window.api.otpConfirm({ userId, token: code }),
         'OTP confirmation',
       )
-      if (!isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       if (result?.success) {
         onDone(true)
         return
       }
       setError(result?.error || 'Invalid code - check your app is synced')
     } catch (confirmError) {
-      if (!isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       setError(confirmError?.message || 'Failed to confirm code')
     } finally {
-      if (isTrackedRequestCurrent(actionRequestRef, requestId)) {
+      if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
         actionInFlightRef.current = false
         setLoading(false)
       }
@@ -110,17 +115,17 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }) {
         () => window.api.otpDisable({ userId, password }),
         'OTP disable',
       )
-      if (!isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       if (result?.success) {
         onDone(false)
         return
       }
       setError(result?.error || 'Failed to disable')
     } catch (disableError) {
-      if (!isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
       setError(disableError?.message || 'Failed to disable')
     } finally {
-      if (isTrackedRequestCurrent(actionRequestRef, requestId)) {
+      if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
         actionInFlightRef.current = false
         setLoading(false)
       }
