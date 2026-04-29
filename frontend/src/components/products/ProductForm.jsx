@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ScanLine } from 'lucide-react'
 import Modal from '../shared/Modal'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from './primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function normalizeGallery(product) {
   const source = Array.isArray(product?.image_gallery)
@@ -95,6 +101,7 @@ export default function ProductForm({
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState('')
   const [saving, setSaving] = useState(false)
+  const supplierRequestRef = useRef(0)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
 
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -109,9 +116,23 @@ export default function ProductForm({
   }, [initialForm])
 
   useEffect(() => {
-    window.api.getSuppliers?.().then((data) => {
-      setSupplierList(Array.isArray(data) ? data : [])
-    }).catch(() => {})
+    if (!window.api?.getSuppliers) {
+      setSupplierList([])
+      return undefined
+    }
+    const requestId = beginTrackedRequest(supplierRequestRef)
+    Promise.resolve(withLoaderTimeout(() => window.api.getSuppliers(), 'Product suppliers'))
+      .then((data) => {
+        if (!isTrackedRequestCurrent(supplierRequestRef, requestId)) return
+        setSupplierList(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (!isTrackedRequestCurrent(supplierRequestRef, requestId)) return
+        setSupplierList([])
+      })
+    return () => {
+      invalidateTrackedRequest(supplierRequestRef)
+    }
   }, [])
 
   useEffect(() => {

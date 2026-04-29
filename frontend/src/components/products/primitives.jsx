@@ -1,7 +1,7 @@
 // Products Shared Primitives
 // Small reusable display components used across the Products module.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
 
 function sanitizeNumericInput(value, { allowDecimal = true, allowNegative = false } = {}) {
@@ -23,32 +23,55 @@ function parseNumericInput(value, fallback = 0) {
 function ProductImg({ src, alt, className, onClick }) {
   const [url, setUrl] = useState(null)
   const [failed, setFailed] = useState(false)
+  const imageRequestRef = useRef(0)
 
   useEffect(() => {
+    const requestId = imageRequestRef.current + 1
+    imageRequestRef.current = requestId
     setFailed(false)
     if (!src) {
       setUrl(null)
-      return
+      return () => {
+        imageRequestRef.current = requestId + 1
+      }
     }
     if (src.startsWith('data:') || src.startsWith('blob:')) {
       setUrl(src)
-      return
+      return () => {
+        imageRequestRef.current = requestId + 1
+      }
     }
     if (src.startsWith('http')) {
       setUrl(src)
-      return
+      return () => {
+        imageRequestRef.current = requestId + 1
+      }
     }
     if (src.startsWith('/uploads/')) {
       const base = (typeof window !== 'undefined' && window.api?.getSyncServerUrl?.())
         || localStorage.getItem('businessos_sync_server')
         || ''
       setUrl(base ? `${base.replace(/\/$/, '')}${src}` : src)
-      return
+      return () => {
+        imageRequestRef.current = requestId + 1
+      }
     }
     if (window.api?.getImageDataUrl) {
-      window.api.getImageDataUrl(src).then((data) => setUrl(data || null))
+      Promise.resolve(window.api.getImageDataUrl(src))
+        .then((data) => {
+          if (imageRequestRef.current !== requestId) return
+          setUrl(data || null)
+        })
+        .catch(() => {
+          if (imageRequestRef.current !== requestId) return
+          setUrl(null)
+        })
     } else {
       setUrl(null)
+    }
+
+    return () => {
+      imageRequestRef.current = requestId + 1
     }
   }, [src])
 
