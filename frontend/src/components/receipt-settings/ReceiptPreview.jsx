@@ -1,20 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 export default function ReceiptPreview({ tpl, settings }) {
   const [ReceiptComp, setReceiptComp] = useState(null)
   const [loadError, setLoadError] = useState(null)
+  const previewRequestRef = useRef(0)
 
   useEffect(() => {
-    let mounted = true
-    import('../receipt/Receipt')
+    const requestId = beginTrackedRequest(previewRequestRef)
+    setLoadError(null)
+    setReceiptComp(null)
+    withLoaderTimeout(() => import('../receipt/Receipt'), 'Receipt preview')
       .then((mod) => {
-        if (mounted) setReceiptComp(() => mod.default)
+        if (!isTrackedRequestCurrent(previewRequestRef, requestId)) return
+        setReceiptComp(() => mod.default)
       })
       .catch((error) => {
+        if (!isTrackedRequestCurrent(previewRequestRef, requestId)) return
         console.error('[ReceiptPreview] import Receipt failed', error)
-        if (mounted) setLoadError(error)
+        setLoadError(error)
       })
-    return () => { mounted = false }
+    return () => {
+      invalidateTrackedRequest(previewRequestRef)
+    }
   }, [])
 
   const exchangeRate = parseFloat(settings.exchange_rate || '4100')
