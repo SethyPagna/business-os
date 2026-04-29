@@ -893,38 +893,64 @@ export default function Backup() {
   const [restoreBrowser, setRestoreBrowser] = useState(null)
   const [browserBusy, setBrowserBusy] = useState('')
   const hostConfigRequestRef = useRef(0)
+  const exportBrowseRequestRef = useRef(0)
+  const restoreBrowseRequestRef = useRef(0)
+  const aliveRef = useRef(true)
 
   useEffect(() => {
-    const requestId = beginTrackedRequest(hostConfigRequestRef)
-    withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
-      .then((config) => {
-        if (!isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(!!config?.hostUiAvailable)
-      })
-      .catch(() => {
-        if (!isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(false)
-      })
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      invalidateTrackedRequest(hostConfigRequestRef)
+      invalidateTrackedRequest(exportBrowseRequestRef)
+      invalidateTrackedRequest(restoreBrowseRequestRef)
+    }
   }, [])
-  useEffect(() => () => invalidateTrackedRequest(hostConfigRequestRef), [])
+
+  useEffect(() => {
+    async function loadHostConfig() {
+      const requestId = beginTrackedRequest(hostConfigRequestRef)
+      try {
+        const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
+        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
+        setHostUiAvailable(!!config?.hostUiAvailable)
+      } catch {
+        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
+        setHostUiAvailable(false)
+      }
+    }
+    loadHostConfig()
+  }, [])
 
   const browseServerFolders = async (target, dir) => {
+    const requestRef = target === 'export' ? exportBrowseRequestRef : restoreBrowseRequestRef
+    const requestId = beginTrackedRequest(requestRef)
     try {
       setBrowserBusy(target)
-      const result = await window.api.browseDir(dir || '__ROOTS__')
+      const result = await withLoaderTimeout(
+        () => window.api.browseDir(dir || '__ROOTS__'),
+        target === 'export' ? 'Backup export folders' : 'Backup restore folders',
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       if (target === 'export') setExportBrowser(result)
       if (target === 'restore') setRestoreBrowser(result)
     } catch (error) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBrowserBusy('')
+      if (aliveRef.current && isTrackedRequestCurrent(requestRef, requestId)) {
+        setBrowserBusy((current) => (current === target ? '' : current))
+      }
     }
   }
 
   const toggleServerBrowser = async (target, currentPath = '') => {
     const isExport = target === 'export'
+    const requestRef = isExport ? exportBrowseRequestRef : restoreBrowseRequestRef
     const visible = isExport ? !!exportBrowser : !!restoreBrowser
     if (visible) {
+      invalidateTrackedRequest(requestRef)
+      setBrowserBusy((current) => (current === target ? '' : current))
       if (isExport) setExportBrowser(null)
       else setRestoreBrowser(null)
       return
@@ -1092,8 +1118,13 @@ export default function Backup() {
                 copy={copy}
                 onBrowse={(dir) => browseServerFolders('export', dir)}
                 onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
-                onClose={() => setExportBrowser(null)}
+                onClose={() => {
+                  invalidateTrackedRequest(exportBrowseRequestRef)
+                  setBrowserBusy((current) => (current === 'export' ? '' : current))
+                  setExportBrowser(null)
+                }}
                 onSelect={(fullPath) => {
+                  invalidateTrackedRequest(exportBrowseRequestRef)
                   setFolderExportPath(fullPath)
                   setExportBrowser(null)
                 }}
@@ -1155,8 +1186,13 @@ export default function Backup() {
                 copy={copy}
                 onBrowse={(dir) => browseServerFolders('restore', dir)}
                 onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
-                onClose={() => setRestoreBrowser(null)}
+                onClose={() => {
+                  invalidateTrackedRequest(restoreBrowseRequestRef)
+                  setBrowserBusy((current) => (current === 'restore' ? '' : current))
+                  setRestoreBrowser(null)
+                }}
                 onSelect={(fullPath) => {
+                  invalidateTrackedRequest(restoreBrowseRequestRef)
                   setFolderImportPath(fullPath)
                   setRestoreBrowser(null)
                 }}
