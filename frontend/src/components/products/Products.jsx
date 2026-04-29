@@ -118,53 +118,85 @@ export default function Products() {
   const [detailProduct,setDetailProduct]= useState(null)
   const [loading,      setLoading]      = useState(true)
   const [loadError,    setLoadError]    = useState(null)
+  const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
 
   const load = useCallback(async (silent = false) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoadError(null)
-    if (!silent) setLoading(true)
-    try {
-      const result = await settleLoaderMap({
-        products: () => window.api.getProducts(),
-        categories: () => window.api.getCategories(),
-        units: () => window.api.getUnits(),
-        branches: () => window.api.getBranches(),
-      })
-      const prods = result.values.products
-      const cats = result.values.categories
-      const unitList = result.values.units
-      const brs = result.values.branches
-
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (Array.isArray(prods)) setProducts(prods)
-      if (Array.isArray(cats)) setCategories(cats)
-      if (Array.isArray(unitList)) setUnits(unitList)
-      if (Array.isArray(brs)) setBranches((brs || []).filter(b => b.is_active))
-
-      if (!result.hasAnySuccess) {
-        throw new Error(getFirstLoaderError(result.errors, 'Failed to load products'))
+    const promise = (async () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoadError(null)
+        setLoading(true)
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(tr('products_load_slow', 'Products are taking longer than expected. Tap Retry or revisit the page in a moment.'))
+        }, 10000)
       }
-      loadedOnceRef.current = true
-      if (result.hasErrors && !silent) {
-        notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
+      try {
+        const result = await settleLoaderMap({
+          products: () => window.api.getProducts(),
+          categories: () => window.api.getCategories(),
+          units: () => window.api.getUnits(),
+          branches: () => window.api.getBranches(),
+        })
+        const prods = result.values.products
+        const cats = result.values.categories
+        const unitList = result.values.units
+        const brs = result.values.branches
+
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (Array.isArray(prods)) setProducts(prods)
+        if (Array.isArray(cats)) setCategories(cats)
+        if (Array.isArray(unitList)) setUnits(unitList)
+        if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
+
+        if (!result.hasAnySuccess) {
+          throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
+        }
+        loadedOnceRef.current = true
+        setLoadError(null)
+        if (result.hasErrors && !silent) {
+          notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
+        }
+      } catch (e) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const nextMessage = e?.message || tr('products_load_failed', 'Failed to load products')
+        if (!loadedOnceRef.current) {
+          setLoadError(nextMessage)
+          notify(nextMessage, 'error')
+        } else if (!silent) {
+          notify(tr('products_refresh_failed', 'Unable to refresh products right now. Showing the latest loaded data.'), 'warning')
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLoading(false)
       }
-    } catch (e) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (!silent) setLoadError(e.message || 'Failed to load products')
-    } finally {
-      if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
-    }
-  }, [notify, t])
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
+      }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [notify, t, tr])
 
   useEffect(() => {
     if (page !== 'products') {
+      window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
       return
     }
     const silent = loadedOnceRef.current
@@ -178,7 +210,11 @@ export default function Products() {
     }
     if (['products', 'categories', 'units', 'branches'].includes(syncChannelName)) load(true)
   }, [load, page, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  useEffect(() => () => {
+    window.clearTimeout(loadWatchdogRef.current)
+    invalidateTrackedRequest(loadRequestRef)
+    loadPromiseRef.current = null
+  }, [])
 
   const handleSave = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
@@ -272,68 +308,104 @@ export default function Products() {
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedVisibleIds.length) return
+    if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
+    setBulkActionBusy(true)
     let failed = 0
-    for (const id of selectedVisibleIds) {
-      try { await window.api.deleteProduct(id) } catch { failed++ }
+    let done = 0
+    try {
+      for (const id of selectedVisibleIds) {
+        try {
+          const result = await window.api.deleteProduct(id)
+          if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
+          done++
+        } catch {
+          failed++
+        }
+      }
+      setSelectedIds(new Set())
+      await load(true)
+      if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
+      else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
+    } finally {
+      setBulkActionBusy(false)
     }
-    setSelectedIds(new Set())
-    load()
-    if (failed) notify(`Deleted ${selectedVisibleCount - failed}, ${failed} failed`, 'warning')
-    else notify(`${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''} deleted`)
   }
 
   const handleBulkOutOfStock = async () => {
-    if (!selectedVisibleIds.length) return
+    if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
+    setBulkActionBusy(true)
     let done = 0
-    for (const id of selectedVisibleIds) {
-      const p = products.find(x => x.id === id)
-      if (!p) continue
-      try {
-        await window.api.updateProduct(id, { ...p, stock_quantity: 0, userId: user.id, userName: user.name })
-        done++
-      } catch {}
+    let failed = 0
+    try {
+      for (const id of selectedVisibleIds) {
+        try {
+          const result = await window.api.updateProduct(id, { stock_quantity: 0, userId: user.id, userName: user.name })
+          if (result?.success === false) throw new Error(result.error || 'Failed to update product')
+          done++
+        } catch {
+          failed++
+        }
+      }
+      setSelectedIds(new Set())
+      await load(true)
+      notify(
+        failed
+          ? `${done} product(s) set to out-of-stock, ${failed} failed`
+          : `${done} product(s) set to out-of-stock`,
+        failed ? 'warning' : 'success',
+      )
+    } finally {
+      setBulkActionBusy(false)
     }
-    setSelectedIds(new Set()); load()
-    notify(`${done} product(s) set to out-of-stock`)
   }
 
   const handleBulkChangeBranch = async (branchId) => {
-    if (!selectedVisibleIds.length || !branchId) return
+    if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
     const branch = branches.find(b => String(b.id) === String(branchId))
     if (!branch) return
     if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
+    setBulkActionBusy(true)
     let done = 0
-    const defaultBranch = branches.find(b => b.is_default)
-    for (const id of selectedVisibleIds) {
-      const p = products.find(x => x.id === id)
-      if (!p) continue
-      try {
-        // Transfer from current branch to target branch
-        const currentBranch = (p.branch_stock||[]).find(bs => (bs?.quantity ?? 0) > 0)
-        if (currentBranch && currentBranch.branch_id !== parseInt(branchId) && (currentBranch?.quantity ?? 0) > 0) {
-          await window.api.transferStock({
-            fromBranchId: currentBranch.branch_id,
-            toBranchId: parseInt(branchId),
-            productId: id, productName: p.name,
-            quantity: currentBranch.quantity,
-            note: 'Bulk branch change',
-            userId: user.id, userName: user.name,
-          })
-        } else if (!currentBranch) {
-          // No stock in any branch ??just assign to that branch with 0
-          await window.api.adjustStock({
-            productId: id, productName: p.name, type: 'add', quantity: 0,
-            branchId: parseInt(branchId), userId: user.id, userName: user.name,
-          })
+    let failed = 0
+    try {
+      for (const id of selectedVisibleIds) {
+        const p = products.find(x => x.id === id)
+        if (!p) continue
+        try {
+          const currentBranch = (p.branch_stock||[]).find(bs => (bs?.quantity ?? 0) > 0)
+          if (currentBranch && currentBranch.branch_id !== parseInt(branchId) && (currentBranch?.quantity ?? 0) > 0) {
+            await window.api.transferStock({
+              fromBranchId: currentBranch.branch_id,
+              toBranchId: parseInt(branchId),
+              productId: id, productName: p.name,
+              quantity: currentBranch.quantity,
+              note: 'Bulk branch change',
+              userId: user.id, userName: user.name,
+            })
+          } else if (!currentBranch) {
+            await window.api.adjustStock({
+              productId: id, productName: p.name, type: 'add', quantity: 0,
+              branchId: parseInt(branchId), userId: user.id, userName: user.name,
+            })
+          }
+          done++
+        } catch {
+          failed++
         }
-        done++
-      } catch {}
+      }
+      setSelectedIds(new Set())
+      await load(true)
+      notify(
+        failed
+          ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
+          : `${done} product(s) branch updated to "${branch.name}"`,
+        failed ? 'warning' : 'success',
+      )
+    } finally {
+      setBulkActionBusy(false)
     }
-    setSelectedIds(new Set()); load()
-    notify(`${done} product(s) branch updated to "${branch.name}"`)
   }
 
   const [bulkAddModal, setBulkAddModal] = useState(null)
@@ -656,6 +728,43 @@ export default function Products() {
     scrollNodeWithOffset(node)
   }, [jumpTargetIdsByLetter])
 
+  const runBulkProductUpdates = useCallback(async (updates) => {
+    if (!selectedVisibleIds.length || bulkActionBusy) return
+    const nextUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([, value]) => value !== undefined),
+    )
+    if (!Object.keys(nextUpdates).length) {
+      notify('No changes specified', 'warning')
+      return
+    }
+    setBulkActionBusy(true)
+    let done = 0
+    let failed = 0
+    try {
+      for (const id of selectedVisibleIds) {
+        try {
+          const result = await window.api.updateProduct(id, { ...nextUpdates, userId: user.id, userName: user.name })
+          if (result?.success === false) throw new Error(result.error || 'Failed to update product')
+          done++
+        } catch {
+          failed++
+        }
+      }
+      setSelectedIds(new Set())
+      setBulkEditMode(null)
+      setBulkEditForm({})
+      await load(true)
+      notify(
+        failed
+          ? `Updated ${done} products, ${failed} failed`
+          : `Updated ${done} products`,
+        failed ? 'warning' : 'success',
+      )
+    } finally {
+      setBulkActionBusy(false)
+    }
+  }, [bulkActionBusy, load, notify, selectedVisibleIds, user.id, user.name])
+
   const productFilterSections = useMemo(() => ([
     {
       id: 'stock',
@@ -759,11 +868,11 @@ export default function Products() {
     },
   ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
-  if (loadError) return (
+  if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
       <div className="text-4xl">!</div>
       <p className="text-red-600 dark:text-red-400 font-medium">{loadError}</p>
-      <button onClick={load} className="btn-primary">Retry</button>
+      <button type="button" onClick={() => load(false)} className="btn-primary">Retry</button>
     </div>
   )
 
@@ -833,14 +942,15 @@ export default function Products() {
               { id:'branch', icon:'Branch', label:'Branch' },
             ].map(opt => (
               <button key={opt.id}
+                disabled={bulkActionBusy}
                 onClick={() => { setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({}) }}
-                className={`text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
+                className={`text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
                 {opt.icon} {opt.label}
               </button>
             ))}
-            <button onClick={handleBulkOutOfStock} className="btn-secondary text-xs py-1.5 px-3">Out of Stock</button>
-            <button onClick={handleBulkDelete} className="btn-danger text-xs py-1.5 px-3">Delete</button>
-            <button onClick={() => { setSelectedIds(new Set()); setBulkEditMode(null) }} className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 sm:ml-auto">Clear</button>
+            <button disabled={bulkActionBusy} onClick={handleBulkOutOfStock} className="btn-secondary text-xs py-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-60">Out of Stock</button>
+            <button disabled={bulkActionBusy} onClick={handleBulkDelete} className="btn-danger text-xs py-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-60">Delete</button>
+            <button disabled={bulkActionBusy} onClick={() => { setSelectedIds(new Set()); setBulkEditMode(null) }} className="text-xs text-blue-500 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 sm:ml-auto">Clear</button>
           </div>
 
           {/* Expanded edit panel */}
@@ -871,17 +981,14 @@ export default function Products() {
                   <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
                 </div>
               </div>
-              <button className="btn-primary text-xs py-1.5 px-4 mt-3" onClick={async () => {
+              <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
                 const updates = {}
                 if (bulkEditForm.category) updates.category = bulkEditForm.category
                 if (bulkEditForm.unit) updates.unit = bulkEditForm.unit
                 if (bulkEditForm.supplier) updates.supplier = bulkEditForm.supplier
                 if (bulkEditForm.brand) updates.brand = bulkEditForm.brand
                 if (bulkEditForm.low_stock_threshold !== undefined && bulkEditForm.low_stock_threshold !== '') updates.low_stock_threshold = parseInt(bulkEditForm.low_stock_threshold)
-                if (!Object.keys(updates).length) return notify('No changes specified', 'warning')
-                let ok = 0
-                for (const id of selectedVisibleIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
-                notify(`Updated ${ok} products`); load(); setBulkEditMode(null); setSelectedIds(new Set())
+                await runBulkProductUpdates(updates)
               }}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
@@ -896,14 +1003,11 @@ export default function Products() {
                   <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
               </div>
               <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
-              <button className="btn-primary text-xs py-1.5 px-4 mt-3" onClick={async () => {
+              <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
                 const updates = {}
                 if (bulkEditForm.selling_price_usd !== '' && bulkEditForm.selling_price_usd !== undefined) updates.selling_price_usd = parseFloat(bulkEditForm.selling_price_usd)
                 if (bulkEditForm.purchase_price_usd !== '' && bulkEditForm.purchase_price_usd !== undefined) updates.purchase_price_usd = parseFloat(bulkEditForm.purchase_price_usd)
-                if (!Object.keys(updates).length) return notify('No changes specified', 'warning')
-                let ok = 0
-                for (const id of selectedVisibleIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
-                notify(`Updated ${ok} products`); load(); setBulkEditMode(null); setSelectedIds(new Set())
+                await runBulkProductUpdates(updates)
               }}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
@@ -922,7 +1026,7 @@ export default function Products() {
                   </div>
                 </div>
               </div>
-              <button className="btn-primary text-xs py-1.5 px-4 mt-3" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
+              <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
 
@@ -936,7 +1040,7 @@ export default function Products() {
                     {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                 </div>
-                <button className="btn-primary text-xs py-1.5 px-4" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId); setBulkEditMode(null) } else notify('Select a branch first','error') }}>Move Stock</button>
+                <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify('Select a branch first','error') }}>Move Stock</button>
               </div>
             </div>
           )}

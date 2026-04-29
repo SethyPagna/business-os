@@ -48,7 +48,13 @@ export default function AllFieldsPanel({ tpl, setT }) {
       </div>
 
       <div className="mb-4">
+        <label htmlFor="receipt-field-search" className="sr-only">
+          {T('search_fields_placeholder', 'Search receipt fields')}
+        </label>
         <input
+          id="receipt-field-search"
+          name="receipt_field_search"
+          autoComplete="off"
           className="input text-sm"
           placeholder={T('search_fields_placeholder', 'Search receipt fields')}
           value={search}

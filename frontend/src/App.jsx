@@ -713,15 +713,15 @@ export default function App() {
     <div id="app-root" className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
       <div className="app-topbar hidden h-14 flex-shrink-0 items-center justify-between border-b px-4 md:flex">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 dark:border-slate-700/70 dark:bg-slate-800/80">
+          <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full ${settings?.customer_portal_logo_image ? 'ring-1 ring-slate-200/80 dark:ring-slate-700/70' : 'border border-slate-200/80 bg-[var(--ui-accent)] dark:border-slate-700/70'}`}>
             {settings?.customer_portal_logo_image ? (
               <img
                 src={settings.customer_portal_logo_image}
                 alt={settings?.business_name || 'Business OS'}
-                className="h-full w-full object-contain p-0.5"
+                className="h-full w-full object-cover"
               />
             ) : (
-              <span className="grid h-full w-full place-items-center text-sm font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
+              <span className="grid h-full w-full place-items-center text-sm font-semibold text-white">
                 {String(settings?.business_name || 'Business OS').slice(0, 2).toUpperCase()}
               </span>
             )}

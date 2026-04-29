@@ -168,7 +168,11 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
         preferences: result?.preferences || {},
         unavailable: !!result?.unavailable,
       })
-      scheduleRefresh(result?.unavailable ? 5 * 60 * 1000 : 30000)
+      const unavailableDelay = Math.max(
+        5 * 60 * 1000,
+        Number(result?.cooldownUntil || 0) - Date.now(),
+      )
+      scheduleRefresh(result?.unavailable ? unavailableDelay : 30000)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       failureCountRef.current += 1

@@ -46,6 +46,7 @@ function buildSafePreviewSource(previewNode, printSettings, T) {
       if (!(node instanceof HTMLElement)) return
       node.style.backgroundImage = 'none'
       node.style.maskImage = 'none'
+      node.removeAttribute('class')
       node.removeAttribute('crossorigin')
     })
     return clone
@@ -154,7 +155,8 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
 
       <Section icon={Scaling} title={T('print_scale', 'Scale')}>
         <div className="flex items-center gap-3">
-          <input className="flex-1" type="range" min="50" max="150" step="5" value={ps.scale || '100'} onChange={(event) => setValue('scale', event.target.value)} />
+          <label htmlFor="print-scale-slider" className="sr-only">{T('print_scale', 'Scale')}</label>
+          <input id="print-scale-slider" name="print_scale" autoComplete="off" className="flex-1" type="range" min="50" max="150" step="5" value={ps.scale || '100'} onChange={(event) => setValue('scale', event.target.value)} />
           <span className="w-12 text-right text-sm font-bold text-gray-700 dark:text-gray-300">{ps.scale || 100}%</span>
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -182,6 +184,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await openReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
+                  preferTextOnly: true,
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF preview failed:', error)
@@ -200,6 +203,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
                 await downloadReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
+                  preferTextOnly: true,
                 })
               } catch (error) {
                 console.error('[PrintSettings] PDF download failed:', error)

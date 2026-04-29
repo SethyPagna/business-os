@@ -501,6 +501,19 @@ export async function createReceiptPdfBlob(content, options = {}) {
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const title = options.title || 'Receipt'
   const pageWidthPt = mmToPt(widthMm)
+  const buildTextOnlyReceiptBlob = () => {
+    const fallbackLines = extractReceiptLines(content)
+    const pdfBytes = buildTextOnlyPdf({
+      lines: fallbackLines,
+      pageWidthPt,
+      title,
+    })
+    return new Blob([pdfBytes], { type: 'application/pdf' })
+  }
+
+  if (options.preferTextOnly) {
+    return buildTextOnlyReceiptBlob()
+  }
 
   const renderPdfBlob = async () => {
     const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
@@ -523,15 +536,9 @@ export async function createReceiptPdfBlob(content, options = {}) {
       await new Promise((resolve) => window.setTimeout(resolve, 180))
       return await renderPdfBlob()
     } catch (secondError) {
-      const fallbackLines = extractReceiptLines(content)
-      if (fallbackLines.length) {
-        const pdfBytes = buildTextOnlyPdf({
-          lines: fallbackLines,
-          pageWidthPt,
-          title,
-        })
-        return new Blob([pdfBytes], { type: 'application/pdf' })
-      }
+      try {
+        return buildTextOnlyReceiptBlob()
+      } catch (_) {}
       throw new Error(
         secondError?.message
         || firstError?.message

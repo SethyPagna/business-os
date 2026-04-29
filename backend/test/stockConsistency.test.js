@@ -183,6 +183,15 @@ async function getProduct(baseUrl, authToken, productId) {
   return product
 }
 
+async function updateProduct(baseUrl, authToken, productId, payload = {}) {
+  return fetchJson(baseUrl, `/api/products/${productId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    authToken,
+    body: JSON.stringify(payload),
+  })
+}
+
 async function getSale(baseUrl, authToken, saleId) {
   const sales = await fetchJson(baseUrl, '/api/sales?limit=100', { authToken })
   const sale = Array.isArray(sales) ? sales.find((row) => row.id === saleId) : null
@@ -1189,6 +1198,45 @@ runTest('custom table row writes reject stale expectedUpdatedAt values', async (
     assert.equal(saved.title, 'Updated row again')
   } finally {
     await stopServer(server?.child)
+  }
+})
+
+pendingTests.add('product updates accept partial payloads and preserve required fields from the existing row')
+runTest('product updates accept partial payloads and preserve required fields from the existing row', async () => {
+  const runtimeDir = makeTempRoot('bos-stock-partial-product-')
+  const server = await startServer(runtimeDir)
+  try {
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Partial Update Product',
+      sku: 'PARTIAL-001',
+      stock_quantity: 6,
+      selling_price_usd: 12.5,
+      purchase_price_usd: 7.25,
+      brand: 'Baseline',
+    })
+
+    const before = await getProduct(server.baseUrl, authToken, productId)
+    const updated = await updateProduct(server.baseUrl, authToken, productId, {
+      stock_quantity: 0,
+      brand: 'Updated Brand',
+      userId: 1,
+      userName: 'QA',
+      expectedUpdatedAt: before.updated_at,
+    })
+
+    assert.equal(updated.success, true)
+
+    const after = await getProduct(server.baseUrl, authToken, productId)
+    assert.equal(after.name, 'Partial Update Product')
+    assert.equal(after.sku, 'PARTIAL-001')
+    assert.equal(after.brand, 'Updated Brand')
+    assert.equal(after.stock_quantity, 0)
+    assert.equal(after.purchase_price_usd, 7.25)
+  } finally {
+    await stopServer(server.child)
+    fs.rmSync(runtimeDir, { recursive: true, force: true })
   }
 })
 

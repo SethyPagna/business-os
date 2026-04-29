@@ -45,6 +45,7 @@ export default function Sales() {
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
   const [salesGroupMode, setSalesGroupMode] = useState('time')
   const [salesSortDirection, setSalesSortDirection] = useState('desc')
@@ -52,6 +53,8 @@ export default function Sales() {
   const selectAllRef = useRef(null)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef(null)
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
   const aliveRef = useRef(true)
@@ -65,29 +68,56 @@ export default function Sales() {
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
 
   const loadSales = useCallback(async (silent = false) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent && aliveRef.current) setLoading(true)
-    try {
-      const result = await withLoaderTimeout(() => window.api.getSales(), 'Sales')
-      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (Array.isArray(result)) {
-        setSales(result)
-        loadedOnceRef.current = true
+    const promise = (async () => {
+      if (!silent && aliveRef.current) {
+        setLoading(true)
+        setLoadError(null)
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!loadedOnceRef.current) {
+          loadWatchdogRef.current = window.setTimeout(() => {
+            if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+            setLoading(false)
+            setLoadError(translateOr('sales_load_slow', 'Sales are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
+          }, 10000)
+        }
       }
-    } catch (error) {
-      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      console.error('[Sales] load failed:', error.message)
-      if (!silent) setSales([])
-    } finally {
-      if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
-        setLoading(false)
+      try {
+        const result = await withLoaderTimeout(() => window.api.getSales(), 'Sales')
+        if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (Array.isArray(result)) {
+          setSales(result)
+          loadedOnceRef.current = true
+          setLoadError(null)
+        }
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        console.error('[Sales] load failed:', error.message)
+        if (!silent && !loadedOnceRef.current) {
+          setSales([])
+          setLoadError(error?.message || translateOr('sales_load_failed', 'Failed to load sales'))
+          loadedOnceRef.current = true
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!silent && aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) {
+          setLoading(false)
+        }
       }
-    }
-  }, [])
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [translateOr])
 
   useEffect(() => {
     if (page !== 'sales') {
+      window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
       return
     }
     aliveRef.current = true
@@ -100,7 +130,9 @@ export default function Sales() {
   }, [loadSales, page, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => () => {
     aliveRef.current = false
+    window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
+    loadPromiseRef.current = null
   }, [])
 
   const handleStatusChange = async (saleId, newStatus, notes) => {
@@ -413,6 +445,17 @@ export default function Sales() {
   const showSalesActionGroups = salesGroupMode === 'time+action'
 
   if (selectedSale) return <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
+  if (loadError && !loading && !sales.length) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        <div className="text-4xl">!</div>
+        <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
+        <button type="button" onClick={() => loadSales(false)} className="btn-primary">
+          {t('retry') || 'Retry'}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">

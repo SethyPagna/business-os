@@ -77,40 +77,70 @@ export default function Returns() {
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editRet, setEditRet] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [returnGroupMode, setReturnGroupMode] = useState('time')
   const [returnSortDirection, setReturnSortDirection] = useState('desc')
   const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
+  const loadPromiseRef = useRef(null)
+  const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const loadReturns = useCallback(async (silent = false) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(returnsRequestRef)
-    if (!silent) setLoading(true)
-    try {
-      const params = { scope }
-      const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns')
-      if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
-      setRows(Array.isArray(result) ? result : [])
-    } catch (error) {
-      if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
-      console.error('[Returns] load failed:', error?.message)
-      if (!silent && !loadedOnceRef.current) {
-        setRows([])
+    const promise = (async () => {
+      if (!silent) {
+        setLoading(true)
+        setLoadError(null)
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!loadedOnceRef.current) {
+          loadWatchdogRef.current = window.setTimeout(() => {
+            if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
+            setLoading(false)
+            setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'ការបង្វិលត្រឡប់កំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
+          }, 10000)
+        }
       }
-    } finally {
-      if (isTrackedRequestCurrent(returnsRequestRef, requestId)) {
+      try {
+        const params = { scope }
+        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns')
+        if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
+        setRows(Array.isArray(result) ? result : [])
         loadedOnceRef.current = true
-        if (!silent) setLoading(false)
+        setLoadError(null)
+      } catch (error) {
+        if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
+        console.error('[Returns] load failed:', error?.message)
+        if (!silent && !loadedOnceRef.current) {
+          setRows([])
+          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
+          loadedOnceRef.current = true
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (isTrackedRequestCurrent(returnsRequestRef, requestId) && !silent) {
+          setLoading(false)
+        }
       }
-    }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
   }, [scope])
 
   useEffect(() => {
     loadReturns()
-    return () => invalidateTrackedRequest(returnsRequestRef)
+    return () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(returnsRequestRef)
+      loadPromiseRef.current = null
+    }
   }, [loadReturns])
 
   useEffect(() => {
@@ -383,6 +413,18 @@ export default function Returns() {
       )
     }
     return <span className="font-semibold text-gray-900 dark:text-white">{fmtUSD(ret.total_refund_usd || 0)}</span>
+  }
+
+  if (loadError && !loading && !rows.length) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        <div className="text-4xl">!</div>
+        <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
+        <button type="button" onClick={() => loadReturns(false)} className="btn-primary">
+          {t('retry') || 'Retry'}
+        </button>
+      </div>
+    )
   }
 
   return (

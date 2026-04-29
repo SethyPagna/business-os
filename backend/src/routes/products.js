@@ -128,6 +128,14 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
   throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
+function hasOwnField(source, key) {
+  return Object.prototype.hasOwnProperty.call(source || {}, key)
+}
+
+function pickField(source, key, fallback) {
+  return hasOwnField(source, key) ? source[key] : fallback
+}
+
 // ?? GET /api/products ?????????????????????????????????????????????????????????
 router.get('/', authToken, (req, res) => {
   // Fetch all products with branch stock in a single optimized query (avoids O(n簡) filtering)
@@ -288,20 +296,47 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req, d)
-  if (!d.name?.trim()) return err(res, 'Product name required')
   try {
     const productId = parseInt(req.params.id, 10)
     db.transaction(() => {
-      const prev = db.prepare('SELECT id, stock_quantity, name, image_path, updated_at FROM products WHERE id=?').get(productId)
+      const prev = db.prepare('SELECT * FROM products WHERE id=?').get(productId)
       if (!prev) throw new Error('Product not found')
       assertUpdatedAtMatch('product', prev, getExpectedUpdatedAt(d))
-      assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode, excludeId: productId })
 
-      const desiredQty = Math.max(0, parseFloat(d.stock_quantity) || 0)
-      const incomingGallery = normalizeImageGallery(d.image_gallery, null)
+      const merged = {
+        name: pickField(d, 'name', prev.name),
+        sku: pickField(d, 'sku', prev.sku),
+        barcode: pickField(d, 'barcode', prev.barcode),
+        category: pickField(d, 'category', prev.category),
+        brand: pickField(d, 'brand', prev.brand),
+        unit: pickField(d, 'unit', prev.unit),
+        description: pickField(d, 'description', prev.description),
+        selling_price_usd: pickField(d, 'selling_price_usd', prev.selling_price_usd),
+        selling_price_khr: pickField(d, 'selling_price_khr', prev.selling_price_khr),
+        purchase_price_usd: pickField(d, 'purchase_price_usd', prev.purchase_price_usd),
+        purchase_price_khr: pickField(d, 'purchase_price_khr', prev.purchase_price_khr),
+        cost_price_usd: pickField(d, 'cost_price_usd', prev.cost_price_usd),
+        cost_price_khr: pickField(d, 'cost_price_khr', prev.cost_price_khr),
+        stock_quantity: pickField(d, 'stock_quantity', prev.stock_quantity),
+        low_stock_threshold: pickField(d, 'low_stock_threshold', prev.low_stock_threshold),
+        out_of_stock_threshold: pickField(d, 'out_of_stock_threshold', prev.out_of_stock_threshold),
+        image_path: pickField(d, 'image_path', prev.image_path),
+        is_active: pickField(d, 'is_active', prev.is_active),
+        supplier: pickField(d, 'supplier', prev.supplier),
+        custom_fields: pickField(d, 'custom_fields', tryParse(prev.custom_fields, {})),
+      }
+
+      if (!String(merged.name || '').trim()) throw new Error('Product name required')
+      assertUniqueProductFields({ name: merged.name, sku: merged.sku, barcode: merged.barcode, excludeId: productId })
+
+      const desiredQty = Math.max(0, parseFloat(merged.stock_quantity) || 0)
+      const incomingGallery = normalizeImageGallery(
+        hasOwnField(d, 'image_gallery') ? d.image_gallery : [],
+        null,
+      )
       const effectiveGallery = incomingGallery.length
         ? incomingGallery
-        : normalizeImageGallery([], d.image_path || prev.image_path || null)
+        : normalizeImageGallery([], merged.image_path || prev.image_path || null)
       const primaryImage = effectiveGallery[0] || null
 
       db.prepare(`
@@ -314,15 +349,25 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           image_path=?, is_active=?, supplier=?, custom_fields=?, updated_at=datetime('now')
         WHERE id=?
       `).run(
-        d.name.trim(), d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
-        d.selling_price_usd || 0, d.selling_price_khr || 0,
-        d.purchase_price_usd || 0, d.purchase_price_khr || 0,
-        d.cost_price_usd || d.purchase_price_usd || 0,
-        d.cost_price_khr || d.purchase_price_khr || 0,
-        desiredQty, d.low_stock_threshold ?? 10, d.out_of_stock_threshold ?? 0,
-        primaryImage, d.is_active ?? 1,
-        d.supplier || null,
-        JSON.stringify(d.custom_fields || {}),
+        String(merged.name || '').trim(),
+        merged.sku || null,
+        merged.barcode || null,
+        merged.category || null,
+        merged.brand || null,
+        merged.unit || 'pcs',
+        merged.description || null,
+        merged.selling_price_usd || 0,
+        merged.selling_price_khr || 0,
+        merged.purchase_price_usd || 0,
+        merged.purchase_price_khr || 0,
+        merged.cost_price_usd || merged.purchase_price_usd || 0,
+        merged.cost_price_khr || merged.purchase_price_khr || 0,
+        desiredQty,
+        merged.low_stock_threshold ?? 10,
+        merged.out_of_stock_threshold ?? 0,
+        primaryImage, merged.is_active ?? 1,
+        merged.supplier || null,
+        JSON.stringify(merged.custom_fields || {}),
         productId,
       )
       syncProductImageGallery(productId, effectiveGallery)
@@ -382,15 +427,15 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
           productId,
-          d.name.trim(),
+          String(merged.name || '').trim(),
           movementBranchId,
           branchName,
           delta > 0 ? 'add' : 'remove',
           Math.abs(delta),
-          d.purchase_price_usd || 0,
-          d.purchase_price_khr || 0,
-          Math.abs(delta) * (d.purchase_price_usd || 0),
-          Math.abs(delta) * (d.purchase_price_khr || 0),
+          merged.purchase_price_usd || 0,
+          merged.purchase_price_khr || 0,
+          Math.abs(delta) * (merged.purchase_price_usd || 0),
+          Math.abs(delta) * (merged.purchase_price_khr || 0),
           'Product edit (manual stock change)',
           actor.userId,
           actor.userName,
@@ -399,7 +444,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         recalcProductStock(productId)
       }
 
-      audit(actor.userId, actor.userName, 'update', 'product', productId, { name: d.name }, {
+      audit(actor.userId, actor.userName, 'update', 'product', productId, { name: merged.name }, {
         deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
       })
     })()

@@ -9,10 +9,9 @@ import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
 import {
   beginTrackedRequest,
-  getFirstLoaderError,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
-  settleLoaderMap,
+  withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 
 /**
@@ -70,9 +69,9 @@ export default function Users() {
   const { t, notify, hasPermission, user: currentUser, page } = useApp()
   const { syncChannel } = useSync()
   const loadedOnceRef = useRef(false)
-  const pageLoadKeyRef = useRef('')
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const tr = useCallback((key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -113,82 +112,99 @@ export default function Users() {
   const syncTimestamp = Number(syncChannel?.ts || 0)
 
   const load = useCallback(async ({ silent = loadedOnceRef.current } = {}) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!canManage) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setUsers([])
-      setRoles([])
-      setLoadError(null)
-      setLoading(false)
-      loadedOnceRef.current = true
-      return
-    }
-    window.clearTimeout(loadWatchdogRef.current)
-    if (!silent || !loadedOnceRef.current) {
-      setLoading(true)
-      setLoadError(null)
-      loadWatchdogRef.current = window.setTimeout(() => {
+    const promise = (async () => {
+      if (!canManage) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setUsers([])
+        setRoles([])
+        setLoadError(null)
+        setLoading(false)
+        loadedOnceRef.current = true
+        return
+      }
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoading(true)
+        setLoadError(null)
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(tr('users_load_slow', 'Users are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
+        }, 10000)
+      }
+      try {
+        const [usersResult, rolesResult] = await Promise.allSettled([
+          withLoaderTimeout(() => window.api.getUsers(), 'Users list', 8000),
+          withLoaderTimeout(() => window.api.getRoles(), 'Roles list', 8000),
+        ])
+
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+
+        const nextUsers = usersResult.status === 'fulfilled' && Array.isArray(usersResult.value)
+          ? usersResult.value
+          : null
+        const nextRoles = rolesResult.status === 'fulfilled' && Array.isArray(rolesResult.value)
+          ? rolesResult.value
+          : null
+
+        if (nextUsers) setUsers(nextUsers)
+        else if (!loadedOnceRef.current) setUsers([])
+
+        if (nextRoles) setRoles(nextRoles)
+        else if (!loadedOnceRef.current) setRoles([])
+
+        if (nextUsers === null && nextRoles === null) {
+          const firstError = usersResult.reason || rolesResult.reason
+          throw new Error(firstError?.message || tr('users_load_failed', 'Failed to load users'))
+        }
+
+        loadedOnceRef.current = true
+        setLoadError(null)
+
+        if (usersResult.status === 'rejected') {
+          notify(usersResult.reason?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
+        } else if (rolesResult.status === 'rejected') {
+          notify(rolesResult.reason?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
+        }
+      } catch (error) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const nextMessage = error?.message || tr('users_load_failed', 'Failed to load users')
+        if (!loadedOnceRef.current) {
+          setUsers([])
+          setRoles([])
+          setLoadError(nextMessage)
+          notify(nextMessage, 'error')
+          loadedOnceRef.current = true
+        } else {
+          const refreshMessage = tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.')
+          setLoadError((current) => current || refreshMessage)
+          notify(refreshMessage, 'warning')
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
-        setLoadError(tr('users_load_slow', 'Users are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
-      }, 15000)
-    }
-    try {
-      const result = await settleLoaderMap({
-        users: () => window.api.getUsers(),
-        roles: () => window.api.getRoles(),
-      })
-
-      if (Array.isArray(result.values.users)) {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setUsers(result.values.users)
       }
-      if (Array.isArray(result.values.roles)) {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setRoles(result.values.roles)
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
       }
-
-      if (!result.hasAnySuccess) {
-        throw new Error(getFirstLoaderError(result.errors, 'Failed to load users'))
-      }
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoadError(null)
-
-      if (result.errors.users) {
-        notify(result.errors.users?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
-      } else if (result.errors.roles) {
-        notify(result.errors.roles?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
-      }
-      loadedOnceRef.current = true
-    } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      const nextMessage = error?.message || 'Failed to load users'
-      if (!loadedOnceRef.current) {
-        setLoadError(nextMessage)
-        notify(nextMessage, 'error')
-      } else {
-        setLoadError((current) => current || tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.'))
-        notify(tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.'), 'warning')
-      }
-    } finally {
-      window.clearTimeout(loadWatchdogRef.current)
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoading(false)
-    }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
   }, [canManage, notify, tr])
 
   useEffect(() => {
     if (page !== 'users') {
-      pageLoadKeyRef.current = ''
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
       return
     }
-    const accessKey = canManage ? 'manage' : 'view'
-    const nextLoadKey = `${page}:${accessKey}`
-    if (pageLoadKeyRef.current === nextLoadKey) return
-    pageLoadKeyRef.current = nextLoadKey
-    load({ silent: false })
+    load({ silent: loadedOnceRef.current })
   }, [canManage, load, page])
   useEffect(() => {
     if (page !== 'users' || !syncChannelName) return
@@ -199,6 +215,7 @@ export default function Users() {
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
+    loadPromiseRef.current = null
   }, [])
 
   const filteredUsers = useMemo(() => {
@@ -497,11 +514,17 @@ export default function Users() {
           aria-label="Search users"
           autoComplete="off"
           className="input max-w-sm"
-          placeholder={`${t('search') || 'Search'}...`}
+          placeholder={tr('search_users_placeholder', 'Search users, phone, email, or role')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {loadError ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+          {loadError}
+        </div>
+      ) : null}
 
       {tab === 'users' ? (
         <>

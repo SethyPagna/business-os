@@ -62,77 +62,109 @@ export default function Inventory() {
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
   const [collapsedMovementSections, setCollapsedMovementSections] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
+  const [loadError,     setLoadError]     = useState(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
   const movementSelectAllRef = useRef(null)
   const loadRequestRef = useRef(0)
+  const loadedOnceRef = useRef(false)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
   )
 
   const load = useCallback(async (silent = false) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (!silent) setLoading(true)
-    // branchId must be a number or omitted ??NOT wrapped in a plain object at the call site
-    const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter) } : {}
-    try {
-      const result = await settleLoaderMap({
-        summary: () => window.api.getInventorySummary(branchOpts),
-        movements: () => window.api.getInventoryMovements(branchOpts),
-        branches: () => window.api.getBranches(),
-        returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
-        dashboard: () => window.api.getDashboard().catch(() => ({})),
-      })
-      const sum = result.values.summary
-      const movs = result.values.movements
-      const brs = result.values.branches
-      const rets = result.values.returns
-      const dash = result.values.dashboard
+    const promise = (async () => {
+      if (!silent) {
+        setLoadError(null)
+        setLoading(true)
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!loadedOnceRef.current) {
+          loadWatchdogRef.current = window.setTimeout(() => {
+            if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+            setLoading(false)
+            setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.', 'ស្តុកកំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
+          }, 10000)
+        }
+      }
+      const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}
+      try {
+        const result = await settleLoaderMap({
+          summary: () => window.api.getInventorySummary(branchOpts),
+          movements: () => window.api.getInventoryMovements(branchOpts),
+          branches: () => window.api.getBranches(),
+          returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
+          dashboard: () => window.api.getDashboard().catch(() => ({})),
+        })
+        const sum = result.values.summary
+        const movs = result.values.movements
+        const brs = result.values.branches
+        const rets = result.values.returns
+        const dash = result.values.dashboard
 
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (Array.isArray(sum)) setSummary(sum || [])
-      if (Array.isArray(movs)) setMovements(movs || [])
-      if (Array.isArray(brs)) setBranches(brs.filter(b => b.is_active))
-      if (dash && typeof dash === 'object') {
-        setTaxDelivery({
-          tax:           dash.all_tax_usd      || 0,
-          delivery:      dash.all_delivery_usd  || 0,
-          deliveryCount: dash.all_delivery_count || 0,
-        })
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        if (Array.isArray(sum)) setSummary(sum || [])
+        if (Array.isArray(movs)) setMovements(movs || [])
+        if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
+        if (dash && typeof dash === 'object') {
+          setTaxDelivery({
+            tax: dash.all_tax_usd || 0,
+            delivery: dash.all_delivery_usd || 0,
+            deliveryCount: dash.all_delivery_count || 0,
+          })
+        }
+        if (Array.isArray(rets)) {
+          const active = rets.filter((ret) => (ret.status || 'completed') !== 'cancelled')
+          const customerReturns = active.filter((ret) => (ret.return_scope || 'customer') !== 'supplier')
+          const supplierReturns = active.filter((ret) => (ret.return_scope || 'customer') === 'supplier')
+          const totalItems = customerReturns.reduce((sumItems, ret) => sumItems + (ret.items?.reduce((acc, item) => acc + (item.quantity || 0), 0) || 0), 0)
+          setReturnStats({
+            count: customerReturns.length,
+            refund_usd: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_usd || 0), 0),
+            refund_khr: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_khr || 0), 0),
+            items: totalItems,
+            restock: customerReturns.filter((ret) => (ret.return_type || 'restock') === 'restock').length,
+            supplier_count: supplierReturns.length,
+            supplier_compensation_usd: supplierReturns.reduce((sumCompensation, ret) => sumCompensation + (ret.supplier_compensation_usd || 0), 0),
+            supplier_loss_usd: supplierReturns.reduce((sumLoss, ret) => sumLoss + (ret.supplier_loss_usd || 0), 0),
+          })
+        }
+        if (!result.hasAnySuccess) {
+          throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
+        }
+        loadedOnceRef.current = true
+        setLoadError(null)
+      } catch (e) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        console.warn('[Inventory] load failed:', e.message)
+        if (!silent && !loadedOnceRef.current) {
+          setSummary([])
+          setMovements([])
+          setLoadError(e.message || 'Failed to load inventory')
+          loadedOnceRef.current = true
+        }
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
       }
-      if (Array.isArray(rets)) {
-        // Compute return stats from the returns list
-        const active = rets.filter(r => (r.status || 'completed') !== 'cancelled')
-        const customerReturns = active.filter(r => (r.return_scope || 'customer') !== 'supplier')
-        const supplierReturns = active.filter(r => (r.return_scope || 'customer') === 'supplier')
-        const totalItems = customerReturns.reduce((s, r) => s + (r.items?.reduce((a, i) => a + (i.quantity||0), 0) || 0), 0)
-        setReturnStats({
-          count:      customerReturns.length,
-          refund_usd: customerReturns.reduce((s, r) => s + (r.total_refund_usd || 0), 0),
-          refund_khr: customerReturns.reduce((s, r) => s + (r.total_refund_khr || 0), 0),
-          items:      totalItems,
-          restock:    customerReturns.filter(r => (r.return_type || 'restock') === 'restock').length,
-          supplier_count: supplierReturns.length,
-          supplier_compensation_usd: supplierReturns.reduce((s, r) => s + (r.supplier_compensation_usd || 0), 0),
-          supplier_loss_usd: supplierReturns.reduce((s, r) => s + (r.supplier_loss_usd || 0), 0),
-        })
-      }
-      if (!result.hasAnySuccess) {
-        throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
-      }
-    } catch (e) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      console.warn('[Inventory] load failed:', e.message)
-    } finally {
-      if (!silent && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
-    }
-  }, [branchFilter])
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [branchFilter, tr])
 
   useEffect(() => {
     if (page !== 'inventory') {
+      window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
       return
     }
     load()
@@ -142,7 +174,11 @@ export default function Inventory() {
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
   }, [load, page, syncChannel?.channel, syncChannel?.ts])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  useEffect(() => () => {
+    window.clearTimeout(loadWatchdogRef.current)
+    invalidateTrackedRequest(loadRequestRef)
+    loadPromiseRef.current = null
+  }, [])
 
   const getStockQty = useCallback((product) => {
     if (!product) return 0
@@ -746,6 +782,38 @@ export default function Inventory() {
     visibleMovementGroups.length,
   ])
 
+  const buildInventoryExportContextRows = useCallback(() => ([
+    { Section: 'Export Context', Metric: 'Active Tab', Value: tab },
+    { Section: 'Export Context', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Export Context', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
+    { Section: 'Export Context', Metric: 'Stock Filter', Value: stockFilter },
+    { Section: 'Export Context', Metric: 'Movement Type Filter', Value: movFilter },
+    { Section: 'Export Context', Metric: 'Movement Date Range', Value: movementDateRangeLabel },
+    { Section: 'Export Context', Metric: 'Movement Group Mode', Value: movementGroupMode },
+    { Section: 'Export Context', Metric: 'Movement Sort Direction', Value: movementSortDirection },
+    { Section: 'Export Context', Metric: 'Year Filter', Value: movementYearFilter },
+    { Section: 'Export Context', Metric: 'Month Filter', Value: movementMonthFilter },
+    { Section: 'Export Context', Metric: 'Search', Value: search || '' },
+    { Section: 'Export Context', Metric: 'Visible Products', Value: filteredSummary.length },
+    { Section: 'Export Context', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
+    { Section: 'Export Context', Metric: 'Generated At', Value: new Date().toISOString() },
+  ]), [
+    branchFilter,
+    branches,
+    brandFilter,
+    filteredSummary.length,
+    movFilter,
+    movementDateRangeLabel,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementYearFilter,
+    search,
+    stockFilter,
+    tab,
+    visibleMovementGroups.length,
+  ])
+
   const buildMovementRows = useCallback((groups) => groups.map((group) => ({
     Date: group.latest_at || '',
     Activity: group.movementLabel || '',
@@ -785,6 +853,13 @@ export default function Inventory() {
 
   const exportInventoryStats = useCallback((filePrefix = 'inventory-stats') => {
     const rows = [
+      ...buildInventoryExportContextRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: row.Value,
+        Formula: '',
+        Example: '',
+      })),
       ...buildInventoryStatsRows().map((row) => ({
         Section: row.Section,
         Metric: row.Metric,
@@ -801,31 +876,25 @@ export default function Inventory() {
       })),
     ]
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, rows)
-  }, [buildInventoryFormulaRows, buildInventoryStatsRows, exportStamp])
+  }, [buildInventoryExportContextRows, buildInventoryFormulaRows, buildInventoryStatsRows, exportStamp])
 
   const exportInventoryPackage = useCallback((mode = tab) => {
     const movementRows = buildMovementRows(visibleMovementGroups)
     const productRows = buildInventoryProductRows(filteredSummary)
     const statsRows = buildInventoryStatsRows()
     const formulaRows = buildInventoryFormulaRows()
-    const manifestRows = buildReportManifestRows([
-      { metric: 'View Tab', value: mode },
-      { metric: 'Branch Filter', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
-      { metric: 'Brand Filter', value: brandFilter === 'all' ? 'All brands' : brandFilter },
-      { metric: 'Stock Filter', value: stockFilter },
-      { metric: 'Movement Type Filter', value: movFilter },
-      { metric: 'Movement Date Range', value: movementDateRangeLabel },
-      { metric: 'Movement Group Mode', value: movementGroupMode },
-      { metric: 'Movement Sort Direction', value: movementSortDirection },
-      { metric: 'Search', value: search || '' },
-      { metric: 'Generated At', value: new Date().toISOString() },
-    ])
+    const contextRows = buildInventoryExportContextRows()
+    const manifestRows = buildReportManifestRows(contextRows.map((row) => ({
+      metric: row.Metric,
+      value: row.Value,
+    })))
     const files = buildReportPackageFiles({
       baseName: 'inventory',
       exportStamp,
       manifestRows,
       csvFiles: mode === 'movements'
         ? [
+            { name: `inventory-export-context-${exportStamp}.csv`, content: buildCSV(contextRows) },
             { name: `inventory-movement-filters-${exportStamp}.csv`, content: buildCSV(buildMovementFilterRows()) },
             { name: `inventory-movement-groups-${exportStamp}.csv`, content: buildCSV(movementRows) },
             { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(statsRows) },
@@ -833,7 +902,8 @@ export default function Inventory() {
             { name: `inventory-products-reference-${exportStamp}.csv`, content: buildCSV(productRows) },
           ]
         : [
-            { name: `inventory-filters-${exportStamp}.csv`, content: buildCSV(statsRows) },
+            { name: `inventory-export-context-${exportStamp}.csv`, content: buildCSV(contextRows) },
+            { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(statsRows) },
             { name: `inventory-calculations-${exportStamp}.csv`, content: buildCSV(formulaRows) },
             { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(productRows) },
             { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(movementRows) },
@@ -931,6 +1001,7 @@ export default function Inventory() {
     buildInventoryFormulaRows,
     buildInventoryProductRows,
     buildInventoryStatsRows,
+    buildInventoryExportContextRows,
     buildMovementFilterRows,
     buildMovementRows,
     exportStamp,
@@ -1209,6 +1280,18 @@ export default function Inventory() {
     [isMovementScopeFullySelected, selectedMovementIds],
   )
   const showMovementActionGroups = movementGroupMode === 'time+action'
+
+  if (loadError && !loading && !summary.length && !movements.length) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+        <div className="text-4xl">!</div>
+        <p className="text-center font-medium text-red-600 dark:text-red-400">{loadError}</p>
+        <button type="button" onClick={() => load(false)} className="btn-primary">
+          {t('retry') || 'Retry'}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="page-scroll p-3 sm:p-6">

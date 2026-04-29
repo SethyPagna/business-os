@@ -247,18 +247,32 @@ function mirrorTable(tableName) {
   }
 }
 
+if (typeof window !== 'undefined') {
+  Promise.resolve().then(() => purgeSensitiveLiveServerMirrors()).catch(() => {})
+}
+
 const NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY = 'businessos_notifications_summary_missing_until'
-const NOTIFICATION_SUMMARY_MISSING_TTL_MS = 60 * 60 * 1000
+const NOTIFICATION_SUMMARY_MISSING_TTL_MS = 4 * 60 * 60 * 1000
 const DRIVE_SYNC_STATUS_COOLDOWN_KEY = 'businessos_drive_sync_status_cooldown_until'
-const DRIVE_SYNC_STATUS_COOLDOWN_MS = 5 * 60 * 1000
+const DRIVE_SYNC_STATUS_COOLDOWN_MS = 10 * 60 * 1000
 let notificationSummaryMissingUntilMemory = 0
 let notificationSummaryRequestPromise = null
+let driveSyncStatusCooldownMemory = 0
+let driveSyncStatusRequestPromise = null
 
 function getNotificationSummaryFallback(extra = {}) {
   return {
     unreadCount: 0,
     sections: [],
     preferences: {},
+    ...extra,
+  }
+}
+
+function getDriveSyncStatusFallback(extra = {}) {
+  return {
+    item: null,
+    unavailable: true,
     ...extra,
   }
 }
@@ -304,27 +318,44 @@ function clearNotificationSummaryMissing() {
 }
 
 function readStorageNumber(key) {
-  if (typeof window === 'undefined') return 0
+  const memoryValue = key === DRIVE_SYNC_STATUS_COOLDOWN_KEY
+    ? Number(driveSyncStatusCooldownMemory || 0)
+    : 0
+  if (typeof window === 'undefined') {
+    return Number.isFinite(memoryValue) ? memoryValue : 0
+  }
   try {
-    const raw = window.sessionStorage.getItem(key)
-    const value = Number(raw || 0)
-    return Number.isFinite(value) ? value : 0
+    const sessionValue = Number(window.sessionStorage.getItem(key) || 0)
+    const localValue = Number(window.localStorage.getItem(key) || 0)
+    return Math.max(
+      Number.isFinite(memoryValue) ? memoryValue : 0,
+      Number.isFinite(sessionValue) ? sessionValue : 0,
+      Number.isFinite(localValue) ? localValue : 0,
+    )
   } catch (_) {
-    return 0
+    return Number.isFinite(memoryValue) ? memoryValue : 0
   }
 }
 
 function writeStorageNumber(key, value) {
+  if (key === DRIVE_SYNC_STATUS_COOLDOWN_KEY) {
+    driveSyncStatusCooldownMemory = Number(value || 0) || 0
+  }
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.setItem(key, String(value))
+    window.localStorage.setItem(key, String(value))
   } catch (_) {}
 }
 
 function clearStorageNumber(key) {
+  if (key === DRIVE_SYNC_STATUS_COOLDOWN_KEY) {
+    driveSyncStatusCooldownMemory = 0
+  }
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.removeItem(key)
+    window.localStorage.removeItem(key)
   } catch (_) {}
 }
 
@@ -1007,30 +1038,35 @@ export const getGoogleDriveSyncStatus = () =>
   route('system:driveSyncStatus', async () => {
     const cooldownUntil = readStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
     if (cooldownUntil > Date.now()) {
-      return {
-        item: null,
-        unavailable: true,
-        cooldownUntil,
-      }
+      return getDriveSyncStatusFallback({ cooldownUntil })
     }
-    try {
-      const result = await apiFetch('GET', '/api/system/drive-sync/status')
-      clearStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
-      return result
-    } catch (error) {
-      if (isNetErr(error) || String(error?.message || '').toLowerCase().includes('insufficient_resources')) {
-        const nextUntil = Date.now() + DRIVE_SYNC_STATUS_COOLDOWN_MS
-        writeStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY, nextUntil)
-        return {
-          item: null,
-          unavailable: true,
-          cooldownUntil: nextUntil,
-          lastError: error?.message || 'Drive sync status temporarily unavailable',
+    if (driveSyncStatusRequestPromise) return await driveSyncStatusRequestPromise
+    driveSyncStatusRequestPromise = (async () => {
+      try {
+        const result = await apiFetch('GET', '/api/system/drive-sync/status')
+        clearStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
+        return result
+      } catch (error) {
+        const status = Number(error?.status || 0)
+        const message = String(error?.message || '').toLowerCase()
+        const retryable = isNetErr(error)
+          || message.includes('insufficient_resources')
+          || [404, 429, 500, 502, 503, 504].includes(status)
+        if (retryable) {
+          const nextUntil = Date.now() + DRIVE_SYNC_STATUS_COOLDOWN_MS
+          writeStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY, nextUntil)
+          return getDriveSyncStatusFallback({
+            cooldownUntil: nextUntil,
+            lastError: error?.message || 'Drive sync status temporarily unavailable',
+          })
         }
+        throw error
+      } finally {
+        driveSyncStatusRequestPromise = null
       }
-      throw error
-    }
-  }, () => ({ item: null, unavailable: true }))
+    })()
+    return await driveSyncStatusRequestPromise
+  }, () => getDriveSyncStatusFallback())
 
 export const saveGoogleDriveSyncPreferences = (payload) =>
   route('system:driveSyncPreferences', () => apiFetch('POST', '/api/system/drive-sync/preferences', payload), null, true)

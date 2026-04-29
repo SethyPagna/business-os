@@ -355,6 +355,29 @@ export default function Dashboard() {
     revenueFormulaText,
   ])
 
+  const buildDashboardManifestRows = useCallback(() => (
+    buildReportManifestRows([
+      { metric: 'Range Preset', value: periodShort },
+      { metric: 'Date Range', value: rangeLabel },
+      { metric: 'Active Chart Mode', value: activeChart },
+      { metric: 'Top Ranking Mode', value: topMode },
+      { metric: 'Visible Sales Periods', value: chartData.length },
+      { metric: 'Payment Methods', value: analytics?.byPayment?.length || 0 },
+      { metric: 'Visible Branches', value: analytics?.byBranch?.length || 0 },
+      { metric: 'Low Stock Items', value: summary?.low_stock?.length || 0 },
+      { metric: 'Generated At', value: new Date().toISOString() },
+    ])
+  ), [
+    activeChart,
+    analytics?.byBranch?.length,
+    analytics?.byPayment?.length,
+    chartData.length,
+    periodShort,
+    rangeLabel,
+    summary?.low_stock?.length,
+    topMode,
+  ])
+
   const buildDashboardSalesRows = useCallback(() => (
     (analytics?.periodData || []).map((d) => ({
       Period: d.date || d.period || '',
@@ -429,6 +452,12 @@ export default function Dashboard() {
 
   const buildExportAll = () => {
     if (!analytics || !summary) return
+    const manifestRows = buildDashboardManifestRows().map((row) => ({
+      Section: row.Section,
+      Metric: row.Metric,
+      Value: row.Value,
+      Period: rangeLabel,
+    }))
     const kpiRows = buildDashboardKpiRows()
     const salesRows    = buildDashboardSalesRows().map((row) => ({ Section: 'Period Sales', ...row }))
     const topRevRows   = buildDashboardTopProductRows().map((row) => ({ Section: 'Top Products (Rev)', ...row }))
@@ -436,10 +465,45 @@ export default function Dashboard() {
     const pmRows       = buildDashboardPaymentRows().map((row) => ({ Section: 'Payments', ...row }))
     const branchRows   = buildDashboardBranchRows().map((row) => ({ Section: 'Branches', ...row }))
     const lowRows      = buildDashboardLowStockRows().map((row) => ({ Section: 'Low Stock', ...row }))
-    const all = [...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
+    const all = [...manifestRows, ...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
     const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
     downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
   }
+
+  const exportDashboardStats = useCallback(() => {
+    if (!summary || !analytics) return
+    const rows = [
+      ...buildDashboardManifestRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: row.Value,
+        Formula: '',
+        Example: '',
+      })),
+      ...buildDashboardKpiRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: row.Value,
+        Formula: '',
+        Example: row.Period || '',
+      })),
+      ...buildDashboardFormulaRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: '',
+        Formula: row.Formula,
+        Example: row.Example,
+      })),
+    ]
+    downloadCSV(`dashboard-stats-${exportStamp}.csv`, rows)
+  }, [
+    analytics,
+    buildDashboardFormulaRows,
+    buildDashboardKpiRows,
+    buildDashboardManifestRows,
+    exportStamp,
+    summary,
+  ])
 
   const exportDashboardPackage = useCallback(() => {
     if (!analytics || !summary) return
@@ -450,22 +514,13 @@ export default function Dashboard() {
     const branchRows = buildDashboardBranchRows()
     const lowRows = buildDashboardLowStockRows()
     const recentRows = buildDashboardRecentRows()
-    const manifestRows = buildReportManifestRows([
-      { metric: 'Range Preset', value: periodShort },
-      { metric: 'Date Range', value: rangeLabel },
-      { metric: 'Active Chart Mode', value: activeChart },
-      { metric: 'Top Ranking Mode', value: topMode },
-      { metric: 'Visible Sales Periods', value: chartData.length },
-      { metric: 'Payment Methods', value: paymentRows.length },
-      { metric: 'Visible Branches', value: branchRows.length },
-      { metric: 'Low Stock Items', value: lowRows.length },
-      { metric: 'Generated At', value: new Date().toISOString() },
-    ])
+    const manifestRows = buildDashboardManifestRows()
     const files = buildReportPackageFiles({
       baseName: 'dashboard',
       exportStamp,
       manifestRows,
       csvFiles: [
+        { name: `dashboard-export-context-${exportStamp}.csv`, content: buildCSV(manifestRows) },
         { name: `dashboard-kpis-${exportStamp}.csv`, content: buildCSV(buildDashboardKpiRows()) },
         { name: `dashboard-calculations-${exportStamp}.csv`, content: buildCSV(buildDashboardFormulaRows()) },
         { name: `dashboard-sales-${exportStamp}.csv`, content: buildCSV(salesRows) },
@@ -575,6 +630,7 @@ export default function Dashboard() {
     buildDashboardBranchRows,
     buildDashboardFormulaRows,
     buildDashboardKpiRows,
+    buildDashboardManifestRows,
     buildDashboardLowStockRows,
     buildDashboardPaymentRows,
     buildDashboardRecentRows,
@@ -600,7 +656,7 @@ export default function Dashboard() {
       if (!summary || !analytics) return
       downloadCSV(`dashboard-kpi-${exportStamp}.csv`, buildDashboardKpiRows())
     } },
-    { label: t('export_dashboard_calculations') || 'Export calculations and formulas', onClick: () => downloadCSV(`dashboard-calculations-${exportStamp}.csv`, buildDashboardFormulaRows()) },
+    { label: t('export_dashboard_calculations') || 'Export dashboard stats and calculations', onClick: exportDashboardStats },
     'divider',
     { label: t('export_sales_chart'), onClick: () => {
       const rows = chartData.map(d => ({

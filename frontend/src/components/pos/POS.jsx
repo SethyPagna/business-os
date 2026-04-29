@@ -1125,7 +1125,8 @@ export default function POS() {
               {showCustomer && (
                 <div className="px-3 pb-3 space-y-2">
                   <div className="relative">
-                    <input className="input text-xs py-1.5 pr-8" placeholder={t('search_customer')} value={active.customerSearch || ''}
+                    <label htmlFor="pos-customer-search" className="sr-only">{t('search_customer')}</label>
+                    <input id="pos-customer-search" name="pos_customer_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={t('search_customer')} value={active.customerSearch || ''}
                       onChange={e => { patchActive({ customerSearch: e.target.value, customer: { ...active.customer, name: e.target.value } }); setShowCustomerDrop(true) }}
                       onFocus={() => setShowCustomerDrop(true)} />
                     {active.customerSearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearCustomer}>Clear</button>}
@@ -1152,8 +1153,10 @@ export default function POS() {
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-1">
-                        <input className="input text-xs py-1" placeholder={t('phone')} value={active.customer.phone||''} onChange={e => patchActive({ customer: { ...active.customer, phone: e.target.value } })} />
-                        <input className="input text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} />
+                        <label htmlFor="pos-customer-phone-inline" className="sr-only">{t('phone')}</label>
+                        <input id="pos-customer-phone-inline" name="pos_customer_phone_inline" autoComplete="tel" className="input text-xs py-1" placeholder={t('phone')} value={active.customer.phone||''} onChange={e => patchActive({ customer: { ...active.customer, phone: e.target.value } })} />
+                        <label htmlFor="pos-customer-address-inline" className="sr-only">{t('address')}</label>
+                        <input id="pos-customer-address-inline" name="pos_customer_address_inline" autoComplete="street-address" className="input text-xs py-1" placeholder={t('address')} value={active.customer.address||''} onChange={e => patchActive({ customer: { ...active.customer, address: e.target.value } })} />
                       </div>
                       {/* Option picker ??appears inline when customer has multiple options */}
                       {showOptionPicker && customerOptionsList.length > 0 && (
@@ -1206,7 +1209,8 @@ export default function POS() {
                       <button onClick={() => setShowAddDelivery(true)} className="text-xs text-orange-500 hover:text-orange-700 font-medium">{t('add_new')||'+ New'}</button>
                     </div>
                     <div className="relative">
-                      <input className="input text-xs py-1.5 pr-8" placeholder={`${t('search')}...`} value={active.deliverySearch || ''}
+                      <label htmlFor="pos-delivery-search" className="sr-only">{t('search')}</label>
+                      <input id="pos-delivery-search" name="pos_delivery_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={`${t('search')}...`} value={active.deliverySearch || ''}
                         onChange={e => { patchActive({ deliverySearch: e.target.value }); setShowDeliveryDrop(true) }}
                         onFocus={() => setShowDeliveryDrop(true)} />
                       {active.deliverySearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearDelivery}>Clear</button>}

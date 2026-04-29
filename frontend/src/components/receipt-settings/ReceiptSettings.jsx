@@ -284,7 +284,7 @@ export default function ReceiptSettings() {
                   ))}
                 </div>
                 <label htmlFor="receipt-font-size" className="text-sm text-gray-700 dark:text-gray-300 block mb-2">{t('font_size_label') || 'Font Size'}: {tpl.font_size}px</label>
-                <input id="receipt-font-size" type="range" min="9" max="16" value={tpl.font_size} onChange={e => setT('font_size', parseInt(e.target.value))} className="w-full" />
+                <input id="receipt-font-size" name="receipt_font_size" autoComplete="off" type="range" min="9" max="16" value={tpl.font_size} onChange={e => setT('font_size', parseInt(e.target.value))} className="w-full" />
               </Section>
               <Section title={t('header_alignment') || 'Header Alignment'}>
                 <div className="grid grid-cols-3 gap-2">
@@ -336,7 +336,7 @@ export default function ReceiptSettings() {
               </Section>
               <Section title={t('custom_header_text') || 'Custom Header Text'}>
                 <label htmlFor="receipt-custom-header" className="sr-only">{t('custom_header_text') || 'Custom Header Text'}</label>
-                <input id="receipt-custom-header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder="e.g. ** OFFICIAL RECEIPT **" autoComplete="off" />
+                <input id="receipt-custom-header" name="receipt_custom_header" className="input mb-3" value={tpl.custom_header} onChange={e => setT('custom_header', e.target.value)} placeholder="e.g. ** OFFICIAL RECEIPT **" autoComplete="off" />
               </Section>
             </>
           )}

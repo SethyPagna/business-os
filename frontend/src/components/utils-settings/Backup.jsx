@@ -657,7 +657,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
 
   const load = useCallback(async ({ force = false } = {}) => {
     if (!active) return
-    if (inFlightRef.current && !force) return
+    if (inFlightRef.current) return
     if (!force && unavailableUntilRef.current > Date.now()) return
     const requestId = beginTrackedRequest(loadRequestRef)
     inFlightRef.current = true
@@ -666,7 +666,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       const item = result?.item || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       if (result?.unavailable) {
-        unavailableUntilRef.current = Math.max(Date.now() + 30000, Number(result?.cooldownUntil || 0) || 0)
+        unavailableUntilRef.current = Math.max(Date.now() + 60000, Number(result?.cooldownUntil || 0) || 0)
         failureCountRef.current = Math.max(1, failureCountRef.current)
         scheduleRetry(unavailableUntilRef.current - Date.now())
       } else {
@@ -885,12 +885,16 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
           />
         </label>
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
-          <span>{copy('drive_sync_interval', 'Sync every (seconds)')}</span>
+          <span id="drive-sync-interval-label">{copy('drive_sync_interval', 'Sync every (seconds)')}</span>
           <input
+            id="drive-sync-interval"
+            name="drive_sync_interval_seconds"
             type="number"
             min="30"
             max="3600"
             className="input"
+            autoComplete="off"
+            aria-labelledby="drive-sync-interval-label"
             value={form.syncIntervalSeconds}
             onChange={(event) => setForm((current) => ({ ...current, syncIntervalSeconds: event.target.value }))}
           />
