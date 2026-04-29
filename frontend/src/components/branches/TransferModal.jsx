@@ -31,6 +31,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const stockRequestRef = useRef(0)
+  const aliveRef = useRef(true)
+
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(stockRequestRef)
+  }, [])
 
   const invalidQuantityText = settings?.language === 'km'
     ? 'ចំនួនផ្ទេរត្រូវតែធំជាងសូន្យ។'
@@ -52,33 +58,30 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
     const requestId = beginTrackedRequest(stockRequestRef)
     setLoadingProducts(true)
-    Promise.resolve(
-      withLoaderTimeout(
-        () => window.api.getBranchStock(Number.parseInt(fromBranch, 10)),
-        'Branch stock for transfer',
-      ),
-    )
-      .then((stock) => {
-        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
+    async function loadStock() {
+      try {
+        const stock = await withLoaderTimeout(
+          () => window.api.getBranchStock(Number.parseInt(fromBranch, 10)),
+          'Branch stock for transfer',
+        )
+        if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setProducts(Array.isArray(stock) ? stock : [])
         setSelectedProduct(null)
         setQuantity('')
-      })
-      .catch((error) => {
-        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setProducts([])
         setSelectedProduct(null)
         setQuantity('')
         notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
-      })
-      .finally(() => {
-        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
+      } finally {
+        if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setLoadingProducts(false)
-      })
-
-    return () => {
-      invalidateTrackedRequest(stockRequestRef)
+      }
     }
+    loadStock()
+
+    return () => invalidateTrackedRequest(stockRequestRef)
   }, [fromBranch])
 
   /**

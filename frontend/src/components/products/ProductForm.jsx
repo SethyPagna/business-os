@@ -102,6 +102,7 @@ export default function ProductForm({
   const [scannerField, setScannerField] = useState('')
   const [saving, setSaving] = useState(false)
   const supplierRequestRef = useRef(0)
+  const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
 
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -115,24 +116,29 @@ export default function ProductForm({
     setImageList(normalizeGallery(initialForm))
   }, [initialForm])
 
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(supplierRequestRef)
+  }, [])
+
   useEffect(() => {
     if (!window.api?.getSuppliers) {
       setSupplierList([])
       return undefined
     }
     const requestId = beginTrackedRequest(supplierRequestRef)
-    Promise.resolve(withLoaderTimeout(() => window.api.getSuppliers(), 'Product suppliers'))
-      .then((data) => {
-        if (!isTrackedRequestCurrent(supplierRequestRef, requestId)) return
+    async function loadSuppliers() {
+      try {
+        const data = await withLoaderTimeout(() => window.api.getSuppliers(), 'Product suppliers')
+        if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
         setSupplierList(Array.isArray(data) ? data : [])
-      })
-      .catch(() => {
-        if (!isTrackedRequestCurrent(supplierRequestRef, requestId)) return
+      } catch {
+        if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
         setSupplierList([])
-      })
-    return () => {
-      invalidateTrackedRequest(supplierRequestRef)
+      }
     }
+    loadSuppliers()
+    return () => invalidateTrackedRequest(supplierRequestRef)
   }, [])
 
   useEffect(() => {

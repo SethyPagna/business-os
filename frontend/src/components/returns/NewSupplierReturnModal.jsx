@@ -31,21 +31,27 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [compensationKhr, setCompensationKhr] = useState('')
   const bootstrapRequestRef = useRef(0)
   const inventoryRequestRef = useRef(0)
+  const aliveRef = useRef(true)
+
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(bootstrapRequestRef)
+    invalidateTrackedRequest(inventoryRequestRef)
+  }, [])
 
   useEffect(() => {
     const requestId = beginTrackedRequest(bootstrapRequestRef)
     setLoading(true)
-    Promise.resolve(
-      withLoaderTimeout(
-        () => Promise.all([
-          window.api.getBranches(),
-          window.api.getSuppliers(),
-        ]),
-        'Supplier return setup',
-      ),
-    )
-      .then(([branchRows, supplierRows]) => {
-        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
+    async function loadSetup() {
+      try {
+        const [branchRows, supplierRows] = await withLoaderTimeout(
+          () => Promise.all([
+            window.api.getBranches(),
+            window.api.getSuppliers(),
+          ]),
+          'Supplier return setup',
+        )
+        if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         const activeBranches = (branchRows || []).filter((branch) => branch.is_active)
         setBranches(activeBranches)
         setSuppliers(supplierRows || [])
@@ -54,20 +60,18 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           const defaultBranchId = activeBranches.find((branch) => branch.is_default)?.id || activeBranches[0]?.id || ''
           return defaultBranchId ? String(defaultBranchId) : ''
         })
-      })
-      .catch((error) => {
-        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
         setBranches([])
         setSuppliers([])
-      })
-      .finally(() => {
-        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
+      } finally {
+        if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         setLoading(false)
-      })
-    return () => {
-      invalidateTrackedRequest(bootstrapRequestRef)
+      }
     }
+    loadSetup()
+    return () => invalidateTrackedRequest(bootstrapRequestRef)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -79,29 +83,26 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     }
     const requestId = beginTrackedRequest(inventoryRequestRef)
     setLoadingProducts(true)
-    Promise.resolve(
-      withLoaderTimeout(
-        () => window.api.getInventorySummary({ branchId: Number(branchId) }),
-        'Supplier return inventory',
-      ),
-    )
-      .then((rows) => {
-        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
+    async function loadInventory() {
+      try {
+        const rows = await withLoaderTimeout(
+          () => window.api.getInventorySummary({ branchId: Number(branchId) }),
+          'Supplier return inventory',
+        )
+        if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         const next = (rows || []).filter((product) => (product.display_quantity || 0) > 0)
         setProducts(next)
-      })
-      .catch((error) => {
-        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
+      } catch (error) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
         setProducts([])
-      })
-      .finally(() => {
-        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
+      } finally {
+        if (!aliveRef.current || !isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         setLoadingProducts(false)
-      })
-    return () => {
-      invalidateTrackedRequest(inventoryRequestRef)
+      }
     }
+    loadInventory()
+    return () => invalidateTrackedRequest(inventoryRequestRef)
   }, [branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredProducts = useMemo(() => {
