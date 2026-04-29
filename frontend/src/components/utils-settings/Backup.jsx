@@ -641,26 +641,41 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   const retryTimerRef = useRef(null)
   const failureCountRef = useRef(0)
   const failureNotifiedRef = useRef(false)
+  const inFlightRef = useRef(false)
+  const unavailableUntilRef = useRef(0)
+  const loadRef = useRef(null)
+  const isMountedRef = useRef(true)
 
-  const load = useCallback(async () => {
+  const scheduleRetry = useCallback((delayMs) => {
+    window.clearTimeout(retryTimerRef.current)
     if (!active) return
+    retryTimerRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current || !active) return
+      loadRef.current?.({ force: true })
+    }, Math.max(5000, Number(delayMs || 0) || 30000))
+  }, [active])
+
+  const load = useCallback(async ({ force = false } = {}) => {
+    if (!active) return
+    if (inFlightRef.current && !force) return
+    if (!force && unavailableUntilRef.current > Date.now()) return
     const requestId = beginTrackedRequest(loadRequestRef)
+    inFlightRef.current = true
     try {
       const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
       const item = result?.item || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       if (result?.unavailable) {
-        const nextDelayMs = Math.max(30000, Number(result?.cooldownUntil || 0) - Date.now() || 5 * 60 * 1000)
+        unavailableUntilRef.current = Math.max(Date.now() + 30000, Number(result?.cooldownUntil || 0) || 0)
         failureCountRef.current = Math.max(1, failureCountRef.current)
-        window.clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = window.setTimeout(() => {
-          if (active) load()
-        }, nextDelayMs)
+        scheduleRetry(unavailableUntilRef.current - Date.now())
       } else {
+        unavailableUntilRef.current = 0
         failureCountRef.current = 0
         failureNotifiedRef.current = false
+        window.clearTimeout(retryTimerRef.current)
       }
-      setStatus(item)
+      setStatus((current) => item || current || null)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
         clientSecret: current.clientSecret || '',
@@ -673,26 +688,39 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       failureCountRef.current += 1
       const nextDelayMs = Math.min(30000, 2000 * (2 ** Math.min(failureCountRef.current - 1, 4)))
-      window.clearTimeout(retryTimerRef.current)
-      retryTimerRef.current = window.setTimeout(() => {
-        if (active) load()
-      }, nextDelayMs)
+      unavailableUntilRef.current = Date.now() + nextDelayMs
+      scheduleRetry(nextDelayMs)
       if (!failureNotifiedRef.current) {
         failureNotifiedRef.current = true
         notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
       }
+    } finally {
+      if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
+        inFlightRef.current = false
+      }
     }
-  }, [active, copy, notify])
+  }, [active, copy, notify, scheduleRetry])
 
   useEffect(() => {
+    loadRef.current = load
+  }, [load])
+
+  useEffect(() => {
+    isMountedRef.current = true
     if (!active) {
+      unavailableUntilRef.current = 0
+      inFlightRef.current = false
       window.clearTimeout(retryTimerRef.current)
       invalidateTrackedRequest(loadRequestRef)
       return
     }
-    load()
+    load({ force: true })
+    return () => {
+      isMountedRef.current = false
+    }
   }, [active, load])
   useEffect(() => () => {
+    isMountedRef.current = false
     window.clearTimeout(retryTimerRef.current)
     invalidateTrackedRequest(loadRequestRef)
   }, [])
@@ -704,7 +732,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       if (event.data.status === 'connected') {
         notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
         setForm((current) => ({ ...current, clientSecret: '' }))
-        load()
+        load({ force: true })
         return
       }
       if (event.data.status === 'error') {
@@ -726,7 +754,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       })
       setStatus(result?.item || status)
       notify(copy('saved', 'Saved'), 'success')
-      await load()
+      await load({ force: true })
     } catch (error) {
       notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -773,7 +801,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
     try {
       const result = await window.api.syncGoogleDriveNow?.()
       const summary = result?.summary || {}
-      await load()
+      await load({ force: true })
       notify(
         `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
         'success',
@@ -791,7 +819,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
     try {
       await window.api.disconnectGoogleDriveSync?.()
       setForm((current) => ({ ...current, clientSecret: '' }))
-      await load()
+      await load({ force: true })
       notify(copy('drive_sync_disconnected', 'Google Drive disconnected'), 'success')
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -822,7 +850,10 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <span>{copy('drive_sync_client_id', 'OAuth client ID')}</span>
           <input
+            id="drive-sync-client-id"
+            name="drive_sync_client_id"
             className="input"
+            autoComplete="off"
             value={form.clientId}
             onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
             placeholder="xxxxxxxx.apps.googleusercontent.com"
@@ -831,8 +862,11 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <span>{copy('drive_sync_client_secret', 'OAuth client secret')}</span>
           <input
+            id="drive-sync-client-secret"
+            name="drive_sync_client_secret"
             type="password"
             className="input"
+            autoComplete="off"
             value={form.clientSecret}
             onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
             placeholder={status?.hasClientSecret ? copy('drive_sync_secret_saved', 'Leave blank to keep the saved secret') : 'GOCSPX-...'}
@@ -841,7 +875,10 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <span>{copy('drive_sync_folder_name', 'Drive folder name')}</span>
           <input
+            id="drive-sync-folder-name"
+            name="drive_sync_folder_name"
             className="input"
+            autoComplete="off"
             value={form.folderName}
             onChange={(event) => setForm((current) => ({ ...current, folderName: event.target.value }))}
             placeholder="Business OS Sync"

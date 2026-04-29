@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleUserRound, UserPlus } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
@@ -72,10 +72,11 @@ export default function Users() {
   const loadedOnceRef = useRef(false)
   const pageLoadKeyRef = useRef('')
   const loadRequestRef = useRef(0)
-  const tr = (key, fallback) => {
+  const loadWatchdogRef = useRef(null)
+  const tr = useCallback((key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
-  }
+  }, [t])
 
   const [users, setUsers] = useState([])
   const [roles, setRoles] = useState([])
@@ -108,18 +109,30 @@ export default function Users() {
     return !targetUser.has_admin_access
   }
 
-  const load = async () => {
+  const syncChannelName = String(syncChannel?.channel || '')
+  const syncTimestamp = Number(syncChannel?.ts || 0)
+
+  const load = useCallback(async ({ silent = loadedOnceRef.current } = {}) => {
     const requestId = beginTrackedRequest(loadRequestRef)
     if (!canManage) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setUsers([])
       setRoles([])
       setLoadError(null)
+      setLoading(false)
       loadedOnceRef.current = true
       return
     }
-    setLoading(true)
-    setLoadError(null)
+    window.clearTimeout(loadWatchdogRef.current)
+    if (!silent || !loadedOnceRef.current) {
+      setLoading(true)
+      setLoadError(null)
+      loadWatchdogRef.current = window.setTimeout(() => {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        setLoading(false)
+        setLoadError(tr('users_load_slow', 'Users are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
+      }, 15000)
+    }
     try {
       const result = await settleLoaderMap({
         users: () => window.api.getUsers(),
@@ -139,6 +152,7 @@ export default function Users() {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to load users'))
       }
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      setLoadError(null)
 
       if (result.errors.users) {
         notify(result.errors.users?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
@@ -148,17 +162,25 @@ export default function Users() {
       loadedOnceRef.current = true
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLoadError(error?.message || 'Failed to load users')
-      notify(error?.message || 'Failed to load users', 'error')
+      const nextMessage = error?.message || 'Failed to load users'
+      if (!loadedOnceRef.current) {
+        setLoadError(nextMessage)
+        notify(nextMessage, 'error')
+      } else {
+        setLoadError((current) => current || tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.'))
+        notify(tr('users_refresh_failed', 'Unable to refresh users right now. Showing the latest loaded data.'), 'warning')
+      }
     } finally {
+      window.clearTimeout(loadWatchdogRef.current)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoading(false)
     }
-  }
+  }, [canManage, notify, tr])
 
   useEffect(() => {
     if (page !== 'users') {
       pageLoadKeyRef.current = ''
+      window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       return
     }
@@ -166,13 +188,18 @@ export default function Users() {
     const nextLoadKey = `${page}:${accessKey}`
     if (pageLoadKeyRef.current === nextLoadKey) return
     pageLoadKeyRef.current = nextLoadKey
-    load()
-  }, [canManage, page]) // eslint-disable-line react-hooks/exhaustive-deps
+    load({ silent: false })
+  }, [canManage, load, page])
   useEffect(() => {
-    if (page !== 'users' || !syncChannel) return
-    if (syncChannel.channel === 'users' || syncChannel.channel === 'roles') load()
-  }, [page, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+    if (page !== 'users' || !syncChannelName) return
+    if (syncChannelName === 'users' || syncChannelName === 'roles') {
+      load({ silent: true })
+    }
+  }, [load, page, syncChannelName, syncTimestamp])
+  useEffect(() => () => {
+    window.clearTimeout(loadWatchdogRef.current)
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -463,10 +490,12 @@ export default function Users() {
       </div>
 
       <div className="mb-4">
+        <label htmlFor="users-search" className="sr-only">{tr('search_users', 'Search users')}</label>
         <input
           id="users-search"
           name="users_search"
           aria-label="Search users"
+          autoComplete="off"
           className="input max-w-sm"
           placeholder={`${t('search') || 'Search'}...`}
           value={search}
@@ -624,29 +653,29 @@ export default function Users() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="user-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('full_name', 'Full name')}</label>
-                <input id="user-name" name="name" className="input" value={userForm.name} onChange={(e) => setUserForm((prev) => ({ ...prev, name: e.target.value }))} />
+                <input id="user-name" name="name" autoComplete="name" className="input" value={userForm.name} onChange={(e) => setUserForm((prev) => ({ ...prev, name: e.target.value }))} />
               </div>
               <div>
                 <label htmlFor="user-username" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('username', 'Username')}</label>
-                <input id="user-username" name="username" className="input" value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} />
+                <input id="user-username" name="username" autoComplete="username" className="input" value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} />
               </div>
               <div>
                 <label htmlFor="user-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('phone', 'Phone')}</label>
-                <input id="user-phone" name="phone" className="input" value={userForm.phone} onChange={(e) => setUserForm((prev) => ({ ...prev, phone: e.target.value }))} />
+                <input id="user-phone" name="phone" autoComplete="tel" className="input" value={userForm.phone} onChange={(e) => setUserForm((prev) => ({ ...prev, phone: e.target.value }))} />
               </div>
               <div>
                 <label htmlFor="user-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('email', 'Email')}</label>
-                <input id="user-email" name="email" type="email" className="input" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} />
+                <input id="user-email" name="email" type="email" autoComplete="email" className="input" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} />
               </div>
             </div>
             <div>
               <label htmlFor="user-avatar" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('avatar_image', 'Avatar image')}</label>
-              <input id="user-avatar" name="avatar_path" className="input" placeholder={tr('avatar_upload_note', 'Use My Profile to upload an image')} value={userForm.avatar_path} onChange={(e) => setUserForm((prev) => ({ ...prev, avatar_path: e.target.value }))} />
+              <input id="user-avatar" name="avatar_path" autoComplete="off" className="input" placeholder={tr('avatar_upload_note', 'Use My Profile to upload an image')} value={userForm.avatar_path} onChange={(e) => setUserForm((prev) => ({ ...prev, avatar_path: e.target.value }))} />
             </div>
             {!selectedUser ? (
               <div>
                 <label htmlFor="user-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('password', 'Password')}</label>
-                <input id="user-password" name="password" type="password" className="input" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} />
+                <input id="user-password" name="password" type="password" autoComplete="new-password" className="input" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} />
               </div>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -736,7 +765,7 @@ export default function Users() {
           <div className="space-y-4">
             <div>
               <label htmlFor="role-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_name', 'Role name')}</label>
-              <input id="role-name" name="role_name" className="input" value={roleForm.name} onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))} />
+              <input id="role-name" name="role_name" autoComplete="off" className="input" value={roleForm.name} onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))} />
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>

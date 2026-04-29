@@ -189,6 +189,31 @@ export async function resetLocalMirrorDb() {
   } catch (_) {}
 }
 
+export async function clearLocalMirrorTables(tableNames = []) {
+  const names = Array.isArray(tableNames)
+    ? [...new Set(tableNames.map((name) => String(name || '').trim()).filter(Boolean))]
+    : []
+  if (!names.length) return
+
+  const tables = names
+    .map((name) => {
+      try {
+        return dexieDb.table(name)
+      } catch (_) {
+        return null
+      }
+    })
+    .filter(Boolean)
+
+  if (!tables.length) return
+
+  await dexieDb.transaction('rw', ...tables, async () => {
+    for (const table of tables) {
+      await table.clear().catch(() => {})
+    }
+  })
+}
+
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 export function parseCSV(text) {
   if (!text) return []

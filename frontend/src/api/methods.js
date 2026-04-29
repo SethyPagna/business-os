@@ -12,7 +12,7 @@ function getDeviceInfo() {
  */
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite, isNetErr } from './http.js'
-import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
+import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
 import { resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
@@ -203,8 +203,45 @@ function routeMirrored(channel, serverFn, localFn, mirrorFn) {
   return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
 }
 
+const LIVE_SERVER_SENSITIVE_MIRROR_TABLES = new Set([
+  'users',
+  'roles',
+  'products',
+  'branch_stock',
+  'customers',
+  'suppliers',
+  'delivery_contacts',
+  'sales',
+  'sale_items',
+  'returns',
+  'audit_logs',
+  'inventory_movements',
+  'stock_transfers',
+])
+
+let sensitiveMirrorPurgePromise = null
+
+function shouldPersistLocalMirror(tableName) {
+  return !(getSyncServerUrl() && LIVE_SERVER_SENSITIVE_MIRROR_TABLES.has(String(tableName || '').trim()))
+}
+
+async function purgeSensitiveLiveServerMirrors() {
+  if (!getSyncServerUrl()) {
+    sensitiveMirrorPurgePromise = null
+    return
+  }
+  if (!sensitiveMirrorPurgePromise) {
+    sensitiveMirrorPurgePromise = clearLocalMirrorTables([...LIVE_SERVER_SENSITIVE_MIRROR_TABLES]).catch(() => {})
+  }
+  await sensitiveMirrorPurgePromise
+}
+
 function mirrorTable(tableName) {
   return async (rows) => {
+    if (!shouldPersistLocalMirror(tableName)) {
+      await clearLocalMirrorTables([tableName]).catch(() => {})
+      return []
+    }
     const incomingRows = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : []
     return replaceTableContents(tableName, incomingRows)
   }
@@ -230,9 +267,12 @@ function readNotificationSummaryMissingUntil() {
   const memoryValue = Number(notificationSummaryMissingUntilMemory || 0)
   if (typeof window === 'undefined') return 0
   try {
-    const raw = window.sessionStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
-    const value = Number(raw || 0)
-    const storageValue = Number.isFinite(value) ? value : 0
+    const sessionValue = Number(window.sessionStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
+    const localValue = Number(window.localStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
+    const storageValue = Math.max(
+      Number.isFinite(sessionValue) ? sessionValue : 0,
+      Number.isFinite(localValue) ? localValue : 0,
+    )
     return Math.max(storageValue, Number.isFinite(memoryValue) ? memoryValue : 0)
   } catch (_) {
     return Number.isFinite(memoryValue) ? memoryValue : 0
@@ -247,6 +287,10 @@ function markNotificationSummaryMissing() {
       NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
       String(notificationSummaryMissingUntilMemory),
     )
+    window.localStorage.setItem(
+      NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
+      String(notificationSummaryMissingUntilMemory),
+    )
   } catch (_) {}
 }
 
@@ -255,6 +299,7 @@ function clearNotificationSummaryMissing() {
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.removeItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
+    window.localStorage.removeItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
   } catch (_) {}
 }
 
@@ -374,8 +419,11 @@ export async function getAppBootstrap() {
   const hasSession = !!getAuthSessionToken()
 
   if (!hasServer) {
+    sensitiveMirrorPurgePromise = null
     return buildLocalBootstrap()
   }
+
+  await purgeSensitiveLiveServerMirrors().catch(() => {})
 
   if (!hasSession) {
     const localBootstrap = await buildLocalBootstrap()

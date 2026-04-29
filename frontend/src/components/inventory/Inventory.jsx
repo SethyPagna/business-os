@@ -21,6 +21,15 @@ import {
   settleLoaderMap,
 } from '../../utils/loaders.mjs'
 
+function reuseSetWhenUnchanged(current, nextValues = []) {
+  const next = new Set(nextValues)
+  if (next.size !== current.size) return next
+  for (const value of current) {
+    if (!next.has(value)) return next
+  }
+  return current
+}
+
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol, page } = useApp()
   const { syncChannel } = useSync()
@@ -246,14 +255,13 @@ export default function Inventory() {
   useEffect(() => {
     setExpandedMovementGroups((current) => {
       const validIds = new Set(visibleMovementGroups.map((group) => group.id))
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
+      return reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id)))
     })
   }, [visibleMovementGroups])
 
   useEffect(() => {
     const validIds = new Set(visibleMovementGroups.map((group) => group.id))
-    setSelectedMovementIds((current) => new Set([...current].filter((id) => validIds.has(id))))
+    setSelectedMovementIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
   }, [visibleMovementGroups])
 
   useEffect(() => {
@@ -298,8 +306,7 @@ export default function Inventory() {
   useEffect(() => {
     setCollapsedMovementSections((current) => {
       const validIds = new Set(movementSections.map((section) => section.id))
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
+      return reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id)))
     })
   }, [movementSections])
 

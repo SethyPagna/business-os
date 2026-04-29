@@ -32,6 +32,28 @@ function buildFallbackPreviewHtml(printSettings, T) {
   `
 }
 
+function buildSafePreviewSource(previewNode, printSettings, T) {
+  if (!(previewNode instanceof HTMLElement)) {
+    return buildFallbackPreviewHtml(printSettings, T)
+  }
+  try {
+    const clone = previewNode.cloneNode(true)
+    if (!(clone instanceof HTMLElement)) {
+      return buildFallbackPreviewHtml(printSettings, T)
+    }
+    clone.querySelectorAll('img, svg image, video, canvas').forEach((node) => node.remove())
+    clone.querySelectorAll('*').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return
+      node.style.backgroundImage = 'none'
+      node.style.maskImage = 'none'
+      node.removeAttribute('crossorigin')
+    })
+    return clone
+  } catch (_) {
+    return buildFallbackPreviewHtml(printSettings, T)
+  }
+}
+
 export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
   const T = (key, fallback) => (tProp && tProp(key)) || fallback
   const [ps, setPs] = useState(() => {
@@ -67,8 +89,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
 
   const getPreviewSource = () => {
     const previewNode = previewTargetRef?.current
-    if (previewNode instanceof HTMLElement) return previewNode
-    return buildFallbackPreviewHtml(ps, T)
+    return buildSafePreviewSource(previewNode, ps, T)
   }
 
   return (
