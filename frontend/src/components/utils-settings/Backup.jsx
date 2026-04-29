@@ -828,6 +828,25 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
     }
   }
 
+  const forgetCredentials = async () => {
+    if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
+    setBusy('forget')
+    try {
+      await window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true })
+      setForm((current) => ({
+        ...current,
+        clientId: '',
+        clientSecret: '',
+      }))
+      await load({ force: true })
+      notify(copy('drive_sync_credentials_forgotten', 'Saved Google Drive app credentials were removed'), 'success')
+    } catch (error) {
+      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
   return (
     <div className="card p-5 sm:p-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -926,6 +945,9 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         <div className="mt-2 text-xs text-blue-700 dark:text-blue-200">
           {copy('drive_sync_setup_note', 'Add this exact redirect URI to your Google OAuth client, then connect the Drive account that should store the mirrored Business OS data folder.')}
         </div>
+        <div className="mt-2 text-xs text-blue-700 dark:text-blue-200">
+          {copy('drive_sync_credential_retention_note', 'Disconnect keeps these app credentials in place so reconnecting stays easy. Use Forget app credentials only when you intentionally want to remove them.')}
+        </div>
       </div>
 
       {status?.connectedEmail || status?.connectedName ? (
@@ -959,6 +981,10 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
             {busy === 'disconnect' ? copy('disconnecting', 'Disconnecting...') : copy('disconnect', 'Disconnect')}
           </PathActionButton>
         ) : null}
+        <PathActionButton onClick={forgetCredentials} disabled={busy === 'forget'}>
+          <Link2Off className="h-4 w-4" />
+          {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
+        </PathActionButton>
       </div>
     </div>
   )

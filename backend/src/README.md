@@ -5,7 +5,7 @@ This folder contains the first-party backend runtime for Business OS.
 ## How The Backend Runs
 
 1. `backend/server.js` bootstraps Express, mounts middleware, API routes, the health endpoint, the SPA fallback, and the WebSocket server.
-2. `config.js` resolves the runtime folder, `.env`, data folder, upload path, and frontend build path.
+2. `config/` resolves the runtime folder, `.env`, canonical organization data folder, upload path, and frontend build path.
 3. `database.js` opens SQLite, applies schema/migrations, and seeds required defaults.
 4. `requestContext.js`, `middleware.js`, `security.js`, and `helpers.js` provide the cross-cutting request, auth, audit, and broadcast behavior used by route files.
 5. `routes/` owns HTTP behavior by domain.
@@ -13,7 +13,7 @@ This folder contains the first-party backend runtime for Business OS.
 
 ## File Ownership
 
-- `config.js` - runtime path and environment resolution
+- `config/` - runtime path, environment resolution, and organization-aware storage bootstrap
 - `database.js` - SQLite schema, pragmas, migrations, seed data
 - `helpers.js` - shared validation, audit, sync broadcast, and response helpers
 - `middleware.js` - auth token, upload, and request guard middleware

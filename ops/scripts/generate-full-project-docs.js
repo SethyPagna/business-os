@@ -24,14 +24,13 @@ const EXCLUDED_DIRS = new Set([
   'business-os-data',
   'docs',
 ])
-const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'])
+const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const ROOT_INCLUDE_EXTENSIONS = new Set([
   '.bat',
   '.sh',
   '.ps1',
   '.js',
   '.mjs',
-  '.cjs',
   '.json',
   '.md',
   '.nsi',
@@ -299,14 +298,12 @@ function resolveInternalImport(fromFile, spec) {
     `${base}.ts`,
     `${base}.tsx`,
     `${base}.mjs`,
-    `${base}.cjs`,
     `${base}.json`,
     path.join(base, 'index.js'),
     path.join(base, 'index.jsx'),
     path.join(base, 'index.ts'),
     path.join(base, 'index.tsx'),
     path.join(base, 'index.mjs'),
-    path.join(base, 'index.cjs'),
   ]
   for (const candidate of candidates) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate

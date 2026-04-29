@@ -24,7 +24,7 @@ The backend is the source of truth for all business data. Frontend state is view
 
 ### 2) Configuration and Paths
 
-- `backend/src/config.js`
+- `backend/src/config/index.js`
   - Resolves runtime directory (source vs packaged EXE).
   - Loads `.env`.
   - Resolves data root via `data-location.json` or defaults.
@@ -128,4 +128,3 @@ Returns write path updates:
 - `build-release.bat` assembles a portable folder and installer.
 - Existing `business-os-data` and `.env` in release folder are preserved on rebuild.
 - Data path can be relocated and persisted via `data-location.json`.
-

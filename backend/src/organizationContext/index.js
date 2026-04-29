@@ -3,9 +3,10 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const { db } = require('./database')
-const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH } = require('./config')
-const { isSamePath, isSubPath, summarizeDataRoot } = require('./dataPath')
+const { db } = require('../database')
+const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT } = require('../config')
+const { isSamePath, summarizeDataRoot } = require('../dataPath')
+const { buildOrganizationFolderName } = require('../storage/organizationFolders')
 
 function trim(value) {
   return String(value || '').trim()
@@ -136,7 +137,10 @@ function getPortalPublicPath(organization) {
 
 function getOrganizationFilesystemLayout(organization) {
   if (!organization?.public_id) return null
-  const orgRoot = path.join(STORAGE_ROOT, 'organizations', organization.public_id)
+  const orgRoot = path.join(
+    ORGANIZATIONS_ROOT,
+    buildOrganizationFolderName(organization.public_id, organization.name || organization.slug || 'Organization'),
+  )
   return {
     orgRoot,
     metaRoot: path.join(orgRoot, 'meta'),

@@ -3,7 +3,7 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const { DATA_ROOT } = require('./config')
+const { DATA_ROOT } = require('../config')
 
 const RUNTIME_META_DIR = path.join(DATA_ROOT, 'meta')
 const RUNTIME_STATE_FILE = path.join(RUNTIME_META_DIR, 'runtime-state.json')

@@ -13,7 +13,7 @@ function getDeviceInfo() {
 
 import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
-import { resetClientRuntimeState } from './clientRuntime.js'
+import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 import {
@@ -25,7 +25,7 @@ import {
   shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy,
   maxStoredNumber,
   isCooldownActive,
-} from './storagePolicy.mjs'
+} from '../platform/storage/storagePolicy.mjs'
 
 function getPortalBaseUrl() {
   const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
@@ -1068,6 +1068,9 @@ export const startGoogleDriveSyncOauth = (payload) =>
 
 export const disconnectGoogleDriveSync = () =>
   route('system:driveSyncDisconnect', () => apiFetch('POST', '/api/system/drive-sync/disconnect', {}), null, true)
+
+export const forgetGoogleDriveSyncCredentials = (payload = {}) =>
+  route('system:driveSyncForgetCredentials', () => apiFetch('POST', '/api/system/drive-sync/forget-credentials', payload), null, true)
 
 export const syncGoogleDriveNow = () =>
   route('system:driveSyncNow', () => apiFetch('POST', '/api/system/drive-sync/sync-now', {}), null, true)

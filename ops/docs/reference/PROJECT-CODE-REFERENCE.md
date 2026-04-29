@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **8**
+Total files documented: **10**
 
 ## 2. Symbol Count by File
 
@@ -12,12 +12,14 @@ Total files documented: **8**
 |---:|---|---:|
 | 1 | `clean-generated.ps1` | 0 |
 | 2 | `ops/scripts/backend/verify-data-integrity.js` | 10 |
-| 3 | `ops/scripts/frontend/verify-i18n.js` | 5 |
+| 3 | `ops/scripts/frontend/verify-i18n.js` | 6 |
 | 4 | `ops/scripts/generate-doc-reference.js` | 18 |
 | 5 | `ops/scripts/generate-full-project-docs.js` | 26 |
 | 6 | `ops/scripts/lib/fs-utils.js` | 8 |
 | 7 | `ops/scripts/performance-scan.js` | 3 |
-| 8 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
+| 8 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
+| 9 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
+| 10 | `ops/scripts/verify-runtime-deps.js` | 4 |
 
 ## 3. Detailed Function Commentary
 
@@ -45,10 +47,11 @@ Total files documented: **8**
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `collectUsedKeys` | function | 29 |
-| 2 | `listMissing` | function | 69 |
-| 3 | `listEmptyValues` | function | 74 |
-| 4 | `printList` | function | 81 |
-| 5 | `main` | function | 88 |
+| 2 | `flattenTranslationTree` | function | 69 |
+| 3 | `listMissing` | function | 83 |
+| 4 | `listEmptyValues` | function | 88 |
+| 5 | `printList` | function | 95 |
+| 6 | `main` | function | 102 |
 
 ### 3.4 `ops/scripts/generate-doc-reference.js`
 
@@ -77,32 +80,32 @@ Total files documented: **8**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 49 |
-| 2 | `toPosix` | function | 53 |
-| 3 | `rel` | function | 57 |
-| 4 | `shouldSkipDir` | function | 61 |
-| 5 | `collectFilesAndFolders` | function | 65 |
-| 6 | `getAllProjectFilesAndFolders` | function | 86 |
-| 7 | `isProbablyText` | function | 109 |
-| 8 | `readText` | function | 122 |
-| 9 | `lineCount` | function | 130 |
-| 10 | `fileCategory` | function | 135 |
-| 11 | `inferPurpose` | function | 155 |
-| 12 | `markdownHeader` | function | 180 |
-| 13 | `markdownSection` | function | 184 |
-| 14 | `extractImportsExports` | function | 188 |
-| 15 | `findSymbols` | function | 228 |
-| 16 | `writeAllFunctionReference` | function | 254 |
-| 17 | `resolveInternalImport` | function | 292 |
-| 18 | `writeAllFileInventory` | function | 317 |
-| 19 | `folderPurpose` | function | 339 |
-| 20 | `writeFolderCoverage` | function | 354 |
-| 21 | `writeImportExportReference` | function | 413 |
-| 22 | `readJsonObject` | function | 487 |
-| 23 | `translationSectionForKey` | function | 495 |
-| 24 | `writeTranslationSectionReference` | function | 546 |
-| 25 | `writeMainCoverageSummary` | function | 595 |
-| 26 | `main` | function | 624 |
+| 1 | `ensureDir` | function | 48 |
+| 2 | `toPosix` | function | 52 |
+| 3 | `rel` | function | 56 |
+| 4 | `shouldSkipDir` | function | 60 |
+| 5 | `collectFilesAndFolders` | function | 64 |
+| 6 | `getAllProjectFilesAndFolders` | function | 85 |
+| 7 | `isProbablyText` | function | 108 |
+| 8 | `readText` | function | 121 |
+| 9 | `lineCount` | function | 129 |
+| 10 | `fileCategory` | function | 134 |
+| 11 | `inferPurpose` | function | 154 |
+| 12 | `markdownHeader` | function | 179 |
+| 13 | `markdownSection` | function | 183 |
+| 14 | `extractImportsExports` | function | 187 |
+| 15 | `findSymbols` | function | 227 |
+| 16 | `writeAllFunctionReference` | function | 253 |
+| 17 | `resolveInternalImport` | function | 291 |
+| 18 | `writeAllFileInventory` | function | 314 |
+| 19 | `folderPurpose` | function | 336 |
+| 20 | `writeFolderCoverage` | function | 351 |
+| 21 | `writeImportExportReference` | function | 410 |
+| 22 | `readJsonObject` | function | 484 |
+| 23 | `translationSectionForKey` | function | 492 |
+| 24 | `writeTranslationSectionReference` | function | 543 |
+| 25 | `writeMainCoverageSummary` | function | 592 |
+| 26 | `main` | function | 621 |
 
 ### 3.6 `ops/scripts/lib/fs-utils.js`
 
@@ -121,11 +124,24 @@ Total files documented: **8**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `kb` | function | 44 |
-| 2 | `topN` | function | 49 |
-| 3 | `main` | function | 57 |
+| 1 | `kb` | function | 43 |
+| 2 | `topN` | function | 48 |
+| 3 | `main` | function | 56 |
 
-### 3.8 `ops/scripts/sync-firebase-release-env.ps1`
+### 3.8 `ops/scripts/powershell/clean-generated.ps1`
 
 - No top-level named function/class symbols detected.
+
+### 3.9 `ops/scripts/sync-firebase-release-env.ps1`
+
+- No top-level named function/class symbols detected.
+
+### 3.10 `ops/scripts/verify-runtime-deps.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `readJson` | function | 22 |
+| 2 | `assertTrackedFile` | function | 26 |
+| 3 | `hasLockDependency` | function | 32 |
+| 4 | `main` | function | 38 |
 

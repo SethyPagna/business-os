@@ -18,7 +18,7 @@ import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
 import { STORAGE_KEYS }            from './constants.js'
-import { sanitizeSyncServerUrl }   from './api/clientRuntime.js'
+import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.js'
 
 function getStoredAuthToken() {
   try {

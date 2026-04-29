@@ -1,4 +1,4 @@
-'use strict'
+ï»¿'use strict'
 /**
  * system.js
  * Operational/system endpoints:
@@ -15,7 +15,7 @@ const path = require('path')
 const { spawn } = require('child_process')
 const Database = require('better-sqlite3')
 const express = require('express')
-const { db, ensureCoreDataInvariants }  = require('../database')
+const { db, ensureCoreDataInvariants } = require('../../database')
 const {
   UPLOADS_PATH,
   RUNTIME_DIR,
@@ -26,23 +26,25 @@ const {
   DATA_LOCATION_FILE,
   writeDataLocation,
   normalizeSelectedDataDir,
-} = require('../config')
+  TAILSCALE_URL,
+  GOOGLE_DRIVE_OAUTH_REDIRECT_URI,
+} = require('../../config')
 const {
   summarizeDataRoot,
   isSamePath,
   isSubPath,
-} = require('../dataPath')
+} = require('../../dataPath')
 const {
   BACKUP_VERSION,
   BACKUP_TABLES,
   BACKUP_CLEAR_ORDER,
   buildBackupSummary,
-} = require('../backupSchema')
-const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../helpers')
-const { authToken, requirePermission, requireAnyPermission, getAuditActor } = require('../middleware')
-const { checkRateLimit } = require('../security')
-const { classifyRequestAccess } = require('../accessControl')
-const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../organizationContext')
+} = require('../../backupSchema')
+const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../../helpers')
+const { authToken, requirePermission, requireAnyPermission, getAuditActor } = require('../../middleware')
+const { checkRateLimit } = require('../../security')
+const { classifyRequestAccess } = require('../../accessControl')
+const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../../organizationContext')
 const {
   GOOGLE_DRIVE_SCOPE,
   beginGoogleDriveOAuth,
@@ -52,11 +54,12 @@ const {
   getDriveSyncStatus,
   runDriveSync,
   saveDriveSyncPreferences,
-} = require('../services/googleDriveSync')
-const { buildRuntimeDescriptor, bumpStorageVersion } = require('../runtimeState')
+  forgetDriveSyncCredentials,
+} = require('../../services/googleDriveSync')
+const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 
 const router = express.Router()
-const SYSTEM_FS_WORKER = path.join(__dirname, '../systemFsWorker.js')
+const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
 
 function q(name) {
   return `"${String(name).replace(/"/g, '""')}"`
@@ -150,6 +153,13 @@ function buildRequestBaseUrl(req) {
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim()
   if (!host) return ''
   return `${proto}://${host}`
+}
+
+function resolveDriveRedirectUri(req) {
+  const configured = String(GOOGLE_DRIVE_OAUTH_REDIRECT_URI || '').trim()
+  if (configured) return configured
+  const baseUrl = buildRequestBaseUrl(req)
+  return baseUrl ? `${baseUrl}/api/system/drive-sync/oauth/callback` : ''
 }
 
 function getTableColumns(table) {
@@ -469,7 +479,7 @@ function recreateCustomTable(tableName, columns = []) {
   db.exec(sql)
 }
 
-// ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Audit log ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 router.get('/audit-logs', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all())
 })
@@ -478,7 +488,6 @@ router.get('/debug/log', authToken, (req, res) => {
   res.json({ entries: getServerLog().slice(0, 200), clients: wss_clients.size, uptime: process.uptime() })
 })
 
-const { TAILSCALE_URL } = require('../config')
 const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 
 router.get('/config', authToken, (req, res) => {
@@ -513,20 +522,18 @@ router.get('/config', authToken, (req, res) => {
   })
 })
 
-// ?€?€ Backup export ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Backup export ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 router.get('/drive-sync/status', authToken, (req, res) => {
-  const baseUrl = buildRequestBaseUrl(req)
   ok(res, {
-    item: getDriveSyncStatus(`${baseUrl}/api/system/drive-sync/oauth/callback`),
+    item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
   })
 })
 
 router.post('/drive-sync/preferences', authToken, requirePermission('settings'), (req, res) => {
   try {
     saveDriveSyncPreferences(req.body || {})
-    const baseUrl = buildRequestBaseUrl(req)
     ok(res, {
-      item: getDriveSyncStatus(`${baseUrl}/api/system/drive-sync/oauth/callback`),
+      item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
     })
   } catch (error) {
     err(res, error?.message || 'Failed to save Google Drive sync settings')
@@ -541,8 +548,8 @@ router.post('/drive-sync/oauth/start', authToken, requirePermission('settings'),
     if (!clientId || !clientSecret) return err(res, 'Google OAuth client ID and client secret are required.')
 
     const baseUrl = buildRequestBaseUrl(req)
-    if (!baseUrl) return err(res, 'Could not determine the current server URL for Google Drive setup.')
-    const redirectUri = `${baseUrl}/api/system/drive-sync/oauth/callback`
+    const redirectUri = resolveDriveRedirectUri(req)
+    if (!redirectUri) return err(res, 'Could not determine the current server URL for Google Drive setup.')
     const state = beginGoogleDriveOAuth({
       clientId,
       clientSecret,
@@ -551,7 +558,7 @@ router.post('/drive-sync/oauth/start', authToken, requirePermission('settings'),
       syncIntervalSeconds: req.body?.syncIntervalSeconds,
       enabled: req.body?.enabled !== false,
       redirectUri,
-      returnOrigin: String(req.body?.returnOrigin || baseUrl).trim(),
+      returnOrigin: String(req.body?.returnOrigin || baseUrl || '').trim(),
       returnPath: String(req.body?.returnPath || '/').trim() || '/',
       userId: req.user?.id,
       userName: req.user?.name || req.user?.username,
@@ -613,12 +620,29 @@ router.post('/drive-sync/disconnect', authToken, requirePermission('settings'), 
   }
 })
 
+router.post('/drive-sync/forget-credentials', authToken, requirePermission('settings'), (req, res) => {
+  if (req.body?.confirm !== true) {
+    return err(res, 'Confirmation is required to forget Google Drive app credentials.', 400)
+  }
+
+  try {
+    const result = forgetDriveSyncCredentials()
+    ok(res, {
+      success: true,
+      ...result,
+      item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to forget Google Drive app credentials')
+  }
+})
+
 router.post('/drive-sync/sync-now', authToken, async (req, res) => {
   try {
     const summary = await runDriveSync('manual')
     ok(res, {
       summary,
-      item: getDriveSyncStatus(`${buildRequestBaseUrl(req)}/api/system/drive-sync/oauth/callback`),
+      item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
     })
   } catch (error) {
     err(res, error?.message || 'Google Drive sync failed')
@@ -690,7 +714,7 @@ router.post('/backup/export-folder', authToken, async (req, res) => {
   }
 })
 
-// ?€?€ Backup import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Backup import ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 // Accepts any version >= 1. Unknown columns are dropped, missing columns default to NULL.
 router.post('/backup/import', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import', max: 6, windowMs: 10 * 60 * 1000 })) return
@@ -754,7 +778,7 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), (re
   })
 })
 
-// ?€?€ Reset business data ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Reset business data ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 // mode='sales' ??clear all transactional data (sales, RETURNS, stock movements); zero stock
 // mode='all'   ??also remove products, contacts, custom_fields; keep settings/users/branches
 router.post('/reset-data', authToken, requirePermission('backup'), (req, res) => {
@@ -799,7 +823,7 @@ router.post('/reset-data', authToken, requirePermission('backup'), (req, res) =>
   } catch (e) { err(res, e.message) }
 })
 
-// ?€?€ Factory reset (wipe everything; keep admin + rebuild defaults) ?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Factory reset (wipe everything; keep admin + rebuild defaults) ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 router.post('/factory-reset', authToken, requirePermission('backup'), (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:factory_reset', max: 2, windowMs: 30 * 60 * 1000 })) return
   const actor = getAuditActor(req, req.body || {})
@@ -839,13 +863,13 @@ router.post('/factory-reset', authToken, requirePermission('backup'), (req, res)
   } catch (e) { err(res, e.message) }
 })
 
-// ?€?€ Offline sync push ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Offline sync push ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 router.post('/sync/push', authToken, (req, res) => {
   const { operations = [] } = req.body || {}
   res.json({ applied: operations.map(op => op.id).filter(Boolean) })
 })
 
-// ?€?€ Data Integrity Check & Repair ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Data Integrity Check & Repair ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 /**
  * GET /api/system/verify-integrity ??Run data integrity checks without repairs.
  * Read-only operation to detect inconsistencies.
@@ -904,7 +928,7 @@ router.post('/repair-integrity', authToken, requireAnyPermission(['backup', 'set
   }
 })
 
-// ?€?€ Data folder location ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ?â‚¬?â‚¬ Data folder location ?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬?â‚¬
 /**
  * GET /api/system/data-path
  * Returns the current data folder path and whether data-location.json exists.
@@ -1197,6 +1221,7 @@ router.post('/pick-folder', authToken, requireAnyPermission(['backup', 'settings
 })
 
 module.exports = router
+
 
 
 

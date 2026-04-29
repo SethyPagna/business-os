@@ -3,6 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { authToken, hasPermission } = require('../middleware')
+const { getDriveSyncConfig } = require('../services/googleDriveSync')
 
 const router = express.Router()
 
@@ -350,21 +351,9 @@ function buildPortalSection() {
 }
 
 function buildSystemSection() {
-  const settingsMap = {}
-  db.prepare(`
-    SELECT key, value
-    FROM settings
-    WHERE key IN (
-      'google_drive_sync_enabled',
-      'google_drive_sync_refresh_token',
-      'google_drive_sync_folder_name'
-    )
-  `).all().forEach((row) => {
-    settingsMap[row.key] = row.value
-  })
-
-  const driveEnabled = normalizeBoolean(settingsMap.google_drive_sync_enabled, false)
-  const refreshToken = String(settingsMap.google_drive_sync_refresh_token || '').trim()
+  const driveConfig = getDriveSyncConfig()
+  const driveEnabled = !!driveConfig.enabled
+  const refreshToken = String(driveConfig.refreshToken || '').trim()
   if (!driveEnabled || refreshToken) return null
 
   return {

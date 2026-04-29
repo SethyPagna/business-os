@@ -154,7 +154,7 @@ File: `backend/src/routes/customTables.js`
 ## System / Backup / Reset / Data Path
 
 Base: `/api/system`  
-File: `backend/src/routes/system.js`
+File: `backend/src/routes/system/index.js`
 
 - audit/debug
 - backup export/import
@@ -162,4 +162,3 @@ File: `backend/src/routes/system.js`
 - integrity verify/repair
 - data path read/update/delete
 - folder browsing/open/picker endpoints
-

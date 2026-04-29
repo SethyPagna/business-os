@@ -6,7 +6,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // is available before any React render cycle runs.
 import './web-api.js'
 import { cacheClearAll, startHealthCheck } from './api/http.js'
-import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './api/clientRuntime.js'
+import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { normalizePriceValue } from './utils/pricing.js'

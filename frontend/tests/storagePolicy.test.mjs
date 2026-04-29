@@ -6,7 +6,7 @@ import {
   isCooldownActive,
   maxStoredNumber,
   shouldPersistLocalMirror,
-} from '../src/api/storagePolicy.mjs'
+} from '../src/platform/storage/storagePolicy.mjs'
 
 let failed = 0
 

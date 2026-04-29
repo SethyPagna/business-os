@@ -16,7 +16,17 @@
 !ifdef APP_VERSION
   ; passed via /DAPP_VERSION=x.x.x on command line
 !else
-  !define APP_VERSION "2.2.0"
+  !define APP_VERSION "6.0.0"
+!endif
+
+!ifndef GOOGLE_DRIVE_CLIENT_ID
+  !define GOOGLE_DRIVE_CLIENT_ID ""
+!endif
+!ifndef GOOGLE_DRIVE_CLIENT_SECRET
+  !define GOOGLE_DRIVE_CLIENT_SECRET ""
+!endif
+!ifndef GOOGLE_DRIVE_OAUTH_REDIRECT_URI
+  !define GOOGLE_DRIVE_OAUTH_REDIRECT_URI "https://leangcosmetics.crane-qilin.ts.net/api/system/drive-sync/oauth/callback"
 !endif
 
 ; ---- Output ------------------------------------------------------------
@@ -61,10 +71,9 @@ Section "Business OS" SecMain
   ${If} $0 == ""
     StrCpy $0 "$INSTDIR\business-os-data"
   ${EndIf}
-  CreateDirectory "$0\db"
-  CreateDirectory "$0\uploads"
+  CreateDirectory "$0\organizations"
 
-  ; ---- .env beside the exe (config.js reads RUNTIME_DIR\.env) -----------
+  ; ---- .env beside the exe (backend config reads RUNTIME_DIR\.env) ------
   ; Only write on fresh install - never overwrite an existing .env.
   SetOutPath "$INSTDIR"
   IfFileExists "$INSTDIR\.env" env_exists env_missing
@@ -73,6 +82,9 @@ Section "Business OS" SecMain
     FileWrite $1 "PORT=4000$\r$\n"
     FileWrite $1 "TAILSCALE_URL=$\r$\n"
     FileWrite $1 "SYNC_TOKEN=$\r$\n"
+    FileWrite $1 "GOOGLE_DRIVE_CLIENT_ID=${GOOGLE_DRIVE_CLIENT_ID}$\r$\n"
+    FileWrite $1 "GOOGLE_DRIVE_CLIENT_SECRET=${GOOGLE_DRIVE_CLIENT_SECRET}$\r$\n"
+    FileWrite $1 "GOOGLE_DRIVE_OAUTH_REDIRECT_URI=${GOOGLE_DRIVE_OAUTH_REDIRECT_URI}$\r$\n"
     FileClose $1
   env_exists:
 

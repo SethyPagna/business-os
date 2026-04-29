@@ -19,7 +19,7 @@
 
 Entry point. Mounts route modules, static assets, and websocket attachment.
 
-### `backend/src/config.js`
+### `backend/src/config/index.js`
 
 Runtime path and environment resolution.
 
@@ -119,5 +119,4 @@ When changing these, review all linked modules:
 - Auth/security: `routes/auth.js`, `routes/users.js`, `services/firebaseAuth.js`, `services/verification.js`, `security.js`.
 - Inventory correctness: `routes/sales.js`, `routes/returns.js`, `routes/inventory.js`, `database.js`, `helpers.js` integrity helpers.
 - Customer portal: `routes/portal.js`, `routes/settings.js`, `frontend/components/CatalogPage.jsx`, `lang/*`.
-- Backup/import/reset: `routes/system.js`, `database.js`, `frontend/components/utils-settings/Backup.jsx`, `ResetData.jsx`.
-
+- Backup/import/reset: `routes/system/index.js`, `database.js`, `frontend/components/utils-settings/Backup.jsx`, `ResetData.jsx`.

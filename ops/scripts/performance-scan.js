@@ -28,7 +28,6 @@ const ROOT_SCAN_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
   '.mjs',
-  '.cjs',
   '.json',
   '.css',
   '.md',

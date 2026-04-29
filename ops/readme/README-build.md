@@ -43,8 +43,8 @@ Source-mode helpers:
 
 Release-mode helpers:
 
-- `start-server-release.bat`
-- `stop-server-release.bat`
+- `start-server-release.bat` (root wrapper for the built release launcher)
+- `stop-server-release.bat` (root wrapper for the built release stopper)
 
 Useful validation commands:
 
@@ -74,7 +74,8 @@ release\
     start-server.bat
     stop-server.bat
     .env
-    business-os-data\   (preserved on rebuild if it already exists)
+    business-os-data\
+      organizations\   (canonical org container, preserved on rebuild)
   BusinessOS-Setup-vX.X.X.exe
 ```
 
@@ -97,7 +98,7 @@ Rebuilt or replaced:
 - `stop-server.bat`
 - packaged app assets and installer output
 
-This keeps customer data, uploads, and environment settings intact across rebuilds.
+This keeps customer data, uploads, organization folders, and environment settings intact across rebuilds.
 
 ## Portable Release Flow
 
@@ -153,7 +154,7 @@ Or path-based if needed:
 
 ## Launcher Behavior
 
-`start-server-release.bat` and the copied release `start-server.bat` are expected to:
+The root `start-server-release.bat` wrapper and the copied release `start-server.bat` are expected to:
 
 - run from the release folder
 - launch the packaged EXE in the background

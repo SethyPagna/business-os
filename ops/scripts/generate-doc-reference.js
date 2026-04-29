@@ -12,7 +12,7 @@ const DOCS_DIR = path.join(ROOT, 'ops', 'docs', 'reference')
 
 const FRONTEND_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx'])
 const BACKEND_EXTENSIONS = new Set(['.js'])
-const ROOT_CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ps1'])
+const ROOT_CODE_EXTENSIONS = new Set(['.js', '.mjs', '.ps1'])
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true })
@@ -187,8 +187,8 @@ function writeFrontendReference() {
     ...getFilesRecursive(path.join(ROOT, 'frontend', 'src'), FRONTEND_EXTENSIONS),
     ...getFilesRecursive(path.join(ROOT, 'ops', 'scripts', 'frontend'), FRONTEND_EXTENSIONS),
     path.join(ROOT, 'frontend', 'vite.config.mjs'),
-    path.join(ROOT, 'frontend', 'postcss.config.js'),
-    path.join(ROOT, 'frontend', 'tailwind.config.js'),
+    path.join(ROOT, 'frontend', 'postcss.config.mjs'),
+    path.join(ROOT, 'frontend', 'tailwind.config.mjs'),
   ].filter((filePath) => fs.existsSync(filePath))
   let md = markdownHeader(
     'Frontend Function Reference',

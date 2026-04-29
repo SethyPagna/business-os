@@ -74,9 +74,10 @@ runTest('config promotes legacy shared runtime data into organization runtime ro
 
   assert.equal(output.storageRoot, storageRoot)
   assert.equal(output.organizationPublicId, 'org_runtime_test')
-  assert.equal(output.dataRoot, path.join(storageRoot, 'organizations', 'org_runtime_test'))
-  assert.equal(output.dbPath, path.join(storageRoot, 'organizations', 'org_runtime_test', 'db', 'business.db'))
-  assert.equal(output.uploadsPath, path.join(storageRoot, 'organizations', 'org_runtime_test', 'uploads'))
+  const canonicalOrgRoot = path.join(storageRoot, 'organizations', 'org_runtime_test (LeangCosmetics)')
+  assert.equal(output.dataRoot, canonicalOrgRoot)
+  assert.equal(output.dbPath, path.join(canonicalOrgRoot, 'db', 'business.db'))
+  assert.equal(output.uploadsPath, path.join(canonicalOrgRoot, 'uploads'))
   assert.equal(output.migratedDbExists, true)
   assert.equal(output.migratedUploadExists, true)
   assert.equal(fs.existsSync(legacyDbPath), true)

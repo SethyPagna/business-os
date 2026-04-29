@@ -4,10 +4,18 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
-const { db } = require('../database')
-const { DATA_ROOT, DATA_FOLDER_NAME, DB_PATH } = require('../config')
-const { walkFiles } = require('../dataPath')
-const { encryptSecret, decryptSecret } = require('../security')
+const { db } = require('../../database')
+const {
+  ACTIVE_ENV_FILE,
+  DATA_ROOT,
+  DATA_FOLDER_NAME,
+  DB_PATH,
+  GOOGLE_DRIVE_CLIENT_ID,
+  GOOGLE_DRIVE_CLIENT_SECRET,
+  ORGANIZATION_FOLDER_NAME,
+} = require('../../config')
+const { walkFiles } = require('../../dataPath')
+const { encryptSecret, decryptSecret } = require('../../security')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
@@ -109,12 +117,18 @@ function resetDriveSyncRootState() {
 
 function getDriveSyncConfig() {
   const settings = readSettingsMap()
+  const envClientId = trim(GOOGLE_DRIVE_CLIENT_ID)
+  const envClientSecret = trim(GOOGLE_DRIVE_CLIENT_SECRET)
+  const storedClientSecret = decryptSecret(settings[SETTINGS_KEYS.clientSecretEncrypted] || '')
   const folderName = trim(settings[SETTINGS_KEYS.folderName]) || 'Business OS Sync'
+  const clientId = trim(settings[SETTINGS_KEYS.clientId]) || envClientId
+  const clientSecret = storedClientSecret || envClientSecret
+  const refreshToken = decryptSecret(settings[SETTINGS_KEYS.refreshTokenEncrypted] || '')
   return {
     enabled: toBool(settings[SETTINGS_KEYS.enabled], false),
-    clientId: trim(settings[SETTINGS_KEYS.clientId]),
-    clientSecret: decryptSecret(settings[SETTINGS_KEYS.clientSecretEncrypted] || ''),
-    refreshToken: decryptSecret(settings[SETTINGS_KEYS.refreshTokenEncrypted] || ''),
+    clientId,
+    clientSecret,
+    refreshToken,
     folderName,
     rootFolderId: trim(settings[SETTINGS_KEYS.rootFolderId]),
     deleteMissing: toBool(settings[SETTINGS_KEYS.deleteMissing], true),
@@ -124,7 +138,7 @@ function getDriveSyncConfig() {
     lastSyncedAt: trim(settings[SETTINGS_KEYS.lastSyncedAt]),
     lastError: trim(settings[SETTINGS_KEYS.lastError]),
     lastStatus: trim(settings[SETTINGS_KEYS.lastStatus]) || 'idle',
-    ready: !!(trim(settings[SETTINGS_KEYS.clientId]) && decryptSecret(settings[SETTINGS_KEYS.clientSecretEncrypted] || '') && decryptSecret(settings[SETTINGS_KEYS.refreshTokenEncrypted] || '')),
+    ready: !!(clientId && clientSecret && refreshToken),
   }
 }
 
@@ -388,8 +402,12 @@ async function ensureRootFolder(config) {
   return created.id
 }
 
+function buildManagedSnapshotRoot(snapshotRoot) {
+  return path.join(snapshotRoot, DATA_FOLDER_NAME, 'organizations', ORGANIZATION_FOLDER_NAME)
+}
+
 function ensureSnapshotLayout(snapshotRoot) {
-  const managedRoot = path.join(snapshotRoot, DATA_FOLDER_NAME)
+  const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
   fs.mkdirSync(path.join(managedRoot, 'db'), { recursive: true })
   fs.mkdirSync(path.join(managedRoot, 'uploads'), { recursive: true })
 }
@@ -402,7 +420,7 @@ function shouldSkipSnapshotFile(relativePath) {
 function createDataRootSnapshot() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-drive-sync-'))
   const snapshotRoot = tempDir
-  const managedRoot = path.join(snapshotRoot, DATA_FOLDER_NAME)
+  const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
   ensureSnapshotLayout(snapshotRoot)
 
   try {
@@ -422,7 +440,7 @@ function createDataRootSnapshot() {
       fs.copyFileSync(DB_PATH, snapshotDbPath)
     }
 
-    return { tempDir, snapshotRoot }
+    return { tempDir, snapshotRoot, managedRoot }
   } catch (error) {
     try { fs.rmSync(tempDir, { recursive: true, force: true }) } catch (_) {}
     throw error
@@ -549,13 +567,13 @@ async function runDriveSync(reason = 'manual') {
     let mappings = getDriveSyncEntriesMap()
     const rootFolderId = await ensureRootFolder(config)
     const items = collectSnapshotItems(snapshot.snapshotRoot)
-    const managedRootRelative = DATA_FOLDER_NAME
-    const legacyFlatLayout = !mappings[managedRootRelative] && Object.keys(mappings).some((relativePath) => (
-      relativePath === 'db'
-      || relativePath === 'uploads'
-      || relativePath.startsWith('db/')
-      || relativePath.startsWith('uploads/')
-    ))
+    const canonicalRootRelative = `${DATA_FOLDER_NAME}/organizations/${ORGANIZATION_FOLDER_NAME}`
+    const hasCanonicalLayout = !!mappings[canonicalRootRelative]
+      || Object.keys(mappings).some((relativePath) => (
+        relativePath === canonicalRootRelative
+        || relativePath.startsWith(`${canonicalRootRelative}/`)
+      ))
+    const legacyFlatLayout = !hasCanonicalLayout && Object.keys(mappings).length > 0
     if (legacyFlatLayout) {
       clearDriveSyncMappings()
       mappings = {}
@@ -566,7 +584,6 @@ async function runDriveSync(reason = 'manual') {
     if (legacyFlatLayout && config.deleteMissing) {
       const rootChildren = await listDriveChildren(config, rootFolderId)
       for (const child of rootChildren) {
-        if (trim(child?.name) === DATA_FOLDER_NAME) continue
         if (!trim(child?.id)) continue
         await removeDriveFile(config, child.id)
         removed += 1
@@ -830,8 +847,6 @@ function saveDriveSyncPreferences(payload = {}) {
 function disconnectDriveSync() {
   clearDriveSyncMappings()
   writeSettingsMap({
-    [SETTINGS_KEYS.clientId]: null,
-    [SETTINGS_KEYS.clientSecretEncrypted]: null,
     [SETTINGS_KEYS.refreshTokenEncrypted]: null,
     [SETTINGS_KEYS.rootFolderId]: null,
     [SETTINGS_KEYS.connectedEmail]: null,
@@ -843,6 +858,34 @@ function disconnectDriveSync() {
   runtimeState.lastSummary = null
   runtimeState.lastError = ''
   runtimeState.lastRunAt = ''
+}
+
+function updateEnvSettingLines(filePath, updates = {}) {
+  const lines = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8').split(/\r?\n/) : []
+  const nextLines = [...lines]
+  Object.entries(updates).forEach(([key, value]) => {
+    const nextLine = `${key}=${String(value ?? '').trim()}`
+    const index = nextLines.findIndex((entry) => entry.startsWith(`${key}=`))
+    if (index >= 0) nextLines[index] = nextLine
+    else nextLines.push(nextLine)
+  })
+  const normalized = nextLines.filter((line, index, all) => !(index === all.length - 1 && line === ''))
+  fs.writeFileSync(filePath, `${normalized.join('\r\n')}\r\n`, 'utf8')
+}
+
+function forgetDriveSyncCredentials() {
+  disconnectDriveSync()
+  writeSettingsMap({
+    [SETTINGS_KEYS.clientId]: null,
+    [SETTINGS_KEYS.clientSecretEncrypted]: null,
+  })
+  if (trim(ACTIVE_ENV_FILE)) {
+    updateEnvSettingLines(ACTIVE_ENV_FILE, {
+      GOOGLE_DRIVE_CLIENT_ID: '',
+      GOOGLE_DRIVE_CLIENT_SECRET: '',
+      GOOGLE_DRIVE_OAUTH_REDIRECT_URI: '',
+    })
+  }
 }
 
 function schedulePeriodicDriveSync() {
@@ -864,6 +907,7 @@ module.exports = {
   beginGoogleDriveOAuth,
   disconnectDriveSync,
   finalizeGoogleDriveOAuth,
+  forgetDriveSyncCredentials,
   getDriveSyncConfig,
   getDriveSyncStatus,
   runDriveSync,
