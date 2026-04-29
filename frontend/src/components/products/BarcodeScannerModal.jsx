@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Camera, ScanLine } from 'lucide-react'
+import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } from 'lucide-react'
 import Modal from '../shared/Modal'
 
 const KNOWN_FORMATS = [
@@ -341,28 +341,102 @@ export default function BarcodeScannerModal({
       : labels.cameraPermissionNeeded
   )
 
+  const stateBadge = status === 'scanning'
+    ? {
+        label: tr('scanner_state_live', 'Live camera', 'កាមេរ៉ាកំពុងដំណើរការ'),
+        className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100',
+        icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+      }
+    : status === 'starting'
+      ? {
+          label: tr('scanner_state_starting', 'Requesting camera', 'កំពុងស្នើសុំកាមេរ៉ា'),
+          className: 'border-cyan-400/30 bg-cyan-500/15 text-cyan-100',
+          icon: <ScanLine className="h-3.5 w-3.5" />,
+        }
+      : permissionState === 'denied' || status === 'blocked'
+        ? {
+            label: tr('scanner_state_blocked', 'Permission blocked', 'សិទ្ធិកាមេរ៉ាត្រូវបានបិទ'),
+            className: 'border-red-400/30 bg-red-500/15 text-red-100',
+            icon: <ShieldAlert className="h-3.5 w-3.5" />,
+          }
+        : status === 'dismissed'
+          ? {
+              label: tr('scanner_state_retry', 'Prompt dismissed', 'សំណើសុំត្រូវបានបិទចោល'),
+              className: 'border-amber-400/30 bg-amber-500/15 text-amber-100',
+              icon: <AlertCircle className="h-3.5 w-3.5" />,
+            }
+          : {
+              label: tr('scanner_state_manual', 'Manual entry ready', 'ត្រៀមបញ្ចូលដោយដៃ'),
+              className: 'border-slate-300/20 bg-slate-700/40 text-slate-100',
+              icon: <Keyboard className="h-3.5 w-3.5" />,
+            }
+
   return (
     <Modal title={title} onClose={onClose} size="lg">
       <div className="space-y-4">
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 dark:border-slate-700">
           <div className="aspect-[4/3] w-full bg-slate-950">
             {status === 'scanning' || status === 'starting' ? (
-              <video
-                ref={videoRef}
-                className="h-full w-full object-cover"
-                muted
-                autoPlay
-                playsInline
-              />
+              <div className="relative h-full w-full overflow-hidden">
+                <video
+                  ref={videoRef}
+                  className="h-full w-full object-cover"
+                  muted
+                  autoPlay
+                  playsInline
+                />
+                <div className="pointer-events-none absolute inset-0">
+                  <div className="absolute inset-x-4 top-4">
+                    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm shadow-lg ${stateBadge.className}`}>
+                      {stateBadge.icon}
+                      <span>{stateBadge.label}</span>
+                    </div>
+                  </div>
+                  <div className="absolute left-1/2 top-1/2 h-[58%] w-[72%] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-cyan-300/45 shadow-[0_0_0_999px_rgba(2,6,23,0.42)]" />
+                  <div className="absolute left-1/2 top-1/2 h-[58%] w-[72%] -translate-x-1/2 -translate-y-1/2">
+                    <div className="absolute left-0 top-0 h-8 w-8 rounded-tl-[24px] border-l-[3px] border-t-[3px] border-cyan-300" />
+                    <div className="absolute right-0 top-0 h-8 w-8 rounded-tr-[24px] border-r-[3px] border-t-[3px] border-cyan-300" />
+                    <div className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-[24px] border-b-[3px] border-l-[3px] border-cyan-300" />
+                    <div className="absolute bottom-0 right-0 h-8 w-8 rounded-br-[24px] border-b-[3px] border-r-[3px] border-cyan-300" />
+                    <div className="absolute inset-x-[11%] top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-cyan-300 to-transparent opacity-90 shadow-[0_0_16px_rgba(34,211,238,0.9)]" />
+                  </div>
+                  <div className="absolute inset-x-5 bottom-5 rounded-2xl border border-white/10 bg-slate-950/58 px-3 py-2 text-center text-xs leading-5 text-slate-100 backdrop-blur-sm">
+                    {tr('scanner_live_hint', 'Center the barcode inside the frame. We will scan it automatically.', 'ដាក់បារកូដឱ្យស្ថិតនៅកណ្ដាលស៊ុម។ ប្រព័ន្ធនឹងស្កេនដោយស្វ័យប្រវត្តិ។')}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-8 text-center text-slate-100">
+                <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${stateBadge.className}`}>
+                  {stateBadge.icon}
+                  <span>{stateBadge.label}</span>
+                </div>
                 <Camera className="h-10 w-10 text-cyan-300" />
-                <p className="max-w-md text-sm leading-6 text-slate-200">{emptyStateMessage}</p>
-                <div className="flex max-w-md flex-col items-center gap-2">
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-white">
+                    {tr('scanner_ready_title', 'Ready to scan a barcode', 'ត្រៀមស្កេនបារកូដ')}
+                  </p>
+                  <p className="max-w-md text-sm leading-6 text-slate-200">{emptyStateMessage}</p>
+                </div>
+                <div className="grid w-full max-w-md gap-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-200 sm:grid-cols-3">
+                  <div>
+                    <div className="font-semibold text-white">{tr('scanner_step_tap', '1. Tap start', '១. ចុចចាប់ផ្តើម')}</div>
+                    <div className="mt-1 text-slate-300">{tr('scanner_step_tap_detail', 'Open the live camera only when you want to scan.', 'បើកកាមេរ៉ាពេលដែលអ្នកចង់ស្កេន។')}</div>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">{tr('scanner_step_allow', '2. Allow camera', '២. អនុញ្ញាតកាមេរ៉ា')}</div>
+                    <div className="mt-1 text-slate-300">{tr('scanner_step_allow_detail', 'Approve the browser prompt when it appears.', 'អនុម័តសំណើរបស់កម្មវិធីរុករក នៅពេលវាលេចឡើង។')}</div>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">{tr('scanner_step_manual', '3. Or type manually', '៣. ឬបញ្ចូលដោយដៃ')}</div>
+                    <div className="mt-1 text-slate-300">{tr('scanner_step_manual_detail', 'Manual entry stays available the whole time.', 'ការបញ្ចូលដោយដៃអាចប្រើបានជានិច្ច។')}</div>
+                  </div>
+                </div>
+                <div className="flex w-full max-w-md flex-col items-center gap-2">
                   {showCameraAction ? (
                     <button
                       type="button"
-                      className="btn-secondary border-white/20 bg-white/10 text-white hover:bg-white/15"
+                      className="btn-secondary w-full border-white/20 bg-white/10 text-white hover:bg-white/15"
                       disabled={status === 'starting'}
                       onClick={() => startCamera({ preserveManualValue: true })}
                     >
@@ -385,9 +459,20 @@ export default function BarcodeScannerModal({
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
-          <label htmlFor="scanner-manual-value" className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
-            {manualValue ? labels.detectedValue : labels.manualEntry}
-          </label>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <label htmlFor="scanner-manual-value" className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                {manualValue ? labels.detectedValue : labels.manualEntry}
+              </label>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {tr('scanner_manual_subtitle', 'Paste or type the barcode / SKU if the camera is unavailable or you want to confirm the value yourself.', 'បិទភ្ជាប់ ឬវាយបារកូដ / SKU ប្រសិនបើមិនអាចប្រើកាមេរ៉ា ឬអ្នកចង់បញ្ជាក់តម្លៃដោយខ្លួនឯង។')}
+              </p>
+            </div>
+            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <Keyboard className="h-3.5 w-3.5" />
+              {tr('manual_entry', 'Manual entry', 'បញ្ចូលដោយដៃ')}
+            </span>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <input
               id="scanner-manual-value"

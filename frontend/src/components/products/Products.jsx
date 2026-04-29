@@ -1273,11 +1273,23 @@ export default function Products() {
             {!isCollapsed ? section.items.map(p => {
           const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
           const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
+          const isOut = qty <= (p.out_of_stock_threshold || 0)
+          const isLow = !isOut && qty <= (p.low_stock_threshold || 10)
+          const mobileStatusLabel = isOut
+            ? (t('out_of_stock') || 'Out of Stock')
+            : isLow
+              ? (t('low_stock') || 'Low Stock')
+              : (t('in_stock') || 'In Stock')
+          const mobileStatusClass = isOut
+            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+            : isLow
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
           return (
             <div
               key={p.id}
               data-product-jump-id={p.id}
-              className={`card p-3 flex gap-3 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+              className={`card flex gap-2.5 p-2.5 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
               onClick={()=>setDetailProduct(p)}
             >
               <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={e=>{e.stopPropagation();toggleSelect(p.id)}} onClick={e=>e.stopPropagation()} />
@@ -1287,13 +1299,17 @@ export default function Products() {
                   : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-1">
-                  <div className="font-semibold text-gray-900 dark:text-white text-sm truncate">{p.name}</div>
-                  {getStockBadge(p)}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="max-w-[10.75rem] truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+                  </div>
+                  <span className={`flex-shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
+                    {mobileStatusLabel}
+                  </span>
                 </div>
                 {p.category && (
                   <span
-                    className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-xs"
+                    className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[10px]"
                     style={{
                       background: catMap[p.category]?.color || '#6b7280',
                       color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
@@ -1302,10 +1318,12 @@ export default function Products() {
                     {p.category}
                   </span>
                 )}
-                <div className="flex items-center gap-3 mt-1 text-xs flex-wrap">
-                  <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
-                  <span className="text-green-700">{fmtUSD(p.selling_price_usd)}</span>
-                  <span className="flex items-center text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
+                <div className="mt-1 flex flex-nowrap items-center gap-2.5 overflow-hidden text-[11px]">
+                  <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
                 </div>
               </div>
               <div onClick={e=>e.stopPropagation()}>
