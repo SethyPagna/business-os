@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }) {
   const { user, t } = useApp()
@@ -9,6 +15,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   }
 
   const [loading, setLoading] = useState(true)
+  const [loadingProducts, setLoadingProducts] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [branches, setBranches] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -22,50 +29,79 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const [quantities, setQuantities] = useState({})
   const [compensationUsd, setCompensationUsd] = useState('')
   const [compensationKhr, setCompensationKhr] = useState('')
+  const bootstrapRequestRef = useRef(0)
+  const inventoryRequestRef = useRef(0)
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      setLoading(true)
-      try {
-        const [branchRows, supplierRows] = await Promise.all([
+    const requestId = beginTrackedRequest(bootstrapRequestRef)
+    setLoading(true)
+    Promise.resolve(
+      withLoaderTimeout(
+        () => Promise.all([
           window.api.getBranches(),
           window.api.getSuppliers(),
-        ])
-        if (!mounted) return
+        ]),
+        'Supplier return setup',
+      ),
+    )
+      .then(([branchRows, supplierRows]) => {
+        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         const activeBranches = (branchRows || []).filter((branch) => branch.is_active)
         setBranches(activeBranches)
         setSuppliers(supplierRows || [])
-        const defaultBranchId = activeBranches.find((branch) => branch.is_default)?.id || activeBranches[0]?.id || ''
-        if (defaultBranchId) setBranchId(String(defaultBranchId))
-      } catch (error) {
+        setBranchId((current) => {
+          if (current && activeBranches.some((branch) => String(branch.id) === String(current))) return current
+          const defaultBranchId = activeBranches.find((branch) => branch.is_default)?.id || activeBranches[0]?.id || ''
+          return defaultBranchId ? String(defaultBranchId) : ''
+        })
+      })
+      .catch((error) => {
+        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
-      } finally {
-        if (mounted) setLoading(false)
-      }
-    })()
-    return () => { mounted = false }
+        setBranches([])
+        setSuppliers([])
+      })
+      .finally(() => {
+        if (!isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
+        setLoading(false)
+      })
+    return () => {
+      invalidateTrackedRequest(bootstrapRequestRef)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!branchId) {
+      invalidateTrackedRequest(inventoryRequestRef)
+      setLoadingProducts(false)
       setProducts([])
-      return
+      return undefined
     }
-    let mounted = true
-    ;(async () => {
-      try {
-        const rows = await window.api.getInventorySummary({ branchId: Number(branchId) })
-        if (!mounted) return
+    const requestId = beginTrackedRequest(inventoryRequestRef)
+    setLoadingProducts(true)
+    Promise.resolve(
+      withLoaderTimeout(
+        () => window.api.getInventorySummary({ branchId: Number(branchId) }),
+        'Supplier return inventory',
+      ),
+    )
+      .then((rows) => {
+        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         const next = (rows || []).filter((product) => (product.display_quantity || 0) > 0)
         setProducts(next)
-      } catch (error) {
-        if (!mounted) return
+      })
+      .catch((error) => {
+        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
         notify(error?.message || tr('failed_to_load_data', 'Failed to load data'), 'error')
         setProducts([])
-      }
-    })()
-    return () => { mounted = false }
+      })
+      .finally(() => {
+        if (!isTrackedRequestCurrent(inventoryRequestRef, requestId)) return
+        setLoadingProducts(false)
+      })
+    return () => {
+      invalidateTrackedRequest(inventoryRequestRef)
+    }
   }, [branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredProducts = useMemo(() => {
@@ -227,7 +263,11 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts.length === 0 ? (
+                    {loadingProducts ? (
+                      <tr>
+                        <td className="px-3 py-5 text-center text-xs text-gray-400" colSpan={4}>{tr('loading', 'Loading')}...</td>
+                      </tr>
+                    ) : filteredProducts.length === 0 ? (
                       <tr>
                         <td className="px-3 py-5 text-center text-xs text-gray-400" colSpan={4}>{tr('no_data', 'No data')}</td>
                       </tr>
@@ -323,8 +363,8 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         )}
 
         <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          <button className="btn-secondary flex-1" onClick={onClose}>{tr('cancel', 'Cancel')}</button>
-          <button className="btn-primary flex-1" onClick={submit} disabled={loading || submitting}>
+          <button className="btn-secondary flex-1" onClick={onClose} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
+          <button className="btn-primary flex-1" onClick={submit} disabled={loading || loadingProducts || submitting}>
             {submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}
           </button>
         </div>

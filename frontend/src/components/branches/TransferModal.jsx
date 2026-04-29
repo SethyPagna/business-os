@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 /**
  * 1. Transfer Modal Component
@@ -23,6 +29,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [quantity, setQuantity] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [loadingProducts, setLoadingProducts] = useState(false)
+  const stockRequestRef = useRef(0)
 
   const invalidQuantityText = settings?.language === 'km'
     ? 'ចំនួនផ្ទេរត្រូវតែធំជាងសូន្យ។'
@@ -33,19 +41,44 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 3.1 Refresh product list each time source branch changes.
    */
   useEffect(() => {
-    const run = async () => {
-      if (!fromBranch) {
+    if (!fromBranch) {
+      invalidateTrackedRequest(stockRequestRef)
+      setLoadingProducts(false)
+      setProducts([])
+      setSelectedProduct(null)
+      setQuantity('')
+      return undefined
+    }
+
+    const requestId = beginTrackedRequest(stockRequestRef)
+    setLoadingProducts(true)
+    Promise.resolve(
+      withLoaderTimeout(
+        () => window.api.getBranchStock(Number.parseInt(fromBranch, 10)),
+        'Branch stock for transfer',
+      ),
+    )
+      .then((stock) => {
+        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
+        setProducts(Array.isArray(stock) ? stock : [])
+        setSelectedProduct(null)
+        setQuantity('')
+      })
+      .catch((error) => {
+        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
         setProducts([])
         setSelectedProduct(null)
         setQuantity('')
-        return
-      }
-      const stock = await window.api.getBranchStock(Number.parseInt(fromBranch, 10))
-      setProducts(Array.isArray(stock) ? stock : [])
-      setSelectedProduct(null)
-      setQuantity('')
+        notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
+      })
+      .finally(() => {
+        if (!isTrackedRequestCurrent(stockRequestRef, requestId)) return
+        setLoadingProducts(false)
+      })
+
+    return () => {
+      invalidateTrackedRequest(stockRequestRef)
     }
-    run()
   }, [fromBranch])
 
   /**
@@ -180,7 +213,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 onChange={(event) => setSearch(event.target.value)}
               />
               <div className="max-h-48 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
-                {filtered.length === 0 ? (
+                {loadingProducts ? (
+                  <p className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
+                ) : filtered.length === 0 ? (
                   <p className="py-6 text-center text-sm text-gray-400">{t('no_data') || 'No data'}</p>
                 ) : null}
 
@@ -272,11 +307,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             className="btn-primary flex-1"
             type="button"
             onClick={handleTransfer}
-            disabled={saving || !fromBranch || !toBranch || !selectedProduct || !quantity}
+            disabled={saving || loadingProducts || !fromBranch || !toBranch || !selectedProduct || !quantity}
           >
             {saving ? (t('saving') || 'Saving...') : (t('stock_transfer') || 'Transfer')}
           </button>
-          <button className="btn-secondary" type="button" onClick={onClose}>
+          <button className="btn-secondary" type="button" onClick={onClose} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>
         </div>
