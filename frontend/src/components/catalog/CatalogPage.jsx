@@ -1426,6 +1426,9 @@ export default function CatalogPage({ publicView = false }) {
   const membershipLookupRequestRef = useRef(0)
   const submissionSavingRef = useRef(false)
   const reviewSavingRef = useRef(false)
+  const assistantRequestRef = useRef(0)
+  const assistantStatusRequestRef = useRef(0)
+  const assistantInFlightRef = useRef(false)
 
   const canEdit = !publicView && hasPermission('settings')
   const previewConfig = useMemo(
@@ -1521,16 +1524,29 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => {
     if (!publicView || !previewConfig.aiEnabled) {
+      invalidateTrackedRequest(assistantRequestRef)
+      invalidateTrackedRequest(assistantStatusRequestRef)
+      assistantInFlightRef.current = false
+      setAssistantLoading(false)
       setAssistantUsage(null)
       setAssistantRequestPolicy(null)
       return
     }
 
-    window.api.getPortalAiStatus()
+    const requestId = beginTrackedRequest(assistantStatusRequestRef)
+    withLoaderTimeout(() => window.api.getPortalAiStatus(), 'Portal AI status')
       .then((result) => {
+        if (!isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
         setAssistantUsage(result?.usage || null)
+        setAssistantRequestPolicy(result?.requestPolicy || null)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
+      })
+
+    return () => {
+      invalidateTrackedRequest(assistantStatusRequestRef)
+    }
   }, [publicView, previewConfig.aiEnabled, previewConfig.aiProviderId])
 
   /** Open modal gallery for selected product image list. */
@@ -1658,6 +1674,8 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => () => {
     invalidateTrackedRequest(membershipLookupRequestRef)
+    invalidateTrackedRequest(assistantRequestRef)
+    invalidateTrackedRequest(assistantStatusRequestRef)
   }, [])
 
   useEffect(() => {
@@ -2118,23 +2136,34 @@ export default function CatalogPage({ publicView = false }) {
       notify('Add a question or at least one shopping preference first.', 'error')
       return
     }
+    if (assistantInFlightRef.current) return
 
+    const requestId = beginTrackedRequest(assistantRequestRef)
+    assistantInFlightRef.current = true
     setAssistantLoading(true)
     setAssistantError('')
     setAssistantExpandedProductId(null)
     try {
-      const result = await window.api.askPortalAi({
-        question: assistantQuestion.trim(),
-        profile: assistantProfile,
-      })
+      const result = await withLoaderTimeout(
+        () => window.api.askPortalAi({
+          question: assistantQuestion.trim(),
+          profile: assistantProfile,
+        }),
+        'Portal AI request',
+      )
+      if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
       setAssistantResponse(result || null)
       setAssistantUsage(result?.usage || null)
       setAssistantRequestPolicy(result?.requestPolicy || null)
     } catch (error) {
+      if (!isTrackedRequestCurrent(assistantRequestRef, requestId)) return
       setAssistantError(error?.message || 'Portal AI request failed')
       notify(error?.message || 'Portal AI request failed', 'error')
     } finally {
-      setAssistantLoading(false)
+      if (isTrackedRequestCurrent(assistantRequestRef, requestId)) {
+        assistantInFlightRef.current = false
+        setAssistantLoading(false)
+      }
     }
   }
 
