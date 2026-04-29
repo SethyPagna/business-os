@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 const COPY = {
   en: {
@@ -132,6 +138,9 @@ export default function LoyaltyPointsPage() {
   const [lookupData, setLookupData] = useState(null)
   const [customerPoints, setCustomerPoints] = useState([])
   const [customerPointsLoading, setCustomerPointsLoading] = useState(true)
+  const lookupRequestRef = useRef(0)
+  const customerPointsRequestRef = useRef(0)
+  const saveInFlightRef = useRef(false)
 
   useEffect(() => {
     setForm({
@@ -147,23 +156,33 @@ export default function LoyaltyPointsPage() {
     })
   }, [settings])
 
-  useEffect(() => {
-    let cancelled = false
-    async function loadCustomerPoints() {
-      try {
-        setCustomerPointsLoading(true)
-        const rows = await window.api.getCustomers()
-        if (cancelled) return
-        setCustomerPoints(Array.isArray(rows) ? rows : [])
-      } catch (_) {
-        if (!cancelled) setCustomerPoints([])
-      } finally {
-        if (!cancelled) setCustomerPointsLoading(false)
+  const loadCustomerPoints = useCallback(async (label = 'Loyalty customer points') => {
+    const requestId = beginTrackedRequest(customerPointsRequestRef)
+    setCustomerPointsLoading(true)
+    try {
+      const rows = await withLoaderTimeout(() => window.api.getCustomers(), label)
+      if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
+      const nextRows = Array.isArray(rows) ? rows : []
+      setCustomerPoints(nextRows)
+      return nextRows
+    } catch (_) {
+      if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
+      setCustomerPoints([])
+      return null
+    } finally {
+      if (isTrackedRequestCurrent(customerPointsRequestRef, requestId)) {
+        setCustomerPointsLoading(false)
       }
     }
-    loadCustomerPoints()
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    void loadCustomerPoints()
+    return () => {
+      invalidateTrackedRequest(customerPointsRequestRef)
+      invalidateTrackedRequest(lookupRequestRef)
+    }
+  }, [loadCustomerPoints])
 
   const basis = form.customer_portal_points_basis === 'khr' ? 'khr' : 'usd'
   const redeemPoints = sanitizeInteger(form.customer_portal_redeem_points, 100, 1)
@@ -189,6 +208,8 @@ export default function LoyaltyPointsPage() {
   }
 
   async function handleSave() {
+    if (saveInFlightRef.current) return
+    saveInFlightRef.current = true
     try {
       setSaving(true)
       await saveSettings({
@@ -206,6 +227,7 @@ export default function LoyaltyPointsPage() {
     } catch (error) {
       notify(error?.message || 'Failed to save point rules', 'error')
     } finally {
+      saveInFlightRef.current = false
       setSaving(false)
     }
   }
@@ -218,10 +240,12 @@ export default function LoyaltyPointsPage() {
       return
     }
 
+    const requestId = beginTrackedRequest(lookupRequestRef)
     try {
       setLookupLoading(true)
       setLookupError('')
-      const result = await window.api.lookupPortalMembership(value)
+      const result = await withLoaderTimeout(() => window.api.lookupPortalMembership(value), 'Loyalty membership lookup')
+      if (!isTrackedRequestCurrent(lookupRequestRef, requestId)) return
       if (!result) {
         setLookupData(null)
         setLookupError(copy('customerNotFound', 'Membership number not found.'))
@@ -229,10 +253,13 @@ export default function LoyaltyPointsPage() {
       }
       setLookupData(result)
     } catch (error) {
+      if (!isTrackedRequestCurrent(lookupRequestRef, requestId)) return
       setLookupData(null)
       setLookupError(error?.message || copy('customerNotFound', 'Membership number not found.'))
     } finally {
-      setLookupLoading(false)
+      if (isTrackedRequestCurrent(lookupRequestRef, requestId)) {
+        setLookupLoading(false)
+      }
     }
   }
 
