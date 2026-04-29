@@ -370,14 +370,17 @@ export default function Settings() {
     }
 
     const requestId = beginTrackedRequest(otpStatusRequestRef)
-    withLoaderTimeout(() => window.api.otpStatus(user.id), 'OTP status')
-      .then((result) => {
-        if (!isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
+    async function loadOtpStatus() {
+      try {
+        const result = await withLoaderTimeout(() => window.api.otpStatus(user.id), 'OTP status')
+        if (!aliveRef.current || !isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
         setOtpStatus(!!result?.otpEnabled)
-      })
-      .catch(() => {
-        if (!isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
-      })
+      } catch {
+        if (!aliveRef.current || !isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
+      }
+    }
+
+    loadOtpStatus()
 
     return () => {
       invalidateTrackedRequest(otpStatusRequestRef)
