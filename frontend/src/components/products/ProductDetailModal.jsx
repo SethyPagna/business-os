@@ -17,6 +17,8 @@ export default function ProductDetailModal({
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
   const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
   const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
+  const specialUsd = p.special_price_usd || 0
+  const specialKhr = p.special_price_khr || 0
   const marginUsd = p.selling_price_usd - purchaseUsd
   const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
@@ -106,6 +108,12 @@ export default function ProductDetailModal({
               <span className="text-green-600">{fmtUSD(p.selling_price_usd)}</span>
               {p.selling_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</span> : null}
             </Row>
+            {(specialUsd > 0 || specialKhr > 0) ? (
+              <Row label={T('special_price', 'Special Price')}>
+                <span className="text-blue-600">{fmtUSD(specialUsd || p.selling_price_usd || 0)}</span>
+                {(specialKhr > 0 || p.selling_price_khr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || p.selling_price_khr || 0)}</span> : null}
+              </Row>
+            ) : null}
             <Row label={T('label_margin', 'Margin')}>
               <span className={marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}>
                 {fmtUSD(marginUsd)} ({marginPct.toFixed(1)}%)

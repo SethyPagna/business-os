@@ -56,6 +56,13 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, fmtU
               <div className="font-bold text-green-700 dark:text-green-300">{fmtUSD(p.selling_price_usd || 0)}</div>
               {(p.selling_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</div> : null}
             </div>
+            {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+              <div className="rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20 col-span-2">
+                <div className="mb-1 text-xs font-semibold text-blue-600 dark:text-blue-400">{T('special_price', 'Special Price')}</div>
+                <div className="font-bold text-blue-700 dark:text-blue-300">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</div>
+                {(p.special_price_khr || p.selling_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</div> : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-2">

@@ -11,6 +11,14 @@ import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelecti
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import {
+  CONTACT_OPTION_LIMIT,
+  buildContactOptionSummary,
+  createContactOption,
+  getPrimaryContactOption,
+  parseStoredContactOptions,
+  serializeContactOptions,
+} from './contactOptionUtils'
 
 // ?? Options helpers ????????????????????????????????????????????????????????????
 // Options stored as JSON array in the 'address' TEXT column.
@@ -18,28 +26,14 @@ import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from 
 // Backward-compatible: old plain strings migrated to a single option.
 
 export function parseDeliveryOptions(raw) {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      if (parsed.length === 0) return []
-      if (typeof parsed[0] === 'object' && parsed[0] !== null) return parsed.filter(Boolean)
-      return parsed.filter(Boolean).map((a, i) => ({
-        label: i === 0 ? 'Default' : `Option ${i + 1}`, name: '', phone: '', area: String(a),
-      }))
-    }
-  } catch {}
-  return raw ? [{ label: 'Default', name: '', phone: '', area: raw }] : []
+  return parseStoredContactOptions(raw, { legacyField: 'area' })
 }
 
 export function serializeDeliveryOptions(opts) {
-  const clean = opts.filter(o =>
-    (o.label||'').trim() || (o.name||'').trim() || (o.phone||'').trim() || (o.area||'').trim()
-  )
-  return clean.length ? JSON.stringify(clean) : null
+  return serializeContactOptions(opts)
 }
 
-const BLANK_OPTION = () => ({ label: '', name: '', phone: '', area: '' })
+const BLANK_OPTION = () => createContactOption({ label: '', name: '', phone: '', area: '' })
 
 // ?? OptionEditor ???????????????????????????????????????????????????????????????
 function OptionEditor({ option, index, total, onChange, onRemove }) {
@@ -84,13 +78,33 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
 function DeliveryForm({ contact, onSave, onClose, t }) {
   const init = contact ? { ...contact } : { name: '', phone: '', area: '', notes: '' }
   const [form, setForm] = useState(init)
+  const [options, setOptions] = useState(() => {
+    const parsed = parseDeliveryOptions(init.address)
+    if (parsed.length) return parsed
+    return [BLANK_OPTION()]
+  })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const addOption = () => setOptions((current) => {
+    if (current.length >= CONTACT_OPTION_LIMIT) return current
+    return [...current, BLANK_OPTION()]
+  })
+  const updateOption = (index, nextOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
+  const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const handleSave = async () => {
     if (saving) return
     setSaving(true)
     try {
-      await Promise.resolve(onSave({ ...form }))
+      const primaryOption = getPrimaryContactOption(options, {
+        fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
+      })
+      await Promise.resolve(onSave({
+        ...form,
+        name: primaryOption.name || form.name || '',
+        phone: primaryOption.phone || form.phone || '',
+        area: primaryOption.area || form.area || '',
+        address: serializeDeliveryOptions(options),
+      }))
     } finally {
       setSaving(false)
     }
@@ -108,14 +122,27 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
           </label>
           <input id="delivery-form-name" name="delivery_name" className="input" value={form.name} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="delivery-form-phone" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('phone')} <span className="text-xs font-normal text-gray-400">(optional)</span></label>
-            <input id="delivery-form-phone" name="delivery_phone" className="input" value={form.phone||''} onChange={e => set('phone', e.target.value)} placeholder="+855..." />
+        <div>
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Contact Options
+              <span className="ml-1.5 text-xs font-normal text-gray-400">Up to {CONTACT_OPTION_LIMIT} riders or zones</span>
+            </label>
+            <button type="button" onClick={addOption} disabled={options.length >= CONTACT_OPTION_LIMIT} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20">
+              + Add Option
+            </button>
           </div>
-          <div>
-            <label htmlFor="delivery-form-area" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('area_zone')||'Area / Zone'}</label>
-            <input id="delivery-form-area" name="delivery_area" className="input" value={form.area||''} onChange={e => set('area', e.target.value)} />
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-0.5">
+            {options.map((option, index) => (
+              <OptionEditor
+                key={`delivery-option-${index}`}
+                option={option}
+                index={index}
+                total={options.length}
+                onChange={(nextOption) => updateOption(index, nextOption)}
+                onRemove={() => removeOption(index)}
+              />
+            ))}
           </div>
         </div>
         <div>
@@ -435,7 +462,20 @@ function DeliveryTab({ t, notify }) {
             <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
           </button>
           <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => {
-            const rows = visibleContacts.map(c => ({ Name: c.name||'', Phone: c.phone||'', Area: c.area||'', Notes: c.notes||'', Created: c.created_at||'' }))
+            const rows = visibleContacts.map(c => {
+              const options = parseDeliveryOptions(c.address)
+              const primaryOption = getPrimaryContactOption(options, {
+                fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
+              })
+              return {
+                Name: c.name || '',
+                Phone: primaryOption.phone || c.phone || '',
+                Area: primaryOption.area || c.area || '',
+                ContactOptions: buildContactOptionSummary(options, { mode: 'area' }),
+                Notes: c.notes || '',
+                Created: c.created_at || '',
+              }
+            })
             downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
           }} title={tr('export', 'Export', 'នាំចេញ')}>
             <Upload className="h-4 w-4" />
@@ -492,18 +532,26 @@ function DeliveryTab({ t, notify }) {
               </td>
             </tr>
           ) : (
+          (() => {
+            const options = parseDeliveryOptions(c.address)
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
+            })
+            return (
           <tr key={c.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(c.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="px-3 py-2 w-10" onClick={e => e.stopPropagation()}>
               <label htmlFor={`delivery-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
               <input id={`delivery-select-${c.id}`} name={`delivery_select_${c.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(c.id)} onChange={() => toggleOne(c.id)} />
             </td>
             <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{c.name}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{c.phone||'-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{c.area||'-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{primaryOption.phone || c.phone || '-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(c); setModal('detail') }}>{primaryOption.area || c.area || '-'}</td>
             <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
             </td>
           </tr>
+            )
+          })()
         ))}
         renderCard={c => (
           c?.__kind === 'section' ? (
@@ -531,6 +579,12 @@ function DeliveryTab({ t, notify }) {
               </div>
             </div>
           ) : (
+          (() => {
+            const options = parseDeliveryOptions(c.address)
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
+            })
+            return (
           <div key={c.id} className={`card p-3 flex items-center gap-3 ${selectedIds.has(c.id) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(c.id) }}>
               <label htmlFor={`delivery-card-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
@@ -543,13 +597,16 @@ function DeliveryTab({ t, notify }) {
               <div className="font-semibold text-gray-900 dark:text-white text-sm truncate flex items-center gap-1">
                 {c.name}
               </div>
-              {c.phone && <div className="text-xs text-gray-500">{c.phone}</div>}
-              {c.area  && <div className="text-xs text-gray-400 truncate">{c.area}</div>}
+              {primaryOption.phone || c.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || c.phone}</div> : null}
+              {primaryOption.area || c.area ? <div className="text-xs text-gray-400 truncate">{primaryOption.area || c.area}</div> : null}
+              {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
             </div>
             <div onClick={e => e.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
             </div>
           </div>
+            )
+          })()
         ))}
       />
 
@@ -557,13 +614,20 @@ function DeliveryTab({ t, notify }) {
       {modal === 'import' && <ImportModal type="deliveryContact" onClose={() => setModal(null)} onDone={load} />}
       {modal === 'detail' && selected && (
         <DetailModal item={selected}
-          fields={[
-            [t('name'), selected.name],
-            [t('phone'), selected.phone],
-            [t('area_zone')||'Area / Zone', selected.area],
-            [t('notes'), selected.notes],
-            [t('col_added')||'Added', selected.created_at || fmtDate(selected.created_at)],
-          ]}
+          fields={(() => {
+            const options = parseDeliveryOptions(selected.address)
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: { name: selected.name || '', phone: selected.phone || '', area: selected.area || '' },
+            })
+            return [
+              [t('name'), selected.name],
+              [t('phone'), primaryOption.phone || selected.phone],
+              [t('area_zone')||'Area / Zone', primaryOption.area || selected.area],
+              ['Contact Options', buildContactOptionSummary(options, { mode: 'area' })],
+              [t('notes'), selected.notes],
+              [t('col_added')||'Added', selected.created_at || fmtDate(selected.created_at)],
+            ]
+          })()}
           onEdit={() => setModal('form')} onDelete={() => handleDelete(selected)} onClose={() => { setModal(null); setSelected(null) }} t={t} />
       )}
     </div>

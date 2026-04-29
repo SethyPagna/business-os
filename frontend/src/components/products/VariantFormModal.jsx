@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../../AppContext'
 import Modal from '../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from './primitives'
+import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 
 export default function VariantFormModal({ parent, units, branches, user, onClose, onDone, t, usdSymbol }) {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -16,10 +17,12 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     barcode: '',
     description: '',
     supplier: parent.supplier || '',
-    purchase_price_usd: parent.purchase_price_usd || 0,
-    purchase_price_khr: parent.purchase_price_khr || 0,
-    selling_price_usd: parent.selling_price_usd || 0,
-    selling_price_khr: parent.selling_price_khr || 0,
+    purchase_price_usd: formatPriceNumber(parent.purchase_price_usd || 0),
+    purchase_price_khr: formatPriceNumber(parent.purchase_price_khr || 0),
+    selling_price_usd: formatPriceNumber(parent.selling_price_usd || 0),
+    selling_price_khr: formatPriceNumber(parent.selling_price_khr || 0),
+    special_price_usd: formatPriceNumber((parent.special_price_usd ?? parent.selling_price_usd) || 0),
+    special_price_khr: formatPriceNumber((parent.special_price_khr ?? parent.selling_price_khr) || 0),
     stock_quantity: 0,
     branch_id: branches.find((branch) => branch.is_default)?.id || '',
     unit: parent.unit || 'pcs',
@@ -45,13 +48,15 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       const response = await window.api.createProductVariant({
         ...form,
         parent_id: parent.id,
-        purchase_price_usd: parseNumericInput(form.purchase_price_usd),
-        purchase_price_khr: parseNumericInput(form.purchase_price_khr),
-        selling_price_usd: parseNumericInput(form.selling_price_usd),
-        selling_price_khr: parseNumericInput(form.selling_price_khr),
+        purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
+        purchase_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
+        selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
+        selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
+        special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
+        special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
         stock_quantity: parseNumericInput(form.stock_quantity),
-        cost_price_usd: parseNumericInput(form.purchase_price_usd),
-        cost_price_khr: parseNumericInput(form.purchase_price_khr),
+        cost_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
+        cost_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
         userId: user?.id,
         userName: user?.name,
       })
@@ -158,6 +163,38 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
               autoComplete="off"
               value={form.selling_price_usd ?? ''}
               onChange={(event) => setNumeric('selling_price_usd', event.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="variant-form-special-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
+            </label>
+            <input
+              id="variant-form-special-price"
+              name="variant_special_price_usd"
+              className="input"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              value={form.special_price_usd ?? ''}
+              onChange={(event) => setNumeric('special_price_usd', event.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="variant-form-special-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
+            </label>
+            <input
+              id="variant-form-special-price-khr"
+              name="variant_special_price_khr"
+              className="input"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              value={form.special_price_khr ?? ''}
+              onChange={(event) => setNumeric('special_price_khr', event.target.value)}
             />
           </div>
 

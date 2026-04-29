@@ -901,7 +901,12 @@ export const deleteCustomer = async (id) => {
   return route('customers:delete', () => apiFetch('DELETE', `/api/customers/${id}`, payload), null, true)
 }
 export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
-export const downloadCustomerTemplate = ()  => buildCSVTemplate(['name','membership_number','phone','email','address','company','notes'], 'customers-template.csv')
+export const downloadCustomerTemplate = ()  => buildCSVTemplate([
+  'name','membership_number','phone','email','address','company','notes',
+  'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
+  'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
+  'contact_label_3','contact_name_3','contact_phone_3','contact_email_3','contact_address_3',
+], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
@@ -918,7 +923,12 @@ export const deleteSupplier = async (id) => {
   return route('suppliers:delete', () => apiFetch('DELETE', `/api/suppliers/${id}`, payload), null, true)
 }
 export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
-export const downloadSupplierTemplate = ()  => buildCSVTemplate(['name','phone','email','address','company','contact_person','notes'], 'suppliers-template.csv')
+export const downloadSupplierTemplate = ()  => buildCSVTemplate([
+  'name','phone','email','address','company','contact_person','notes',
+  'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
+  'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
+  'contact_label_3','contact_name_3','contact_phone_3','contact_email_3','contact_address_3',
+], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
 export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
@@ -1100,7 +1110,12 @@ export function downloadImportTemplate(type) {
   // 2) Product template focuses on filename-based image columns.
   // 3) `image_conflict_mode` controls keep/replace/append behavior during bulk import.
   if (type === 'customer') return downloadCustomerTemplate()
-  if (type === 'deliveryContact') return buildCSVTemplate(['name', 'phone', 'area', 'address', 'notes'], 'delivery-contacts-template.csv')
+  if (type === 'deliveryContact') return buildCSVTemplate([
+    'name', 'phone', 'area', 'address', 'notes',
+    'contact_label_1','contact_name_1','contact_phone_1','contact_area_1',
+    'contact_label_2','contact_name_2','contact_phone_2','contact_area_2',
+    'contact_label_3','contact_name_3','contact_phone_3','contact_area_3',
+  ], 'delivery-contacts-template.csv')
   if (type === 'supplier') return downloadSupplierTemplate()
   if (type === 'sales') {
     return buildCSVTemplate([
@@ -1119,9 +1134,11 @@ export function downloadImportTemplate(type) {
   buildCSVTemplate([
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',
+    'special_price_usd','special_price_khr',
     'purchase_price_usd','purchase_price_khr',
     'stock_quantity','low_stock_threshold',
     'branch','supplier',
+    'parent_id','is_group',
     'image_filename_1','image_filename_2','image_filename_3','image_filename_4','image_filename_5',
     'image_filenames','image_conflict_mode',
     'is_active'

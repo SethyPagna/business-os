@@ -11,40 +11,22 @@ import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelecti
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import {
+  CONTACT_OPTION_LIMIT,
+  buildContactOptionSummary,
+  createContactOption,
+  getPrimaryContactOption,
+  parseStoredContactOptions,
+  serializeContactOptions as serializeStoredContactOptions,
+} from './contactOptionUtils'
 
 export function parseContactOptions(raw) {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      if (!parsed.length) return []
-      if (typeof parsed[0] === 'object' && parsed[0] !== null && !Array.isArray(parsed[0])) {
-        return parsed.filter(Boolean)
-      }
-      return parsed.filter(Boolean).map((address, index) => ({
-        label: index === 0 ? 'Default' : `Option ${index + 1}`,
-        name: '',
-        phone: '',
-        email: '',
-        address: String(address),
-      }))
-    }
-  } catch (_) {}
-  return [{ label: 'Default', name: '', phone: '', email: '', address: String(raw) }]
+  return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
 export function serializeContactOptions(options) {
-  const clean = (Array.isArray(options) ? options : []).filter((option) => (
-    String(option?.label || '').trim() ||
-    String(option?.name || '').trim() ||
-    String(option?.phone || '').trim() ||
-    String(option?.email || '').trim() ||
-    String(option?.address || '').trim()
-  ))
-  return clean.length ? JSON.stringify(clean) : null
+  return serializeStoredContactOptions(options)
 }
-
-const BLANK_OPTION = () => ({ label: '', name: '', phone: '', email: '', address: '' })
 
 function tr(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : null
@@ -95,14 +77,6 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
   )
 }
 
-function buildOptionSummary(options) {
-  if (!options.length) return '-'
-  return options.map((option, index) => {
-    const parts = [option.name, option.phone, option.email, option.address].filter(Boolean)
-    return `#${index + 1} ${option.label ? `(${option.label}) ` : ''}${parts.join(' | ') || '-'}`
-  }).join('\n')
-}
-
 function CustomerForm({ customer, onSave, onClose, t }) {
   const initial = customer
     ? { ...customer }
@@ -110,13 +84,16 @@ function CustomerForm({ customer, onSave, onClose, t }) {
   const [form, setForm] = useState(initial)
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
-    return parsed.length ? parsed : [BLANK_OPTION()]
+    return parsed.length ? parsed : [createContactOption()]
   })
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }))
-  const addOption = () => setOptions((current) => [...current, BLANK_OPTION()])
+  const addOption = () => setOptions((current) => {
+    if (current.length >= CONTACT_OPTION_LIMIT) return current
+    return [...current, createContactOption()]
+  })
   const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const updateOption = (index, nextOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
   const handleSubmit = async () => {
@@ -187,9 +164,9 @@ function CustomerForm({ customer, onSave, onClose, t }) {
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Contact Options
-              <span className="ml-1.5 text-xs font-normal text-gray-400">Different names, phones, emails, or addresses per option</span>
+              <span className="ml-1.5 text-xs font-normal text-gray-400">Up to {CONTACT_OPTION_LIMIT} names, phones, emails, or addresses</span>
             </label>
-            <button type="button" onClick={addOption} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/20">
+            <button type="button" onClick={addOption} disabled={options.length >= CONTACT_OPTION_LIMIT} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20">
               + Add Option
             </button>
           </div>
@@ -611,6 +588,14 @@ function CustomersTab({ t, notify }) {
             )
           }
           const options = parseContactOptions(customer.address)
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: {
+              name: customer.name || '',
+              phone: customer.phone || '',
+              email: customer.email || '',
+              address: '',
+            },
+          })
           return (
             <tr key={customer.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(customer.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
               <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
@@ -622,8 +607,8 @@ function CustomersTab({ t, notify }) {
               <td className="px-4 py-2 font-semibold text-blue-600 cursor-pointer dark:text-blue-300" onClick={() => { setSelected(customer); setModal('detail') }}>
                 {Number(customer.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.phone || '-'}</td>
-              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.email || '-'}</td>
+              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{primaryOption.phone || customer.phone || '-'}</td>
+              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{primaryOption.email || customer.email || '-'}</td>
               <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>{customer.company || '-'}</td>
               <td className="px-4 py-2 cursor-pointer" onClick={() => { setSelected(customer); setModal('detail') }}>
                 {options.length === 0 ? (
@@ -673,6 +658,14 @@ function CustomersTab({ t, notify }) {
             )
           }
           const options = parseContactOptions(customer.address)
+          const primaryOption = getPrimaryContactOption(options, {
+            fallback: {
+              name: customer.name || '',
+              phone: customer.phone || '',
+              email: customer.email || '',
+              address: '',
+            },
+          })
           return (
             <div key={customer.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(customer.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
               <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customer.id) }}>
@@ -684,7 +677,7 @@ function CustomersTab({ t, notify }) {
                 <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customer.name}</div>
                 {customer.membership_number ? <div className="font-mono text-[11px] text-blue-500">{customer.membership_number}</div> : null}
                 <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">{tr(t, 'loyalty_points', 'Points')}: {Number(customer.points_balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
-                {customer.phone ? <div className="text-xs text-gray-500">{customer.phone}</div> : null}
+                {primaryOption.phone || customer.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || customer.phone}</div> : null}
                 {customer.company ? <div className="truncate text-xs text-gray-400">{customer.company}</div> : null}
                 {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
               </div>
@@ -712,7 +705,7 @@ function CustomersTab({ t, notify }) {
             [tr(t, 'phone', 'Phone'), selected.phone],
             [tr(t, 'email', 'Email'), selected.email],
             [tr(t, 'company', 'Company'), selected.company],
-            ['Contact Options', buildOptionSummary(parseContactOptions(selected.address))],
+            ['Contact Options', buildContactOptionSummary(parseContactOptions(selected.address))],
             [tr(t, 'notes', 'Notes'), selected.notes],
             [tr(t, 'col_added', 'Added'), selected.created_at || fmtDate(selected.created_at)],
           ]}

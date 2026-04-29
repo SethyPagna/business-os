@@ -8,6 +8,7 @@ import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
 import { buildStandaloneReportHtml } from '../../utils/exportReports'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
+import { formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import DualMoney from './DualMoney'
@@ -30,6 +31,10 @@ function reuseSetWhenUnchanged(current, nextValues = []) {
     if (!next.has(value)) return next
   }
   return current
+}
+
+function priceCsv(value) {
+  return formatPriceNumber(value || 0)
 }
 
 export default function Inventory() {
@@ -821,7 +826,7 @@ export default function Inventory() {
     Products: group.productSummary || '',
     Records: group.items?.length || 0,
     Qty: group.totalQuantity || 0,
-    Total_Cost_USD: group.totalCostUsd || 0,
+    Total_Cost_USD: priceCsv(group.totalCostUsd || 0),
     Branch: group.branchSummary || '',
     Reason: group.reasonSummary || '',
     User: group.userSummary || '',
@@ -833,12 +838,18 @@ export default function Inventory() {
       SKU: p.sku || '',
       Category: p.category || '',
       Brand: p.brand || '',
+      Selling_Price_USD: priceCsv(p.selling_price_usd || 0),
+      Selling_Price_KHR: priceCsv(p.selling_price_khr || 0),
+      Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0),
+      Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
+      Cost_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0),
+      Cost_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
       Stock_Qty: getStockQty(p),
       Sold_Qty: p.qty_sold || 0,
-      Revenue_USD: p.revenue_usd || 0,
-      COGS_USD: p.cogs_usd || 0,
-      Profit_USD: (p.revenue_usd || 0) - (p.cogs_usd || 0),
-      Stock_Value_USD: getStockQty(p) * (p.purchase_price_usd || p.cost_price_usd || 0),
+      Revenue_USD: priceCsv(p.revenue_usd || 0),
+      COGS_USD: priceCsv(p.cogs_usd || 0),
+      Profit_USD: priceCsv((p.revenue_usd || 0) - (p.cogs_usd || 0)),
+      Stock_Value_USD: priceCsv(getStockQty(p) * (p.purchase_price_usd || p.cost_price_usd || 0)),
       Unit: p.unit || '',
       Supplier: p.supplier || '',
     }))
@@ -1579,6 +1590,12 @@ export default function Inventory() {
                     <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
                     <span className="text-gray-300 dark:text-gray-600">|</span>
                     <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
+                    {(p.special_price_usd || 0) > 0 ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600">|</span>
+                        <span>Special {fmtUSD(p.special_price_usd || 0)}</span>
+                      </>
+                    ) : null}
                     <span className="text-gray-300 dark:text-gray-600">|</span>
                     <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
                   </div>
@@ -1646,7 +1663,15 @@ export default function Inventory() {
                         )}
                         <td className="px-3 py-1 text-center"><span className={status.cls}>{status.label}</span></td>
                         <td className="px-3 py-1"><DualMoney usd={p.purchase_price_usd||p.cost_price_usd||0} khr={p.purchase_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                        <td className="px-3 py-1"><DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
+                        <td className="px-3 py-1">
+                          <DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+                          {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                            <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+                              Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                              {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-3 py-1 hidden lg:table-cell"><DualMoney usd={p.stock_value_usd||0} khr={p.stock_value_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
                         <td className="px-3 py-1 text-right text-gray-500 hidden xl:table-cell">{Math.max(0,p.qty_sold||0)}</td>
                         <td className="px-3 py-1 hidden xl:table-cell"><DualMoney usd={netRev} khr={0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>

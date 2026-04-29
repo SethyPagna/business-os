@@ -9,6 +9,7 @@ import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
 import { buildStandaloneReportHtml } from '../../utils/exportReports'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import { fmtTime } from '../../utils/formatters'
+import { formatPriceNumber } from '../../utils/pricing.js'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
 import PortalMenu from '../shared/PortalMenu'
@@ -26,6 +27,7 @@ export default function Dashboard() {
   }
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
   const refreshLabel = translateOr('refresh', 'Refresh', 'ស្រស់ថ្មី')
+  const priceCsv = useCallback((value) => formatPriceNumber(value || 0), [])
 
   // Range presets use t() for labels inside the component so t() is in scope.
   const RANGE_PRESETS = [
@@ -295,21 +297,21 @@ export default function Dashboard() {
 
   const buildDashboardKpiRows = useCallback(() => ([
     { Section:'KPI', Metric:'Period', Value: periodShort, Period: rangeLabel },
-    { Section:'KPI', Metric:'Gross Sales (USD)', Value: aGrossSales, Period: rangeLabel },
-    { Section:'KPI', Metric:'Revenue (USD)', Value: aRevenue, Period: rangeLabel },
-    { Section:'KPI', Metric:'Discounts (USD)', Value: aDiscounts, Period: rangeLabel },
-    { Section:'KPI', Metric:'Store Discounts (USD)', Value: aStoreDiscounts, Period: rangeLabel },
-    { Section:'KPI', Metric:'Membership Discounts (USD)', Value: aMembershipDiscounts, Period: rangeLabel },
-    { Section:'KPI', Metric:'Tax (USD)', Value: aTax, Period: rangeLabel },
-    { Section:'KPI', Metric:'Delivery (USD)', Value: aDelivery, Period: rangeLabel },
-    { Section:'KPI', Metric:'COGS (USD)', Value: aCost, Period: rangeLabel },
-    { Section:'KPI', Metric:'Est. Profit (USD)', Value: aProfit, Period: rangeLabel },
+    { Section:'KPI', Metric:'Gross Sales (USD)', Value: priceCsv(aGrossSales), Period: rangeLabel },
+    { Section:'KPI', Metric:'Revenue (USD)', Value: priceCsv(aRevenue), Period: rangeLabel },
+    { Section:'KPI', Metric:'Discounts (USD)', Value: priceCsv(aDiscounts), Period: rangeLabel },
+    { Section:'KPI', Metric:'Store Discounts (USD)', Value: priceCsv(aStoreDiscounts), Period: rangeLabel },
+    { Section:'KPI', Metric:'Membership Discounts (USD)', Value: priceCsv(aMembershipDiscounts), Period: rangeLabel },
+    { Section:'KPI', Metric:'Tax (USD)', Value: priceCsv(aTax), Period: rangeLabel },
+    { Section:'KPI', Metric:'Delivery (USD)', Value: priceCsv(aDelivery), Period: rangeLabel },
+    { Section:'KPI', Metric:'COGS (USD)', Value: priceCsv(aCost), Period: rangeLabel },
+    { Section:'KPI', Metric:'Est. Profit (USD)', Value: priceCsv(aProfit), Period: rangeLabel },
     { Section:'KPI', Metric:'Transactions', Value: aTxCount, Period: rangeLabel },
-    { Section:'KPI', Metric:'Avg Order (USD)', Value: aAvgOrder.toFixed(2), Period: rangeLabel },
+    { Section:'KPI', Metric:'Avg Order (USD)', Value: priceCsv(aAvgOrder), Period: rangeLabel },
     { Section:'KPI', Metric:'Returns', Value: aReturns, Period: rangeLabel },
-    { Section:'KPI', Metric:'Refunded (USD)', Value: aRefundUsd, Period: rangeLabel },
+    { Section:'KPI', Metric:'Refunded (USD)', Value: priceCsv(aRefundUsd), Period: rangeLabel },
     { Section:'KPI', Metric:'Supplier Returns', Value: aSupplierReturns, Period: rangeLabel },
-    { Section:'KPI', Metric:'Business Loss (USD)', Value: aSupplierLossUsd, Period: rangeLabel },
+    { Section:'KPI', Metric:'Business Loss (USD)', Value: priceCsv(aSupplierLossUsd), Period: rangeLabel },
     { Section:'KPI', Metric:'Low Stock', Value: summary?.low_stock?.length || 0, Period:'all-time' },
   ]), [
     aAvgOrder,
@@ -328,6 +330,7 @@ export default function Dashboard() {
     aTax,
     aTxCount,
     periodShort,
+    priceCsv,
     rangeLabel,
     summary?.low_stock?.length,
   ])
@@ -382,55 +385,55 @@ export default function Dashboard() {
   const buildDashboardSalesRows = useCallback(() => (
     (analytics?.periodData || []).map((d) => ({
       Period: d.date || d.period || '',
-      Gross_Sales_USD: d.gross_sales_usd || 0,
-      Discounts_USD: d.discount_usd || 0,
-      Tax_USD: d.tax_usd || 0,
-      Delivery_USD: d.delivery_usd || 0,
-      Refund_USD: d.refund_usd || 0,
-      Revenue_USD: d.revenue_usd || 0,
-      COGS_USD: d.cost_usd || 0,
-      Profit_USD: d.profit_usd || 0,
+      Gross_Sales_USD: priceCsv(d.gross_sales_usd || 0),
+      Discounts_USD: priceCsv(d.discount_usd || 0),
+      Tax_USD: priceCsv(d.tax_usd || 0),
+      Delivery_USD: priceCsv(d.delivery_usd || 0),
+      Refund_USD: priceCsv(d.refund_usd || 0),
+      Revenue_USD: priceCsv(d.revenue_usd || 0),
+      COGS_USD: priceCsv(d.cost_usd || 0),
+      Profit_USD: priceCsv(d.profit_usd || 0),
       Tx: d.count || 0,
     }))
-  ), [analytics?.periodData])
+  ), [analytics?.periodData, priceCsv])
 
   const buildDashboardTopProductRows = useCallback(() => (
     (analytics?.topProducts || []).map((p, i) => ({
       Rank: i + 1,
       Product: p.product_name || '',
-      Revenue_USD: p.revenue_usd || 0,
+      Revenue_USD: priceCsv(p.revenue_usd || 0),
       Qty: p.qty_sold || 0,
     }))
-  ), [analytics?.topProducts])
+  ), [analytics?.topProducts, priceCsv])
 
   const buildDashboardTopCustomerRows = useCallback(() => (
     (analytics?.topCustomers || []).map((c, i) => ({
       Rank: i + 1,
       Customer: c.customer_name || '',
       Sales: c.sale_count || 0,
-      Gross: c.gross_revenue_usd || 0,
-      Store_Discounts: c.store_discount_usd || 0,
-      Membership_Discounts: c.membership_discount_usd || 0,
-      Returns: c.total_refund_usd || 0,
-      Net: c.net_revenue_usd || 0,
+      Gross: priceCsv(c.gross_revenue_usd || 0),
+      Store_Discounts: priceCsv(c.store_discount_usd || 0),
+      Membership_Discounts: priceCsv(c.membership_discount_usd || 0),
+      Returns: priceCsv(c.total_refund_usd || 0),
+      Net: priceCsv(c.net_revenue_usd || 0),
     }))
-  ), [analytics?.topCustomers])
+  ), [analytics?.topCustomers, priceCsv])
 
   const buildDashboardPaymentRows = useCallback(() => (
     (analytics?.byPayment || []).map((p) => ({
       Method: p.payment_method || '',
       Count: p.count || 0,
-      Revenue: p.revenue_usd || 0,
+      Revenue: priceCsv(p.revenue_usd || 0),
     }))
-  ), [analytics?.byPayment])
+  ), [analytics?.byPayment, priceCsv])
 
   const buildDashboardBranchRows = useCallback(() => (
     (analytics?.byBranch || []).map((b) => ({
       Branch: b.branch_name || '',
       Tx: b.count || 0,
-      Revenue: b.revenue_usd || 0,
+      Revenue: priceCsv(b.revenue_usd || 0),
     }))
-  ), [analytics?.byBranch])
+  ), [analytics?.byBranch, priceCsv])
 
   const buildDashboardLowStockRows = useCallback(() => (
     (summary?.low_stock || []).map((p) => ({
@@ -446,10 +449,10 @@ export default function Dashboard() {
       Created_At: sale.created_at || '',
       Branch: sale.branch_name || '',
       Customer: sale.customer_name || '',
-      Total_USD: sale.total_usd || sale.total || 0,
-      Total_KHR: sale.total_khr || 0,
+      Total_USD: priceCsv(sale.total_usd || sale.total || 0),
+      Total_KHR: priceCsv(sale.total_khr || 0),
     }))
-  ), [summary?.recent_sales])
+  ), [priceCsv, summary?.recent_sales])
 
   const buildExportAll = () => {
     if (!analytics || !summary) return

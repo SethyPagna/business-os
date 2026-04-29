@@ -11,19 +11,51 @@ import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelecti
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import {
+  CONTACT_OPTION_LIMIT,
+  buildContactOptionSummary,
+  createContactOption,
+  getPrimaryContactOption,
+  parseContactOptionsFromImportRow,
+  parseStoredContactOptions,
+  serializeContactOptions,
+} from './contactOptionUtils'
 
 function SupplierForm({ supplier, onSave, onClose, t }) {
   const init = supplier
     ? { ...supplier }
     : { name: '', phone: '', email: '', company: '', contact_person: '', address: '', notes: '' }
   const [form, setForm] = useState(init)
+  const [options, setOptions] = useState(() => {
+    const parsed = parseStoredContactOptions(init.address, { legacyField: 'address' })
+    if (parsed.length) return parsed
+    return [createContactOption({
+      name: init.contact_person || '',
+      phone: init.phone || '',
+      email: init.email || '',
+      address: init.address || '',
+    })]
+  })
   const [saving, setSaving] = useState(false)
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const addOption = () => setOptions((current) => {
+    if (current.length >= CONTACT_OPTION_LIMIT) return current
+    return [...current, createContactOption()]
+  })
+  const updateOption = (index, nextOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
+  const removeOption = (index) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const handleSubmit = async () => {
     if (saving) return
     setSaving(true)
     try {
-      await Promise.resolve(onSave(form))
+      const primaryOption = getPrimaryContactOption(options)
+      await Promise.resolve(onSave({
+        ...form,
+        phone: primaryOption.phone || form.phone || '',
+        email: primaryOption.email || form.email || '',
+        address: serializeContactOptions(options),
+        contact_person: primaryOption.name || form.contact_person || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -38,16 +70,6 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="supplier-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('phone')}</label>
-            <input id="supplier-form-phone" name="supplier_phone" className="input" value={form.phone || ''} onChange={(event) => set('phone', event.target.value)} />
-          </div>
-          <div>
-            <label htmlFor="supplier-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('email')}</label>
-            <input id="supplier-form-email" name="supplier_email" className="input" type="email" value={form.email || ''} onChange={(event) => set('email', event.target.value)} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
             <label htmlFor="supplier-form-company" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('company')}</label>
             <input id="supplier-form-company" name="supplier_company" className="input" value={form.company || ''} onChange={(event) => set('company', event.target.value)} />
           </div>
@@ -57,8 +79,44 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
           </div>
         </div>
         <div>
-          <label htmlFor="supplier-form-address" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('address')}</label>
-          <input id="supplier-form-address" name="supplier_address" className="input" value={form.address || ''} onChange={(event) => set('address', event.target.value)} />
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Contact Options
+              <span className="ml-1.5 text-xs font-normal text-gray-400">Up to {CONTACT_OPTION_LIMIT} supplier contacts</span>
+            </label>
+            <button type="button" onClick={addOption} disabled={options.length >= CONTACT_OPTION_LIMIT} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20">
+              + Add Option
+            </button>
+          </div>
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-0.5">
+            {options.map((option, index) => (
+              <div key={`supplier-option-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
+                  <input className="input flex-1 text-xs py-1" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
+                  {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">Remove</button> : null}
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-0.5 block text-xs text-gray-400">Name</label>
+                    <input className="input text-xs py-1" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-xs text-gray-400">Phone</label>
+                    <input className="input text-xs py-1" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-xs text-gray-400">Email</label>
+                  <input className="input text-xs py-1" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-xs text-gray-400">Address</label>
+                  <input className="input text-xs py-1" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
         <div>
           <label htmlFor="supplier-form-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('notes') || 'Notes'}</label>
@@ -378,14 +436,28 @@ function SuppliersTab({ t, notify }) {
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={() => {
               const rows = visibleSuppliers.map((supplier) => ({
+                ...(() => {
+                  const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
+                  const primaryOption = getPrimaryContactOption(options, {
+                    fallback: {
+                      name: supplier.contact_person || '',
+                      phone: supplier.phone || '',
+                      email: supplier.email || '',
+                      address: '',
+                    },
+                  })
+                  return {
                 Name: supplier.name || '',
-                Phone: supplier.phone || '',
-                Email: supplier.email || '',
+                Phone: primaryOption.phone || supplier.phone || '',
+                Email: primaryOption.email || supplier.email || '',
                 Company: supplier.company || '',
-                ContactPerson: supplier.contact_person || '',
-                Address: supplier.address || '',
+                ContactPerson: primaryOption.name || supplier.contact_person || '',
+                Address: primaryOption.address || '',
+                ContactOptions: buildContactOptionSummary(options),
                 Notes: supplier.notes || '',
                 Created: supplier.created_at || '',
+                  }
+                })(),
               }))
               downloadCSV(`suppliers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
@@ -445,20 +517,33 @@ function SuppliersTab({ t, notify }) {
               </td>
             </tr>
           ) : (
+          (() => {
+            const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: {
+                name: supplier.contact_person || '',
+                phone: supplier.phone || '',
+                email: supplier.email || '',
+                address: '',
+              },
+            })
+            return (
           <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(supplier.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
               <label htmlFor={`supplier-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
               <input id={`supplier-select-${supplier.id}`} name={`supplier_select_${supplier.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(supplier.id)} onChange={() => toggleOne(supplier.id)} />
             </td>
             <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.name}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.phone || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.email || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.phone || supplier.phone || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.email || supplier.email || '--'}</td>
             <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.company || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.contact_person || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.name || supplier.contact_person || '--'}</td>
             <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </td>
           </tr>
+            )
+          })()
         ))}
         renderCard={(supplier) => (
           supplier?.__kind === 'section' ? (
@@ -486,6 +571,17 @@ function SuppliersTab({ t, notify }) {
               </div>
             </div>
           ) : (
+          (() => {
+            const options = parseStoredContactOptions(supplier.address, { legacyField: 'address' })
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: {
+                name: supplier.contact_person || '',
+                phone: supplier.phone || '',
+                email: supplier.email || '',
+                address: '',
+              },
+            })
+            return (
           <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(supplier.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(supplier.id) }}>
               <label htmlFor={`supplier-card-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
@@ -496,13 +592,16 @@ function SuppliersTab({ t, notify }) {
             </div>
             <div className="min-w-0 flex-1 cursor-pointer" onClick={() => { setSelected(supplier); setModal('detail') }}>
               <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</div>
-              {supplier.phone ? <div className="text-xs text-gray-500">{supplier.phone}</div> : null}
+              {primaryOption.phone || supplier.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || supplier.phone}</div> : null}
               {supplier.company ? <div className="truncate text-xs text-gray-400">{supplier.company}</div> : null}
+              {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
             </div>
             <div onClick={(event) => event.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </div>
           </div>
+            )
+          })()
         ))}
       />
 
@@ -511,16 +610,28 @@ function SuppliersTab({ t, notify }) {
       {modal === 'detail' && selected ? (
         <DetailModal
           item={selected}
-          fields={[
-            [t('name'), selected.name],
-            [t('phone'), selected.phone],
-            [t('email'), selected.email],
-            [t('company'), selected.company],
-            [t('contact_person') || 'Contact', selected.contact_person],
-            [t('address'), selected.address],
-            [t('notes'), selected.notes],
-            [t('col_added') || t('added_on') || 'Added', selected.created_at || fmtDate(selected.created_at)],
-          ]}
+          fields={(() => {
+            const options = parseStoredContactOptions(selected.address, { legacyField: 'address' })
+            const primaryOption = getPrimaryContactOption(options, {
+              fallback: {
+                name: selected.contact_person || '',
+                phone: selected.phone || '',
+                email: selected.email || '',
+                address: '',
+              },
+            })
+            return [
+              [t('name'), selected.name],
+              [t('phone'), primaryOption.phone || selected.phone],
+              [t('email'), primaryOption.email || selected.email],
+              [t('company'), selected.company],
+              [t('contact_person') || 'Contact', primaryOption.name || selected.contact_person],
+              [t('address'), primaryOption.address],
+              ['Contact Options', buildContactOptionSummary(options)],
+              [t('notes'), selected.notes],
+              [t('col_added') || t('added_on') || 'Added', selected.created_at || fmtDate(selected.created_at)],
+            ]
+          })()}
           onEdit={() => setModal('form')}
           onDelete={() => handleDelete(selected)}
           onClose={() => { setModal(null); setSelected(null) }}

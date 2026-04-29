@@ -11,6 +11,7 @@ const { isSafeExternalImageReference } = require('../netSecurity')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency')
+const { normalizePriceValue } = require('../money')
 
 const router = express.Router()
 
@@ -136,6 +137,21 @@ function pickField(source, key, fallback) {
   return hasOwnField(source, key) ? source[key] : fallback
 }
 
+function ensureParentProductExists(parentId, { childId = null } = {}) {
+  if (!parentId) return null
+  const numericId = Number(parentId)
+  if (!Number.isFinite(numericId) || numericId <= 0) throw new Error('Parent product not found')
+  if (childId && numericId === Number(childId)) throw new Error('A product cannot be its own group parent')
+  const parent = db.prepare('SELECT id, name FROM products WHERE id = ?').get(numericId)
+  if (!parent) throw new Error('Parent product not found')
+  return parent
+}
+
+function markParentProductAsGroup(parentId) {
+  if (!parentId) return
+  db.prepare("UPDATE products SET is_group = 1, updated_at = datetime('now') WHERE id = ?").run(parentId)
+}
+
 // ?? GET /api/products ?????????????????????????????????????????????????????????
 router.get('/', authToken, (req, res) => {
   // Fetch all products with branch stock in a single optimized query (avoids O(n簡) filtering)
@@ -178,7 +194,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
     if (!openingBranchId) return err(res, 'A branch is required for new products')
     assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
 
-    const parent = db.prepare('SELECT * FROM products WHERE id = ?').get(d.parent_id)
+    const parent = ensureParentProductExists(d.parent_id)
     if (!parent) return err(res, 'Parent product not found')
     const parentGallery = normalizeImageGallery(
       loadProductImageMap([parent.id]).get(parent.id) || [],
@@ -189,27 +205,28 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       d.image_path || parentGallery[0] || parent.image_path || null,
     )
     const primaryImage = imageGallery[0] || null
-    db.prepare("UPDATE products SET is_group = 1 WHERE id = ?").run(d.parent_id)
+    markParentProductAsGroup(d.parent_id)
     const r = db.prepare(`
       INSERT INTO products
-        (name, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr,
+        (name, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
          stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active,
-         supplier, custom_fields, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         supplier, custom_fields, is_group, parent_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), d.sku || null, d.barcode || null,
       d.category || parent.category || null,
       d.brand || parent.brand || null,
       d.unit || parent.unit || 'pcs', d.description || null,
-      d.selling_price_usd || 0, d.selling_price_khr || 0,
-      d.purchase_price_usd || 0, d.purchase_price_khr || 0,
-      d.cost_price_usd || d.purchase_price_usd || 0,
-      d.cost_price_khr || d.purchase_price_khr || 0,
+      normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
+      normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
+      normalizePriceValue(d.purchase_price_usd || 0), normalizePriceValue(d.purchase_price_khr || 0),
+      normalizePriceValue(d.cost_price_usd || d.purchase_price_usd || 0),
+      normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
       openingStock, d.low_stock_threshold ?? parent.low_stock_threshold ?? 10,
       d.out_of_stock_threshold ?? 0,
       primaryImage, d.is_active ?? 1,
-      d.supplier || null, JSON.stringify(d.custom_fields || {}), d.parent_id,
+      d.supplier || null, JSON.stringify(d.custom_fields || {}), 0, d.parent_id,
     )
     const pid = r.lastInsertRowid
     syncProductImageGallery(pid, imageGallery)
@@ -245,29 +262,34 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     const openingBranchId = d.branch_id ? parseInt(d.branch_id, 10) : defaultBranch?.id || null
     const imageGallery = normalizeImageGallery(d.image_gallery, d.image_path || null)
     const primaryImage = imageGallery[0] || null
+    const parentRecord = ensureParentProductExists(d.parent_id)
+    const normalizedParentId = parentRecord?.id || null
     if (!openingBranchId) return err(res, 'A branch is required for new products')
     assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
 
     const r = db.prepare(`
       INSERT INTO products
-        (name, client_request_id, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr,
+        (name, client_request_id, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
-         stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active, supplier, custom_fields, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active, supplier, custom_fields, is_group, parent_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), clientRequestId, d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
-      d.selling_price_usd || 0, d.selling_price_khr || 0,
-      d.purchase_price_usd || 0, d.purchase_price_khr || 0,
-      d.cost_price_usd || d.purchase_price_usd || 0,
-      d.cost_price_khr || d.purchase_price_khr || 0,
+      normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
+      normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
+      normalizePriceValue(d.purchase_price_usd || 0), normalizePriceValue(d.purchase_price_khr || 0),
+      normalizePriceValue(d.cost_price_usd || d.purchase_price_usd || 0),
+      normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
       openingStock, d.low_stock_threshold ?? 10, d.out_of_stock_threshold ?? 0,
       primaryImage, d.is_active ?? 1,
       d.supplier || null,
       JSON.stringify(d.custom_fields || {}),
-      d.parent_id || null,
+      normalizedParentId ? 0 : (Number(d.is_group) ? 1 : 0),
+      normalizedParentId,
     )
     const pid = r.lastInsertRowid
     syncProductImageGallery(pid, imageGallery)
+    if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
 
     // Seed branch_stock rows for all active branches
     seedBranchRows(pid, activeBranches)
@@ -313,6 +335,8 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         description: pickField(d, 'description', prev.description),
         selling_price_usd: pickField(d, 'selling_price_usd', prev.selling_price_usd),
         selling_price_khr: pickField(d, 'selling_price_khr', prev.selling_price_khr),
+        special_price_usd: pickField(d, 'special_price_usd', prev.special_price_usd),
+        special_price_khr: pickField(d, 'special_price_khr', prev.special_price_khr),
         purchase_price_usd: pickField(d, 'purchase_price_usd', prev.purchase_price_usd),
         purchase_price_khr: pickField(d, 'purchase_price_khr', prev.purchase_price_khr),
         cost_price_usd: pickField(d, 'cost_price_usd', prev.cost_price_usd),
@@ -324,10 +348,14 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         is_active: pickField(d, 'is_active', prev.is_active),
         supplier: pickField(d, 'supplier', prev.supplier),
         custom_fields: pickField(d, 'custom_fields', tryParse(prev.custom_fields, {})),
+        is_group: pickField(d, 'is_group', prev.is_group),
+        parent_id: pickField(d, 'parent_id', prev.parent_id),
       }
 
       if (!String(merged.name || '').trim()) throw new Error('Product name required')
       assertUniqueProductFields({ name: merged.name, sku: merged.sku, barcode: merged.barcode, excludeId: productId })
+      const parentRecord = ensureParentProductExists(merged.parent_id, { childId: productId })
+      const normalizedParentId = parentRecord?.id || null
 
       const desiredQty = Math.max(0, parseFloat(merged.stock_quantity) || 0)
       const incomingGallery = normalizeImageGallery(
@@ -343,10 +371,11 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         UPDATE products SET
           name=?, sku=?, barcode=?, category=?, brand=?, unit=?, description=?,
           selling_price_usd=?, selling_price_khr=?,
+          special_price_usd=?, special_price_khr=?,
           purchase_price_usd=?, purchase_price_khr=?,
           cost_price_usd=?, cost_price_khr=?,
           stock_quantity=?, low_stock_threshold=?, out_of_stock_threshold=?,
-          image_path=?, is_active=?, supplier=?, custom_fields=?, updated_at=datetime('now')
+          image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=datetime('now')
         WHERE id=?
       `).run(
         String(merged.name || '').trim(),
@@ -356,21 +385,26 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         merged.brand || null,
         merged.unit || 'pcs',
         merged.description || null,
-        merged.selling_price_usd || 0,
-        merged.selling_price_khr || 0,
-        merged.purchase_price_usd || 0,
-        merged.purchase_price_khr || 0,
-        merged.cost_price_usd || merged.purchase_price_usd || 0,
-        merged.cost_price_khr || merged.purchase_price_khr || 0,
+        normalizePriceValue(merged.selling_price_usd || 0),
+        normalizePriceValue(merged.selling_price_khr || 0),
+        normalizePriceValue(merged.special_price_usd ?? merged.selling_price_usd ?? 0),
+        normalizePriceValue(merged.special_price_khr ?? merged.selling_price_khr ?? 0),
+        normalizePriceValue(merged.purchase_price_usd || 0),
+        normalizePriceValue(merged.purchase_price_khr || 0),
+        normalizePriceValue(merged.cost_price_usd || merged.purchase_price_usd || 0),
+        normalizePriceValue(merged.cost_price_khr || merged.purchase_price_khr || 0),
         desiredQty,
         merged.low_stock_threshold ?? 10,
         merged.out_of_stock_threshold ?? 0,
         primaryImage, merged.is_active ?? 1,
         merged.supplier || null,
         JSON.stringify(merged.custom_fields || {}),
+        normalizedParentId ? 0 : (merged.is_group ? 1 : 0),
+        normalizedParentId,
         productId,
       )
       syncProductImageGallery(productId, effectiveGallery)
+      if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
 
       const delta = desiredQty - Math.max(0, prev.stock_quantity || 0)
       if (Math.abs(delta) > 0.0001) {
@@ -625,6 +659,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     return parsed
   }
 
+  const parseImportFlag = (row, field, fallbackValue = 0) => {
+    const raw = row?.[field]
+    if (raw === undefined || raw === null || String(raw).trim() === '') return fallbackValue
+    const value = String(raw).trim().toLowerCase()
+    if (['1', 'true', 'yes', 'y'].includes(value)) return 1
+    if (['0', 'false', 'no', 'n'].includes(value)) return 0
+    return fallbackValue
+  }
+
   const hasImportValue = (row, field) => {
     const raw = row?.[field]
     return !(raw === undefined || raw === null || String(raw).trim() === '')
@@ -832,11 +875,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         if (!p.name?.trim()) { errors.push('Row missing name'); continue }
         const action  = p._action || 'new'
         const qty     = parseImportNumber(p, 'stock_quantity', 0)
-        const sellUsd = parseImportNumber(p, 'selling_price_usd', 0)
-        const sellKhr = parseImportNumber(p, 'selling_price_khr', 0)
-        const buyUsd  = parseImportNumber(p, 'purchase_price_usd', 0)
-        const buyKhr  = parseImportNumber(p, 'purchase_price_khr', 0)
+        const sellUsd = normalizePriceValue(parseImportNumber(p, 'selling_price_usd', 0))
+        const sellKhr = normalizePriceValue(parseImportNumber(p, 'selling_price_khr', 0))
+        const specialUsd = normalizePriceValue(parseImportNumber(p, 'special_price_usd', sellUsd))
+        const specialKhr = normalizePriceValue(parseImportNumber(p, 'special_price_khr', sellKhr))
+        const buyUsd  = normalizePriceValue(parseImportNumber(p, 'purchase_price_usd', 0))
+        const buyKhr  = normalizePriceValue(parseImportNumber(p, 'purchase_price_khr', 0))
         const thresh  = parseImportNumber(p, 'low_stock_threshold', 10)
+        const parentId = parseImportNumber(p, 'parent_id', 0)
+        const isGroup = parseImportFlag(p, 'is_group', 0)
         const normalizedCategory = ensureCategory(p.category)
         const normalizedUnit = ensureUnit(p.unit || 'pcs') || 'pcs'
         const normalizedBrand = ensureBrand(p.brand)
@@ -854,6 +901,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         )
 
         if (action === 'new') {
+          const parentRecord = ensureParentProductExists(parentId || null)
+          const normalizedParentId = parentRecord?.id || null
           assertUniqueProductFields({ name: p.name, sku: p.sku, barcode: p.barcode })
           const newProductGallery = incomingImageGallery
           const newPrimaryImage = newProductGallery[0] || null
@@ -861,19 +910,20 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             INSERT INTO products
               (name, sku, barcode, category, unit, description,
               brand,
-              selling_price_usd, selling_price_khr,
+              selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
               purchase_price_usd, purchase_price_khr,
               cost_price_usd, cost_price_khr,
               stock_quantity, low_stock_threshold,
-              is_active, supplier, image_path)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              is_active, supplier, image_path, is_group, parent_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
             p.name.trim(), p.sku || null, p.barcode || null, normalizedCategory, normalizedUnit,
-            p.description || null, normalizedBrand, sellUsd, sellKhr, buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
-            (p.is_active !== undefined ? p.is_active : 1), normalizedSupplier, newPrimaryImage
+            p.description || null, normalizedBrand, sellUsd, sellKhr, specialUsd, specialKhr, buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
+            (p.is_active !== undefined ? p.is_active : 1), normalizedSupplier, newPrimaryImage, normalizedParentId ? 0 : isGroup, normalizedParentId
           )
           const pid = r.lastInsertRowid
           syncProductImageGallery(pid, newProductGallery)
+          if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
           activeBranches.forEach(b => insertBS.run(pid, b.id, 0))
           const branch = determineBranch(p.branch)
           if (qty > 0) {
@@ -897,9 +947,16 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           const resolvedSupplier = resolveImportValue(ep.supplier, normalizedSupplier, hasImportValue(p, 'supplier'), fieldRules.supplier, defaultFieldRule)
           const resolvedSellUsd = resolveImportValue(ep.selling_price_usd, sellUsd, hasImportValue(p, 'selling_price_usd'), fieldRules.selling_price_usd, defaultFieldRule)
           const resolvedSellKhr = resolveImportValue(ep.selling_price_khr, sellKhr, hasImportValue(p, 'selling_price_khr'), fieldRules.selling_price_khr, defaultFieldRule)
+          const resolvedSpecialUsd = resolveImportValue(ep.special_price_usd, specialUsd, hasImportValue(p, 'special_price_usd'), fieldRules.special_price_usd, defaultFieldRule)
+          const resolvedSpecialKhr = resolveImportValue(ep.special_price_khr, specialKhr, hasImportValue(p, 'special_price_khr'), fieldRules.special_price_khr, defaultFieldRule)
           const resolvedBuyUsd = resolveImportValue(ep.purchase_price_usd, buyUsd, hasImportValue(p, 'purchase_price_usd'), fieldRules.purchase_price_usd, defaultFieldRule)
           const resolvedBuyKhr = resolveImportValue(ep.purchase_price_khr, buyKhr, hasImportValue(p, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultFieldRule)
           const resolvedThreshold = resolveImportValue(ep.low_stock_threshold, thresh, hasImportValue(p, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultFieldRule)
+          const resolvedIsGroup = resolveImportValue(ep.is_group, isGroup, hasImportValue(p, 'is_group'), fieldRules.is_group, defaultFieldRule)
+          const resolvedParentId = resolveImportValue(ep.parent_id, parentId || null, hasImportValue(p, 'parent_id'), fieldRules.parent_id, defaultFieldRule)
+          const parentRecord = ensureParentProductExists(resolvedParentId || null, { childId: pid })
+          const normalizedParentId = parentRecord?.id || null
+          const normalizedIsGroup = normalizedParentId ? 0 : (resolvedIsGroup ? 1 : 0)
           const currentGallery = loadCurrentGallery(pid, ep.image_path || null)
           let nextGallery = currentGallery
           if (incomingImageGallery.length > 0) {
@@ -919,18 +976,23 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               || resolvedSupplier !== ep.supplier
               || resolvedSellUsd !== ep.selling_price_usd
               || resolvedSellKhr !== ep.selling_price_khr
+              || resolvedSpecialUsd !== ep.special_price_usd
+              || resolvedSpecialKhr !== ep.special_price_khr
               || resolvedBuyUsd !== ep.purchase_price_usd
               || resolvedBuyKhr !== ep.purchase_price_khr
               || resolvedThreshold !== ep.low_stock_threshold
+              || normalizedIsGroup !== ep.is_group
+              || normalizedParentId !== ep.parent_id
             )
             if (changedFields) {
               db.prepare(`
                 UPDATE products SET
                   category=?, unit=?, brand=?, description=?, supplier=?,
                   selling_price_usd=?, selling_price_khr=?,
+                  special_price_usd=?, special_price_khr=?,
                   purchase_price_usd=?, purchase_price_khr=?,
                   cost_price_usd=?, cost_price_khr=?,
-                  low_stock_threshold=?,
+                  low_stock_threshold=?, is_group=?, parent_id=?,
                   updated_at=datetime('now')
                 WHERE id=?
               `).run(
@@ -939,16 +1001,21 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 resolvedBrand,
                 resolvedDescription,
                 resolvedSupplier,
-                resolvedSellUsd || 0,
-                resolvedSellKhr || 0,
-                resolvedBuyUsd || 0,
-                resolvedBuyKhr || 0,
-                resolvedBuyUsd || 0,
-                resolvedBuyKhr || 0,
+                normalizePriceValue(resolvedSellUsd || 0),
+                normalizePriceValue(resolvedSellKhr || 0),
+                normalizePriceValue(resolvedSpecialUsd ?? resolvedSellUsd ?? 0),
+                normalizePriceValue(resolvedSpecialKhr ?? resolvedSellKhr ?? 0),
+                normalizePriceValue(resolvedBuyUsd || 0),
+                normalizePriceValue(resolvedBuyKhr || 0),
+                normalizePriceValue(resolvedBuyUsd || 0),
+                normalizePriceValue(resolvedBuyKhr || 0),
                 resolvedThreshold || 0,
+                normalizedIsGroup ? 1 : 0,
+                normalizedParentId,
                 pid,
               )
             }
+            if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
             if (qty > 0) {
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, 'add', qty, ep.purchase_price_usd, ep.purchase_price_khr,
@@ -964,9 +1031,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               UPDATE products SET
                 category=?, unit=?, brand=?, description=?, supplier=?,
                 selling_price_usd=?, selling_price_khr=?,
+                special_price_usd=?, special_price_khr=?,
                 purchase_price_usd=?, purchase_price_khr=?,
                 cost_price_usd=?, cost_price_khr=?,
-                low_stock_threshold=?,
+                low_stock_threshold=?, is_group=?, parent_id=?,
                 updated_at=datetime('now') WHERE id=?
             `).run(
               resolvedCategory,
@@ -974,15 +1042,20 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               resolvedBrand,
               resolvedDescription,
               resolvedSupplier,
-              resolvedSellUsd || 0,
-              resolvedSellKhr || 0,
-              resolvedBuyUsd || 0,
-              resolvedBuyKhr || 0,
-              resolvedBuyUsd || 0,
-              resolvedBuyKhr || 0,
+              normalizePriceValue(resolvedSellUsd || 0),
+              normalizePriceValue(resolvedSellKhr || 0),
+              normalizePriceValue(resolvedSpecialUsd ?? resolvedSellUsd ?? 0),
+              normalizePriceValue(resolvedSpecialKhr ?? resolvedSellKhr ?? 0),
+              normalizePriceValue(resolvedBuyUsd || 0),
+              normalizePriceValue(resolvedBuyKhr || 0),
+              normalizePriceValue(resolvedBuyUsd || 0),
+              normalizePriceValue(resolvedBuyKhr || 0),
               resolvedThreshold || 0,
+              normalizedIsGroup ? 1 : 0,
+              normalizedParentId,
               pid,
             )
+            if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
             if (JSON.stringify(nextGallery) !== JSON.stringify(currentGallery)) {
               syncProductImageGallery(pid, nextGallery)
             }

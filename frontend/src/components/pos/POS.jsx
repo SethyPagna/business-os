@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { ImageOff, Info, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ImageOff, Info, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Receipt from '../receipt/Receipt'
 import {
@@ -40,6 +40,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { normalizePriceValue } from '../../utils/pricing.js'
 
 // ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -220,6 +221,7 @@ export default function POS() {
   const [membershipLoading, setMembershipLoading] = useState(false)
   const [membershipError,  setMembershipError]  = useState('')
   const [imageLightbox, setImageLightbox] = useState(null)
+  const [expandedGroupIds, setExpandedGroupIds] = useState(() => new Set())
 
   // Completed receipts shown as overlay modals (queue so multiple can stack)
   const [receiptQueue, setReceiptQueue] = useState([])
@@ -605,6 +607,75 @@ export default function POS() {
     })
   })()
 
+  const productsById = useMemo(
+    () => new Map(products.map((product) => [Number(product.id), product])),
+    [products],
+  )
+
+  const variantChildrenByParentId = useMemo(() => {
+    const map = new Map()
+    products.forEach((product) => {
+      const parentId = Number(product?.parent_id || 0)
+      if (!parentId) return
+      if (!map.has(parentId)) map.set(parentId, [])
+      map.get(parentId).push(product)
+    })
+    map.forEach((items) => items.sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })))
+    return map
+  }, [products])
+
+  const visibleProductCards = useMemo(() => {
+    const cards = []
+    const seen = new Set()
+    filteredProducts.forEach((product) => {
+      const root = product?.parent_id ? productsById.get(Number(product.parent_id)) || product : product
+      const rootId = Number(root?.id || product?.id)
+      if (!Number.isFinite(rootId) || seen.has(rootId)) return
+      seen.add(rootId)
+      cards.push(root)
+    })
+    return cards
+  }, [filteredProducts, productsById])
+
+  const getVariantChoices = useCallback((product) => {
+    const rootId = Number(product?.id || 0)
+    return variantChildrenByParentId.get(rootId) || []
+  }, [variantChildrenByParentId])
+
+  const hasVariantChoices = useCallback((product) => getVariantChoices(product).length > 0, [getVariantChoices])
+
+  const toggleExpandedGroup = useCallback((productId) => {
+    const numericId = Number(productId)
+    if (!Number.isFinite(numericId)) return
+    setExpandedGroupIds((current) => {
+      const next = new Set(current)
+      if (next.has(numericId)) next.delete(numericId)
+      else next.add(numericId)
+      return next
+    })
+  }, [])
+
+  const getPriceModeValues = useCallback((product, priceMode = 'selling') => {
+    const useSpecial = priceMode === 'special' && ((product?.special_price_usd || 0) > 0 || (product?.special_price_khr || 0) > 0)
+    if (useSpecial) {
+      return {
+        applied_price_usd: product.special_price_usd || product.selling_price_usd || 0,
+        applied_price_khr: product.special_price_khr || product.selling_price_khr || CURRENCY.usdToKhr(product.special_price_usd || product.selling_price_usd || 0, exchangeRate),
+        price_mode: 'special',
+      }
+    }
+    return {
+      applied_price_usd: product?.selling_price_usd || 0,
+      applied_price_khr: product?.selling_price_khr || 0,
+      price_mode: 'selling',
+    }
+  }, [exchangeRate])
+
+  const getCartLineId = useCallback((item) => (
+    item?.cart_line_id
+    || `${Number(item?.id || 0)}:${item?.price_mode || 'selling'}:${Number(item?.branch_id || 0)}`
+  ), [])
+
   const getBranchStockQty = useCallback((product, branchId) => {
     const id = parseInt(branchId, 10)
     if (!product || !Number.isFinite(id)) return 0
@@ -689,24 +760,34 @@ export default function POS() {
   }, [getProductGallery])
 
   // ?�?� Cart mutations ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
-  const addToCart = (product) => {
-    const existing = active.cart.find(i => i.id === product.id)
+  const addToCart = (product, priceMode = 'selling') => {
+    const assignedBranchId = branchFilter !== 'all'
+      ? parseInt(branchFilter, 10)
+      : pickBestBranchId(product)
+    const priceValues = getPriceModeValues(product, priceMode)
+    const existing = active.cart.find((item) => (
+      Number(item.id) === Number(product.id)
+      && String(item.price_mode || 'selling') === String(priceValues.price_mode)
+      && Number(item.branch_id || 0) === Number(assignedBranchId || 0)
+    ))
     let newCart
     if (existing) {
       const stock = getDisplayStock(product, existing)
       if (existing.quantity >= stock) { notify(t('not_enough_stock'), 'error'); return }
-      newCart = active.cart.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)
+      const existingLineId = getCartLineId(existing)
+      newCart = active.cart.map((item) => (
+        getCartLineId(item) === existingLineId
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ))
     } else {
-      const assignedBranchId = branchFilter !== 'all'
-        ? parseInt(branchFilter, 10)
-        : pickBestBranchId(product)
       const stock = getDisplayStock(product, { branch_id: assignedBranchId })
       if (stock <= 0) { notify(t('not_enough_stock'), 'error'); return }
       newCart = [...active.cart, {
         ...product,
-        quantity:          1,
-        applied_price_usd: product.selling_price_usd || 0,
-        applied_price_khr: product.selling_price_khr || 0,
+        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+        quantity: 1,
+        ...priceValues,
         branch_id: assignedBranchId || null,
       }]
     }
@@ -715,30 +796,42 @@ export default function POS() {
     searchRef.current?.focus()
   }
 
-  const updateQty = (id, qty) => {
-    if (qty <= 0) { patchActive({ cart: active.cart.filter(i => i.id !== id) }); return }
-    const product = products.find(p => p.id === id)
-    const cartItem = active.cart.find((item) => item.id === id)
+  const updateQty = (cartLineId, qty) => {
+    if (qty <= 0) { patchActive({ cart: active.cart.filter((item) => getCartLineId(item) !== cartLineId) }); return }
+    const cartItem = active.cart.find((item) => getCartLineId(item) === cartLineId)
+    const product = products.find((entry) => Number(entry.id) === Number(cartItem?.id))
     if (qty > getDisplayStock(product, cartItem)) { notify(t('not_enough_stock'), 'error'); return }
-    patchActive({ cart: active.cart.map(i => i.id === id ? { ...i, quantity: qty } : i) })
+    patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
 
-  const updatePrice = (id, field, rawValue) => {
-    const num = parseFloat(rawValue) || 0
+  const updatePrice = (cartLineId, field, rawValue) => {
+    const num = normalizePriceValue(rawValue, 0)
     patchActive({
-      cart: active.cart.map(i => {
-        if (i.id !== id) return i
-        if (field === 'usd') return { ...i, applied_price_usd: num, applied_price_khr: CURRENCY.usdToKhr(num, exchangeRate) }
-        if (field === 'khr') return { ...i, applied_price_khr: num, applied_price_usd: CURRENCY.khrToUsd(num, exchangeRate) }
-        return i
-      })
+      cart: active.cart.map((item) => {
+        if (getCartLineId(item) !== cartLineId) return item
+        if (field === 'usd') {
+          return {
+            ...item,
+            applied_price_usd: num,
+            applied_price_khr: normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0),
+          }
+        }
+        if (field === 'khr') {
+          return {
+            ...item,
+            applied_price_khr: num,
+            applied_price_usd: normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0),
+          }
+        }
+        return item
+      }),
     })
   }
 
-  const updateItemBranch = (id, branchId) => {
+  const updateItemBranch = (cartLineId, branchId) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
-    const item = active.cart.find((entry) => entry.id === id)
-    const product = products.find((entry) => entry.id === id)
+    const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
+    const product = products.find((entry) => Number(entry.id) === Number(item?.id))
     if (!item || !product) return
 
     const available = getDisplayStock(product, { ...item, branch_id: nextBranchId })
@@ -748,7 +841,7 @@ export default function POS() {
       return
     }
 
-    patchActive({ cart: active.cart.map(i => i.id === id ? { ...i, branch_id: nextBranchId } : i) })
+    patchActive({ cart: active.cart.map((entry) => getCartLineId(entry) === cartLineId ? { ...entry, branch_id: nextBranchId } : entry) })
   }
 
   // ?�?� Totals (derived from active order) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -1022,35 +1115,98 @@ export default function POS() {
           {/* Product grid */}
           <div className={`flex-1 overflow-y-auto overflow-x-hidden p-3 ${filterOpen ? 'pt-[20.5rem] sm:pt-[18rem]' : ''}`}>
             <div className="pos-product-grid">
-              {filteredProducts.map(p => {
+              {visibleProductCards.map(p => {
+                const variants = getVariantChoices(p)
+                const groupProduct = hasVariantChoices(p)
                 const stock   = getDisplayStock(p)
-                const inStock = stock > (p.out_of_stock_threshold || 0)
+                const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
+                const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
+                const groupExpanded = expandedGroupIds.has(Number(p.id))
                 return (
-                  <button key={p.id} onClick={() => inStock && addToCart(p)} disabled={!inStock}
-                    className={`card p-3 text-left transition-all active:scale-95 relative ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+                  <div key={p.id} className={`card relative p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}>
                     <button className="absolute top-1.5 right-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-500 shadow-sm hover:text-blue-600 dark:bg-gray-900/70" onClick={e => { e.stopPropagation(); setDetailProduct(p) }} title="Details">
                       <Info className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
                       className="w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openImageLightbox(p, 0)
-                      }}
+                      onClick={() => openImageLightbox(p, 0)}
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
                     </button>
-                    <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.name}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.name}</p>
+                      {groupProduct ? (
+                        <button
+                          type="button"
+                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                          onClick={() => toggleExpandedGroup(p.id)}
+                        >
+                          {groupExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          {variants.length}
+                        </button>
+                      ) : null}
+                    </div>
                     <p className="text-sm font-bold text-blue-600">{fmtUSD(p.selling_price_usd)}</p>
                     {p.selling_price_khr > 0 && <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p>}
-                    <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>{stock} {p.unit}</p>
-                    {!inStock && <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span>}
-                  </button>
+                    {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                      <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                    ) : null}
+                    <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>
+                      {groupProduct ? `${variants.length} ${posCopy('variants', 'variants')}` : `${stock} ${p.unit}`}
+                    </p>
+                    {!inStock ? <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span> : null}
+                    {groupProduct ? (
+                      <div className="mt-2 space-y-2">
+                        <button
+                          type="button"
+                          className="btn-secondary w-full text-xs"
+                          onClick={() => toggleExpandedGroup(p.id)}
+                        >
+                          {groupExpanded ? posCopy('Hide variants', 'Hide variants') : posCopy('Choose variant', 'Choose variant')}
+                        </button>
+                        {groupExpanded ? (
+                          <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
+                            {variants.map((variant) => {
+                              const variantStock = getDisplayStock(variant)
+                              const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
+                              return (
+                                <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
+                                  <div className="truncate text-xs font-semibold text-gray-900 dark:text-white">{variant.name}</div>
+                                  <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{variantStock} {variant.unit}</div>
+                                  <div className="mt-1 flex flex-wrap gap-1.5">
+                                    <button type="button" className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => addToCart(variant, 'selling')}>
+                                      {fmtUSD(variant.selling_price_usd || 0)}
+                                    </button>
+                                    {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
+                                      <button type="button" className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => addToCart(variant, 'special')}>
+                                        {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <button type="button" className="btn-primary flex-1 text-xs" onClick={() => inStock && addToCart(p, 'selling')} disabled={!inStock}>
+                          + {t('add_to_cart')}
+                        </button>
+                        {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                          <button type="button" className="btn-secondary flex-1 text-xs" onClick={() => inStock && addToCart(p, 'special')} disabled={!inStock}>
+                            {posCopy('Special', 'Special')}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
-              {filteredProducts.length === 0 && <div className="col-span-full text-center py-12 text-gray-400">{t('no_data')}</div>}
+              {visibleProductCards.length === 0 && <div className="col-span-full text-center py-12 text-gray-400">{t('no_data')}</div>}
             </div>
           </div>
         </div>
@@ -1098,10 +1254,10 @@ export default function POS() {
                     <button onClick={() => patchActive({ cart: [] })} className="text-xs text-red-500 hover:underline">{t('clear_cart')}</button>
                   </div>
                   {active.cart.map(item => (
-                    <CartItem key={item.id} item={item} branches={branches} t={t}
+                    <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t}
                       onQtyChange={updateQty} onPriceChange={updatePrice}
                       onBranchChange={updateItemBranch}
-                      onRemove={id => patchActive({ cart: active.cart.filter(i => i.id !== id) })}
+                      onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
                       onShowDetails={() => { const p = products.find(pr => pr.id === item.id); if (p) setDetailProduct(p) }}
                       fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
                     />
@@ -1438,7 +1594,10 @@ export default function POS() {
 
       {/* ?�?� Product detail bottom-sheet ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
       {detailProduct && (() => {
-        const p = detailProduct; const stock = getDisplayStock(p)
+        const p = detailProduct
+        const stock = getDisplayStock(p)
+        const variants = getVariantChoices(p)
+        const groupProduct = hasVariantChoices(p)
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailProduct(null)}>
             <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1469,12 +1628,55 @@ export default function POS() {
                   <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{val}</span></div>
                 ) : null)}
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_selling_price')||'Price'}</span><div><span className="font-bold text-blue-600">{fmtUSD(p.selling_price_usd)}</span>{p.selling_price_khr > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.selling_price_khr)}</span>}</div></div>
+                {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
+                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</span>{(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</span>}</div></div>
+                ) : null}
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
+                {groupProduct ? (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{posCopy('Variants', 'Variants')}</div>
+                    <div className="space-y-2">
+                      {variants.map((variant) => {
+                        const variantStock = getDisplayStock(variant)
+                        const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
+                        return (
+                          <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
+                            <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
+                            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{variantStock} {variant.unit}</div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <button className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'selling'); setDetailProduct(null) }}>
+                                {fmtUSD(variant.selling_price_usd || 0)}
+                              </button>
+                              {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
+                                <button className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'special'); setDetailProduct(null) }}>
+                                  {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                <button className="btn-primary w-full" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p); setDetailProduct(null) }}>
-                  {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `+ ${t('add_to_cart')}`}
-                </button>
+                {groupProduct ? (
+                  <button className="btn-secondary w-full" onClick={() => { toggleExpandedGroup(p.id); setDetailProduct(null) }}>
+                    {posCopy('Choose variant', 'Choose variant')}
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button className="btn-primary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
+                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `+ ${t('add_to_cart')}`}
+                    </button>
+                    {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
+                      <button className="btn-secondary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
+                        {posCopy('Special', 'Special')}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </div>
           </div>

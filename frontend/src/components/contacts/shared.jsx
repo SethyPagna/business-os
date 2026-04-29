@@ -264,7 +264,7 @@ const CONTACT_IMPORT_CONFIG = {
     label: 'Customers',
     importer: () => window.api.bulkImportCustomers,
     loader: () => window.api.getCustomers,
-    fields: ['name', 'membership_number', 'phone', 'email', 'address', 'company', 'notes'],
+    fields: ['name', 'membership_number', 'contact_options', 'phone', 'email', 'address', 'company', 'notes'],
     match(existingRows, incoming) {
       const incomingMembership = String(incoming.membership_number || '').trim().toLowerCase()
       const incomingPhone = String(incoming.phone || '').trim()
@@ -280,7 +280,7 @@ const CONTACT_IMPORT_CONFIG = {
     label: 'Suppliers',
     importer: () => window.api.bulkImportSuppliers,
     loader: () => window.api.getSuppliers,
-    fields: ['name', 'phone', 'email', 'address', 'company', 'contact_person', 'notes'],
+    fields: ['name', 'contact_options', 'phone', 'email', 'address', 'company', 'contact_person', 'notes'],
     match(existingRows, incoming) {
       const incomingName = String(incoming.name || '').trim().toLowerCase()
       const incomingPhone = String(incoming.phone || '').trim()
@@ -294,7 +294,7 @@ const CONTACT_IMPORT_CONFIG = {
     label: 'Delivery',
     importer: () => window.api.bulkImportDeliveryContacts,
     loader: () => window.api.getDeliveryContacts,
-    fields: ['name', 'phone', 'area', 'address', 'notes'],
+    fields: ['name', 'contact_options', 'phone', 'area', 'address', 'notes'],
     match(existingRows, incoming) {
       const incomingName = String(incoming.name || '').trim().toLowerCase()
       const incomingPhone = String(incoming.phone || '').trim()
@@ -506,7 +506,7 @@ export function ImportModal({ type, onClose, onDone }) {
             {fieldList.filter((field) => field !== 'name').slice(0, 6).map((field) => (
               <div key={field}>
                 <label htmlFor={`contacts-field-rule-${field}`} className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {field.replaceAll('_', ' ')}
+                  {field === 'contact_options' ? 'contact options' : field.replaceAll('_', ' ')}
                 </label>
                 <select
                   id={`contacts-field-rule-${field}`}

@@ -5,6 +5,7 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
+import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -26,6 +27,11 @@ function normalizeGallery(product) {
     if (list.length >= 5) break
   }
   return list
+}
+
+function editablePrice(value, fallback = 0) {
+  if (value === '' || value === null || typeof value === 'undefined') return formatPriceNumber(fallback)
+  return formatPriceNumber(value)
 }
 
 function pickImageFiles(maxCount = 1, options = {}) {
@@ -53,6 +59,7 @@ export default function ProductForm({
   units,
   branches,
   brandOptions = [],
+  groupCandidates = [],
   onSave,
   onClose,
   t,
@@ -64,6 +71,7 @@ export default function ProductForm({
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id?.toString()
     || branches[0]?.id?.toString()
     || ''
+  const currentProductId = Number(product?.id || 0)
 
   const initialForm = useMemo(() => {
     if (product) {
@@ -80,6 +88,8 @@ export default function ProductForm({
       purchase_price_khr: 0,
       selling_price_usd: 0,
       selling_price_khr: 0,
+      special_price_usd: 0,
+      special_price_khr: 0,
       cost_price_usd: 0,
       cost_price_khr: 0,
       stock_quantity: 0,
@@ -90,8 +100,17 @@ export default function ProductForm({
       image_path: '',
       image_gallery: [],
       branch_id: defaultBranchId,
+      is_group: 0,
+      parent_id: null,
     }
   }, [product, units, defaultBranchId])
+
+  const availableGroupParents = useMemo(() => (
+    (Array.isArray(groupCandidates) ? groupCandidates : [])
+      .filter((candidate) => Number(candidate?.id || 0) !== currentProductId)
+      .filter((candidate) => !Number(candidate?.parent_id || 0))
+      .sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' }))
+  ), [currentProductId, groupCandidates])
 
   const [form, setForm] = useState(initialForm)
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm))
@@ -112,7 +131,18 @@ export default function ProductForm({
   }
 
   useEffect(() => {
-    setForm(initialForm)
+    setForm({
+      ...initialForm,
+      purchase_price_usd: editablePrice(initialForm.purchase_price_usd),
+      purchase_price_khr: editablePrice(initialForm.purchase_price_khr),
+      selling_price_usd: editablePrice(initialForm.selling_price_usd),
+      selling_price_khr: editablePrice(initialForm.selling_price_khr),
+      special_price_usd: editablePrice(initialForm.special_price_usd ?? initialForm.selling_price_usd),
+      special_price_khr: editablePrice(initialForm.special_price_khr ?? initialForm.selling_price_khr),
+      cost_price_usd: editablePrice(initialForm.cost_price_usd),
+      cost_price_khr: editablePrice(initialForm.cost_price_khr),
+      parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
+    })
     setImageList(normalizeGallery(initialForm))
   }, [initialForm])
 
@@ -214,17 +244,21 @@ export default function ProductForm({
     }
     const payload = {
       ...form,
-      purchase_price_usd: parseNumericInput(form.purchase_price_usd),
-      purchase_price_khr: parseNumericInput(form.purchase_price_khr),
-      selling_price_usd: parseNumericInput(form.selling_price_usd),
-      selling_price_khr: parseNumericInput(form.selling_price_khr),
-      cost_price_usd: parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd),
-      cost_price_khr: parseNumericInput(form.cost_price_khr ?? form.purchase_price_khr),
+      purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
+      purchase_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
+      selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
+      selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
+      special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
+      special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+      cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd)),
+      cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr ?? form.purchase_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       image_gallery: imageList.slice(0, 5),
       image_path: imageList[0] || '',
+      is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
+      parent_id: form.parent_id ? Number(form.parent_id) : null,
     }
     setSaving(true)
     try {
@@ -400,6 +434,34 @@ export default function ProductForm({
                 ))}
               </select>
             </div>
+            <div>
+              <label htmlFor="product-parent-group" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('group_parent', 'Group Parent', 'ក្រុមមេ')}
+              </label>
+              <select
+                id="product-parent-group"
+                name="product_parent_group"
+                className="input"
+                value={form.parent_id || ''}
+                onChange={(event) => {
+                  const nextParentId = event.target.value ? Number(event.target.value) : null
+                  setField('parent_id', nextParentId)
+                  if (nextParentId) setField('is_group', 0)
+                }}
+              >
+                <option value="">{tr('group_parent_none', 'No group parent (standalone or root item)', 'គ្មានក្រុមមេ (ឯករាជ្យ ឬ ជាឫសក្រុម)')}</option>
+                {availableGroupParents.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {form.parent_id
+                  ? tr('group_parent_child_hint', 'This product will stay as a child variant inside the selected group.', 'ផលិតផលនេះនឹងនៅជាវ៉ារ្យ៉ង់កូននៅក្នុងក្រុមដែលបានជ្រើស។')
+                  : tr('group_parent_none_hint', 'Leave blank to keep this product standalone or make it the root of a group.', 'ទុកឲ្យទទេ ដើម្បីរក្សាផលិតផលនេះឯករាជ្យ ឬជាឫសរបស់ក្រុម។')}
+              </p>
+            </div>
             <div className="relative">
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
               <input
@@ -437,6 +499,23 @@ export default function ProductForm({
               <label htmlFor="product-description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('description')}</label>
               <textarea id="product-description" name="product_description" className="input resize-none" rows={2} value={form.description || ''} onChange={(event) => setField('description', event.target.value)} />
             </div>
+            <div className="col-span-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded"
+                  checked={Number(form.is_group) === 1}
+                  onChange={(event) => setField('is_group', event.target.checked ? 1 : 0)}
+                  disabled={!!form.parent_id}
+                />
+                {tr('product_group_parent', 'Treat this item as a group parent', 'កំណត់ផលិតផលនេះជា​ក្រុមមេ')}
+              </label>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {form.parent_id
+                  ? tr('variant_child_hint', 'This product is already a variant inside another group.', 'ផលិតផលនេះជា variant នៅក្នុងក្រុមមួយរួចហើយ។')
+                  : tr('group_parent_hint', 'Group parents help you organize related variants with different costs, suppliers, or prices.', 'ក្រុមមេជួយរៀបចំ variant ដែលមានថ្លៃដើម អ្នកផ្គត់ផ្គង់ ឬតម្លៃលក់ខុសគ្នា។')}
+              </p>
+            </div>
           </div>
         </div>
       ) : null}
@@ -453,14 +532,14 @@ export default function ProductForm({
               labelKhr={t('cost_in_khr_label')}
               valueUsd={form.purchase_price_usd}
               valueKhr={form.purchase_price_khr}
-              onUsdChange={(value) => {
-                setField('purchase_price_usd', value)
-                setField('cost_price_usd', value)
-                if (!String(form.purchase_price_khr ?? '').trim()) {
-                  const converted = parseNumericInput(value) * exchangeRate
-                  setField('purchase_price_khr', value === '' ? '' : String(converted))
-                }
-              }}
+                onUsdChange={(value) => {
+                  setField('purchase_price_usd', value)
+                  setField('cost_price_usd', value)
+                  if (!String(form.purchase_price_khr ?? '').trim()) {
+                    const converted = parseNumericInput(value) * exchangeRate
+                    setField('purchase_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                  }
+                }}
               onKhrChange={(value) => {
                 setField('purchase_price_khr', value)
                 setField('cost_price_khr', value)
@@ -482,14 +561,39 @@ export default function ProductForm({
               labelKhr={tr('selling_price_khr_full', 'Selling Price (KHR)', 'តម្លៃលក់ (KHR)')}
               valueUsd={form.selling_price_usd}
               valueKhr={form.selling_price_khr}
-              onUsdChange={(value) => {
-                setField('selling_price_usd', value)
-                if (!String(form.selling_price_khr ?? '').trim()) {
-                  const converted = parseNumericInput(value) * exchangeRate
-                  setField('selling_price_khr', value === '' ? '' : String(converted))
-                }
-              }}
+                onUsdChange={(value) => {
+                  setField('selling_price_usd', value)
+                  if (!String(form.selling_price_khr ?? '').trim()) {
+                    const converted = parseNumericInput(value) * exchangeRate
+                    setField('selling_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                  }
+                }}
               onKhrChange={(value) => setField('selling_price_khr', value)}
+              usdSymbol={usdSymbol}
+              khrSymbol={khrSymbol}
+              exchangeRate={exchangeRate}
+              t={t}
+            />
+          </div>
+
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/10">
+            <div className="mb-3">
+              <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
+              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Optional alternate selling price for promotions, VIP pricing, or quick POS selection.', 'តម្លៃលក់ជម្រើស សម្រាប់ប្រូម៉ូសិន VIP ឬជ្រើសរហ័សនៅ POS។')}</p>
+            </div>
+            <DualPriceInput
+              labelUsd={tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
+              labelKhr={tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
+              valueUsd={form.special_price_usd}
+              valueKhr={form.special_price_khr}
+                onUsdChange={(value) => {
+                  setField('special_price_usd', value)
+                  if (!String(form.special_price_khr ?? '').trim()) {
+                    const converted = normalizePriceValue(parseNumericInput(value) * exchangeRate)
+                    setField('special_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                  }
+                }}
+              onKhrChange={(value) => setField('special_price_khr', value)}
               usdSymbol={usdSymbol}
               khrSymbol={khrSymbol}
               exchangeRate={exchangeRate}

@@ -9,6 +9,7 @@ import { cacheClearAll, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './api/clientRuntime.js'
 import { isWSConnected } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
+import { normalizePriceValue } from './utils/pricing.js'
 
 /**
  * Global application context.
@@ -1223,10 +1224,10 @@ export function AppProvider({ children }) {
   const displayTimezone = settings.display_timezone || deviceTimezone
 
   const fmtUSD = useCallback((n) => {
-    return `${usdSymbol}${Number(n||0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
+    return `${usdSymbol}${normalizePriceValue(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
   }, [usdSymbol])
   const fmtKHR = useCallback((n) => {
-    return `${Number(n||0).toLocaleString('en-US', { maximumFractionDigits:0 })}${khrSymbol}`
+    return `${normalizePriceValue(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}${khrSymbol}`
   }, [khrSymbol])
   const formatPrice = useCallback((usd, khr) => {
     const u = usd || 0
@@ -1323,8 +1324,8 @@ const FALLBACK_APP_CONTEXT = {
   canAccessPage: () => true,
   getPermissions: () => [],
   formatPrice: (value) => String(value ?? ''),
-  fmtUSD: (value) => `$${Number(value || 0).toFixed(2)}`,
-  fmtKHR: (value) => `${Number(value || 0).toLocaleString()} KHR`,
+  fmtUSD: (value) => `$${normalizePriceValue(value || 0).toFixed(2)}`,
+  fmtKHR: (value) => `${normalizePriceValue(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KHR`,
   usdSymbol: '$',
   khrSymbol: 'KHR',
   displayCurrency: 'usd',

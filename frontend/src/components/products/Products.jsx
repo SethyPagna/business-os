@@ -5,6 +5,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import { ChevronDown, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
+import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
@@ -547,12 +548,16 @@ export default function Products() {
   const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
     const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
     const toImageUrl = (value) => String(value || '').trim()
+    const priceCsv = (value) => formatPriceNumber(value || 0)
     const rows = rowsToExport.map((p) => ({
       Name: p.name || '', SKU: p.sku || '', Barcode: p.barcode || '',
       Category: p.category || '', Brand: p.brand || '', Unit: p.unit || '', Description: p.description || '',
       Created_At: p.created_at || '',
-      Selling_Price_USD: p.selling_price_usd || 0, Selling_Price_KHR: p.selling_price_khr || 0,
-      Purchase_Price_USD: p.purchase_price_usd || 0, Purchase_Price_KHR: p.purchase_price_khr || 0, Stock_Quantity: p.stock_quantity || 0,
+      Selling_Price_USD: priceCsv(p.selling_price_usd), Selling_Price_KHR: priceCsv(p.selling_price_khr),
+      Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0), Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
+      Purchase_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0), Purchase_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
+      Cost_Price_USD: priceCsv(p.cost_price_usd || p.purchase_price_usd || 0), Cost_Price_KHR: priceCsv(p.cost_price_khr || p.purchase_price_khr || 0),
+      Stock_Quantity: p.stock_quantity || 0,
       Low_Stock_Threshold: p.low_stock_threshold || 0, Supplier: p.supplier || '',
       Image_Filename_1: toImageName((p.image_gallery || [])[0] || p.image_path || ''),
       Image_Filename_2: toImageName((p.image_gallery || [])[1] || ''),
@@ -1001,24 +1006,36 @@ export default function Products() {
             </div>
           )}
 
-          {bulkEditMode === 'pricing' && (
-            <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
-                  <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-                <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
-                  <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+            {bulkEditMode === 'pricing' && (
+              <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
+                <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">Special Price (USD)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">Special Price (KHR)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                  <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (KHR)</label>
+                    <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
+                <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
+                  const updates = {}
+                  if (bulkEditForm.selling_price_usd !== '' && bulkEditForm.selling_price_usd !== undefined) updates.selling_price_usd = normalizePriceValue(bulkEditForm.selling_price_usd)
+                  if (bulkEditForm.selling_price_khr !== '' && bulkEditForm.selling_price_khr !== undefined) updates.selling_price_khr = normalizePriceValue(bulkEditForm.selling_price_khr)
+                  if (bulkEditForm.special_price_usd !== '' && bulkEditForm.special_price_usd !== undefined) updates.special_price_usd = normalizePriceValue(bulkEditForm.special_price_usd)
+                  if (bulkEditForm.special_price_khr !== '' && bulkEditForm.special_price_khr !== undefined) updates.special_price_khr = normalizePriceValue(bulkEditForm.special_price_khr)
+                  if (bulkEditForm.purchase_price_usd !== '' && bulkEditForm.purchase_price_usd !== undefined) updates.purchase_price_usd = normalizePriceValue(bulkEditForm.purchase_price_usd)
+                  if (bulkEditForm.purchase_price_khr !== '' && bulkEditForm.purchase_price_khr !== undefined) updates.purchase_price_khr = normalizePriceValue(bulkEditForm.purchase_price_khr)
+                  await runBulkProductUpdates(updates)
+                }}>Apply to {selectedVisibleCount} products</button>
               </div>
-              <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
-              <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
-                const updates = {}
-                if (bulkEditForm.selling_price_usd !== '' && bulkEditForm.selling_price_usd !== undefined) updates.selling_price_usd = parseFloat(bulkEditForm.selling_price_usd)
-                if (bulkEditForm.purchase_price_usd !== '' && bulkEditForm.purchase_price_usd !== undefined) updates.purchase_price_usd = parseFloat(bulkEditForm.purchase_price_usd)
-                await runBulkProductUpdates(updates)
-              }}>Apply to {selectedVisibleCount} products</button>
-            </div>
-          )}
+            )}
 
           {bulkEditMode === 'stock' && (
             <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
@@ -1181,6 +1198,12 @@ export default function Products() {
                     <td className="px-3 py-2 text-right col-highlight-green">
                       <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(p.selling_price_usd)}</div>
                       {p.selling_price_khr>0 && <div className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</div>}
+                      {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                        <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+                          Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                          {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 text-right hidden lg:table-cell">
                       {purchaseUsd>0 && p.selling_price_usd>0
@@ -1322,6 +1345,12 @@ export default function Products() {
                   <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
                   <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
+                  {(p.special_price_usd || 0) > 0 ? (
+                    <>
+                      <span className="text-gray-300 dark:text-gray-600">|</span>
+                      <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(p.special_price_usd || 0)}</span>
+                    </>
+                  ) : null}
                   <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
                 </div>
@@ -1417,7 +1446,7 @@ export default function Products() {
           t={t}
         />
       )}
-      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null)}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
+      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null)}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
       {variantModal && (
         <VariantFormModal
           parent={variantModal}

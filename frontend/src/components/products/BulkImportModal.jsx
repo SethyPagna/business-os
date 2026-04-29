@@ -224,6 +224,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           (!row.supplier || String(row.supplier).trim() === String(existing.supplier || ''))
         )
         const sellingOk = !row.selling_price_usd || Math.abs(parseFloat(row.selling_price_usd || 0) - (existing.selling_price_usd || 0)) < 0.001
+        const specialOk = !row.special_price_usd || Math.abs(parseFloat(row.special_price_usd || 0) - (existing.special_price_usd || 0)) < 0.001
         const purchaseOk = !row.purchase_price_usd || Math.abs(parseFloat(row.purchase_price_usd || 0) - (existing.purchase_price_usd || 0)) < 0.001
         const existingImages = getExistingImageFilenames(existing)
         const sameImages = !incomingImages.length || (
@@ -236,7 +237,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           index,
           existing,
           sameBasic,
-          samePricing: sellingOk && purchaseOk,
+          samePricing: sellingOk && specialOk && purchaseOk,
           sameImages,
           incomingImages,
           existingImages,
@@ -360,7 +361,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
             <p className="mb-1 font-semibold">{T('csv_columns_header', 'Columns')}</p>
             <p className="font-mono text-xs leading-relaxed">
-              {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, purchase_price_usd, purchase_price_khr, stock_quantity, low_stock_threshold, supplier, branch, image_filename_1..5, image_filenames, image_conflict_mode')}
+              {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, purchase_price_usd, purchase_price_khr, stock_quantity, low_stock_threshold, supplier, branch, parent_id, is_group, image_filename_1..5, image_filenames, image_conflict_mode')}
             </p>
           </div>
           <div className="flex gap-3">
@@ -452,9 +453,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     ['description', 'Description'],
                     ['selling_price_usd', 'Sell USD'],
                     ['selling_price_khr', 'Sell KHR'],
+                    ['special_price_usd', 'Special USD'],
+                    ['special_price_khr', 'Special KHR'],
                     ['purchase_price_usd', 'Buy USD'],
                     ['purchase_price_khr', 'Buy KHR'],
                     ['low_stock_threshold', 'Threshold'],
+                    ['parent_id', 'Parent ID'],
+                    ['is_group', 'Is Group'],
                   ].map(([field, label]) => (
                     <div key={field}>
                       <label htmlFor={`products-field-rule-${field}`} className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</label>
