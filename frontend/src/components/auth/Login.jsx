@@ -100,6 +100,8 @@ export default function Login() {
   const oauthCallbackRequestRef = useRef(0)
   const passwordResetActionRef = useRef(false)
   const oauthStartInFlightRef = useRef(false)
+  const loginSubmitInFlightRef = useRef(false)
+  const otpVerifyInFlightRef = useRef(false)
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -355,42 +357,54 @@ export default function Login() {
 
   const handleLogin = async (event) => {
     event.preventDefault()
+    if (loginSubmitInFlightRef.current) return
     const resolvedOrganization = String(organizationId || organizationSearch || '').trim()
     if (!resolvedOrganization) {
       setError(tr('enter_organization_first', 'Please choose your organization first.'))
       return
     }
     setError('')
+    loginSubmitInFlightRef.current = true
     setLoading(true)
-    const result = await login(username, password, sessionDuration, resolvedOrganization)
-    if (result?.otpRequired) {
-      setOtpRequired(true)
-      setPendingUserId(result.userId)
+    try {
+      const result = await withLoaderTimeout(
+        () => Promise.resolve(login(username, password, sessionDuration, resolvedOrganization)),
+        'Login',
+      )
+      if (result?.otpRequired) {
+        setOtpRequired(true)
+        setPendingUserId(result.userId)
+        return
+      }
+      if (!result?.success) setError(result?.error || 'Login failed')
+    } catch (loginError) {
+      setError(loginError?.message || tr('login_failed_try_again', 'Login failed. Please try again.'))
+    } finally {
+      loginSubmitInFlightRef.current = false
       setLoading(false)
-      return
     }
-    if (!result.success) setError(result.error || 'Login failed')
-    setLoading(false)
   }
 
   const handleOtp = async (event) => {
     event.preventDefault()
+    if (otpVerifyInFlightRef.current) return
     if (!otp.trim()) {
       setError(tr('enter_6_digit_code', 'Please enter the 6-digit code'))
       return
     }
     setError('')
+    otpVerifyInFlightRef.current = true
     setLoading(true)
     try {
       const device = getClientDeviceInfo()
-      const verifyResult = await window.api.otpVerify({
+      const verifyResult = await withLoaderTimeout(() => window.api.otpVerify({
         userId: pendingUserId,
         token: otp.trim(),
         sessionDuration,
         clientTime: new Date().toISOString(),
         deviceTz: device.deviceTz,
         deviceName: device.deviceName,
-      })
+      }), 'OTP verification')
 
       if (verifyResult?.success && verifyResult?.user) {
         await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.authToken || '', verifyResult.sessionExpiresAt || '')
@@ -399,8 +413,10 @@ export default function Login() {
       }
     } catch (otpError) {
       setError(otpError?.message || tr('otp_verification_failed', 'OTP verification failed'))
+    } finally {
+      otpVerifyInFlightRef.current = false
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleOtpInput = (value) => {
