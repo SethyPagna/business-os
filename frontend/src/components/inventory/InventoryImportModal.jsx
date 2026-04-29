@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { normalizeCsvKey, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function normalizeAction(value) {
   const raw = normalizeCsvKey(value)
@@ -16,6 +22,9 @@ export default function InventoryImportModal({ onClose, onDone }) {
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const importRequestRef = useRef(0)
+  const importInFlightRef = useRef(false)
+  const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -24,6 +33,11 @@ export default function InventoryImportModal({ onClose, onDone }) {
   }
 
   const previewRows = useMemo(() => parseCsvRows(csvText), [csvText])
+
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(importRequestRef)
+  }, [])
 
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
@@ -38,18 +52,25 @@ export default function InventoryImportModal({ onClose, onDone }) {
   }
 
   const handleImport = async () => {
+    if (importInFlightRef.current) return
     const rows = parseCsvRows(csvText)
     if (!rows.length) {
       notify(tr('inventory_import_choose_rows', 'Choose a CSV file with at least one inventory row.', 'សូមជ្រើសឯកសារ CSV ដែលមានយ៉ាងហោចណាស់មួយជួរស្តុក។'), 'error')
       return
     }
 
+    const requestId = beginTrackedRequest(importRequestRef)
+    importInFlightRef.current = true
     setLoading(true)
     try {
-      const [products, branches] = await Promise.all([
-        window.api.getProducts(),
-        window.api.getBranches(),
-      ])
+      const [products, branches] = await withLoaderTimeout(
+        () => Promise.all([
+          window.api.getProducts(),
+          window.api.getBranches(),
+        ]),
+        'Inventory import setup',
+      )
+      if (!isTrackedRequestCurrent(importRequestRef, requestId)) return
 
       const bySku = new Map()
       const byBarcode = new Map()
@@ -126,6 +147,7 @@ export default function InventoryImportModal({ onClose, onDone }) {
       }
 
       const nextResult = { imported, errors }
+      if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(nextResult)
       if (imported > 0) {
         notify(tr('inventory_import_finished', 'Inventory import finished: {count} row(s) applied.', 'ការនាំចូលស្តុកបានបញ្ចប់៖ បានអនុវត្ត {count} ជួរ។').replace('{count}', imported), 'success')
@@ -135,10 +157,15 @@ export default function InventoryImportModal({ onClose, onDone }) {
       }
     } catch (error) {
       const nextResult = { imported: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
-      setResult(nextResult)
-      notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
+      if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
+        setResult(nextResult)
+        notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
+      }
     } finally {
-      setLoading(false)
+      importInFlightRef.current = false
+      if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -188,7 +215,7 @@ export default function InventoryImportModal({ onClose, onDone }) {
           </div>
         ) : null}
         <div className="flex gap-2">
-          <button type="button" className="btn-secondary flex-1" onClick={onClose}>{t('close') || 'Close'}</button>
+          <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>{t('close') || 'Close'}</button>
           <button type="button" className="btn-primary flex-1" disabled={loading || !String(csvText || '').trim()} onClick={handleImport}>
             {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_inventory_button', 'Import inventory', 'នាំចូលស្តុក')}
           </button>

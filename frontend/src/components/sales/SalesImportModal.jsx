@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import { normalizeCsvKey, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 function normalizeBranchMap(branches = []) {
   const map = new Map()
@@ -30,6 +36,9 @@ export default function SalesImportModal({ onClose, onDone }) {
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const importRequestRef = useRef(0)
+  const importInFlightRef = useRef(false)
+  const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -38,6 +47,11 @@ export default function SalesImportModal({ onClose, onDone }) {
   }
 
   const previewRows = useMemo(() => parseCsvRows(csvText), [csvText])
+
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(importRequestRef)
+  }, [])
 
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
@@ -52,18 +66,25 @@ export default function SalesImportModal({ onClose, onDone }) {
   }
 
   const handleImport = async () => {
+    if (importInFlightRef.current) return
     const rows = parseCsvRows(csvText)
     if (!rows.length) {
       notify(tr('sales_import_choose_rows', 'Choose a CSV file with at least one sale row.', 'សូមជ្រើសឯកសារ CSV ដែលមានយ៉ាងហោចណាស់មួយជួរលក់។'), 'error')
       return
     }
 
+    const requestId = beginTrackedRequest(importRequestRef)
+    importInFlightRef.current = true
     setLoading(true)
     try {
-      const [products, branches] = await Promise.all([
-        window.api.getProducts(),
-        window.api.getBranches(),
-      ])
+      const [products, branches] = await withLoaderTimeout(
+        () => Promise.all([
+          window.api.getProducts(),
+          window.api.getBranches(),
+        ]),
+        'Sales import setup',
+      )
+      if (!isTrackedRequestCurrent(importRequestRef, requestId)) return
 
       const productMaps = {
         bySku: new Map(),
@@ -176,6 +197,7 @@ export default function SalesImportModal({ onClose, onDone }) {
         duplicates,
         errors,
       }
+      if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(nextResult)
       if (imported > 0 || duplicates > 0) {
         notify(
@@ -190,10 +212,15 @@ export default function SalesImportModal({ onClose, onDone }) {
       }
     } catch (error) {
       const nextResult = { imported: 0, duplicates: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
-      setResult(nextResult)
-      notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
+      if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
+        setResult(nextResult)
+        notify(error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'), 'error')
+      }
     } finally {
-      setLoading(false)
+      importInFlightRef.current = false
+      if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -244,7 +271,7 @@ export default function SalesImportModal({ onClose, onDone }) {
           </div>
         ) : null}
         <div className="flex gap-2">
-          <button type="button" className="btn-secondary flex-1" onClick={onClose}>{t('close') || 'Close'}</button>
+          <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>{t('close') || 'Close'}</button>
           <button type="button" className="btn-primary flex-1" disabled={loading || !String(csvText || '').trim()} onClick={handleImport}>
             {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_sales_button', 'Import sales', 'នាំចូលការលក់')}
           </button>
