@@ -1577,6 +1577,39 @@ export default function CatalogPage({ publicView = false }) {
     }
   }
 
+  function isPortalLoadCurrent(requestId) {
+    return aliveRef.current && Number(loadRequestRef.current) === Number(requestId)
+  }
+
+  async function loadPortalEditorData(requestId, nextConfig, nextMeta, nextProducts) {
+    const [providersResult, reviewResult] = await Promise.allSettled([
+      withLoaderTimeout(() => window.api.getAiProviders(), 'Portal AI providers'),
+      withLoaderTimeout(() => window.api.getPortalSubmissionsForReview(), 'Portal review items'),
+    ])
+    if (!isPortalLoadCurrent(requestId)) return
+
+    if (providersResult.status === 'fulfilled') {
+      setAiProviders(Array.isArray(providersResult.value?.items) ? providersResult.value.items : [])
+    }
+
+    if (reviewResult.status === 'fulfilled') {
+      const normalizedReviewItems = Array.isArray(reviewResult.value)
+        ? reviewResult.value.map((item) => (
+            item?.status === 'pending' && !Number(item?.reward_points)
+              ? { ...item, reward_points: nextConfig.submissionRewardPoints }
+              : item
+          ))
+        : []
+      setReviewItems(normalizedReviewItems)
+      writePortalCache({
+        config: nextConfig,
+        ...nextMeta,
+        products: nextProducts,
+        reviewItems: normalizedReviewItems,
+      })
+    }
+  }
+
   /** Fetch all portal data needed by current mode (public/editor). */
   async function loadPortal() {
     const requestId = ++loadRequestRef.current
@@ -1611,32 +1644,7 @@ export default function CatalogPage({ publicView = false }) {
     })
 
     if (!canEdit) return
-    window.api.getAiProviders()
-      .then((providerResult) => {
-        if (requestId !== loadRequestRef.current) return
-        setAiProviders(Array.isArray(providerResult?.items) ? providerResult.items : [])
-      })
-      .catch(() => {})
-
-    window.api.getPortalSubmissionsForReview()
-      .then((reviewData) => {
-        if (requestId !== loadRequestRef.current) return
-        const normalizedReviewItems = Array.isArray(reviewData)
-          ? reviewData.map((item) => (
-              item?.status === 'pending' && !Number(item?.reward_points)
-                ? { ...item, reward_points: nextConfig.submissionRewardPoints }
-                : item
-            ))
-          : []
-        setReviewItems(normalizedReviewItems)
-        writePortalCache({
-          config: nextConfig,
-          ...nextMeta,
-          products: nextProducts,
-          reviewItems: normalizedReviewItems,
-        })
-      })
-      .catch(() => {})
+    void loadPortalEditorData(requestId, nextConfig, nextMeta, nextProducts)
   }
 
   useEffect(() => {
