@@ -1610,6 +1610,33 @@ export default function CatalogPage({ publicView = false }) {
     }
   }
 
+  async function refreshPortalView({ showSpinner = true, reportError = true } = {}) {
+    const requestId = beginTrackedRequest(portalBootstrapRequestRef)
+    try {
+      const hasCachedData = !!(
+        products.length
+        || categories.length
+        || brands.length
+        || branches.length
+        || cachedPortal
+      )
+      if (showSpinner && !hasCachedData && aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
+        setLoading(true)
+      }
+      if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) && reportError) {
+        setPortalError('')
+      }
+      await withLoaderTimeout(() => loadPortal(), 'Customer portal')
+    } catch (error) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) || !reportError) return
+      setPortalError(error?.message || 'Failed to load customer portal')
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
+        setLoading(false)
+      }
+    }
+  }
+
   /** Fetch all portal data needed by current mode (public/editor). */
   async function loadPortal() {
     const requestId = ++loadRequestRef.current
@@ -1648,34 +1675,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   useEffect(() => {
-    async function run(showSpinner = true) {
-      const requestId = beginTrackedRequest(portalBootstrapRequestRef)
-      try {
-        const hasCachedData = !!(
-          products.length
-          || categories.length
-          || brands.length
-          || branches.length
-          || cachedPortal
-        )
-        if (showSpinner && !hasCachedData && aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
-          setLoading(true)
-        }
-        if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
-          setPortalError('')
-        }
-        await withLoaderTimeout(() => loadPortal(), 'Customer portal')
-      } catch (error) {
-        if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) return
-        setPortalError(error?.message || 'Failed to load customer portal')
-      } finally {
-        if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
-          setLoading(false)
-        }
-      }
-    }
-
-    run()
+    refreshPortalView()
 
     if (!publicView) {
       return () => {
@@ -1685,7 +1685,7 @@ export default function CatalogPage({ publicView = false }) {
     }
 
     const timer = window.setInterval(() => {
-      run(false).catch(() => {})
+      refreshPortalView({ showSpinner: false }).catch(() => {})
     }, Math.max(5, Number(previewConfig.refreshSeconds || 20)) * 1000)
 
     return () => {
@@ -1801,7 +1801,7 @@ export default function CatalogPage({ publicView = false }) {
 
     if (syncReloadTimerRef.current) window.clearTimeout(syncReloadTimerRef.current)
     syncReloadTimerRef.current = window.setTimeout(() => {
-      loadPortal().catch(() => {})
+      refreshPortalView({ showSpinner: false }).catch(() => {})
     }, 180)
 
     return () => {
@@ -2259,6 +2259,7 @@ export default function CatalogPage({ publicView = false }) {
   async function addSubmissionImages(images) {
     const next = Array.isArray(images) ? images.filter(Boolean) : []
     if (!next.length) return
+    if (!aliveRef.current) return
     setSubmissionDraft((current) => ({
       ...current,
       screenshots: [...current.screenshots, ...next].slice(0, 8),
@@ -2278,7 +2279,7 @@ export default function CatalogPage({ publicView = false }) {
       reader.onerror = () => reject(new Error('Failed to read pasted image'))
       reader.readAsDataURL(file)
     })))
-    addSubmissionImages(images)
+    await addSubmissionImages(images)
   }
 
   async function handleSubmitShareProof() {
@@ -2314,7 +2315,9 @@ export default function CatalogPage({ publicView = false }) {
         label: 'Catalog membership refresh after submission',
         showLoading: false,
       })
-      if (canEdit) loadPortal().catch(() => {})
+      if (canEdit) {
+        await refreshPortalView({ showSpinner: false, reportError: false })
+      }
     } catch (error) {
       notify(error?.message || 'Submission failed', 'error')
     } finally {
@@ -2470,10 +2473,13 @@ export default function CatalogPage({ publicView = false }) {
   const publicFaqItems = Array.isArray(previewConfig.faqItems) ? previewConfig.faqItems.filter((item) => item?.question && item?.answer) : []
   const aiUsageSummary = assistantUsage || null
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
-  const handleUploadSubmissionImages = () => {
-    pickMultipleImagesAsDataUrls()
-      .then(addSubmissionImages)
-      .catch((error) => notify(error?.message || 'Image upload failed', 'error'))
+  const handleUploadSubmissionImages = async () => {
+    try {
+      const images = await pickMultipleImagesAsDataUrls()
+      await addSubmissionImages(images)
+    } catch (error) {
+      notify(error?.message || 'Image upload failed', 'error')
+    }
   }
   const secondaryTabProps = {
     tab: activeTab,
