@@ -16,6 +16,16 @@ import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, loc
 import { resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
+import {
+  LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
+  NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
+  NOTIFICATION_SUMMARY_MISSING_TTL_MS,
+  DRIVE_SYNC_STATUS_COOLDOWN_KEY,
+  DRIVE_SYNC_STATUS_COOLDOWN_MS,
+  shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy,
+  maxStoredNumber,
+  isCooldownActive,
+} from './storagePolicy.mjs'
 
 function getPortalBaseUrl() {
   const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
@@ -203,26 +213,10 @@ function routeMirrored(channel, serverFn, localFn, mirrorFn) {
   return route(channel, async () => mirrorReadResult(mirrorFn, await serverFn()), localFn)
 }
 
-const LIVE_SERVER_SENSITIVE_MIRROR_TABLES = new Set([
-  'users',
-  'roles',
-  'products',
-  'branch_stock',
-  'customers',
-  'suppliers',
-  'delivery_contacts',
-  'sales',
-  'sale_items',
-  'returns',
-  'audit_logs',
-  'inventory_movements',
-  'stock_transfers',
-])
-
 let sensitiveMirrorPurgePromise = null
 
 function shouldPersistLocalMirror(tableName) {
-  return !(getSyncServerUrl() && LIVE_SERVER_SENSITIVE_MIRROR_TABLES.has(String(tableName || '').trim()))
+  return shouldPersistLocalMirrorByPolicy(tableName, getSyncServerUrl())
 }
 
 async function purgeSensitiveLiveServerMirrors() {
@@ -251,10 +245,6 @@ if (typeof window !== 'undefined') {
   Promise.resolve().then(() => purgeSensitiveLiveServerMirrors()).catch(() => {})
 }
 
-const NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY = 'businessos_notifications_summary_missing_until'
-const NOTIFICATION_SUMMARY_MISSING_TTL_MS = 4 * 60 * 60 * 1000
-const DRIVE_SYNC_STATUS_COOLDOWN_KEY = 'businessos_drive_sync_status_cooldown_until'
-const DRIVE_SYNC_STATUS_COOLDOWN_MS = 10 * 60 * 1000
 let notificationSummaryMissingUntilMemory = 0
 let notificationSummaryRequestPromise = null
 let driveSyncStatusCooldownMemory = 0
@@ -283,11 +273,7 @@ function readNotificationSummaryMissingUntil() {
   try {
     const sessionValue = Number(window.sessionStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
     const localValue = Number(window.localStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY) || 0)
-    const storageValue = Math.max(
-      Number.isFinite(sessionValue) ? sessionValue : 0,
-      Number.isFinite(localValue) ? localValue : 0,
-    )
-    return Math.max(storageValue, Number.isFinite(memoryValue) ? memoryValue : 0)
+    return maxStoredNumber([sessionValue, localValue, memoryValue])
   } catch (_) {
     return Number.isFinite(memoryValue) ? memoryValue : 0
   }
@@ -327,11 +313,7 @@ function readStorageNumber(key) {
   try {
     const sessionValue = Number(window.sessionStorage.getItem(key) || 0)
     const localValue = Number(window.localStorage.getItem(key) || 0)
-    return Math.max(
-      Number.isFinite(memoryValue) ? memoryValue : 0,
-      Number.isFinite(sessionValue) ? sessionValue : 0,
-      Number.isFinite(localValue) ? localValue : 0,
-    )
+    return maxStoredNumber([memoryValue, sessionValue, localValue])
   } catch (_) {
     return Number.isFinite(memoryValue) ? memoryValue : 0
   }
@@ -387,7 +369,7 @@ export async function getSystemConfig() {
 export async function getNotificationSummary() {
   return route('notifications:summary', async () => {
     const missingUntil = readNotificationSummaryMissingUntil()
-    if (missingUntil > Date.now()) {
+    if (isCooldownActive(missingUntil)) {
       return getNotificationSummaryFallback({
         unavailable: true,
         cooldownUntil: missingUntil,
@@ -1047,7 +1029,7 @@ export async function importBackup() {
 export const getGoogleDriveSyncStatus = () =>
   route('system:driveSyncStatus', async () => {
     const cooldownUntil = readStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
-    if (cooldownUntil > Date.now()) {
+    if (isCooldownActive(cooldownUntil)) {
       return getDriveSyncStatusFallback({ cooldownUntil })
     }
     if (driveSyncStatusRequestPromise) return await driveSyncStatusRequestPromise

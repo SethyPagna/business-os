@@ -1240,6 +1240,54 @@ runTest('product updates accept partial payloads and preserve required fields fr
   }
 })
 
+pendingTests.add('product grouping updates preserve special prices and parent-child invariants')
+runTest('product grouping updates preserve special prices and parent-child invariants', async () => {
+  const runtimeDir = makeTempRoot('bos-stock-grouped-product-')
+  const server = await startServer(runtimeDir)
+  try {
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const parentId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Grouped Parent Product',
+      sku: 'GROUP-PARENT-001',
+      stock_quantity: 3,
+      selling_price_usd: 30,
+      special_price_usd: 27.5,
+      is_group: 0,
+    })
+    const childId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: 'Loose Child Product',
+      sku: 'GROUP-CHILD-001',
+      stock_quantity: 1,
+      selling_price_usd: 14.25,
+      special_price_usd: 12.75,
+      is_group: 1,
+    })
+
+    const before = await getProduct(server.baseUrl, authToken, childId)
+    const updated = await updateProduct(server.baseUrl, authToken, childId, {
+      parent_id: parentId,
+      special_price_usd: 11.5,
+      userId: 1,
+      userName: 'QA',
+      expectedUpdatedAt: before.updated_at,
+    })
+    assert.equal(updated.success, true)
+
+    const parentAfter = await getProduct(server.baseUrl, authToken, parentId)
+    const childAfter = await getProduct(server.baseUrl, authToken, childId)
+    assert.equal(parentAfter.is_group, 1)
+    assert.equal(childAfter.parent_id, parentId)
+    assert.equal(childAfter.is_group, 0)
+    assert.equal(childAfter.special_price_usd, 11.5)
+    assert.equal(childAfter.name, 'Loose Child Product')
+    assert.equal(childAfter.sku, 'GROUP-CHILD-001')
+  } finally {
+    await stopServer(server.child)
+    fs.rmSync(runtimeDir, { recursive: true, force: true })
+  }
+})
+
 pendingTests.add('custom table schema rejects duplicate or invalid column definitions')
 runTest('custom table schema rejects duplicate or invalid column definitions', async () => {
   const runtimeDir = makeTempRoot('bos-custom-table-schema-')

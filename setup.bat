@@ -213,39 +213,15 @@ if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
     )
 )
 echo.
-echo [INFO] Building frontend ^(~30 seconds^)...
-call npm run build
+echo [INFO] Running shared local verification...
+cd /d "%ROOT%"
+call "%ROOT%\verify-local.bat"
 if errorlevel 1 (
-    echo [WARN] Frontend build failed in cmd. Retrying via PowerShell...
-    powershell -NoProfile -Command "Set-Location '%ROOT%\frontend'; npm run build"
-    if errorlevel 1 (
-        echo [ERROR] Frontend build failed.
-        pause
-        exit /b 1
-    )
-)
-echo [OK] Frontend built successfully
-
-echo.
-echo [INFO] Verifying frontend translation coverage...
-call npm run verify:i18n
-if errorlevel 1 (
-    echo [ERROR] Frontend i18n verification failed.
+    echo [ERROR] Local verification failed.
     pause
     exit /b 1
 )
-echo [OK] Frontend verification passed
-
-echo.
-echo [INFO] Verifying backend utility tests...
-cd /d "%ROOT%\backend"
-call npm run test:utils
-if errorlevel 1 (
-    echo [ERROR] Backend utility tests failed.
-    pause
-    exit /b 1
-)
-echo [OK] Backend verification passed
+echo [OK] Shared local verification passed
 
 REM ---- PM2 (optional process manager) ------------------------------------
 REM Used by start-server.bat for auto-restart/background execution.

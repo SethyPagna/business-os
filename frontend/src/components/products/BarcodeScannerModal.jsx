@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } from 'lucide-react'
 import Modal from '../shared/Modal'
+import { deriveScannerPresentation } from './barcodeScannerState.mjs'
 
 const KNOWN_FORMATS = [
   'aztec',
@@ -91,6 +92,8 @@ export default function BarcodeScannerModal({
     useValue: tr('use_value', 'Use value', 'ប្រើតម្លៃនេះ'),
     scanning: tr('scanning', 'Scanning...', 'កំពុងស្កេន...'),
   }), [tr])
+
+  const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
 
   const cleanup = useCallback(() => {
     startTokenRef.current = 0
@@ -315,51 +318,37 @@ export default function BarcodeScannerModal({
 
   if (!open) return null
 
-  const requestCameraLabel = permissionState === 'denied' || status === 'dismissed'
-    ? labels.tryCameraAgain
-    : labels.requestCameraAccess
-  const statusMessage = status === 'scanning'
-    ? labels.scanReady
-    : status === 'starting'
-      ? labels.requestingCamera
-      : (
-          error
-          || (
-            permissionState === 'unsupported'
-              ? labels.scanUnsupported
-              : permissionState === 'granted'
-                ? labels.requestingCamera
-                : labels.cameraPermissionNeeded
-          )
-        )
-  const showCameraAction = permissionState !== 'unsupported' && status !== 'scanning'
-  const emptyStateMessage = error || (
-    permissionState === 'denied' || status === 'blocked'
-      ? labels.cameraPermissionBlocked
-      : status === 'dismissed'
-        ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
-      : labels.cameraPermissionNeeded
-  )
-
-  const stateBadge = status === 'scanning'
+  const {
+    showCameraAction,
+    requestCameraLabel,
+    statusMessage,
+    emptyStateMessage,
+    stateKind,
+  } = deriveScannerPresentation({
+    status,
+    permissionState,
+    labels: { ...labels, error },
+    promptDismissedMessage,
+  })
+  const stateBadge = stateKind === 'scanning'
     ? {
         label: tr('scanner_state_live', 'Live camera', 'កាមេរ៉ាកំពុងដំណើរការ'),
         className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100',
         icon: <CheckCircle2 className="h-3.5 w-3.5" />,
       }
-    : status === 'starting'
+    : stateKind === 'starting'
       ? {
           label: tr('scanner_state_starting', 'Requesting camera', 'កំពុងស្នើសុំកាមេរ៉ា'),
           className: 'border-cyan-400/30 bg-cyan-500/15 text-cyan-100',
           icon: <ScanLine className="h-3.5 w-3.5" />,
         }
-      : permissionState === 'denied' || status === 'blocked'
+      : stateKind === 'blocked'
         ? {
             label: tr('scanner_state_blocked', 'Permission blocked', 'សិទ្ធិកាមេរ៉ាត្រូវបានបិទ'),
             className: 'border-red-400/30 bg-red-500/15 text-red-100',
             icon: <ShieldAlert className="h-3.5 w-3.5" />,
           }
-        : status === 'dismissed'
+        : stateKind === 'dismissed'
           ? {
               label: tr('scanner_state_retry', 'Prompt dismissed', 'សំណើសុំត្រូវបានបិទចោល'),
               className: 'border-amber-400/30 bg-amber-500/15 text-amber-100',
@@ -507,3 +496,4 @@ export default function BarcodeScannerModal({
     </Modal>
   )
 }
+

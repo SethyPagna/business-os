@@ -158,8 +158,8 @@ runTest('file upload rejects mismatched content without creating assets', async 
   }
 })
 
-pendingTests.add('successful file upload hides original filename from public path')
-runTest('successful file upload hides original filename from public path', async () => {
+pendingTests.add('successful file upload preserves a sanitized readable public filename')
+runTest('successful file upload preserves a sanitized readable public filename', async () => {
   const runtimeDir = makeTempRoot('bos-upload-opaque-')
   let server = null
   try {
@@ -175,8 +175,8 @@ runTest('successful file upload hides original filename from public path', async
     })
     assert.equal(uploaded.response.ok, true)
     assert.equal(uploaded.json.original_name, fileName)
-    assert.match(String(uploaded.json.public_path || ''), /^\/uploads\/[0-9a-f-]+\.png$/i)
-    assert.equal(String(uploaded.json.public_path || '').includes('sensitive-client-logo'), false)
+    assert.match(String(uploaded.json.public_path || ''), /^\/uploads\/sensitive-client-logo(?:-\d+)?\.png$/i)
+    assert.equal(String(uploaded.json.public_path || '').includes('..'), false)
   } finally {
     await stopServer(server?.child)
   }

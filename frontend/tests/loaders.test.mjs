@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import {
   beginTrackedRequest,
+  createLoaderTimeoutError,
   getFirstLoaderError,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   settleLoaderMap,
+  withLoaderTimeout,
 } from '../src/utils/loaders.mjs'
 
 let failed = 0
@@ -51,6 +53,27 @@ await runTest('tracked requests only treat the latest request as current', () =>
 
   invalidateTrackedRequest(ref)
   assert.equal(isTrackedRequestCurrent(ref, second), false)
+})
+
+await runTest('createLoaderTimeoutError returns a stable typed timeout error', () => {
+  const error = createLoaderTimeoutError('Inventory load', 5000)
+  assert.equal(error.name, 'LoaderTimeoutError')
+  assert.equal(error.code, 'loader_timeout')
+  assert.match(error.message, /Inventory load took longer than 5s/i)
+})
+
+await runTest('withLoaderTimeout resolves successful loaders before the timeout', async () => {
+  globalThis.window = globalThis
+  const result = await withLoaderTimeout(() => Promise.resolve(['ok']), 'Fast load', 50)
+  assert.deepEqual(result, ['ok'])
+})
+
+await runTest('withLoaderTimeout rejects slow loaders with a timeout error', async () => {
+  globalThis.window = globalThis
+  await assert.rejects(
+    () => withLoaderTimeout(() => new Promise((resolve) => setTimeout(resolve, 25)), 'Slow load', 5),
+    (error) => error?.code === 'loader_timeout',
+  )
 })
 
 if (failed > 0) {

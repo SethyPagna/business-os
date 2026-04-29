@@ -213,33 +213,18 @@ REM ============================================================
 REM  STEP 3B - Verify frontend and backend before packaging
 REM  Release output should only be produced from a known-good build.
 REM ============================================================
-echo [STEP 3B] Running verification checks...
-pushd "%FRONTEND_SRC%"
-echo [INFO] Running: npm run verify:i18n >> "%LOG%" 2>&1
-call npm run verify:i18n >> "%LOG%" 2>&1
+echo [STEP 3B] Running shared verification checks...
+cd /d "%ROOT%"
+echo [INFO] Running: verify-local.bat --skip-frontend-build >> "%LOG%" 2>&1
+call "%ROOT%\verify-local.bat" --skip-frontend-build >> "%LOG%" 2>&1
 if errorlevel 1 (
-    popd
     echo.
-    echo [ERROR] Frontend i18n verification failed.
+    echo [ERROR] Shared local verification failed.
     echo         Check %LOG% for details.
     echo.
     pause
     exit /b 1
 )
-popd
-pushd "%BACKEND_SRC%"
-echo [INFO] Running: npm run test:utils >> "%LOG%" 2>&1
-call npm run test:utils >> "%LOG%" 2>&1
-if errorlevel 1 (
-    popd
-    echo.
-    echo [ERROR] Backend utility tests failed.
-    echo         Check %LOG% for details.
-    echo.
-    pause
-    exit /b 1
-)
-popd
 echo [OK] Verification checks passed
 echo.
 

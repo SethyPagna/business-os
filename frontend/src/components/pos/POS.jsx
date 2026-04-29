@@ -32,6 +32,15 @@ import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
+import {
+  buildProductsById,
+  buildVariantChildrenByParentId,
+  buildVisibleProductCards,
+  getVariantChoices as getVariantChoicesForProduct,
+  resolveCartPriceValues,
+  getCartLineId,
+  findMatchingCartLineIndex,
+} from './posCore.mjs'
 import { getStatusLabel } from '../sales/StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import {
@@ -607,39 +616,20 @@ export default function POS() {
     })
   })()
 
-  const productsById = useMemo(
-    () => new Map(products.map((product) => [Number(product.id), product])),
+  const productsById = useMemo(() => buildProductsById(products), [products])
+
+  const variantChildrenByParentId = useMemo(
+    () => buildVariantChildrenByParentId(products),
     [products],
   )
 
-  const variantChildrenByParentId = useMemo(() => {
-    const map = new Map()
-    products.forEach((product) => {
-      const parentId = Number(product?.parent_id || 0)
-      if (!parentId) return
-      if (!map.has(parentId)) map.set(parentId, [])
-      map.get(parentId).push(product)
-    })
-    map.forEach((items) => items.sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })))
-    return map
-  }, [products])
-
-  const visibleProductCards = useMemo(() => {
-    const cards = []
-    const seen = new Set()
-    filteredProducts.forEach((product) => {
-      const root = product?.parent_id ? productsById.get(Number(product.parent_id)) || product : product
-      const rootId = Number(root?.id || product?.id)
-      if (!Number.isFinite(rootId) || seen.has(rootId)) return
-      seen.add(rootId)
-      cards.push(root)
-    })
-    return cards
-  }, [filteredProducts, productsById])
+  const visibleProductCards = useMemo(
+    () => buildVisibleProductCards(filteredProducts, productsById),
+    [filteredProducts, productsById],
+  )
 
   const getVariantChoices = useCallback((product) => {
-    const rootId = Number(product?.id || 0)
-    return variantChildrenByParentId.get(rootId) || []
+    return getVariantChoicesForProduct(product, variantChildrenByParentId)
   }, [variantChildrenByParentId])
 
   const hasVariantChoices = useCallback((product) => getVariantChoices(product).length > 0, [getVariantChoices])
@@ -654,27 +644,6 @@ export default function POS() {
       return next
     })
   }, [])
-
-  const getPriceModeValues = useCallback((product, priceMode = 'selling') => {
-    const useSpecial = priceMode === 'special' && ((product?.special_price_usd || 0) > 0 || (product?.special_price_khr || 0) > 0)
-    if (useSpecial) {
-      return {
-        applied_price_usd: product.special_price_usd || product.selling_price_usd || 0,
-        applied_price_khr: product.special_price_khr || product.selling_price_khr || CURRENCY.usdToKhr(product.special_price_usd || product.selling_price_usd || 0, exchangeRate),
-        price_mode: 'special',
-      }
-    }
-    return {
-      applied_price_usd: product?.selling_price_usd || 0,
-      applied_price_khr: product?.selling_price_khr || 0,
-      price_mode: 'selling',
-    }
-  }, [exchangeRate])
-
-  const getCartLineId = useCallback((item) => (
-    item?.cart_line_id
-    || `${Number(item?.id || 0)}:${item?.price_mode || 'selling'}:${Number(item?.branch_id || 0)}`
-  ), [])
 
   const getBranchStockQty = useCallback((product, branchId) => {
     const id = parseInt(branchId, 10)
@@ -764,12 +733,15 @@ export default function POS() {
     const assignedBranchId = branchFilter !== 'all'
       ? parseInt(branchFilter, 10)
       : pickBestBranchId(product)
-    const priceValues = getPriceModeValues(product, priceMode)
-    const existing = active.cart.find((item) => (
-      Number(item.id) === Number(product.id)
-      && String(item.price_mode || 'selling') === String(priceValues.price_mode)
-      && Number(item.branch_id || 0) === Number(assignedBranchId || 0)
-    ))
+    const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
+      usdToKhr: CURRENCY.usdToKhr,
+    })
+    const existingIndex = findMatchingCartLineIndex(active.cart, {
+      productId: product?.id,
+      priceMode: priceValues.price_mode,
+      branchId: assignedBranchId,
+    })
+    const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
     let newCart
     if (existing) {
       const stock = getDisplayStock(product, existing)

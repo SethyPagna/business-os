@@ -12,6 +12,14 @@ const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWrit
 const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
+const {
+  hasImportValue,
+  normalizeFieldRule,
+  normalizeImageConflictMode,
+  parseImportFlag,
+  parseImportNumber,
+  resolveImportValue,
+} = require('../productImportPolicies')
 
 const router = express.Router()
 
@@ -646,53 +654,6 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     } catch { return null }
   }
 
-  const parseImportNumber = (row, field, fallbackValue, { allowNegative = false } = {}) => {
-    const raw = row?.[field]
-    if (raw === undefined || raw === null || String(raw).trim() === '') return fallbackValue
-    const parsed = Number(raw)
-    if (!Number.isFinite(parsed)) {
-      throw new Error(`Invalid ${field}`)
-    }
-    if (!allowNegative && parsed < 0) {
-      throw new Error(`${field} cannot be negative`)
-    }
-    return parsed
-  }
-
-  const parseImportFlag = (row, field, fallbackValue = 0) => {
-    const raw = row?.[field]
-    if (raw === undefined || raw === null || String(raw).trim() === '') return fallbackValue
-    const value = String(raw).trim().toLowerCase()
-    if (['1', 'true', 'yes', 'y'].includes(value)) return 1
-    if (['0', 'false', 'no', 'n'].includes(value)) return 0
-    return fallbackValue
-  }
-
-  const hasImportValue = (row, field) => {
-    const raw = row?.[field]
-    return !(raw === undefined || raw === null || String(raw).trim() === '')
-  }
-
-  const normalizeFieldRule = (value, fallback) => {
-    const rule = String(value || fallback || '').trim().toLowerCase()
-    return ['keep_existing', 'use_imported', 'merge_blank_only', 'clear_value'].includes(rule)
-      ? rule
-      : fallback
-  }
-
-  const resolveImportValue = (existingValue, incomingValue, hasIncomingValue, rule, fallbackRule = 'use_imported') => {
-    const effectiveRule = normalizeFieldRule(rule, fallbackRule)
-    if (effectiveRule === 'keep_existing') return existingValue
-    if (effectiveRule === 'clear_value') return null
-    if (effectiveRule === 'merge_blank_only') {
-      if (existingValue === undefined || existingValue === null || existingValue === '') {
-        return hasIncomingValue ? incomingValue : existingValue
-      }
-      return existingValue
-    }
-    return hasIncomingValue ? incomingValue : existingValue
-  }
-
   const ensureCategory = (value) => {
     const trimmed = String(value || '').trim()
     if (!trimmed) return null
@@ -837,16 +798,6 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       if (unique.length >= 5) break
     }
     return unique
-  }
-
-  const normalizeImageConflictMode = (mode, action, hasIncomingImages) => {
-    const value = String(mode || '').trim().toLowerCase()
-    if (value === 'keep' || value === 'keep_existing') return 'keep_existing'
-    if (value === 'append' || value === 'append_csv') return 'append_csv'
-    if (value === 'replace' || value === 'replace_with_csv') return 'replace_with_csv'
-    if (!hasIncomingImages) return 'keep_existing'
-    if (action === 'override_add' || action === 'override_replace' || action === 'new') return 'replace_with_csv'
-    return 'keep_existing'
   }
 
   const loadCurrentGallery = (productId, fallbackPrimary = null) => {
