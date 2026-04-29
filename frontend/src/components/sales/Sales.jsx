@@ -11,7 +11,7 @@ import SaleDetailModal from './SaleDetailModal'
 import ExportModal from './ExportModal'
 import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
-import { buildTimeActionSections, getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -29,41 +29,6 @@ function getSaleBranchLabel(sale) {
   if (itemBranchNames.length === 1) return itemBranchNames[0]
   if (itemBranchNames.length > 1) return 'Multiple branches'
   return ''
-}
-
-function getTimeGroupingMode(yearFilter) {
-  return yearFilter === 'all' ? 'year' : 'month'
-}
-
-function getSaleDateParts(sale) {
-  const parsed = new Date(sale?.created_at || '')
-  if (Number.isNaN(parsed.getTime())) return null
-  const year = parsed.getFullYear()
-  const month = parsed.getMonth() + 1
-  return {
-    year,
-    month,
-    yearLabel: String(year),
-    monthKey: `${year}-${String(month).padStart(2, '0')}`,
-    monthLabel: parsed.toLocaleString(undefined, { month: 'long', year: 'numeric' }),
-  }
-}
-
-function buildGroupedSales(sales, groupMode) {
-  const groups = new Map()
-  sales.forEach((sale) => {
-    const parts = getSaleDateParts(sale)
-    const groupId = groupMode === 'year'
-      ? (parts?.yearLabel || 'Unknown year')
-      : (parts?.monthKey || 'unknown-month')
-    const groupLabel = groupMode === 'year'
-      ? (parts?.yearLabel || 'Unknown year')
-      : (parts?.monthLabel || 'Unknown month')
-    const current = groups.get(groupId) || { id: groupId, label: groupLabel, items: [] }
-    current.items.push(sale)
-    groups.set(groupId, current)
-  })
-  return [...groups.values()]
 }
 
 export default function Sales() {
@@ -87,7 +52,7 @@ export default function Sales() {
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
   const aliveRef = useRef(true)
-  const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter), [yearFilter])
+  const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const groupMode = timeGroupingMode
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -213,9 +178,11 @@ export default function Sales() {
       getItemId: (sale) => Number(sale?.id),
       getActionKey: (sale) => sale?.sale_status || 'completed',
       getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+      year: yearFilter,
+      month: monthFilter,
       timeMode: groupMode,
     }),
-    [filtered, groupMode, t],
+    [filtered, groupMode, monthFilter, t, yearFilter],
   )
 
   const visibleSales = useMemo(
@@ -516,16 +483,51 @@ export default function Sales() {
                 <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
-              ) : groupedSales.map((group) => (
-                <Fragment key={group.id}>
-                  {groupMode !== 'none' ? (
-                    <tr className="bg-slate-50 dark:bg-slate-800/60">
-                      <td colSpan={10} className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        {group.label} · {group.items.length} sale{group.items.length === 1 ? '' : 's'}
-                      </td>
-                    </tr>
-                  ) : null}
-                  {group.items.map((sale) => {
+              ) : salesSections.map((section) => (
+                <Fragment key={section.id}>
+                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                    <td colSpan={10} className="px-4 py-2">
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(section.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                            aria-label={`Select ${section.label}`}
+                          />
+                          <span>{section.label}</span>
+                        </label>
+                        <span className="text-slate-400">{section.ids.length} sale{section.ids.length === 1 ? '' : 's'}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {section.groups.map((group) => (
+                    <Fragment key={group.id}>
+                      <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                        <td colSpan={10} className="px-6 py-2">
+                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                            <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded"
+                                checked={isSelectionScopeFullySelected(group.ids)}
+                                ref={(node) => {
+                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                }}
+                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                aria-label={`Select ${group.label}`}
+                              />
+                              <span>{group.label}</span>
+                            </label>
+                            <span className="text-slate-400">{group.items.length}</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {group.items.map((sale) => {
                     const items = Array.isArray(sale.items) ? sale.items : []
                     const totalUsd = sale.total_usd || sale.total || 0
                     const totalKhr = sale.total_khr || 0
@@ -567,7 +569,9 @@ export default function Sales() {
                         </td>
                       </tr>
                     )
-                  })}
+                      })}
+                    </Fragment>
+                  ))}
                 </Fragment>
               ))}
             </tbody>
@@ -583,12 +587,43 @@ export default function Sales() {
           <div className="py-10 text-center text-gray-400">{t('loading')}</div>
         ) : filtered.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
-        ) : groupedSales.map((group) => (
-          <div key={group.id} className="space-y-2">
-            {groupMode !== 'none' ? (
-              <div className="px-1 pt-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{group.label}</div>
-            ) : null}
-            {group.items.map((sale) => {
+        ) : salesSections.map((section) => (
+          <div key={section.id} className="space-y-2">
+            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded"
+                  checked={isSelectionScopeFullySelected(section.ids)}
+                  ref={(node) => {
+                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                  }}
+                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                  aria-label={`Select ${section.label}`}
+                />
+                <span>{section.label}</span>
+                <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+              </label>
+            </div>
+            {section.groups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSelectionScopeFullySelected(group.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                      }}
+                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                      aria-label={`Select ${group.label}`}
+                    />
+                    <span>{group.label}</span>
+                    <span className="text-slate-400">{group.items.length}</span>
+                  </label>
+                </div>
+                {group.items.map((sale) => {
               const items = Array.isArray(sale.items) ? sale.items : []
               const totalUsd = sale.total_usd || sale.total || 0
               const totalKhr = sale.total_khr || 0
@@ -630,7 +665,9 @@ export default function Sales() {
                   </div>
                 </div>
               )
-            })}
+                })}
+              </div>
+            ))}
           </div>
         ))}
       </div>

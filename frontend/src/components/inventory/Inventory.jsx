@@ -12,7 +12,7 @@ import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
-import { buildTimeActionSections, getAvailableYears, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -20,10 +20,6 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
 } from '../../utils/loaders.mjs'
-
-function getTimeGroupingMode(yearFilter) {
-  return yearFilter === 'all' ? 'year' : 'month'
-}
 
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol, page } = useApp()
@@ -59,8 +55,8 @@ export default function Inventory() {
   const movementSelectAllRef = useRef(null)
   const loadRequestRef = useRef(0)
   const movementTimeMode = useMemo(
-    () => getTimeGroupingMode(movementYearFilter),
-    [movementYearFilter],
+    () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
+    [movementMonthFilter, movementYearFilter],
   )
 
   const load = useCallback(async (silent = false) => {
@@ -959,7 +955,7 @@ export default function Inventory() {
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
-          : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${movementTimeMode === 'year' ? 'year sections' : 'month sections'}`}
+          : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${t('tap_for_details')||'click a row for details'}`}
       </p>
 
       {/* ????????????????????????????????????????

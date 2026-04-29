@@ -118,7 +118,7 @@ function buildPortalConfig() {
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
   const languageSetting = settings.customer_portal_language || 'auto'
   const language = languageSetting === 'auto'
-    ? (settings.language || 'en')
+    ? 'en'
     : languageSetting
 
   const redeemPoints = Math.max(1, Math.floor(toNumber(settings.customer_portal_redeem_points, 100)))
@@ -165,7 +165,7 @@ function buildPortalConfig() {
     showFacebook: normalizeBoolean(settings.customer_portal_show_facebook, true),
     showInstagram: normalizeBoolean(settings.customer_portal_show_instagram, true),
     showTelegram: normalizeBoolean(settings.customer_portal_show_telegram, true),
-    title: settings.customer_portal_title || settings.business_name || 'Customer Portal',
+    title: settings.business_name || settings.customer_portal_title || 'Customer Portal',
     titleSize: Math.min(64, Math.max(28, Number(settings.customer_portal_title_size || 40) || 40)),
     intro: settings.customer_portal_intro || 'Browse products and check membership details.',
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
@@ -198,8 +198,8 @@ function buildPortalConfig() {
     stockThresholdMode: settings.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(settings.customer_portal_low_stock_threshold, 10)),
     outOfStockThreshold: Math.max(0, toNumber(settings.customer_portal_out_of_stock_threshold, 0)),
-    gridColumnsMobile: Math.min(2, Math.max(1, Math.round(toNumber(settings.customer_portal_grid_columns_mobile, 1)))),
-    gridColumnsDesktop: Math.min(6, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
+    gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(settings.customer_portal_grid_columns_mobile, 1)))),
+    gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(settings.customer_portal_grid_columns_desktop, 4)))),
     pointsBasis,
     pointsPerUsd,
     pointsPerKhr: toNumber(settings.customer_portal_points_per_khr, derivedPointsPerKhr),

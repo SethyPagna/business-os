@@ -4,6 +4,7 @@ import { Eye, Globe, LayoutList, Palette, Printer, Save, Truck, Type } from 'luc
 import ErrorBoundary from './ErrorBoundary'
 import { useApp } from '../../AppContext'
 import { DEFAULT_TEMPLATE } from './constants'
+import { parseReceiptTemplate, serializeReceiptTemplate } from './template'
 import FieldOrderManager from './FieldOrderManager'
 import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
@@ -37,11 +38,6 @@ function Toggle({ label, desc, value, onChange }) {
 }
 // -----------------------------------------------------------------------------
 
-function parseTemplate(str) {
-  try { return { ...DEFAULT_TEMPLATE, ...(typeof str === 'string' ? JSON.parse(str) : str) } }
-  catch { return { ...DEFAULT_TEMPLATE } }
-}
-
 export default function ReceiptSettings() {
   console.debug('[ReceiptSettings] render start')
   const app = useApp()
@@ -64,6 +60,7 @@ export default function ReceiptSettings() {
   const saveInFlightRef  = useRef(false)
   const queuedSaveRef    = useRef(null)
   const aliveRef         = useRef(true)
+  const previewTargetRef = useRef(null)
 
   // Keep loadSettings ref current without re-triggering effects
   useEffect(() => { loadSettingsRef.current = loadSettings }, [loadSettings])
@@ -75,7 +72,7 @@ export default function ReceiptSettings() {
   // Initialise tpl once persisted settings arrive from the server
   useEffect(() => {
     if (settings.receipt_template) {
-      setTpl(parseTemplate(settings.receipt_template))
+      setTpl(parseReceiptTemplate(settings.receipt_template))
     }
   }, [settings.receipt_template])
 
@@ -98,7 +95,7 @@ export default function ReceiptSettings() {
 
     try {
       await withLoaderTimeout(
-        () => window.api.saveSettings({ receipt_template: JSON.stringify(tpl) }),
+        () => window.api.saveSettings({ receipt_template: serializeReceiptTemplate(tpl) }),
         'Receipt settings save',
       )
 
@@ -342,7 +339,7 @@ export default function ReceiptSettings() {
             </>
           )}
 
-          {activeSection === 'print' && <PrintSettings t={t} />}
+          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={previewTargetRef} />}
 
         </div>
       </div>
@@ -363,7 +360,7 @@ export default function ReceiptSettings() {
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-auto min-h-0 p-4">
+        <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
           <ReceiptPreview tpl={tpl} settings={settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
         </div>
       </div>
@@ -388,7 +385,7 @@ export default function ReceiptSettings() {
                 <button onClick={() => setPreviewOpen(false)} className="text-gray-400 hover:text-gray-700 dark:hover:text-white text-lg leading-none" aria-label="Close preview">x</button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto min-h-0 p-4">
+            <div ref={previewTargetRef} className="flex-1 overflow-auto min-h-0 p-4">
               <ReceiptPreview tpl={tpl} settings={settings} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
             </div>
           </div>

@@ -6,6 +6,7 @@ import Sidebar from './components/navigation/Sidebar'
 import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
+import NotificationCenter from './components/shared/NotificationCenter'
 import Users from './components/users/Users'
 import AuditLog from './components/utils-settings/AuditLog'
 import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
@@ -739,7 +740,10 @@ export default function App() {
             </button>
           </div>
         </div>
-        <QuickPreferenceToggles />
+        <div className="flex items-center gap-2">
+          <NotificationCenter compact visibility="desktop" />
+          <QuickPreferenceToggles />
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

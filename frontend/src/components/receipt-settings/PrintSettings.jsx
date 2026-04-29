@@ -14,7 +14,25 @@ function Section({ icon: Icon, title, children }) {
   )
 }
 
-export default function PrintSettings({ t: tProp }) {
+function buildFallbackPreviewHtml(printSettings, T) {
+  return `
+    <div style="padding:8px;text-align:center;">
+      <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
+      <div style="font-size:11px;color:#555;margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
+      <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+      <div style="font-size:12px;text-align:left;">
+        <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
+        <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 2 x1</span><span>$5.50</span></div>
+      </div>
+      <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold;gap:16px;"><span>TOTAL</span><span>$15.50</span></div>
+      <div style="margin-top:10px;font-size:10px;color:#777;">Paper: ${printSettings?.paperSize || '80mm'} | Scale: ${printSettings?.scale || 100}%</div>
+      <div style="margin-top:4px;font-size:10px;">Thank you!</div>
+    </div>
+  `
+}
+
+export default function PrintSettings({ t: tProp, previewTargetRef = null }) {
   const T = (key, fallback) => (tProp && tProp(key)) || fallback
   const [ps, setPs] = useState(() => {
     try {
@@ -46,6 +64,12 @@ export default function PrintSettings({ t: tProp }) {
     { id: 'letter', label: 'Letter', desc: T('print_us_standard', 'US standard') },
     { id: 'custom', label: T('print_set_size', 'Custom'), desc: T('print_set_size', 'Set size') },
   ]
+
+  const getPreviewSource = () => {
+    const previewNode = previewTargetRef?.current
+    if (previewNode instanceof HTMLElement) return previewNode
+    return buildFallbackPreviewHtml(ps, T)
+  }
 
   return (
     <div className="space-y-6">
@@ -134,21 +158,7 @@ export default function PrintSettings({ t: tProp }) {
             className="btn-primary flex items-center gap-2 text-sm"
             onClick={async () => {
               try {
-                await openReceiptPdf(`
-                  <div style="padding:8px;text-align:center;">
-                    <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
-                    <div style="font-size:11px;color:#555;margin-bottom:8px;">Test Receipt</div>
-                    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
-                    <div style="font-size:12px;text-align:left;">
-                      <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
-                      <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 2 x1</span><span>$5.50</span></div>
-                    </div>
-                    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
-                    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold;gap:16px;"><span>TOTAL</span><span>$15.50</span></div>
-                    <div style="margin-top:10px;font-size:10px;color:#777;">Paper: ${ps?.paperSize || '80mm'} | Scale: ${ps?.scale || 100}%</div>
-                    <div style="margin-top:4px;font-size:10px;">Thank you!</div>
-                  </div>
-                `, {
+                await openReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
                 })
@@ -166,21 +176,7 @@ export default function PrintSettings({ t: tProp }) {
             className="btn-secondary flex items-center gap-2 text-sm"
             onClick={async () => {
               try {
-                await downloadReceiptPdf(`
-                  <div style="padding:8px;text-align:center;">
-                    <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
-                    <div style="font-size:11px;color:#555;margin-bottom:8px;">Test Receipt</div>
-                    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
-                    <div style="font-size:12px;text-align:left;">
-                      <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
-                      <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 2 x1</span><span>$5.50</span></div>
-                    </div>
-                    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
-                    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold;gap:16px;"><span>TOTAL</span><span>$15.50</span></div>
-                    <div style="margin-top:10px;font-size:10px;color:#777;">Paper: ${ps?.paperSize || '80mm'} | Scale: ${ps?.scale || 100}%</div>
-                    <div style="margin-top:4px;font-size:10px;">Thank you!</div>
-                  </div>
-                `, {
+                await downloadReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
                 })

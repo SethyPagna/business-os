@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, RotateCcw, Undo2 } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
+import ExportMenu from '../shared/ExportMenu'
+import FilterMenu from '../shared/FilterMenu'
 import ReturnDetailModal from './ReturnDetailModal'
 import EditReturnModal from './EditReturnModal'
 import NewReturnModal from './NewReturnModal'
 import NewSupplierReturnModal from './NewSupplierReturnModal'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -21,6 +24,38 @@ function normalizeScope(value) {
   return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
 }
 
+function getReturnTypeKey(ret) {
+  const scope = normalizeScope(ret?.return_scope)
+  if (scope === SUPPLIER_SCOPE) return String(ret?.supplier_settlement || 'refund').trim().toLowerCase() || 'refund'
+  return String(ret?.return_type || 'manual').trim().toLowerCase() || 'manual'
+}
+
+function getReturnTypeLabel(ret, tr) {
+  const scope = normalizeScope(ret?.return_scope)
+  if (scope === SUPPLIER_SCOPE) {
+    return ret?.supplier_settlement || tr('settlement_refund', 'refund')
+  }
+  return ret?.return_type || tr('manual_return', 'manual')
+}
+
+function exportReturnRows(rows = [], tr) {
+  return rows.map((ret) => ({
+    Return_Number: ret.return_number || '',
+    Scope: normalizeScope(ret.return_scope),
+    Date: ret.created_at || '',
+    Receipt: ret.receipt_number || '',
+    Customer: ret.customer_name || '',
+    Supplier: ret.supplier_name || '',
+    Reason: ret.reason || '',
+    Type: getReturnTypeLabel(ret, tr),
+    Settlement: ret.supplier_settlement || '',
+    Refund_USD: ret.total_refund_usd || 0,
+    Compensation_USD: ret.supplier_compensation_usd || 0,
+    Business_Loss_USD: ret.supplier_loss_usd || 0,
+    Status: ret.status || 'completed',
+  }))
+}
+
 export default function Returns() {
   const { t, fmtUSD, fmtKHR, notify } = useApp()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -33,6 +68,10 @@ export default function Returns() {
   const [scope, setScope] = useState(CUSTOMER_SCOPE)
   const [rows, setRows] = useState([])
   const [search, setSearch] = useState('')
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [detailRet, setDetailRet] = useState(null)
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
@@ -40,6 +79,8 @@ export default function Returns() {
   const [loading, setLoading] = useState(true)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
+  const selectAllRef = useRef(null)
+  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const loadReturns = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(returnsRequestRef)
@@ -60,9 +101,7 @@ export default function Returns() {
 
   useEffect(() => {
     loadReturns()
-    return () => {
-      invalidateTrackedRequest(returnsRequestRef)
-    }
+    return () => invalidateTrackedRequest(returnsRequestRef)
   }, [loadReturns])
 
   useEffect(() => {
@@ -90,8 +129,29 @@ export default function Returns() {
     }
   }
 
+  const availableYears = useMemo(
+    () => getAvailableYears(rows, (ret) => ret?.created_at),
+    [rows],
+  )
+
+  const typeOptions = useMemo(() => {
+    const options = new Map()
+    rows.forEach((ret) => {
+      const key = getReturnTypeKey(ret)
+      if (!key) return
+      options.set(key, getReturnTypeLabel(ret, tr))
+    })
+    return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]))
+  }, [rows, tr])
+
   const searchTerms = search.trim().split(/\s+/).filter(Boolean)
   const filtered = useMemo(() => rows.filter((ret) => {
+    if (yearFilter !== 'all' || monthFilter !== 'all') {
+      const createdDate = new Date(ret?.created_at || '')
+      if (yearFilter !== 'all' && String(createdDate.getFullYear()) !== String(yearFilter)) return false
+      if (monthFilter !== 'all' && String(createdDate.getMonth() + 1) !== String(monthFilter)) return false
+    }
+    if (typeFilter !== 'all' && getReturnTypeKey(ret) !== typeFilter) return false
     if (!searchTerms.length) return true
     const hay = [
       ret.return_number,
@@ -104,7 +164,70 @@ export default function Returns() {
       ret.supplier_settlement,
     ].join(' ').toLowerCase()
     return searchTerms.every((term) => hay.includes(term.toLowerCase()))
-  }), [rows, searchTerms])
+  }), [monthFilter, rows, searchTerms, typeFilter, yearFilter])
+
+  const returnSections = useMemo(() => buildTimeActionSections(filtered, {
+    getDate: (ret) => ret?.created_at,
+    getItemId: (ret) => Number(ret?.id),
+    getActionKey: (ret) => getReturnTypeKey(ret),
+    getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+  }), [filtered, monthFilter, timeMode, tr, yearFilter])
+
+  const visibleReturns = useMemo(
+    () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+    [returnSections],
+  )
+
+  useEffect(() => {
+    const validIds = new Set(visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)))
+    setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
+  }, [visibleReturns])
+
+  const visibleIds = useMemo(
+    () => visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)),
+    [visibleReturns],
+  )
+
+  const selectedReturns = useMemo(
+    () => visibleReturns.filter((ret) => selectedIds.has(Number(ret.id))),
+    [selectedIds, visibleReturns],
+  )
+
+  useEffect(() => {
+    if (!selectAllRef.current) return
+    selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
+  }, [selectedIds.size, visibleIds.length])
+
+  const toggleSelected = useCallback((returnId) => {
+    const numericId = Number(returnId)
+    if (!Number.isFinite(numericId)) return
+    setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
+  }, [])
+
+  const toggleSelectAll = useCallback((checked) => {
+    if (!checked) {
+      setSelectedIds(new Set())
+      return
+    }
+    setSelectedIds(new Set(visibleIds))
+  }, [visibleIds])
+
+  const toggleSelectionScope = useCallback((ids, checked) => {
+    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+  }, [])
+
+  const isSelectionScopeFullySelected = useCallback(
+    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    [selectedIds],
+  )
+
+  const isSelectionScopePartiallySelected = useCallback(
+    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
+    [isSelectionScopeFullySelected, selectedIds],
+  )
 
   const customerRows = filtered.filter((ret) => normalizeScope(ret.return_scope) === CUSTOMER_SCOPE)
   const supplierRows = filtered.filter((ret) => normalizeScope(ret.return_scope) === SUPPLIER_SCOPE)
@@ -122,21 +245,84 @@ export default function Returns() {
     lossUsd: supplierRows.reduce((sum, ret) => sum + (ret.supplier_loss_usd || 0), 0),
   }
 
-  const exportRows = filtered.map((ret) => ({
-    Return_Number: ret.return_number || '',
-    Scope: normalizeScope(ret.return_scope),
-    Date: ret.created_at || '',
-    Receipt: ret.receipt_number || '',
-    Customer: ret.customer_name || '',
-    Supplier: ret.supplier_name || '',
-    Reason: ret.reason || '',
-    Type: ret.return_type || '',
-    Settlement: ret.supplier_settlement || '',
-    Refund_USD: ret.total_refund_usd || 0,
-    Compensation_USD: ret.supplier_compensation_usd || 0,
-    Business_Loss_USD: ret.supplier_loss_usd || 0,
-    Status: ret.status || 'completed',
-  }))
+  const exportVisible = useCallback((rowsToExport = visibleReturns, prefix = 'returns-visible') => {
+    downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportReturnRows(rowsToExport, tr))
+  }, [tr, visibleReturns])
+
+  const exportSelected = useCallback(() => {
+    if (!selectedReturns.length) return
+    exportVisible(selectedReturns, 'returns-selected')
+    notify(`Exported ${selectedReturns.length} selected return${selectedReturns.length === 1 ? '' : 's'}.`)
+  }, [exportVisible, notify, selectedReturns])
+
+  const exportItems = useMemo(() => ([
+    { label: 'Export visible returns', onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
+    selectedReturns.length ? { label: 'Export selected returns', onClick: exportSelected, color: 'blue' } : null,
+    typeFilter !== 'all' ? { label: `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+  ].filter(Boolean)), [exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, typeFilter, typeOptions, visibleReturns, yearFilter])
+
+  const filterSections = useMemo(() => ([
+    {
+      id: 'scope',
+      label: tr('scope', 'Scope'),
+      options: [
+        { id: CUSTOMER_SCOPE, label: tr('customer_returns', 'Customer Returns'), active: scope === CUSTOMER_SCOPE, onClick: () => setScope(CUSTOMER_SCOPE) },
+        { id: SUPPLIER_SCOPE, label: tr('supplier_returns', 'Supplier Returns'), active: scope === SUPPLIER_SCOPE, onClick: () => setScope(SUPPLIER_SCOPE) },
+      ],
+    },
+    {
+      id: 'year',
+      label: tr('year', 'Year'),
+      options: [
+        { id: 'all', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: tr('month', 'Month'),
+      options: [
+        { id: 'all', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'type',
+      label: tr('type', 'Type'),
+      options: [
+        { id: 'all', label: tr('all_types', 'All types'), active: typeFilter === 'all', onClick: () => setTypeFilter('all') },
+        ...typeOptions.map(([id, label]) => ({
+          id,
+          label,
+          active: typeFilter === id,
+          onClick: () => setTypeFilter(typeFilter === id ? 'all' : id),
+        })),
+      ],
+    },
+  ]), [availableYears, monthFilter, scope, tr, typeFilter, typeOptions, yearFilter])
+
+  const activeFilterCount = useMemo(
+    () => [yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE].filter(Boolean).length,
+    [monthFilter, scope, typeFilter, yearFilter],
+  )
 
   const renderAmount = (ret) => {
     const retScope = normalizeScope(ret.return_scope)
@@ -161,14 +347,7 @@ export default function Returns() {
           </h1>
         </div>
         <div className="flex flex-shrink-0 flex-row flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:items-center sm:pb-0">
-          <button
-            onClick={() => downloadCSV(`returns-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)}
-            className="btn-secondary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm"
-            aria-label={tr('export', 'Export', 'នាំចេញ')}
-          >
-              <Download className="h-4 w-4" />
-            <span>{tr('export', 'Export', 'នាំចេញ')}</span>
-            </button>
+          <ExportMenu label={tr('export', 'Export')} items={exportItems} compact />
           {scope === SUPPLIER_SCOPE ? (
             <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-xs sm:w-auto sm:flex-none sm:text-sm" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
               <Undo2 className="h-4 w-4" />
@@ -183,28 +362,41 @@ export default function Returns() {
         </div>
       </div>
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="inline-flex w-full rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-zinc-800 sm:w-auto">
-          <button
-            className={`flex-1 rounded px-3 py-1.5 text-xs font-medium sm:flex-none ${scope === CUSTOMER_SCOPE ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300'}`}
-            onClick={() => setScope(CUSTOMER_SCOPE)}
-          >
-            {tr('customer_returns', 'Customer Returns')}
-          </button>
-          <button
-            className={`flex-1 rounded px-3 py-1.5 text-xs font-medium sm:flex-none ${scope === SUPPLIER_SCOPE ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300'}`}
-            onClick={() => setScope(SUPPLIER_SCOPE)}
-          >
-            {tr('supplier_returns', 'Supplier Returns')}
-          </button>
-        </div>
-        <input
-          className="input min-w-0 w-full flex-1"
-          placeholder={tr('search_returns_placeholder', 'Search by return number, receipt, customer, supplier, reason')}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label htmlFor="returns-search" className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            id="returns-search"
+            name="returns_search"
+            className="input min-w-0 w-full pl-9"
+            placeholder={tr('search_returns_placeholder', 'Search by return number, receipt, customer, supplier, reason')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <FilterMenu
+          label={tr('filters', 'Filters')}
+          activeCount={activeFilterCount}
+          sections={filterSections}
+          onClear={() => {
+            setScope(CUSTOMER_SCOPE)
+            setYearFilter('all')
+            setMonthFilter('all')
+            setTypeFilter('all')
+          }}
+          compact
         />
       </div>
+
+      {selectedReturns.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
+          <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedReturns.length} selected</span>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={exportSelected}>Export selected</button>
+          <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
+            {tr('clear', 'Clear')}
+          </button>
+        </div>
+      ) : null}
 
       {scope === CUSTOMER_SCOPE ? (
         <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -249,6 +441,16 @@ export default function Returns() {
           <table className="w-full min-w-[760px] text-sm">
             <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
               <tr>
+                <th className="w-10 px-3 py-3">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
+                    onChange={(event) => toggleSelectAll(event.target.checked)}
+                    aria-label="Select all returns"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('return_number', 'Return #')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reference', 'Reference')}</th>
@@ -260,32 +462,87 @@ export default function Returns() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</td></tr>
+                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
-              ) : filtered.map((ret) => {
-                const retScope = normalizeScope(ret.return_scope)
-                const typeLabel = retScope === SUPPLIER_SCOPE
-                  ? (ret.supplier_settlement || tr('settlement_refund', 'refund'))
-                  : (ret.return_type || tr('manual_return', 'manual'))
-                return (
-                  <tr key={ret.id} className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10" onClick={() => setDetailRet(ret)}>
-                    <td className="whitespace-nowrap px-4 py-2.5 font-mono font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-500">{fmtTime(ret.created_at)}</td>
-                    <td className="px-4 py-2.5">
-                      {ret.receipt_number
-                        ? <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{ret.receipt_number}</span>
-                        : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
+                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
+              ) : returnSections.map((section) => (
+                <Fragment key={section.id}>
+                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                    <td colSpan={8} className="px-4 py-2">
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(section.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                            aria-label={`Select ${section.label}`}
+                          />
+                          <span>{section.label}</span>
+                        </label>
+                        <span className="text-slate-400">{section.ids.length}</span>
+                      </div>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</td>
-                    <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{ret.reason || '-'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">{renderAmount(ret)}</td>
                   </tr>
-                )
-              })}
+                  {section.groups.map((group) => (
+                    <Fragment key={group.id}>
+                      <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                        <td colSpan={8} className="px-6 py-2">
+                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                            <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded"
+                                checked={isSelectionScopeFullySelected(group.ids)}
+                                ref={(node) => {
+                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                }}
+                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                aria-label={`Select ${group.label}`}
+                              />
+                              <span>{group.label}</span>
+                            </label>
+                            <span className="text-slate-400">{group.items.length}</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {group.items.map((ret) => {
+                        const retScope = normalizeScope(ret.return_scope)
+                        const typeLabel = getReturnTypeLabel(ret, tr)
+                        return (
+                          <tr key={ret.id} className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10" onClick={() => setDetailRet(ret)}>
+                            <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded"
+                                checked={selectedIds.has(Number(ret.id))}
+                                onChange={() => toggleSelected(ret.id)}
+                                aria-label={`Select ${ret.return_number}`}
+                              />
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2.5 font-mono font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
+                            <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-500">{fmtTime(ret.created_at)}</td>
+                            <td className="px-4 py-2.5">
+                              {ret.receipt_number
+                                ? <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{ret.receipt_number}</span>
+                                : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</td>
+                            <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{ret.reason || '-'}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right">{renderAmount(ret)}</td>
+                          </tr>
+                        )
+                      })}
+                    </Fragment>
+                  ))}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>
@@ -296,24 +553,74 @@ export default function Returns() {
           <div className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</div>
         ) : filtered.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</div>
-        ) : filtered.map((ret) => {
-          const retScope = normalizeScope(ret.return_scope)
-          return (
-            <div key={ret.id} className="card cursor-pointer p-3" onClick={() => setDetailRet(ret)}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</div>
-                  <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
-                  <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
-                  <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
-                </div>
-                <div className="flex-shrink-0 text-right">
-                  {renderAmount(ret)}
-                </div>
-              </div>
+        ) : returnSections.map((section) => (
+          <div key={section.id} className="space-y-2">
+            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded"
+                  checked={isSelectionScopeFullySelected(section.ids)}
+                  ref={(node) => {
+                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                  }}
+                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                  aria-label={`Select ${section.label}`}
+                />
+                <span>{section.label}</span>
+                <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+              </label>
             </div>
-          )
-        })}
+            {section.groups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSelectionScopeFullySelected(group.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                      }}
+                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                      aria-label={`Select ${group.label}`}
+                    />
+                    <span>{group.label}</span>
+                    <span className="text-slate-400">{group.items.length}</span>
+                  </label>
+                </div>
+                {group.items.map((ret) => {
+                  const retScope = normalizeScope(ret.return_scope)
+                  return (
+                    <div key={ret.id} className="card cursor-pointer p-3" onClick={() => setDetailRet(ret)}>
+                      <div className="mb-2 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded"
+                          checked={selectedIds.has(Number(ret.id))}
+                          onChange={() => toggleSelected(ret.id)}
+                          aria-label={`Select ${ret.return_number}`}
+                        />
+                        <span className="text-xs text-gray-500">{tr('select', 'Select')}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</div>
+                          <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
+                          <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          {renderAmount(ret)}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
 
       {detailRet ? (

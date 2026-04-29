@@ -235,6 +235,13 @@ export async function getVerificationCapabilities() {
 export async function getSystemConfig() {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
+export async function getNotificationSummary() {
+  return route('notifications:summary', () => apiFetch('GET', '/api/notifications/summary'), () => ({
+    unreadCount: 0,
+    sections: [],
+    preferences: {},
+  }))
+}
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }

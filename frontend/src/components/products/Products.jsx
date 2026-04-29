@@ -123,44 +123,14 @@ export default function Products() {
   const handleSave = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
     try {
-      // Strip _tempImagePath from the main data object ??it's a large base64 string
-      // and must never be sent as part of create/update (separate upload call below)
-      const { _tempImagePath, ...dataWithoutImage } = form
-      const data = { ...dataWithoutImage, userId: user.id, userName: user.name }
+      const data = { ...form, userId: user.id, userName: user.name }
 
-      let productId = selected?.id
       if (!selected) {
         const res = await window.api.createProduct(data)
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
-        productId = res.id
       } else {
         const res = await window.api.updateProduct(selected.id, data, user.id, user.name)
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
-      }
-
-      // Upload image separately after the product exists (so we have a productId)
-      if (_tempImagePath && productId) {
-        const ext = _tempImagePath.startsWith('data:image/png')  ? '.png'
-                  : _tempImagePath.startsWith('data:image/webp') ? '.webp'
-                  : _tempImagePath.startsWith('data:image/gif')  ? '.gif' : '.jpg'
-        const fn = `product_${productId}_${Date.now()}${ext}`
-        try {
-          const imgRes = await window.api.uploadProductImage({ productId, filePath: _tempImagePath, fileName: fn })
-          if (imgRes && imgRes.path) {
-            // Update the product record with the uploaded image path
-            await window.api.updateProduct(productId, {
-              ...dataWithoutImage,
-              image_path: imgRes.path,
-              userId: user.id,
-              userName: user.name,
-            })
-          } else if (imgRes && !imgRes.success) {
-            notify(`Product saved but image upload failed: ${imgRes.error || 'unknown error'}`, 'warning')
-          }
-        } catch (imgErr) {
-          console.error('[handleSave] image upload error:', imgErr.message)
-          notify(`Product saved but image failed: ${imgErr.message}`, 'warning')
-        }
       }
 
       notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')

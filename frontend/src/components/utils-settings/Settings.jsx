@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useRef } from 'react'
-import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ChevronDown, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
 import FontFamilyPicker from './FontFamilyPicker'
 import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
@@ -298,6 +298,36 @@ function SwatchPicker({
         </button>
       ) : null}
     </div>
+  )
+}
+
+function SettingsSection({
+  title,
+  description = '',
+  defaultOpen = false,
+  children,
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-zinc-900">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left sm:px-5"
+      >
+        <div className="min-w-0">
+          <div className="truncate text-base font-semibold text-gray-900 dark:text-white">{title}</div>
+          {description ? <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{description}</div> : null}
+        </div>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div className="border-t border-gray-100 px-4 py-4 sm:px-5 dark:border-gray-800">
+          {children}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -602,8 +632,7 @@ export default function Settings() {
 
       <div className="mx-auto max-w-[96rem] space-y-4">
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('business_info')}</h2>
+        <SettingsSection title={t('business_info')} defaultOpen>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('business_name', t('business_name'), 'text', 'My Business')}
             {field('business_phone', t('phone'), 'text', '+1 234 567')}
@@ -611,17 +640,16 @@ export default function Settings() {
             {field('business_email', t('email'), 'email', 'info@biz.com')}
             {field('tax_id', t('tax_id'), 'text', 'TAX-000')}
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
+        <SettingsSection
+          title="Browser tab icon"
+          description="Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page."
+        >
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Browser tab icon</h2>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page.
-              </p>
             </div>
             <div className="flex h-16 w-16 items-center justify-center rounded-full border border-gray-200 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-800">
               {appFaviconPreview ? (
@@ -659,12 +687,11 @@ export default function Settings() {
               </button>
             </div>
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('currency_settings')}</h2>
+        <SettingsSection title={t('currency_settings')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('currency_usd_symbol', t('currency_usd_symbol'), 'text', '$')}
             {field('currency_khr_symbol', t('currency_khr_symbol'), 'text', 'KHR')}
@@ -678,12 +705,11 @@ export default function Settings() {
               </select>
             </div>
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('receipt_settings')}</h2>
+        <SettingsSection title={t('receipt_settings')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('tax_rate', t('tax_rate'), 'number', '0')}
             <div>
@@ -700,11 +726,10 @@ export default function Settings() {
               />
             </div>
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{t('appearance')}</h2>
+        <SettingsSection title={t('appearance')}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('theme')}</div>
@@ -738,11 +763,9 @@ export default function Settings() {
               </div>
             </div>
           </div>
-        </div>
+        </SettingsSection>
 
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('design_typography')}</h2>
-          <p className="text-xs text-gray-400 mb-4">{t('customize_fonts')}</p>
+        <SettingsSection title={t('design_typography')} description={t('customize_fonts')}>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
@@ -987,12 +1010,10 @@ export default function Settings() {
               onRemoveCustomColor={(value) => removeStoredColor('ui_custom_sidebar_text_colors', value)}
             />
           </div>
-        </div>
+        </SettingsSection>
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('timezone')}</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">{t('timezone_desc')}</p>
+        <SettingsSection title={t('timezone')} description={t('timezone_desc')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="settings-display-timezone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('display_timezone')}</label>
@@ -1018,13 +1039,11 @@ export default function Settings() {
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>
             </div>
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{copy('navigationTitle', 'Navigation Layout')}</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}</p>
+        <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}>
 
           <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
             <div className="flex items-center justify-between gap-3">
@@ -1139,13 +1158,11 @@ export default function Settings() {
             })}
           </div>
 
-        </div>
+        </SettingsSection>
         ) : null}
 
         {isAdmin ? (
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('manage_payment_methods')}</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{t('configure_payment_desc')}</p>
+        <SettingsSection title={t('manage_payment_methods')} description={t('configure_payment_desc')}>
 
           <div className="space-y-2 mb-3 max-h-48 overflow-auto">
             {pmList.map((paymentMethod, index) => (
@@ -1191,12 +1208,10 @@ export default function Settings() {
               + {t('add')}
             </button>
           </div>
-        </div>
+        </SettingsSection>
         ) : null}
 
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">{t('session_duration') || 'Session duration'}</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{t('session_duration_hint')}</p>
+        <SettingsSection title={t('session_duration') || 'Session duration'} description={t('session_duration_hint')}>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -1218,14 +1233,56 @@ export default function Settings() {
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{t('session_duration_hint')}</p>
             </div>
           </div>
-        </div>
+        </SettingsSection>
+
+        {isAdmin ? (
+          <SettingsSection
+            title={t('notifications') || 'Notifications'}
+            description="Choose which business alerts appear in the top-bar notification center."
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ['notifications_inventory_enabled', 'Inventory alerts', 'Low stock and out of stock warnings'],
+                ['notifications_sales_enabled', 'Sales alerts', 'Awaiting payment and delivery follow-up'],
+                ['notifications_loyalty_enabled', 'Loyalty alerts', 'Customers who reached your points target'],
+                ['notifications_portal_enabled', 'Customer portal alerts', 'Pending public submissions and review items'],
+                ['notifications_system_enabled', 'System alerts', 'Only actionable system reminders'],
+              ].map(([key, label, desc]) => (
+                <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                  <div className="pr-3">
+                    <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{label}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{desc}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={String(form[key] ?? 'true') !== 'false'}
+                    onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
+                  />
+                </label>
+              ))}
+              <div className="sm:col-span-2">
+                <label htmlFor="settings-notifications-loyalty-threshold" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Loyalty points threshold
+                </label>
+                <input
+                  id="settings-notifications-loyalty-threshold"
+                  name="notifications_loyalty_threshold"
+                  className="input max-w-xs"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.notifications_loyalty_threshold || '100'}
+                  onChange={(event) => setValue('notifications_loyalty_threshold', event.target.value)}
+                />
+              </div>
+            </div>
+          </SettingsSection>
+        ) : null}
 
         {user && isAdmin ? (
-          <div className="card p-4 sm:p-5">
+          <SettingsSection title={t('two_factor_auth')} description={t('two_factor_desc')}>
             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('two_factor_auth')}</h2>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t('two_factor_desc')}</p>
               </div>
               <span className={`text-xs px-2 py-1 rounded-full font-medium ${otpStatus ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
                 {otpStatus ? t('otp_enabled') : t('otp_disabled')}
@@ -1257,7 +1314,7 @@ export default function Settings() {
                 t={t}
               />
             ) : null}
-          </div>
+          </SettingsSection>
         ) : null}
 
         <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={() => saveSettings(form)}>

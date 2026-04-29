@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, ClipboardList, Clock3, Download, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronRight, ClipboardList, Clock3, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
+import ExportMenu from '../shared/ExportMenu'
+import FilterMenu from '../shared/FilterMenu'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -34,13 +37,6 @@ const ACTION_COLOR_CLASS = {
   backup_export: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
   backup_restore: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
 }
-
-const TIME_FILTERS = [
-  { id: 'all', days: null },
-  { id: 'today', days: 1 },
-  { id: '7d', days: 7 },
-  { id: '30d', days: 30 },
-]
 
 function toIso(raw) {
   if (!raw) return null
@@ -154,15 +150,20 @@ export default function AuditLog() {
   const { t, page } = useApp()
   const [logs, setLogs] = useState([])
   const [search, setSearch] = useState('')
-  const [timeFilter, setTimeFilter] = useState('all')
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
+  const [actionFilter, setActionFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const selectAllRef = useRef(null)
   const aliveRef = useRef(true)
+  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const actionLabels = useMemo(() => ({
     create: t('create') || 'Create',
@@ -192,11 +193,8 @@ export default function AuditLog() {
     all_time: { en: 'All time', km: 'គ្រប់ពេល' },
     time: 'ពេលវេលា',
     sort: 'តម្រៀប',
-    today: 'ថ្ងៃនេះ',
-    last_7_days: '៧ ថ្ងៃចុងក្រោយ',
-    last_30_days: '៣០ ថ្ងៃចុងក្រោយ',
-    newest_first: 'ថ្មីជាងគេមុន',
-    oldest_first: 'ចាស់ជាងគេមុន',
+    newest_first: 'ថ្មីបំផុតមុន',
+    oldest_first: 'ចាស់បំផុតមុន',
     refresh: 'ស្រស់ថ្មី',
     export: 'នាំចេញ',
     entries: 'កំណត់ត្រា',
@@ -258,13 +256,36 @@ export default function AuditLog() {
     pageLoadRequestedRef.current = true
     load(loadedOnceRef.current)
   }, [load, page])
+
   useEffect(() => () => {
     aliveRef.current = false
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
+  const availableYears = useMemo(
+    () => getAvailableYears(logs, (log) => log?.client_time || log?.created_at),
+    [logs],
+  )
+
+  const actionOptions = useMemo(() => {
+    const seen = new Map()
+    logs.forEach((log) => {
+      const key = String(log?.action || '').toLowerCase()
+      if (!key) return
+      seen.set(key, actionLabel(key))
+    })
+    return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
+  }, [actionLabel, logs])
+
   const query = search.trim().toLowerCase()
-  const searchedLogs = useMemo(() => logs.filter((log) => {
+  const filtered = useMemo(() => logs.filter((log) => {
+    if (yearFilter !== 'all' || monthFilter !== 'all') {
+      const date = new Date(log?.client_time || log?.created_at || '')
+      if (yearFilter !== 'all' && String(date.getFullYear()) !== String(yearFilter)) return false
+      if (monthFilter !== 'all' && String(date.getMonth() + 1) !== String(monthFilter)) return false
+    }
+    const logAction = String(log?.action || '').toLowerCase()
+    if (actionFilter !== 'all' && logAction !== actionFilter) return false
     if (!query) return true
     return [
       log.user_name,
@@ -277,50 +298,95 @@ export default function AuditLog() {
     ]
       .map((value) => String(value || '').toLowerCase())
       .some((value) => value.includes(query))
-  }), [logs, query])
+  }), [actionFilter, logs, monthFilter, query, yearFilter])
 
-  const timeFilteredLogs = useMemo(() => {
-    const activeFilter = TIME_FILTERS.find((entry) => entry.id === timeFilter)
-    if (!activeFilter?.days) return searchedLogs
-
-    const now = Date.now()
-    const rangeStart = activeFilter.days === 1
-      ? (() => {
-          const start = new Date()
-          start.setHours(0, 0, 0, 0)
-          return start.getTime()
-        })()
-      : now - (activeFilter.days * 24 * 60 * 60 * 1000)
-
-    return searchedLogs.filter((log) => getLogEpoch(log) >= rangeStart)
-  }, [searchedLogs, timeFilter])
-
-  const chronologicalLogs = useMemo(() => (
-    [...timeFilteredLogs].sort((a, b) => {
-      const delta = getLogEpoch(a) - getLogEpoch(b)
+  const orderedLogs = useMemo(() => {
+    const next = [...filtered]
+    next.sort((left, right) => {
+      const delta = getLogEpoch(left) - getLogEpoch(right)
       if (delta !== 0) return delta
-      return Number(a?.id || 0) - Number(b?.id || 0)
+      return Number(left?.id || 0) - Number(right?.id || 0)
     })
-  ), [timeFilteredLogs])
+    return sortDirection === 'asc' ? next : next.reverse()
+  }, [filtered, sortDirection])
 
-  const filtered = useMemo(() => (
-    sortDirection === 'asc' ? chronologicalLogs : [...chronologicalLogs].reverse()
-  ), [chronologicalLogs, sortDirection])
+  const groupedSections = useMemo(() => buildTimeActionSections(orderedLogs, {
+    getDate: (log) => log?.client_time || log?.created_at,
+    getItemId: (log) => Number(log?.id),
+    getActionKey: (log) => String(log?.action || '').toLowerCase() || 'other',
+    getActionLabel: (log) => actionLabel(log?.action),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+  }), [actionLabel, monthFilter, orderedLogs, timeMode, yearFilter])
+
+  const visibleLogs = useMemo(
+    () => groupedSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+    [groupedSections],
+  )
+
+  useEffect(() => {
+    const validIds = new Set(visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)))
+    setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
+  }, [visibleLogs])
+
+  const visibleIds = useMemo(
+    () => visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)),
+    [visibleLogs],
+  )
+
+  const selectedLogs = useMemo(
+    () => visibleLogs.filter((log) => selectedIds.has(Number(log.id))),
+    [selectedIds, visibleLogs],
+  )
+
+  useEffect(() => {
+    if (!selectAllRef.current) return
+    selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
+  }, [selectedIds.size, visibleIds.length])
+
+  const toggleSelected = useCallback((logId) => {
+    const numericId = Number(logId)
+    if (!Number.isFinite(numericId)) return
+    setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
+  }, [])
+
+  const toggleSelectAll = useCallback((checked) => {
+    if (!checked) {
+      setSelectedIds(new Set())
+      return
+    }
+    setSelectedIds(new Set(visibleIds))
+  }, [visibleIds])
+
+  const toggleSelectionScope = useCallback((ids, checked) => {
+    setSelectedIds((current) => toggleIdSet(current, ids, checked))
+  }, [])
+
+  const isSelectionScopeFullySelected = useCallback(
+    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
+    [selectedIds],
+  )
+
+  const isSelectionScopePartiallySelected = useCallback(
+    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
+    [isSelectionScopeFullySelected, selectedIds],
+  )
 
   const rowNumberById = useMemo(() => {
     const next = new Map()
-    chronologicalLogs.forEach((log, index) => {
+    orderedLogs.forEach((log, index) => {
       next.set(log.id, index + 1)
     })
     return next
-  }, [chronologicalLogs])
+  }, [orderedLogs])
 
   function sessionEntryLabel(log) {
     return `#${rowNumberById.get(log.id) || 0}`
   }
 
-  const exportCsv = useCallback(() => {
-    const rows = filtered.map((log) => ({
+  const exportRows = useCallback((rows, prefix = 'audit-log') => {
+    downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows.map((log) => ({
       Entry: sessionEntryLabel(log),
       Time: formatLogTime(log),
       Entity: formatEntityName(log),
@@ -329,9 +395,77 @@ export default function AuditLog() {
       Device: log.device_name || '',
       Timezone: log.device_tz || '',
       Summary: readableSummary(log) || '',
-    }))
-    downloadCSV(`audit-log-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-  }, [actionLabel, filtered, rowNumberById])
+    })))
+  }, [actionLabel, rowNumberById])
+
+  const exportItems = useMemo(() => ([
+    { label: 'Export visible logs', onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
+    selectedLogs.length ? { label: 'Export selected logs', onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
+    actionFilter !== 'all' ? { label: `Export ${actionLabel(actionFilter)}`, onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
+  ].filter(Boolean)), [actionFilter, actionLabel, exportRows, monthFilter, selectedLogs.length, selectedLogs, visibleLogs, yearFilter])
+
+  const filterSections = useMemo(() => ([
+    {
+      id: 'year',
+      label: copy('year', 'Year'),
+      options: [
+        { id: 'all', label: copy('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: copy('month', 'Month'),
+      options: [
+        { id: 'all', label: copy('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'action',
+      label: t('action') || 'Action',
+      options: [
+        { id: 'all', label: t('all_actions') || 'All actions', active: actionFilter === 'all', onClick: () => setActionFilter('all') },
+        ...actionOptions.map(([id, label]) => ({
+          id,
+          label,
+          active: actionFilter === id,
+          onClick: () => setActionFilter(actionFilter === id ? 'all' : id),
+        })),
+      ],
+    },
+    {
+      id: 'sort',
+      label: copy('sort', 'Sort'),
+      options: [
+        { id: 'desc', label: copy('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
+        { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+      ],
+    },
+  ]), [actionFilter, actionOptions, availableYears, copy, monthFilter, sortDirection, t, yearFilter])
+
+  const activeFilterCount = useMemo(
+    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length,
+    [actionFilter, monthFilter, sortDirection, yearFilter],
+  )
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
@@ -341,56 +475,50 @@ export default function AuditLog() {
           {t('audit_log') || 'Audit Log'}
         </h1>
         <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
-          <label htmlFor="audit-log-time-filter" className="sr-only">{copy('time', 'Time', 'ពេលវេលា')}</label>
-          <select
-            id="audit-log-time-filter"
-            name="audit_log_time_filter"
-            className="input h-9 min-w-[8rem] shrink-0 px-3 py-1.5 text-xs sm:text-sm"
-            value={timeFilter}
-            onChange={(event) => setTimeFilter(event.target.value)}
-          >
-            <option value="all">{copy('all_time', 'All time', 'គ្រប់ពេល')}</option>
-            <option value="today">{copy('today', 'Today', 'ថ្ងៃនេះ')}</option>
-            <option value="7d">{copy('last_7_days', 'Last 7 days', '៧ ថ្ងៃចុងក្រោយ')}</option>
-            <option value="30d">{copy('last_30_days', 'Last 30 days', '៣០ ថ្ងៃចុងក្រោយ')}</option>
-          </select>
-          <label htmlFor="audit-log-sort-direction" className="sr-only">{copy('sort', 'Sort', 'តម្រៀប')}</label>
-          <select
-            id="audit-log-sort-direction"
-            name="audit_log_sort_direction"
-            className="input h-9 min-w-[8rem] shrink-0 px-3 py-1.5 text-xs sm:text-sm"
-            value={sortDirection}
-            onChange={(event) => setSortDirection(event.target.value)}
-          >
-            <option value="desc">{copy('newest_first', 'Newest first', 'ថ្មីបំផុតមុន')}</option>
-            <option value="asc">{copy('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន')}</option>
-          </select>
           <button onClick={load} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className="h-4 w-4" />
-            {copy('refresh', 'Refresh', 'ស្រស់ថ្មី')}
+            {copy('refresh', 'Refresh')}
           </button>
-          <button onClick={exportCsv} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
-              <Download className="h-4 w-4" />
-            {copy('export', 'Export', 'នាំចេញ')}
-          </button>
+          <ExportMenu label={copy('export', 'Export')} items={exportItems} compact />
         </div>
       </div>
 
-      <div className="mb-3">
-        <div className="relative max-w-sm">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label htmlFor="audit-log-search" className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <label htmlFor="audit-log-search" className="sr-only">{t('search_audit_placeholder') || 'Search logs'}</label>
           <input
             id="audit-log-search"
             name="audit_log_search"
-            className="input w-full pl-9 text-sm"
+            className="input min-w-0 w-full pl-9 text-sm"
             placeholder={t('search_audit_placeholder') || 'Search logs'}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             autoComplete="off"
           />
-        </div>
+        </label>
+        <FilterMenu
+          label={t('filters') || 'Filters'}
+          activeCount={activeFilterCount}
+          sections={filterSections}
+          onClear={() => {
+            setYearFilter('all')
+            setMonthFilter('all')
+            setActionFilter('all')
+            setSortDirection('desc')
+          }}
+          compact
+        />
       </div>
+
+      {selectedLogs.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
+          <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedLogs.length} selected</span>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>Export selected</button>
+          <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
+            {t('clear') || 'Clear'}
+          </button>
+        </div>
+      ) : null}
 
       <p className="mb-3 text-xs text-gray-400">{t('audit_log_desc') || 'Click a row to see full details.'}</p>
 
@@ -414,6 +542,16 @@ export default function AuditLog() {
           <table className="w-full min-w-[860px] text-sm table-bordered">
             <thead className="sticky top-0 z-10">
               <tr>
+                <th className="w-10 px-3 py-3">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
+                    onChange={(event) => toggleSelectAll(event.target.checked)}
+                    aria-label="Select all audit logs"
+                  />
+                </th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{copy('entry', 'Entry', 'លំដាប់')}</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Entity</th>
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('user') || 'User'}</th>
@@ -425,44 +563,101 @@ export default function AuditLog() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
               {loading ? (
-                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
-              ) : filtered.map((log) => (
-                <tr
-                  key={log.id}
-                  className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10"
-                  onClick={() => setDetailLog(log)}
-                >
-                  <td className="px-3 py-2">
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="text-xs font-medium text-gray-800 dark:text-gray-200">{formatEntityName(log)}</div>
-                  </td>
-                  <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
-                  <td className="px-3 py-2">
-                    <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
-                      {actionLabel(log.action)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="max-w-[170px] truncate text-xs text-gray-700 dark:text-gray-300" title={log.device_name || ''}>
-                      {log.device_name || '--'}
-                    </div>
-                    <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{log.device_tz || '--'}</div>
-                  </td>
-                  <td className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-400">{formatLogTime(log)}</td>
-                </tr>
+                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+              ) : visibleLogs.length === 0 ? (
+                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
+              ) : groupedSections.map((section) => (
+                <Fragment key={section.id}>
+                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                    <td colSpan={8} className="px-4 py-2">
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(section.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                            aria-label={`Select ${section.label}`}
+                          />
+                          <span>{section.label}</span>
+                        </label>
+                        <span className="text-slate-400">{section.ids.length}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {section.groups.map((group) => (
+                    <Fragment key={group.id}>
+                      <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                        <td colSpan={8} className="px-6 py-2">
+                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                            <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded"
+                                checked={isSelectionScopeFullySelected(group.ids)}
+                                ref={(node) => {
+                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                }}
+                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                aria-label={`Select ${group.label}`}
+                              />
+                              <span>{group.label}</span>
+                            </label>
+                            <span className="text-slate-400">{group.items.length}</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {group.items.map((log) => (
+                        <tr
+                          key={log.id}
+                          className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10"
+                          onClick={() => setDetailLog(log)}
+                        >
+                          <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded"
+                              checked={selectedIds.has(Number(log.id))}
+                              onChange={() => toggleSelected(log.id)}
+                              aria-label={`Select ${sessionEntryLabel(log)}`}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="text-xs font-medium text-gray-800 dark:text-gray-200">{formatEntityName(log)}</div>
+                          </td>
+                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
+                              {actionLabel(log.action)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="max-w-[170px] truncate text-xs text-gray-700 dark:text-gray-300" title={log.device_name || ''}>
+                              {log.device_name || '--'}
+                            </div>
+                            <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{log.device_tz || '--'}</div>
+                          </td>
+                          <td className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                            {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-400">{formatLogTime(log)}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          <span>{filtered.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
+          <span>{visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
           <span>{t('click_row_details') || 'Click a row for details'}</span>
         </div>
       </div>
@@ -470,31 +665,81 @@ export default function AuditLog() {
       <div className="space-y-2 sm:hidden">
         {loading ? (
           <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
-        ) : filtered.length === 0 ? (
+        ) : visibleLogs.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>
-        ) : filtered.map((log) => (
-          <button
-            key={log.id}
-            type="button"
-            className="card w-full p-3 text-left active:bg-blue-50 dark:active:bg-blue-900/10"
-            onClick={() => setDetailLog(log)}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
-                    {actionLabel(log.action)}
-                  </span>
-                  <span className="text-xs text-gray-500">{formatEntityName(log)}</span>
-                </div>
-                <div className="text-xs font-semibold text-gray-500">{sessionEntryLabel(log)}</div>
-                {readableSummary(log) ? <div className="mt-1 text-xs text-gray-400 line-clamp-2">{readableSummary(log)}</div> : null}
-                <div className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-300">{log.user_name || '--'}</div>
-                <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-gray-300" />
+        ) : groupedSections.map((section) => (
+          <div key={section.id} className="space-y-2">
+            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded"
+                  checked={isSelectionScopeFullySelected(section.ids)}
+                  ref={(node) => {
+                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                  }}
+                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                  aria-label={`Select ${section.label}`}
+                />
+                <span>{section.label}</span>
+                <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+              </label>
             </div>
-          </button>
+            {section.groups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSelectionScopeFullySelected(group.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                      }}
+                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                      aria-label={`Select ${group.label}`}
+                    />
+                    <span>{group.label}</span>
+                    <span className="text-slate-400">{group.items.length}</span>
+                  </label>
+                </div>
+                {group.items.map((log) => (
+                  <button
+                    key={log.id}
+                    type="button"
+                    className="card w-full p-3 text-left active:bg-blue-50 dark:active:bg-blue-900/10"
+                    onClick={() => setDetailLog(log)}
+                  >
+                    <div className="mb-2 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={selectedIds.has(Number(log.id))}
+                        onChange={() => toggleSelected(log.id)}
+                        aria-label={`Select ${sessionEntryLabel(log)}`}
+                      />
+                      <span className="text-xs text-gray-500">{t('select') || 'Select'}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
+                            {actionLabel(log.action)}
+                          </span>
+                          <span className="text-xs text-gray-500">{formatEntityName(log)}</span>
+                        </div>
+                        <div className="text-xs font-semibold text-gray-500">{sessionEntryLabel(log)}</div>
+                        {readableSummary(log) ? <div className="mt-1 text-xs text-gray-400 line-clamp-2">{readableSummary(log)}</div> : null}
+                        <div className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-300">{log.user_name || '--'}</div>
+                        <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-gray-300" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
         ))}
       </div>
 

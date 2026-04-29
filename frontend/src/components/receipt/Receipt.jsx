@@ -2,16 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Download, FileText, Printer } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { downloadReceiptPdf, openReceiptPdf } from '../../utils/printReceipt'
-import { DEFAULT_TEMPLATE } from '../receipt-settings/constants'
+import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
-
-export function parseTpl(str) {
-  try {
-    return { ...DEFAULT_TEMPLATE, ...(str ? JSON.parse(str) : {}) }
-  } catch {
-    return { ...DEFAULT_TEMPLATE }
-  }
-}
 
 function stripEmoji(text) {
   if (typeof text !== 'string') return text
@@ -139,7 +131,7 @@ function Row({ label, value, subValue, bold = false, tone = '' }) {
 export default function Receipt({ sale, settings, onClose, _previewMode }) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
   const printRef = useRef(null)
-  const tpl = parseTpl(settings?.receipt_template)
+  const tpl = parseReceiptTemplate(settings?.receipt_template)
   const [lang, setLang] = useState(tpl.receipt_language || 'en')
   const [pdfBusy, setPdfBusy] = useState('')
 

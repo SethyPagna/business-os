@@ -24,6 +24,7 @@ import { useApp } from '../../AppContext'
 import UserProfileModal from '../users/UserProfileModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
+import NotificationCenter from '../shared/NotificationCenter'
 
 const ICONS_BY_ID = {
   dashboard: LayoutDashboard,
@@ -236,6 +237,7 @@ export default function Sidebar() {
           </div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
+          <NotificationCenter compact visibility="mobile" />
           <QuickPreferenceToggles />
           <button type="button" onClick={() => setProfileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">

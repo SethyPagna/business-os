@@ -51,6 +51,12 @@ export function getAvailableYears(items = [], getDate = (item) => item?.created_
   return [...years].sort((left, right) => Number(right) - Number(left))
 }
 
+export function getTimeGroupingMode(year = 'all', month = 'all') {
+  if (month !== 'all') return 'day'
+  if (year !== 'all') return 'month'
+  return 'year'
+}
+
 export function buildTimeActionSections(items = [], {
   getDate = (item) => item?.created_at,
   getItemId = (item) => item?.id,
@@ -67,8 +73,17 @@ export function buildTimeActionSections(items = [], {
     if (!matchesYearMonthFilters(dateValue, { year, month })) continue
 
     const parts = getTimeParts(dateValue)
-    const sectionId = timeMode === 'year' ? parts.yearLabel : parts.monthKey
-    const sectionLabel = timeMode === 'year' ? parts.yearLabel : parts.monthLabel
+    const normalizedTimeMode = timeMode === 'day' ? 'day' : (timeMode === 'year' ? 'year' : 'month')
+    const sectionId = normalizedTimeMode === 'year'
+      ? parts.yearLabel
+      : normalizedTimeMode === 'day'
+        ? parts.dayKey
+        : parts.monthKey
+    const sectionLabel = normalizedTimeMode === 'year'
+      ? parts.yearLabel
+      : normalizedTimeMode === 'day'
+        ? parts.dayLabel
+        : parts.monthLabel
     const actionKey = String(getActionKey(item) || 'other')
     const actionLabel = String(getActionLabel(item) || actionKey)
 

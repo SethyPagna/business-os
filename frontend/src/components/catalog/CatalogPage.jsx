@@ -94,7 +94,7 @@ const PORTAL_TEXT = {
     portalTitle: 'Portal title',
     portalIntro: 'Portal intro',
     language: 'Portal language',
-    followApp: 'Follow app',
+    followApp: 'English (default source)',
     english: 'English',
     khmer: 'Khmer',
     links: 'Social links',
@@ -225,7 +225,7 @@ const PORTAL_TEXT = {
     portalTitle: 'ចំណងជើងទំព័រ',
     portalIntro: 'អត្ថបទណែនាំ',
     language: 'ភាសាទំព័រ',
-    followApp: 'តាមកម្មវិធី',
+    followApp: 'អង់គ្លេស (ភាសាមូលដ្ឋាន)',
     english: 'អង់គ្លេស',
     khmer: 'ខ្មែរ',
     links: 'តំណភ្ជាប់បណ្ដាញសង្គម',
@@ -614,7 +614,7 @@ Object.assign(PORTAL_KM_FALLBACKS, {
   portalTitle: 'ចំណងជើងផតថល',
   portalIntro: 'អត្ថបទណែនាំផតថល',
   language: 'ភាសាផតថល',
-  followApp: 'តាមកម្មវិធី',
+  followApp: 'អង់គ្លេស (ភាសាមូលដ្ឋាន)',
   english: 'អង់គ្លេស',
   khmer: 'ខ្មែរ',
   showCatalog: 'បង្ហាញកាតាឡុកផលិតផល',
@@ -993,7 +993,7 @@ function buildDraft(config) {
     customer_portal_show_facebook: !!config.showFacebook,
     customer_portal_show_instagram: !!config.showInstagram,
     customer_portal_show_telegram: !!config.showTelegram,
-    customer_portal_title: config.title || '',
+    customer_portal_title: config.businessName || config.title || '',
     customer_portal_title_size: String(config.titleSize ?? 40),
     customer_portal_intro: config.intro || '',
     customer_portal_ai_enabled: !!config.aiEnabled,
@@ -1044,7 +1044,7 @@ function buildDraft(config) {
 function applyDraft(config, draft) {
   const languageSetting = draft.customer_portal_language || config.languageSetting || 'auto'
   const resolvedLanguage = languageSetting === 'auto'
-    ? (config.language || 'en')
+    ? 'en'
     : languageSetting
 
   return {
@@ -1087,7 +1087,7 @@ function applyDraft(config, draft) {
     showFacebook: toBoolean(draft.customer_portal_show_facebook, config.showFacebook),
     showInstagram: toBoolean(draft.customer_portal_show_instagram, config.showInstagram),
     showTelegram: toBoolean(draft.customer_portal_show_telegram, config.showTelegram),
-    title: draft.customer_portal_title || config.title,
+    title: draft.business_name || draft.customer_portal_title || config.businessName || config.title,
     titleSize: Math.min(64, Math.max(28, Math.round(toNumber(draft.customer_portal_title_size, config.titleSize || 40)))),
     intro: draft.customer_portal_intro || config.intro,
     aiEnabled: toBoolean(draft.customer_portal_ai_enabled, config.aiEnabled),
@@ -1137,8 +1137,8 @@ function applyDraft(config, draft) {
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
-    gridColumnsMobile: Math.min(2, Math.max(1, Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)))),
-    gridColumnsDesktop: Math.min(6, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
+    gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)))),
+    gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
     pointsPerUsd: toNumber(draft.customer_portal_points_per_usd, config.pointsPerUsd),
     pointsPerKhr: toNumber(draft.customer_portal_points_per_khr, config.pointsPerKhr),
@@ -2058,13 +2058,13 @@ export default function CatalogPage({ publicView = false }) {
       const sanitizedRefreshSeconds = Math.min(120, Math.max(5, Math.floor(toNumber(editorDraft.customer_portal_refresh_seconds, 20))))
       const sanitizedLowStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_low_stock_threshold, 10))
       const sanitizedOutOfStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_out_of_stock_threshold, 0))
-      const sanitizedGridMobile = Math.min(2, Math.max(1, Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1))))
-        const sanitizedGridDesktop = Math.min(6, Math.max(2, Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4))))
-        const sanitizedLogoSize = Math.min(144, Math.max(48, Math.round(toNumber(editorDraft.customer_portal_logo_size, 80))))
-        const sanitizedLogoZoom = Math.min(180, Math.max(80, Math.round(toNumber(editorDraft.customer_portal_logo_zoom, 100))))
-        const sanitizedLogoPositionX = Math.min(100, Math.max(0, Math.round(toNumber(editorDraft.customer_portal_logo_position_x, 50))))
-        const sanitizedLogoPositionY = Math.min(100, Math.max(0, Math.round(toNumber(editorDraft.customer_portal_logo_position_y, 50))))
-        const sanitizedPublicUrl = String(editorDraft.customer_portal_public_url || '').trim()
+      const sanitizedGridMobile = Math.min(3, Math.max(1, Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1))))
+      const sanitizedGridDesktop = Math.min(8, Math.max(2, Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4))))
+      const sanitizedLogoSize = Math.min(144, Math.max(48, Math.round(toNumber(editorDraft.customer_portal_logo_size, 80))))
+      const sanitizedLogoZoom = Math.min(180, Math.max(80, Math.round(toNumber(editorDraft.customer_portal_logo_zoom, 100))))
+      const sanitizedLogoPositionX = Math.min(100, Math.max(0, Math.round(toNumber(editorDraft.customer_portal_logo_position_x, 50))))
+      const sanitizedLogoPositionY = Math.min(100, Math.max(0, Math.round(toNumber(editorDraft.customer_portal_logo_position_y, 50))))
+      const sanitizedPublicUrl = String(editorDraft.customer_portal_public_url || '').trim()
       const sanitizedGoogleMapEmbed = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
       if (sanitizedPublicUrl && !/^https?:\/\/.+/i.test(sanitizedPublicUrl)) {
         notify(copy('publicUrlHint', 'Use a full https:// URL for the public customer portal if you set one.'), 'error')
@@ -2111,7 +2111,7 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_show_facebook: editorDraft.customer_portal_show_facebook ? 'true' : 'false',
         customer_portal_show_instagram: editorDraft.customer_portal_show_instagram ? 'true' : 'false',
         customer_portal_show_telegram: editorDraft.customer_portal_show_telegram ? 'true' : 'false',
-        customer_portal_title: editorDraft.customer_portal_title || '',
+        customer_portal_title: String(editorDraft.business_name || editorDraft.customer_portal_title || '').trim(),
         customer_portal_title_size: String(Math.min(64, Math.max(28, Math.round(toNumber(editorDraft.customer_portal_title_size, 40))))),
         customer_portal_intro: editorDraft.customer_portal_intro || '',
         customer_portal_ai_enabled: editorDraft.customer_portal_ai_enabled ? 'true' : 'false',
@@ -2141,8 +2141,8 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
         customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
-        customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
-        customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
+        customer_portal_grid_columns_mobile: String(Math.min(3, Math.max(1, sanitizedGridMobile))),
+        customer_portal_grid_columns_desktop: String(Math.min(8, Math.max(2, sanitizedGridDesktop))),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
@@ -2406,8 +2406,8 @@ export default function CatalogPage({ publicView = false }) {
       units: membershipData?.points?.redeemableUnits ?? 0,
     }
   )
-  const mobileGridColumns = Math.min(2, Math.max(1, Math.round(toNumber(previewConfig.gridColumnsMobile, 1))))
-  const desktopGridColumns = Math.min(6, Math.max(2, Math.round(toNumber(previewConfig.gridColumnsDesktop, 4))))
+  const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(previewConfig.gridColumnsMobile, 1))))
+  const desktopGridColumns = Math.min(8, Math.max(2, Math.round(toNumber(previewConfig.gridColumnsDesktop, 4))))
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = desktopGridColumns === 2
     ? 'lg:grid-cols-2'
@@ -2644,7 +2644,7 @@ export default function CatalogPage({ publicView = false }) {
                   className="input"
                   type="number"
                   min="1"
-                  max="2"
+                  max="3"
                   step="1"
                   value={editorDraft.customer_portal_grid_columns_mobile || '1'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_mobile', event.target.value)}
@@ -2658,7 +2658,7 @@ export default function CatalogPage({ publicView = false }) {
                   className="input"
                   type="number"
                   min="2"
-                  max="6"
+                  max="8"
                   step="1"
                   value={editorDraft.customer_portal_grid_columns_desktop || '4'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}
@@ -2965,9 +2965,10 @@ export default function CatalogPage({ publicView = false }) {
               />
               <p className="mt-2 text-xs text-slate-500">{copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')}</p>
             </div>
-            <label className="mt-3 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div>
                 <div className="text-sm font-medium text-slate-700">{copy('translateWidget', 'Enable public translate widget')}</div>
+                <div className="mt-1 text-xs text-slate-500">{copy('translateWidgetHint', 'Public customers can switch languages with Google Translate. English stays the source language for the portal.')}</div>
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
@@ -3041,7 +3042,7 @@ export default function CatalogPage({ publicView = false }) {
                 <div>
                   <label htmlFor="portal-language" className="block text-sm font-medium text-slate-700">{copy('language', 'Portal language')}</label>
                   <select id="portal-language" name="customer_portal_language" className="input" value={editorDraft.customer_portal_language || 'auto'} onChange={(event) => setDraft('customer_portal_language', event.target.value)}>
-                    <option value="auto">{copy('followApp', 'Follow app')}</option>
+                    <option value="auto">{copy('followApp', 'English (default source)')}</option>
                     <option value="en">{copy('english', 'English')}</option>
                     <option value="km">{copy('khmer', 'Khmer')}</option>
                   </select>
