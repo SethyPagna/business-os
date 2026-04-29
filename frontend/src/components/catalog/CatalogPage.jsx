@@ -1537,15 +1537,17 @@ export default function CatalogPage({ publicView = false }) {
     }
 
     const requestId = beginTrackedRequest(assistantStatusRequestRef)
-    withLoaderTimeout(() => window.api.getPortalAiStatus(), 'Portal AI status')
-      .then((result) => {
-        if (!isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
+    async function loadAssistantStatus() {
+      try {
+        const result = await withLoaderTimeout(() => window.api.getPortalAiStatus(), 'Portal AI status')
+        if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
         setAssistantUsage(result?.usage || null)
         setAssistantRequestPolicy(result?.requestPolicy || null)
-      })
-      .catch(() => {
-        if (!isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
-      })
+      } catch {
+        if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
+      }
+    }
+    loadAssistantStatus()
 
     return () => {
       invalidateTrackedRequest(assistantStatusRequestRef)

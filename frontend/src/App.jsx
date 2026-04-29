@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import Login from './components/auth/Login'
@@ -38,6 +38,8 @@ const PAGE_IMPORTERS = {
   catalog: () => import('./components/catalog/CatalogPage'),
   loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
 }
+
+const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 
 const WARMUP_PAGE_IDS = [
   'dashboard',
@@ -616,6 +618,7 @@ export default function App() {
     theme,
     t,
   } = useApp()
+  const faviconRequestRef = useRef(0)
   const { syncError, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
 
@@ -643,7 +646,8 @@ export default function App() {
     let iconEl = document.querySelector('link[rel="icon"]')
     let createdIcon = false
     let previousHref = ''
-    let cancelled = false
+    const requestId = (Number(faviconRequestRef.current) || 0) + 1
+    faviconRequestRef.current = requestId
 
     if (iconEl) previousHref = iconEl.getAttribute('href') || ''
     if (!iconEl) {
@@ -653,18 +657,24 @@ export default function App() {
       createdIcon = true
     }
 
-    createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 })
-      .then((faviconHref) => {
-        if (cancelled || !iconEl) return
+    async function loadFavicon() {
+      try {
+        const faviconHref = await withLoaderTimeout(
+          () => createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
+          'App favicon',
+          APP_FAVICON_REQUEST_TIMEOUT_MS,
+        )
+        if (faviconRequestRef.current !== requestId || !iconEl) return
         iconEl.setAttribute('href', faviconHref || iconSource)
-      })
-      .catch(() => {
-        if (cancelled || !iconEl) return
+      } catch {
+        if (faviconRequestRef.current !== requestId || !iconEl) return
         iconEl.setAttribute('href', iconSource)
-      })
+      }
+    }
+    loadFavicon()
 
     return () => {
-      cancelled = true
+      faviconRequestRef.current = requestId + 1
       if (createdIcon && iconEl) {
         iconEl.remove()
       } else if (iconEl) {

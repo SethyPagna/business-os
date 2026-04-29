@@ -395,19 +395,21 @@ export default function Settings() {
       return undefined
     }
     const requestId = beginTrackedRequest(faviconPreviewRequestRef)
-    withLoaderTimeout(
-      () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
-      'Settings favicon preview',
-      8000,
-    )
-      .then((preview) => {
+    async function loadFaviconPreview() {
+      try {
+        const preview = await withLoaderTimeout(
+          () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
+          'Settings favicon preview',
+          8000,
+        )
         if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
         setAppFaviconPreview(preview || source)
-      })
-      .catch(() => {
+      } catch {
         if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
         setAppFaviconPreview(source)
-      })
+      }
+    }
+    loadFaviconPreview()
     return () => invalidateTrackedRequest(faviconPreviewRequestRef)
   }, [form.ui_app_favicon_image, settings.ui_app_favicon_image])
 

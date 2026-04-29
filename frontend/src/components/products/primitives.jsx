@@ -57,15 +57,17 @@ function ProductImg({ src, alt, className, onClick }) {
       }
     }
     if (window.api?.getImageDataUrl) {
-      Promise.resolve(window.api.getImageDataUrl(src))
-        .then((data) => {
+      async function loadImageData() {
+        try {
+          const data = await window.api.getImageDataUrl(src)
           if (imageRequestRef.current !== requestId) return
           setUrl(data || null)
-        })
-        .catch(() => {
+        } catch {
           if (imageRequestRef.current !== requestId) return
           setUrl(null)
-        })
+        }
+      }
+      loadImageData()
     } else {
       setUrl(null)
     }
