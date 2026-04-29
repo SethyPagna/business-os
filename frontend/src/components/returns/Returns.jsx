@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, RotateCcw, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -7,7 +7,12 @@ import ReturnDetailModal from './ReturnDetailModal'
 import EditReturnModal from './EditReturnModal'
 import NewReturnModal from './NewReturnModal'
 import NewSupplierReturnModal from './NewSupplierReturnModal'
-import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -33,22 +38,32 @@ export default function Returns() {
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editRet, setEditRet] = useState(null)
   const [loading, setLoading] = useState(true)
+  const returnsRequestRef = useRef(0)
+  const editRequestRef = useRef(0)
 
   const loadReturns = useCallback(async (silent = false) => {
+    const requestId = beginTrackedRequest(returnsRequestRef)
     if (!silent) setLoading(true)
     try {
       const params = { scope }
       const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns')
+      if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
       setRows(Array.isArray(result) ? result : [])
     } catch (error) {
+      if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
       console.error('[Returns] load failed:', error?.message)
       setRows([])
     } finally {
-      if (!silent) setLoading(false)
+      if (isTrackedRequestCurrent(returnsRequestRef, requestId) && !silent) setLoading(false)
     }
   }, [scope])
 
-  useEffect(() => { loadReturns() }, [loadReturns])
+  useEffect(() => {
+    loadReturns()
+    return () => {
+      invalidateTrackedRequest(returnsRequestRef)
+    }
+  }, [loadReturns])
 
   useEffect(() => {
     if (!syncChannel) return
@@ -58,6 +73,7 @@ export default function Returns() {
   }, [syncChannel, loadReturns])
 
   const handleOpenEdit = async (ret) => {
+    const requestId = beginTrackedRequest(editRequestRef)
     const retScope = normalizeScope(ret?.return_scope)
     if (retScope !== CUSTOMER_SCOPE) {
       notify(tr('supplier_return_edit_not_supported', 'Supplier returns cannot be edited from this form yet.'), 'info')
@@ -65,9 +81,11 @@ export default function Returns() {
     }
     setDetailRet(null)
     try {
-      const fresh = await window.api.getReturn(ret.id)
+      const fresh = await withLoaderTimeout(() => window.api.getReturn(ret.id), 'Return details')
+      if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
       setEditRet(fresh || ret)
     } catch {
+      if (!isTrackedRequestCurrent(editRequestRef, requestId)) return
       setEditRet(ret)
     }
   }

@@ -1,7 +1,13 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 export default
 function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
@@ -30,22 +36,30 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
   const [returnType,    setReturnType]    = useState('restock')
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
+  const searchRequestRef = useRef(0)
+  const searchInFlightRef = useRef(false)
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return
+    if (!searchQuery.trim() || searchInFlightRef.current) return
+    const requestId = beginTrackedRequest(searchRequestRef)
+    searchInFlightRef.current = true
     setSearching(true)
     try {
-      const sales = await window.api.getSales({ limit: 500 })
+      const sales = await withLoaderTimeout(() => window.api.getSales({ limit: 500 }), 'Return sale search')
+      if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
       const q = searchQuery.trim().toLowerCase()
       const found = sales.find(s =>
         s.receipt_number?.toLowerCase().includes(q) || String(s.id) === q
       )
       if (found) {
-        setFoundSale(found)
         const items = Array.isArray(found.items) ? found.items : []
         let alreadyReturned = {}
         try {
-          const existingReturns = await window.api.getReturns({ saleId: found.id }).catch(() => [])
+          const existingReturns = await withLoaderTimeout(
+            () => window.api.getReturns({ saleId: found.id }).catch(() => []),
+            'Return history lookup',
+          )
+          if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
           ;(existingReturns || []).forEach(ret => {
             if ((ret.status || 'completed') === 'cancelled') return
             ;(ret.items || []).forEach(ri => {
@@ -54,6 +68,8 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
             })
           })
         } catch (_) {}
+        if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
+        setFoundSale(found)
         setSelectedItems(items.map(item => {
           const key = item.id || `p_${item.product_id}`
           const alreadyQty = alreadyReturned[key] || 0
@@ -62,12 +78,17 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
         }))
         setStep('items')
       } else {
+        if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         notify(T('sale_not_found', 'Sale not found. Try the receipt number or sale ID.'), 'error')
       }
     } catch (e) {
+      if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
       notify((T('search_error','Search error') || T('error','Error')) + ': ' + (e.message || e), 'error')
     } finally {
-      setSearching(false)
+      if (isTrackedRequestCurrent(searchRequestRef, requestId)) {
+        searchInFlightRef.current = false
+        setSearching(false)
+      }
     }
   }
 
@@ -197,7 +218,7 @@ function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }) {
                 </div>
               </div>
               <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <button onClick={() => { setFoundSale(null); setSelectedItems([]); setStep('items') }}
+                <button onClick={() => { invalidateTrackedRequest(searchRequestRef); searchInFlightRef.current = false; setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
                   {T('btn_manual_return','→ Skip — manual return (no sale linked)')}
                 </button>
