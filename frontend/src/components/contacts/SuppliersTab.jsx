@@ -1,11 +1,16 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
-import { Download, Plus, Upload } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useMemo } from 'react'
+import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import FilterMenu from '../shared/FilterMenu'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 
 function SupplierForm({ supplier, onSave, onClose, t }) {
   const init = supplier
@@ -71,6 +76,8 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
 function SuppliersTab({ t, notify }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
+  const loadRequestRef = useRef(0)
+  const loadedOnceRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -82,8 +89,12 @@ function SuppliersTab({ t, notify }) {
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
+  const [sortDirection, setSortDirection] = useState('desc')
+  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
 
-  const filtered = suppliers.filter((supplier) => {
+  const filteredBySearch = suppliers.filter((supplier) => {
     const query = search.toLowerCase().trim()
     if (!query) return true
     return (
@@ -95,25 +106,124 @@ function SuppliersTab({ t, notify }) {
     )
   })
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
+  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const availableYears = useMemo(
+    () => getAvailableYears(filteredBySearch, (supplier) => supplier?.created_at),
+    [filteredBySearch],
+  )
+  const filteredSections = useMemo(() => buildTimeActionSections(filteredBySearch, {
+    getDate: (supplier) => supplier?.created_at,
+    getItemId: (supplier) => Number(supplier?.id),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+    groupMode: 'time',
+    sortDirection,
+  }), [filteredBySearch, monthFilter, sortDirection, timeMode, yearFilter])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  useEffect(() => {
+    setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
+  }, [filteredSections])
+
+  const visibleSuppliers = useMemo(
+    () => filteredSections.flatMap((section) => section.items),
+    [filteredSections],
+  )
+  const displayRows = useMemo(
+    () => filteredSections.flatMap((section) => {
+      const collapsed = collapsedSections.has(section.id)
+      return [{ __kind: 'section', section, collapsed }, ...(!collapsed ? section.items : [])]
+    }),
+    [collapsedSections, filteredSections],
+  )
+
+  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleSuppliers)
+  const supplierColumns = [t('name'), t('phone'), t('email'), t('company'), t('contact_person') || 'Contact']
+  const contactFilterSections = useMemo(() => ([
+    {
+      id: 'year',
+      label: tr('year', 'Year'),
+      options: [
+        { id: 'all-years', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: tr('month', 'Month'),
+      options: [
+        { id: 'all-months', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'sort',
+      label: tr('sort', 'Sort'),
+      options: [
+        { id: 'sort-desc', label: tr('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
+        { id: 'sort-asc', label: tr('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+      ],
+    },
+  ]), [availableYears, monthFilter, sortDirection, tr, yearFilter])
+  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length
+  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+    const next = new Set(current)
+    if (next.has(sectionId)) next.delete(sectionId)
+    else next.add(sectionId)
+    return next
+  })
+  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids, checked) => {
+    ids.forEach((id) => {
+      const numericId = Number(id)
+      const isSelected = selectedIds.has(numericId)
+      if ((checked && !isSelected) || (!checked && isSelected)) toggleOne(numericId)
+    })
+  }
+
+  const load = useCallback(async ({ silent = false, label = 'Suppliers' } = {}) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
+    if (!silent) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getSuppliers(), 'Suppliers')
+      const data = await withLoaderTimeout(() => window.api.getSuppliers(), label)
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setSuppliers(Array.isArray(data) ? data : [])
+      loadedOnceRef.current = true
     } catch (error) {
-      setSuppliers([])
-      notify(error?.message || 'Failed to load suppliers', 'error')
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!loadedOnceRef.current) setSuppliers([])
+      notify(error?.message || 'Failed to load suppliers', silent ? 'warning' : 'error')
     } finally {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoading(false)
     }
   }, [notify])
 
-  useEffect(() => { load() }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'suppliers') load()
-  }, [syncChannel, load])
+    load()
+    return () => invalidateTrackedRequest(loadRequestRef)
+  }, [load])
+  useEffect(() => {
+    if (syncChannel?.channel === 'suppliers') load({ silent: true, label: 'Suppliers refresh' })
+  }, [syncChannel?.channel, syncChannel?.ts, load])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) return notify(t('name_required') || 'Name required', 'error')
@@ -171,7 +281,7 @@ function SuppliersTab({ t, notify }) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <span className="whitespace-nowrap text-sm text-gray-400">{filtered.length}</span>
+          <span className="whitespace-nowrap text-sm text-gray-400">{visibleSuppliers.length}</span>
         </div>
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
           {selectedIds.size > 0 ? (
@@ -179,6 +289,17 @@ function SuppliersTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           ) : null}
+          <FilterMenu
+            label={tr('filters', 'Filters')}
+            activeCount={activeFilterCount}
+            sections={contactFilterSections}
+            onClear={() => {
+              setYearFilter('all')
+              setMonthFilter('all')
+              setSortDirection('desc')
+            }}
+            compact
+          />
           <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr('import_contacts', 'Import', 'នាំចូល')}>
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
@@ -186,7 +307,7 @@ function SuppliersTab({ t, notify }) {
           <button
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={() => {
-              const rows = filtered.map((supplier) => ({
+              const rows = visibleSuppliers.map((supplier) => ({
                 Name: supplier.name || '',
                 Phone: supplier.phone || '',
                 Email: supplier.email || '',
@@ -212,14 +333,42 @@ function SuppliersTab({ t, notify }) {
 
       <ContactTable
         loading={loading}
-        rows={filtered}
+        rows={displayRows}
         emptyLabel={t('no_suppliers') || 'No suppliers'}
-        columns={[t('name'), t('phone'), t('email'), t('company'), t('contact_person') || 'Contact']}
+        columns={supplierColumns}
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
-        totalCount={filtered.length}
+        totalCount={visibleSuppliers.length}
         t={t}
         renderRow={(supplier) => (
+          supplier?.__kind === 'section' ? (
+            <tr key={supplier.section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
+              <td colSpan={supplierColumns.length + 2} className="px-4 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSectionFullySelected(supplier.section.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSectionPartiallySelected(supplier.section.ids)
+                      }}
+                      onChange={(event) => toggleSectionSelection(supplier.section.ids, event.target.checked)}
+                      aria-label={`Select ${supplier.section.label}`}
+                    />
+                    <span>{supplier.section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{supplier.section.items.length}</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(supplier.section.id)}>
+                      {supplier.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {supplier.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          ) : (
           <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(supplier.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
               <label htmlFor={`supplier-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
@@ -234,8 +383,33 @@ function SuppliersTab({ t, notify }) {
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </td>
           </tr>
-        )}
+        ))}
         renderCard={(supplier) => (
+          supplier?.__kind === 'section' ? (
+            <div key={supplier.section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <div className="flex items-center justify-between gap-3">
+                <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={isSectionFullySelected(supplier.section.ids)}
+                    ref={(node) => {
+                      if (node) node.indeterminate = isSectionPartiallySelected(supplier.section.ids)
+                    }}
+                    onChange={(event) => toggleSectionSelection(supplier.section.ids, event.target.checked)}
+                    aria-label={`Select ${supplier.section.label}`}
+                  />
+                  <span>{supplier.section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{supplier.section.items.length}</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(supplier.section.id)}>
+                    {supplier.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(supplier.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(supplier.id) }}>
               <label htmlFor={`supplier-card-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
@@ -253,7 +427,7 @@ function SuppliersTab({ t, notify }) {
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
             </div>
           </div>
-        )}
+        ))}
       />
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
@@ -269,7 +443,7 @@ function SuppliersTab({ t, notify }) {
             [t('contact_person') || 'Contact', selected.contact_person],
             [t('address'), selected.address],
             [t('notes'), selected.notes],
-            [t('col_added') || t('added_on') || 'Added', fmtDate(selected.created_at)],
+            [t('col_added') || t('added_on') || 'Added', selected.created_at || fmtDate(selected.created_at)],
           ]}
           onEdit={() => setModal('form')}
           onDelete={() => handleDelete(selected)}

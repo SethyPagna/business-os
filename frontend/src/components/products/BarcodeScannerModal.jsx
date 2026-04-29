@@ -34,6 +34,19 @@ async function readCameraPermissionState() {
   }
 }
 
+async function watchCameraPermission(onChange) {
+  try {
+    if (!navigator?.permissions?.query) return () => {}
+    const result = await navigator.permissions.query({ name: 'camera' })
+    const handleChange = () => onChange?.(String(result?.state || 'unknown'))
+    handleChange()
+    result.addEventListener?.('change', handleChange)
+    return () => result.removeEventListener?.('change', handleChange)
+  } catch (_) {
+    return () => {}
+  }
+}
+
 export default function BarcodeScannerModal({
   open,
   title,
@@ -47,6 +60,7 @@ export default function BarcodeScannerModal({
   const detectorRef = useRef(null)
   const zxingReaderRef = useRef(null)
   const zxingControlsRef = useRef(null)
+  const permissionCleanupRef = useRef(() => {})
   const startTokenRef = useRef(0)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
@@ -66,6 +80,7 @@ export default function BarcodeScannerModal({
     scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow camera access or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតកាមេរ៉ា ឬបញ្ចូលកូដដោយដៃ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'We need camera access to scan barcodes. Tap below and allow camera permission when your browser asks.', 'យើងត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។ ចុចខាងក្រោម ហើយអនុញ្ញាតកាមេរ៉ា នៅពេលកម្មវិធីរុករកស្នើសុំ។'),
     cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked in this browser. Allow it in browser settings, then try again or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទនៅក្នុងកម្មវិធីរុករកនេះ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត ឬបញ្ចូលកូដដោយដៃ។'),
+    cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Open the camera permission from the lock icon in your browser address bar, switch it back to Allow, then try again.', 'សូមបើកសិទ្ធិកាមេរ៉ាតាមរូបសោនៅលើរបារអាសយដ្ឋាន ប្ដូរទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
     requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
     requestingCamera: tr('requesting_camera', 'Requesting camera access...', 'កំពុងស្នើសុំការអនុញ្ញាតកាមេរ៉ា...'),
@@ -262,6 +277,34 @@ export default function BarcodeScannerModal({
     }
   }, [cleanup, open, prepareScanner])
 
+  useEffect(() => {
+    if (!open) return undefined
+    let cancelled = false
+    void watchCameraPermission((nextState) => {
+      if (cancelled) return
+      setPermissionState(nextState)
+      if (nextState === 'granted' && status !== 'scanning' && status !== 'starting') {
+        startCamera({ preserveManualValue: true })
+      }
+      if (nextState === 'denied' && status === 'scanning') {
+        cleanup()
+        setStatus('manual')
+        setError(labels.cameraPermissionBlocked)
+      }
+    }).then((dispose) => {
+      if (cancelled) {
+        dispose?.()
+        return
+      }
+      permissionCleanupRef.current = dispose || (() => {})
+    })
+    return () => {
+      cancelled = true
+      permissionCleanupRef.current?.()
+      permissionCleanupRef.current = () => {}
+    }
+  }, [cleanup, labels.cameraPermissionBlocked, open, startCamera, status])
+
   if (!open) return null
 
   const requestCameraLabel = permissionState === 'denied'
@@ -303,16 +346,21 @@ export default function BarcodeScannerModal({
               <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-8 text-center text-slate-100">
                 <Camera className="h-10 w-10 text-cyan-300" />
                 <p className="max-w-md text-sm leading-6 text-slate-200">{emptyStateMessage}</p>
-                {showCameraAction ? (
-                  <button
-                    type="button"
-                    className="btn-secondary border-white/20 bg-white/10 text-white hover:bg-white/15"
-                    disabled={status === 'starting'}
-                    onClick={() => startCamera({ preserveManualValue: true })}
-                  >
-                    {status === 'starting' ? labels.requestingCamera : requestCameraLabel}
-                  </button>
-                ) : null}
+                <div className="flex max-w-md flex-col items-center gap-2">
+                  {showCameraAction ? (
+                    <button
+                      type="button"
+                      className="btn-secondary border-white/20 bg-white/10 text-white hover:bg-white/15"
+                      disabled={status === 'starting'}
+                      onClick={() => startCamera({ preserveManualValue: true })}
+                    >
+                      {status === 'starting' ? labels.requestingCamera : requestCameraLabel}
+                    </button>
+                  ) : null}
+                  {permissionState === 'denied' ? (
+                    <p className="text-xs leading-5 text-slate-300">{labels.cameraPermissionResetHint}</p>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>

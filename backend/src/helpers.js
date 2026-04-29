@@ -135,28 +135,48 @@ function today() {
  * @param {Function} insertFn     Called once per data row with a `{header: value}` object
  * @returns {{ imported: number, errors: string[] }}
  */
-function bulkImportCSV(csvText, _expectedCols, insertFn) {
-  if (!csvText) return { imported: 0, errors: ['No CSV data'] }
-  const lines = csvText.trim().split('\n').filter(Boolean)
-  if (lines.length < 2) return { imported: 0, errors: ['CSV must have a header row and at least one data row'] }
+function parseCSVRows(csvText) {
+  if (!csvText) return { headers: [], rows: [], errors: ['No CSV data'] }
+  const lines = String(csvText).trim().split('\n').filter(Boolean)
+  if (lines.length < 2) {
+    return {
+      headers: [],
+      rows: [],
+      errors: ['CSV must have a header row and at least one data row'],
+    }
+  }
 
-  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase())
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, '').toLowerCase())
+  const rows = lines.slice(1).map((line, index) => {
+    const vals = parseCSVLine(line)
+    const row = {}
+    headers.forEach((header, colIndex) => {
+      row[header] = vals[colIndex]?.trim().replace(/^"|"$/g, '') || ''
+    })
+    return { row, rowNumber: index + 2 }
+  })
+
+  return { headers, rows, errors: [] }
+}
+
+function bulkImportCSV(csvText, _expectedCols, insertFn) {
+  const parsed = parseCSVRows(csvText)
+  if (parsed.errors.length) return { imported: 0, errors: parsed.errors }
+
   let imported = 0
   const errors = []
 
   const txFn = db.transaction(() => {
-    for (let i = 1; i < lines.length; i++) {
-      const vals = parseCSVLine(lines[i])
-      const row  = {}
-      headers.forEach((h, j) => { row[h] = vals[j]?.trim().replace(/^"|"$/g, '') || '' })
-      if (!row.name) { errors.push(`Row ${i + 1}: name is required`); continue }
+    for (const entry of parsed.rows) {
+      const { row, rowNumber } = entry
+      if (!row.name) { errors.push(`Row ${rowNumber}: name is required`); continue }
       try {
-        const result = insertFn(row)
+        const result = insertFn(row, rowNumber)
         if (result === false) continue
         if (typeof result?.changes === 'number' && result.changes === 0) continue
         imported++
       } catch (e) {
-        errors.push(`Row ${i + 1}: ${e.message}`)
+        errors.push(`Row ${rowNumber}: ${e.message}`)
       }
     }
   })
@@ -467,7 +487,7 @@ module.exports = {
   ok, err,
   audit, broadcast, wss_clients,
   tryParse, today,
-  bulkImportCSV, parseCSVLine, importRows,
+  bulkImportCSV, parseCSVRows, parseCSVLine, importRows,
   verifyAndRepairStockQuantities,
   verifyAndRepairSaleStatuses,
   verifyAndRepairCostPrices,

@@ -11,7 +11,7 @@ function getDeviceInfo() {
  * where available, a local Dexie fallback for offline-first reads.
  */
 
-import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite } from './http.js'
+import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite, isNetErr } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents } from './localDb.js'
 import { resetClientRuntimeState } from './clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
@@ -210,6 +210,78 @@ function mirrorTable(tableName) {
   }
 }
 
+const NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY = 'businessos_notifications_summary_missing_until'
+const NOTIFICATION_SUMMARY_MISSING_TTL_MS = 60 * 60 * 1000
+const DRIVE_SYNC_STATUS_COOLDOWN_KEY = 'businessos_drive_sync_status_cooldown_until'
+const DRIVE_SYNC_STATUS_COOLDOWN_MS = 5 * 60 * 1000
+let notificationSummaryMissingUntilMemory = 0
+
+function getNotificationSummaryFallback(extra = {}) {
+  return {
+    unreadCount: 0,
+    sections: [],
+    preferences: {},
+    ...extra,
+  }
+}
+
+function readNotificationSummaryMissingUntil() {
+  const memoryValue = Number(notificationSummaryMissingUntilMemory || 0)
+  if (typeof window === 'undefined') return 0
+  try {
+    const raw = window.sessionStorage.getItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
+    const value = Number(raw || 0)
+    const storageValue = Number.isFinite(value) ? value : 0
+    return Math.max(storageValue, Number.isFinite(memoryValue) ? memoryValue : 0)
+  } catch (_) {
+    return Number.isFinite(memoryValue) ? memoryValue : 0
+  }
+}
+
+function markNotificationSummaryMissing() {
+  notificationSummaryMissingUntilMemory = Date.now() + NOTIFICATION_SUMMARY_MISSING_TTL_MS
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
+      String(notificationSummaryMissingUntilMemory),
+    )
+  } catch (_) {}
+}
+
+function clearNotificationSummaryMissing() {
+  notificationSummaryMissingUntilMemory = 0
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY)
+  } catch (_) {}
+}
+
+function readStorageNumber(key) {
+  if (typeof window === 'undefined') return 0
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    const value = Number(raw || 0)
+    return Number.isFinite(value) ? value : 0
+  } catch (_) {
+    return 0
+  }
+}
+
+function writeStorageNumber(key, value) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(key, String(value))
+  } catch (_) {}
+}
+
+function clearStorageNumber(key) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(key)
+  } catch (_) {}
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
   return apiFetch('POST', '/api/auth/login', { username, password, organization, sessionDuration, clientTime, deviceTz, deviceName })
@@ -236,11 +308,29 @@ export async function getSystemConfig() {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
 export async function getNotificationSummary() {
-  return route('notifications:summary', () => apiFetch('GET', '/api/notifications/summary'), () => ({
-    unreadCount: 0,
-    sections: [],
-    preferences: {},
-  }))
+  const missingUntil = readNotificationSummaryMissingUntil()
+  return route('notifications:summary', async () => {
+    if (missingUntil > Date.now()) {
+      return getNotificationSummaryFallback({
+        unavailable: true,
+        cooldownUntil: missingUntil,
+      })
+    }
+    try {
+      const result = await apiFetch('GET', '/api/notifications/summary')
+      clearNotificationSummaryMissing()
+      return result
+    } catch (error) {
+      if (Number(error?.status) === 404) {
+        markNotificationSummaryMissing()
+        return getNotificationSummaryFallback({
+          unavailable: true,
+          cooldownUntil: readNotificationSummaryMissingUntil(),
+        })
+      }
+      throw error
+    }
+  }, () => getNotificationSummaryFallback())
 }
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
@@ -859,7 +949,33 @@ export async function importBackup() {
 // Dashboard, Inventory, Sales, Returns, Contacts, Branches, etc. all reload
 // fresh data immediately instead of showing stale results for up to 45 s.
 export const getGoogleDriveSyncStatus = () =>
-  route('system:driveSyncStatus', () => apiFetch('GET', '/api/system/drive-sync/status'), () => ({ item: null }))
+  route('system:driveSyncStatus', async () => {
+    const cooldownUntil = readStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
+    if (cooldownUntil > Date.now()) {
+      return {
+        item: null,
+        unavailable: true,
+        cooldownUntil,
+      }
+    }
+    try {
+      const result = await apiFetch('GET', '/api/system/drive-sync/status')
+      clearStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY)
+      return result
+    } catch (error) {
+      if (isNetErr(error) || String(error?.message || '').toLowerCase().includes('insufficient_resources')) {
+        const nextUntil = Date.now() + DRIVE_SYNC_STATUS_COOLDOWN_MS
+        writeStorageNumber(DRIVE_SYNC_STATUS_COOLDOWN_KEY, nextUntil)
+        return {
+          item: null,
+          unavailable: true,
+          cooldownUntil: nextUntil,
+          lastError: error?.message || 'Drive sync status temporarily unavailable',
+        }
+      }
+      throw error
+    }
+  }, () => ({ item: null, unavailable: true }))
 
 export const saveGoogleDriveSyncPreferences = (payload) =>
   route('system:driveSyncPreferences', () => apiFetch('POST', '/api/system/drive-sync/preferences', payload), null, true)

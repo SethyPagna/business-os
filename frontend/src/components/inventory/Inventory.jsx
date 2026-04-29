@@ -5,7 +5,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
-import { downloadCSV } from '../../utils/csv'
+import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import DualMoney from './DualMoney'
@@ -45,9 +45,12 @@ export default function Inventory() {
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementYearFilter, setMovementYearFilter] = useState('all')
   const [movementMonthFilter, setMovementMonthFilter] = useState('all')
+  const [movementGroupMode, setMovementGroupMode] = useState('time')
+  const [movementSortDirection, setMovementSortDirection] = useState('desc')
   const [selectedMovementIds, setSelectedMovementIds] = useState(() => new Set())
   const [detailProduct, setDetailProduct] = useState(null)
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
+  const [collapsedMovementSections, setCollapsedMovementSections] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
@@ -125,10 +128,10 @@ export default function Inventory() {
     load()
   }, [load, page])
   useEffect(() => {
-    if (page !== 'inventory' || !syncChannel) return
+    if (page !== 'inventory' || !syncChannel?.channel) return
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
-  }, [page, syncChannel, load]) // eslint-disable-line
+  }, [load, page, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const getStockQty = useCallback((product) => {
@@ -230,8 +233,10 @@ export default function Inventory() {
       year: movementYearFilter,
       month: movementMonthFilter,
       timeMode: movementTimeMode,
+      groupMode: movementGroupMode,
+      sortDirection: movementSortDirection,
     })
-  ), [groupedMovements, movementMonthFilter, movementTimeMode, movementYearFilter])
+  ), [groupedMovements, movementGroupMode, movementMonthFilter, movementSortDirection, movementTimeMode, movementYearFilter])
 
   const visibleMovementGroups = useMemo(
     () => movementSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -280,6 +285,23 @@ export default function Inventory() {
     }
     setSelectedMovementIds(new Set(visibleMovementGroups.map((group) => group.id)))
   }, [visibleMovementGroups])
+
+  const toggleMovementSectionCollapsed = useCallback((sectionId) => {
+    setCollapsedMovementSections((current) => {
+      const next = new Set(current)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    setCollapsedMovementSections((current) => {
+      const validIds = new Set(movementSections.map((section) => section.id))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [movementSections])
 
   const MOV_COLORS = {
     add:             'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -478,23 +500,86 @@ export default function Inventory() {
   ]
   const inventoryBrands = [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
   const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
+  const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
-  const exportMovementGroups = useCallback((groups, filePrefix = 'inventory-movements') => {
-    const rows = groups.map(group => ({
-      Date: group.latest_at || '',
-      Activity: group.movementLabel || '',
-      Products: group.productSummary || '',
-      Records: group.items?.length || 0,
-      Qty: group.totalQuantity || 0,
-      Branch: group.branchSummary || '',
-      Reason: group.reasonSummary || '',
-      User: group.userSummary || '',
-    }))
-    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-  }, [])
+  const buildInventoryStatsRows = useCallback(() => ([
+    { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Inventory Stats', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
+    { Section: 'Inventory Stats', Metric: 'Stock Filter', Value: stockFilter },
+    { Section: 'Inventory Stats', Metric: 'Search', Value: search || '' },
+    { Section: 'Inventory Stats', Metric: 'Visible Products', Value: filteredSummary.length },
+    { Section: 'Inventory Stats', Metric: 'Total Products', Value: totalProducts },
+    { Section: 'Inventory Stats', Metric: 'Low Stock Count', Value: lowStockCount },
+    { Section: 'Inventory Stats', Metric: 'Out Of Stock Count', Value: outStockCount },
+    { Section: 'Inventory Stats', Metric: 'Stock Value (USD)', Value: totalValue.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Net Sold Qty', Value: totalQtySold },
+    { Section: 'Inventory Stats', Metric: 'Revenue (USD)', Value: totalRevenue.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'COGS (USD)', Value: totalCOGS.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Gross Profit (USD)', Value: totalProfit.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Store Discounts (USD)', Value: totalStoreDiscounts.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Membership Discounts (USD)', Value: totalMembershipDiscounts.toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Returns Count', Value: returnStats?.count ?? 0 },
+    { Section: 'Inventory Stats', Metric: 'Return Refunds (USD)', Value: Number(returnStats?.refund_usd || 0).toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Tax Collected (USD)', Value: Number(taxDelivery.tax || 0).toFixed(2) },
+    { Section: 'Inventory Stats', Metric: 'Delivery Fees (USD)', Value: Number(taxDelivery.delivery || 0).toFixed(2) },
+  ]), [
+    branchFilter,
+    branches,
+    brandFilter,
+    filteredSummary.length,
+    lowStockCount,
+    outStockCount,
+    returnStats?.count,
+    returnStats?.refund_usd,
+    search,
+    stockFilter,
+    taxDelivery.delivery,
+    taxDelivery.tax,
+    totalCOGS,
+    totalMembershipDiscounts,
+    totalProducts,
+    totalProfit,
+    totalQtySold,
+    totalRevenue,
+    totalStoreDiscounts,
+    totalValue,
+  ])
 
-  const exportInventorySummary = useCallback((productsToExport = filteredSummary, filePrefix = 'inventory') => {
-    const rows = productsToExport.map((p) => ({
+  const buildMovementFilterRows = useCallback(() => ([
+    { Section: 'Movement Filters', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+    { Section: 'Movement Filters', Metric: 'Movement Type Filter', Value: movFilter },
+    { Section: 'Movement Filters', Metric: 'Year Filter', Value: movementYearFilter },
+    { Section: 'Movement Filters', Metric: 'Month Filter', Value: movementMonthFilter },
+    { Section: 'Movement Filters', Metric: 'Group Mode', Value: movementGroupMode },
+    { Section: 'Movement Filters', Metric: 'Sort Direction', Value: movementSortDirection },
+    { Section: 'Movement Filters', Metric: 'Search', Value: search || '' },
+    { Section: 'Movement Filters', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
+  ]), [
+    branchFilter,
+    branches,
+    movFilter,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementYearFilter,
+    search,
+    visibleMovementGroups.length,
+  ])
+
+  const buildMovementRows = useCallback((groups) => groups.map((group) => ({
+    Date: group.latest_at || '',
+    Activity: group.movementLabel || '',
+    Products: group.productSummary || '',
+    Records: group.items?.length || 0,
+    Qty: group.totalQuantity || 0,
+    Total_Cost_USD: group.totalCostUsd || 0,
+    Branch: group.branchSummary || '',
+    Reason: group.reasonSummary || '',
+    User: group.userSummary || '',
+  })), [])
+
+  const buildInventoryProductRows = useCallback((productsToExport = filteredSummary) => (
+    productsToExport.map((p) => ({
       Name: p.name || '',
       SKU: p.sku || '',
       Category: p.category || '',
@@ -508,44 +593,98 @@ export default function Inventory() {
       Unit: p.unit || '',
       Supplier: p.supplier || '',
     }))
-    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-  }, [filteredSummary])
+  ), [filteredSummary, getStockQty])
+
+  const exportMovementGroups = useCallback((groups, filePrefix = 'inventory-movements') => {
+    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildMovementRows(groups))
+  }, [buildMovementRows, exportStamp])
+
+  const exportInventorySummary = useCallback((productsToExport = filteredSummary, filePrefix = 'inventory') => {
+    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryProductRows(productsToExport))
+  }, [buildInventoryProductRows, exportStamp, filteredSummary])
+
+  const exportInventoryStats = useCallback((filePrefix = 'inventory-stats') => {
+    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryStatsRows())
+  }, [buildInventoryStatsRows, exportStamp])
+
+  const exportInventoryPackage = useCallback((mode = tab) => {
+    const files = mode === 'movements'
+      ? [
+          { name: `inventory-movement-filters-${exportStamp}.csv`, content: buildCSV(buildMovementFilterRows()) },
+          { name: `inventory-movement-groups-${exportStamp}.csv`, content: buildCSV(buildMovementRows(visibleMovementGroups)) },
+          { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(buildInventoryStatsRows()) },
+          { name: `inventory-products-reference-${exportStamp}.csv`, content: buildCSV(buildInventoryProductRows(filteredSummary)) },
+        ]
+      : [
+          { name: `inventory-filters-${exportStamp}.csv`, content: buildCSV(buildInventoryStatsRows()) },
+          { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(buildInventoryProductRows(filteredSummary)) },
+          { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(buildMovementRows(visibleMovementGroups)) },
+        ]
+    downloadZipFiles(`inventory-report-${mode}-${exportStamp}.zip`, files)
+  }, [
+    buildInventoryProductRows,
+    buildInventoryStatsRows,
+    buildMovementFilterRows,
+    buildMovementRows,
+    exportStamp,
+    filteredSummary,
+    tab,
+    visibleMovementGroups,
+  ])
 
   const inventoryExportItems = useMemo(() => {
     if (tab === 'movements') {
       return [
-        { label: `Export ${t('movements') || 'Movements'}`, onClick: () => exportMovementGroups(visibleMovementGroups) },
-        selectedMovementGroups.length ? { label: 'Export selected movements', onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
+        { label: tr('export_full_inventory_package', 'Export full inventory package', 'នាំចេញកញ្ចប់ស្តុកពេញលេញ'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
+        { label: tr('export_inventory_stats', 'Export inventory stats and calculations', 'នាំចេញស្ថិតិ និងការគណនាស្តុក'), onClick: () => exportInventoryStats('inventory-stats') },
+        'divider',
+        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`, 'នាំចេញក្រុមចលនាដែលកំពុងបង្ហាញ'), onClick: () => exportMovementGroups(visibleMovementGroups) },
+        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups', 'នាំចេញក្រុមចលនាដែលបានជ្រើស'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
         movementYearFilter !== 'all' || movementMonthFilter !== 'all'
-          ? { label: 'Export current time filter', onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
+          ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
           : null,
         branchFilter !== 'all'
-          ? { label: 'Export current branch movements', onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
+          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements', 'នាំចេញចលនាតាមសាខាដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
           : null,
         movFilter !== 'all'
-          ? { label: 'Export current activity type', onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
+          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type', 'នាំចេញតាមប្រភេទសកម្មភាពដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
           : null,
         'divider',
-        { label: 'Export inventory summary', onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+        { label: tr('export_inventory_summary', 'Export inventory summary', 'នាំចេញសង្ខេបស្តុក'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+        { label: tr('export_low_stock_summary', 'Export low-stock summary', 'នាំចេញសង្ខេបស្តុកទាប'), onClick: () => exportInventorySummary(summary.filter((product) => {
+          const qty = getStockQty(product)
+          return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
+        }), 'inventory-low-stock') },
+        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', 'នាំចេញសង្ខេបអស់ស្តុក'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
       ].filter(Boolean)
     }
 
     return [
-      { label: 'Export visible products', onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
+      { label: tr('export_full_inventory_package', 'Export full inventory package', 'នាំចេញកញ្ចប់ស្តុកពេញលេញ'), onClick: () => exportInventoryPackage('products'), color: 'green' },
+      { label: tr('export_inventory_stats', 'Export inventory stats and calculations', 'នាំចេញស្ថិតិ និងការគណនាស្តុក'), onClick: () => exportInventoryStats('inventory-stats') },
+      'divider',
+      { label: tr('export_visible_products', 'Export visible products', 'នាំចេញផលិតផលដែលកំពុងបង្ហាញ'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
       branchFilter !== 'all'
-        ? { label: 'Export current branch products', onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
+        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products', 'នាំចេញផលិតផលតាមសាខាដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
         : null,
       stockFilter !== 'all'
-        ? { label: 'Export current stock filter', onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
+        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'នាំចេញតាមស្ថានភាពស្តុកដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
         : null,
       brandFilter !== 'all'
-        ? { label: 'Export current brand filter', onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
+        ? { label: tr('export_filtered_brand', 'Export filtered brand', 'នាំចេញតាមម៉ាកដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
         : null,
-      { label: 'Export full inventory summary', onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+      { label: tr('export_full_inventory_summary', 'Export full inventory summary', 'នាំចេញសង្ខេបស្តុកទាំងមូល'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+      { label: tr('export_low_stock_summary', 'Export low-stock summary', 'នាំចេញសង្ខេបស្តុកទាប'), onClick: () => exportInventorySummary(summary.filter((product) => {
+        const qty = getStockQty(product)
+        return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
+      }), 'inventory-low-stock') },
+      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', 'នាំចេញសង្ខេបអស់ស្តុក'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
     ].filter(Boolean)
   }, [
     branchFilter,
     brandFilter,
+    exportInventoryPackage,
+    exportInventoryStats,
     exportInventorySummary,
     exportMovementGroups,
     filteredSummary,
@@ -627,6 +766,22 @@ export default function Inventory() {
             }),
           ],
         },
+        {
+          id: 'movement-grouping',
+          label: t('group_by') || 'Group by',
+          options: [
+            { id: 'time', label: t('group_by_time') || 'Time only', active: movementGroupMode === 'time', onClick: () => setMovementGroupMode('time') },
+            { id: 'time-action', label: t('group_by_time_action') || 'Time + activity', active: movementGroupMode === 'time+action', onClick: () => setMovementGroupMode('time+action') },
+          ],
+        },
+        {
+          id: 'movement-sort',
+          label: t('sort') || 'Sort',
+          options: [
+            { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
+            { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
+          ],
+        },
       ].filter(Boolean)
     }
 
@@ -674,7 +829,9 @@ export default function Inventory() {
     brandFilter,
     inventoryBrands,
     movFilter,
+    movementGroupMode,
     movementMonthFilter,
+    movementSortDirection,
     movementYearFilter,
     movementYears,
     stockFilter,
@@ -689,6 +846,8 @@ export default function Inventory() {
         movFilter !== 'all',
         movementYearFilter !== 'all',
         movementMonthFilter !== 'all',
+        movementGroupMode !== 'time',
+        movementSortDirection !== 'desc',
       ].filter(Boolean).length
     }
 
@@ -697,7 +856,7 @@ export default function Inventory() {
       brandFilter !== 'all',
       stockFilter !== 'all',
     ].filter(Boolean).length
-  }, [branchFilter, brandFilter, movFilter, movementMonthFilter, movementYearFilter, stockFilter, tab])
+  }, [branchFilter, brandFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
@@ -706,6 +865,8 @@ export default function Inventory() {
     setMovFilter('all')
     setMovementYearFilter('all')
     setMovementMonthFilter('all')
+    setMovementGroupMode('time')
+    setMovementSortDirection('desc')
   }, [])
 
   const isMovementScopeFullySelected = useCallback(
@@ -717,6 +878,7 @@ export default function Inventory() {
     (ids = []) => ids.some((id) => selectedMovementIds.has(id)) && !isMovementScopeFullySelected(ids),
     [isMovementScopeFullySelected, selectedMovementIds],
   )
+  const showMovementActionGroups = movementGroupMode === 'time+action'
 
   return (
     <div className="page-scroll p-3 sm:p-6">
@@ -910,13 +1072,13 @@ export default function Inventory() {
       </div>
 
       {/* ?? Filters ?? */}
-      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <div className="flex min-w-0 flex-1 gap-0">
+      <div className="mb-2 overflow-x-auto pb-1">
+        <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
           <input
             id="inventory-search"
             name="inventory_search"
             aria-label="Inventory search"
-            className="input flex-1 text-sm rounded-r-none"
+            className={`input min-w-0 flex-1 text-sm ${tab === 'products' ? 'rounded-r-none' : ''}`}
             placeholder={tab === 'products'
               ? `${t('search') || 'Search'} - separate terms with commas, then choose match mode`
               : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
@@ -924,24 +1086,24 @@ export default function Inventory() {
             onChange={e => setSearch(e.target.value)}
           />
           {tab === 'products' && (
-            <div className="flex border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-lg overflow-hidden">
+            <div className="flex shrink-0 overflow-hidden rounded-r-lg border border-l-0 border-gray-300 dark:border-gray-600">
               {['AND','OR'].map(m => (
                 <button key={m}
                   onClick={() => setSearchMode(m)}
-                  className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50'}`}>
+                  className={`min-w-[2.9rem] px-2 py-1.5 text-xs font-bold transition-colors ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50'}`}>
                   {m}
                 </button>
               ))}
             </div>
           )}
+          <FilterMenu
+            label={t('filters') || 'Filters'}
+            activeCount={activeInventoryFilterCount}
+            sections={inventoryFilterSections}
+            onClear={clearInventoryFilters}
+            compact
+          />
         </div>
-        <FilterMenu
-          label={t('filters') || 'Filters'}
-          activeCount={activeInventoryFilterCount}
-          sections={inventoryFilterSections}
-          onClear={clearInventoryFilters}
-          compact
-        />
       </div>
 
       {search.trim() && tab === 'products' && (
@@ -1118,36 +1280,47 @@ export default function Inventory() {
               <div className="py-10 text-center text-gray-400">{t('loading')}</div>
             ) : visibleMovementGroups.length === 0 ? (
               <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
-            ) : movementSections.map((section) => (
+            ) : movementSections.map((section) => {
+              const isCollapsed = collapsedMovementSections.has(section.id)
+              return (
               <div key={section.id} className="space-y-2">
-                <div className="flex items-center gap-2 px-1 pt-1">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={isMovementScopeFullySelected(section.ids)}
-                    ref={(node) => {
-                      if (node) node.indeterminate = isMovementScopePartiallySelected(section.ids)
-                    }}
-                    onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
-                  />
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    {section.label} · {section.ids.length} groups
+                <div className="flex items-center justify-between gap-3 px-1 pt-1">
+                  <label className="inline-flex min-w-0 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isMovementScopeFullySelected(section.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isMovementScopePartiallySelected(section.ids)
+                      }}
+                      onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
+                    />
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      {section.label} · {section.ids.length} groups
+                    </div>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleMovementSectionCollapsed(section.id)}>
+                      {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </button>
                   </div>
                 </div>
-                {section.groups.map((actionGroup) => (
+                {!isCollapsed ? section.groups.map((actionGroup) => (
                   <div key={actionGroup.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={isMovementScopeFullySelected(actionGroup.ids)}
-                        ref={(node) => {
-                          if (node) node.indeterminate = isMovementScopePartiallySelected(actionGroup.ids)
-                        }}
-                        onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
-                      />
-                      <span>{actionGroup.label} · {actionGroup.items.length}</span>
-                    </div>
+                    {showMovementActionGroups ? (
+                      <div className="flex items-center gap-2 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded"
+                          checked={isMovementScopeFullySelected(actionGroup.ids)}
+                          ref={(node) => {
+                            if (node) node.indeterminate = isMovementScopePartiallySelected(actionGroup.ids)
+                          }}
+                          onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
+                        />
+                        <span>{actionGroup.label} · {actionGroup.items.length}</span>
+                      </div>
+                    ) : null}
                     {actionGroup.items.map((group) => {
                       const isExpanded = expandedMovementGroups.has(group.id)
                       return (
@@ -1160,7 +1333,6 @@ export default function Inventory() {
                                 checked={selectedMovementIds.has(group.id)}
                                 onChange={() => toggleMovementSelection(group.id)}
                               />
-                              Select
                             </label>
                           </div>
                           <button
@@ -1240,9 +1412,9 @@ export default function Inventory() {
                       )
                     })}
                   </div>
-                ))}
+                )) : null}
               </div>
-            ))}
+            )})}
           </div>
 
           <div className="card hidden overflow-hidden sm:block">
@@ -1275,7 +1447,9 @@ export default function Inventory() {
                     <tr><td colSpan={9} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
                   ) : visibleMovementGroups.length === 0 ? (
                     <tr><td colSpan={9} className="py-8 text-center text-gray-400">{t('no_data')}</td></tr>
-                  ) : movementSections.map((section) => (
+                  ) : movementSections.map((section) => {
+                    const isCollapsed = collapsedMovementSections.has(section.id)
+                    return (
                     <Fragment key={section.id}>
                       <tr className="bg-slate-50 dark:bg-slate-800/60">
                         <td className="px-3 py-2">
@@ -1289,28 +1463,38 @@ export default function Inventory() {
                             onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
                           />
                         </td>
-                        <td colSpan={8} className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          {section.label} · {section.ids.length} groups
+                        <td colSpan={8} className="px-4 py-2">
+                          <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            <span>{section.label} · {section.ids.length} groups</span>
+                            <div className="flex items-center gap-1">
+                              <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleMovementSectionCollapsed(section.id)}>
+                                {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                              </button>
+                            </div>
+                          </div>
                         </td>
                       </tr>
-                      {section.groups.map((actionGroup) => (
+                      {!isCollapsed ? section.groups.map((actionGroup) => (
                         <Fragment key={actionGroup.id}>
-                          <tr className="bg-white dark:bg-gray-800/70">
-                            <td className="px-3 py-2">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={isMovementScopeFullySelected(actionGroup.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isMovementScopePartiallySelected(actionGroup.ids)
-                                }}
-                                onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
-                              />
-                            </td>
-                            <td colSpan={8} className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                              {actionGroup.label} · {actionGroup.items.length} groups
-                            </td>
-                          </tr>
+                          {showMovementActionGroups ? (
+                            <tr className="bg-white dark:bg-gray-800/70">
+                              <td className="px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded"
+                                  checked={isMovementScopeFullySelected(actionGroup.ids)}
+                                  ref={(node) => {
+                                    if (node) node.indeterminate = isMovementScopePartiallySelected(actionGroup.ids)
+                                  }}
+                                  onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
+                                />
+                              </td>
+                              <td colSpan={8} className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                {actionGroup.label} · {actionGroup.items.length} groups
+                              </td>
+                            </tr>
+                          ) : null}
                           {actionGroup.items.map((group) => {
                             const isExpanded = expandedMovementGroups.has(group.id)
                             return (
@@ -1393,9 +1577,9 @@ export default function Inventory() {
                             )
                           })}
                         </Fragment>
-                      ))}
+                      )) : null}
                     </Fragment>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>

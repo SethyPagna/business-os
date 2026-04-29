@@ -20,9 +20,13 @@ export default function PortalMenu({
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const triggerRef = useRef(null)
   const menuRef = useRef(null)
+  const frameRef = useRef(0)
 
   const reposition = useCallback(() => {
-    if (!triggerRef.current) return
+    if (!triggerRef.current || !document.body.contains(triggerRef.current)) {
+      setOpen(false)
+      return
+    }
 
     const triggerRect = triggerRef.current.getBoundingClientRect()
     const viewportWidth = window.innerWidth
@@ -31,7 +35,12 @@ export default function PortalMenu({
     const menuWidth = menuRef.current?.offsetWidth || 170
 
     let top = triggerRect.bottom + 4
-    if (top + menuHeight > viewportHeight - 8) top = triggerRect.top - menuHeight - 4
+    if (top + menuHeight > viewportHeight - 8) {
+      top = Math.max(8, triggerRect.top - menuHeight - 4)
+    }
+    if (top + menuHeight > viewportHeight - 8) {
+      top = Math.max(8, viewportHeight - menuHeight - 8)
+    }
 
     let left = align === 'right' ? triggerRect.right - menuWidth : triggerRect.left
     if (left + menuWidth > viewportWidth - 8) left = viewportWidth - menuWidth - 8
@@ -42,7 +51,6 @@ export default function PortalMenu({
 
   const toggleOpen = useCallback((event) => {
     event.stopPropagation()
-    event.preventDefault()
     setOpen((isOpen) => {
       if (!isOpen) setTimeout(reposition, 0)
       return !isOpen
@@ -60,19 +68,42 @@ export default function PortalMenu({
     }
 
     const closeMenu = () => setOpen(false)
+    const scheduleReposition = () => {
+      if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
+      frameRef.current = window.requestAnimationFrame(() => {
+        frameRef.current = 0
+        reposition()
+      })
+    }
+    const closeIfEscape = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    let resizeObserver = null
 
     document.addEventListener('mousedown', closeIfClickedOutside)
     document.addEventListener('touchstart', closeIfClickedOutside)
-    window.addEventListener('scroll', closeMenu, true)
-    window.addEventListener('resize', closeMenu)
+    document.addEventListener('keydown', closeIfEscape)
+    window.addEventListener('scroll', scheduleReposition, true)
+    window.addEventListener('resize', scheduleReposition)
+    if (typeof ResizeObserver !== 'undefined' && menuRef.current) {
+      resizeObserver = new ResizeObserver(() => scheduleReposition())
+      resizeObserver.observe(menuRef.current)
+    }
+    scheduleReposition()
 
     return () => {
       document.removeEventListener('mousedown', closeIfClickedOutside)
       document.removeEventListener('touchstart', closeIfClickedOutside)
-      window.removeEventListener('scroll', closeMenu, true)
-      window.removeEventListener('resize', closeMenu)
+      document.removeEventListener('keydown', closeIfEscape)
+      window.removeEventListener('scroll', scheduleReposition, true)
+      window.removeEventListener('resize', scheduleReposition)
+      resizeObserver?.disconnect()
+      if (frameRef.current) {
+        window.cancelAnimationFrame(frameRef.current)
+        frameRef.current = 0
+      }
     }
-  }, [open])
+  }, [open, reposition])
 
   const colorClassByType = {
     red: 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',

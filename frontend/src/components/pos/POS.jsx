@@ -996,27 +996,31 @@ export default function POS() {
               <div className="flex gap-1 flex-wrap">{searchTerms.map((term, i) => <span key={i} className="badge-blue text-xs">{term}</span>)}</div>
             )}
 
-            {/* Collapsible advanced FilterPanel */}
-            <FilterPanel
-              open={filterOpen}
-              t={t}
-              categories={categories}
-              brands={posBrands}
-              branches={branches}
-              suppliers={posSuppliers}
-              categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}
-              brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
-              branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
-              stockFilter={stockFilter}         setStockFilter={setPersistedStock}
-              supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
-              quickFilters={quickFilters}
-              setQuickFilter={setQuickFilter}
-            />
+            <div className="relative z-20">
+              <div className="pointer-events-none absolute inset-x-0 top-0 pt-2">
+                <FilterPanel
+                  open={filterOpen}
+                  t={t}
+                  onClose={() => setFilterOpen(false)}
+                  categories={categories}
+                  brands={posBrands}
+                  branches={branches}
+                  suppliers={posSuppliers}
+                  categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}
+                  brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
+                  branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
+                  stockFilter={stockFilter}         setStockFilter={setPersistedStock}
+                  supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
+                  quickFilters={quickFilters}
+                  setQuickFilter={setQuickFilter}
+                />
+              </div>
+            </div>
 
           </div>
 
           {/* Product grid */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-3">
+          <div className={`flex-1 overflow-y-auto overflow-x-hidden p-3 ${filterOpen ? 'pt-[20.5rem] sm:pt-[18rem]' : ''}`}>
             <div className="pos-product-grid">
               {filteredProducts.map(p => {
                 const stock   = getDisplayStock(p)
@@ -1225,11 +1229,11 @@ export default function POS() {
 
                   {/* Delivery fee ??USD input + KHR auto-display */}
                   <div>
-                    <label className="text-xs text-gray-400 block mb-1">{t('delivery_fee')||'Delivery fee'}</label>
+                    <label htmlFor="pos-delivery-fee-usd" className="text-xs text-gray-400 block mb-1">{t('delivery_fee')||'Delivery fee'}</label>
                     <div className="flex gap-2 items-center">
                       <div className="relative flex-1">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
-                        <input className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} />
+                        <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} />
                       </div>
                       {feeUsd > 0 && <span className="text-xs text-gray-400 whitespace-nowrap">= {fmtKHR(feeKhr)}</span>}
                     </div>
@@ -1259,10 +1263,10 @@ export default function POS() {
 
               {/* Discount */}
               <div>
-                <label className="text-xs text-gray-500 font-medium">{t('discount')}</label>
+                <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
                 <div className="grid grid-cols-2 gap-1 mt-1">
-                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} /></div>
-                  <div className="relative"><input className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} /></div>
+                  <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
                 </div>
               </div>
 
@@ -1285,8 +1289,8 @@ export default function POS() {
                       </div>
                       <div className="grid grid-cols-[110px,1fr] gap-2">
                         <div>
-                          <label className="mb-1 block text-[11px] font-medium text-emerald-700">{posCopy('Units')}</label>
-                          <input className="input text-xs py-1" type="number" min="0" step="1" value={active.membershipRedeemUnits || ''} onChange={e => handleMembershipUnits(e.target.value)} />
+                          <label htmlFor="pos-membership-redeem-units" className="mb-1 block text-[11px] font-medium text-emerald-700">{posCopy('Units')}</label>
+                          <input id="pos-membership-redeem-units" name="pos_membership_redeem_units" className="input text-xs py-1" type="number" min="0" step="1" value={active.membershipRedeemUnits || ''} onChange={e => handleMembershipUnits(e.target.value)} />
                         </div>
                         <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
                           <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
@@ -1336,15 +1340,15 @@ export default function POS() {
                   ))}
                   <button onClick={() => patchActive({ customPayment: true })} className={`px-2 py-1 rounded-lg text-xs font-medium ${active.customPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>Other</button>
                 </div>
-                {active.customPayment && <input className="input text-xs py-1.5 mt-1" placeholder="Payment method" value={active.paymentMethod} onChange={e => patchActive({ paymentMethod: e.target.value })} autoFocus />}
+                {active.customPayment && <input id="pos-custom-payment-method" name="pos_custom_payment_method" className="input text-xs py-1.5 mt-1" placeholder="Payment method" value={active.paymentMethod} onChange={e => patchActive({ paymentMethod: e.target.value })} autoComplete="off" autoFocus />}
               </div>
 
               {/* Amount paid */}
               <div>
-                <label className="text-xs text-gray-500 font-medium">{t('amount_paid')}</label>
+                <label htmlFor="pos-paid-usd" className="text-xs text-gray-500 font-medium">{t('amount_paid')}</label>
                 <div className="grid grid-cols-2 gap-1 mt-1">
-                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input className="input text-xs py-1.5 pl-5" type="number" step="any" placeholder="0.00" value={active.paidUsd} onChange={e => patchActive({ paidUsd: e.target.value })} /></div>
-                  <div className="relative"><input className="input text-xs py-1.5 pr-5" type="number" step="any" placeholder="0" value={active.paidKhr} onChange={e => patchActive({ paidKhr: e.target.value })} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-paid-usd" name="pos_paid_usd" className="input text-xs py-1.5 pl-5" type="number" step="any" placeholder="0.00" value={active.paidUsd} onChange={e => patchActive({ paidUsd: e.target.value })} autoComplete="off" /></div>
+                  <div className="relative"><label htmlFor="pos-paid-khr" className="sr-only">{`${t('amount_paid')} ${khrSymbol}`}</label><input id="pos-paid-khr" name="pos_paid_khr" className="input text-xs py-1.5 pr-5" type="number" step="any" placeholder="0" value={active.paidKhr} onChange={e => patchActive({ paidKhr: e.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
                 </div>
                 <div className="flex gap-2 mt-1">
                   <button className="text-xs text-blue-500 hover:underline" onClick={() => patchActive({ paidUsd: totalUsd.toFixed(2), paidKhr: '' })}>Exact {usdSymbol}</button>
@@ -1408,10 +1412,10 @@ export default function POS() {
       {/* ?�?� Quick-add Customer modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
       {showAddCustomer && (
         <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
-          <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
+          <div><label htmlFor="pos-quick-customer-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input id="pos-quick-customer-name" name="pos_quick_customer_name" className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('phone')}</label><input className="input" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} /></div>
-            <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('address')}</label><input className="input" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} /></div>
+            <div><label htmlFor="pos-quick-customer-phone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('phone')}</label><input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} autoComplete="tel" /></div>
+            <div><label htmlFor="pos-quick-customer-address" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('address')}</label><input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} autoComplete="street-address" /></div>
           </div>
         </QuickAddModal>
       )}
@@ -1419,10 +1423,10 @@ export default function POS() {
       {/* ?�?� Quick-add Delivery Contact modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?� */}
       {showAddDelivery && (
         <QuickAddModal title={t('add_delivery_contact')||'Add Delivery Contact'} saving={savingDelivery} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
-          <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Driver / Rider Name</label><input className="input" value={newDeliveryForm.name} onChange={e => setNewDeliveryForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
+          <div><label htmlFor="pos-quick-delivery-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Driver / Rider Name</label><input id="pos-quick-delivery-name" name="pos_quick_delivery_name" className="input" value={newDeliveryForm.name} onChange={e => setNewDeliveryForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Phone</label><input className="input" value={newDeliveryForm.phone} onChange={e => setNewDeliveryForm(f => ({ ...f, phone: e.target.value }))} placeholder="012 345 678" /></div>
-            <div><label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Area / Zone</label><input className="input" value={newDeliveryForm.area} onChange={e => setNewDeliveryForm(f => ({ ...f, area: e.target.value }))} placeholder="Central, North" /></div>
+            <div><label htmlFor="pos-quick-delivery-phone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Phone</label><input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={e => setNewDeliveryForm(f => ({ ...f, phone: e.target.value }))} placeholder="012 345 678" autoComplete="tel" /></div>
+            <div><label htmlFor="pos-quick-delivery-area" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Area / Zone</label><input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={e => setNewDeliveryForm(f => ({ ...f, area: e.target.value }))} placeholder="Central, North" autoComplete="address-level2" /></div>
           </div>
           <p className="text-xs text-gray-400">Enter at least a driver name or phone number.</p>
         </QuickAddModal>

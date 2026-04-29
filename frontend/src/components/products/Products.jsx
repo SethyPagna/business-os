@@ -2,7 +2,7 @@
 // Main Products page ??all sub-modals imported from sibling files.
 
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { PackageSearch } from 'lucide-react'
+import { ChevronDown, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { ThreeDotPortal } from '../shared/PortalMenu'
@@ -57,6 +57,16 @@ const CREATED_MONTH_OPTIONS = [
 export default function Products() {
   const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, page } = useApp()
   const { syncChannel } = useSync()
+  const syncChannelName = String(syncChannel?.channel || '')
+  const syncChannelReason = String(syncChannel?.reason || '')
+  const syncChannelSource = String(syncChannel?.source || '')
+  const syncChannelTs = Number(syncChannel?.ts || 0)
+  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
+    const value = t(key)
+    if (value && value !== key) return value
+    return isKhmer ? fallbackKm : fallbackEn
+  }, [isKhmer, t])
   const [products,     setProducts]     = useState([])
   const [categories,   setCategories]   = useState([])
   const [units,        setUnits]        = useState([])
@@ -65,6 +75,7 @@ export default function Products() {
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
+  const [productSortDirection, setProductSortDirection] = useState('desc')
   const [search,       setSearch]       = useState('')
   const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
   const [selectedIds,    setSelectedIds]    = useState(new Set())
@@ -80,10 +91,12 @@ export default function Products() {
   const [loading,      setLoading]      = useState(true)
   const [loadError,    setLoadError]    = useState(null)
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
+  const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
+  const productJumpRefs = useRef({})
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -131,10 +144,13 @@ export default function Products() {
     load(silent)
   }, [load, page])
   useEffect(() => {
-    if (page !== 'products' || !syncChannel) return
-    const ch = syncChannel.channel
-    if (ch==='products'||ch==='categories'||ch==='units'||ch==='branches') load(true)
-  }, [page, syncChannel, load])
+    if (page !== 'products' || !syncChannelTs) return
+    if (syncChannelReason === 'cache-refresh') {
+      const sourceTable = syncChannelSource.split(':')[0]
+      if (['products', 'categories', 'units', 'branches'].includes(sourceTable)) return
+    }
+    if (['products', 'categories', 'units', 'branches'].includes(syncChannelName)) load(true)
+  }, [load, page, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
 
   const handleSave = async (form) => {
@@ -229,23 +245,23 @@ export default function Products() {
   }
 
   const handleBulkDelete = async () => {
-    if (!selectedIds.size) return
-    if (!confirm(`Delete ${selectedIds.size} product${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return
+    if (!selectedVisibleIds.length) return
+    if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
     let failed = 0
-    for (const id of selectedIds) {
+    for (const id of selectedVisibleIds) {
       try { await window.api.deleteProduct(id) } catch { failed++ }
     }
     setSelectedIds(new Set())
     load()
-    if (failed) notify(`Deleted ${selectedIds.size - failed}, ${failed} failed`, 'warning')
-    else notify(`${selectedIds.size} product${selectedIds.size > 1 ? 's' : ''} deleted`)
+    if (failed) notify(`Deleted ${selectedVisibleCount - failed}, ${failed} failed`, 'warning')
+    else notify(`${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''} deleted`)
   }
 
   const handleBulkOutOfStock = async () => {
-    if (!selectedIds.size) return
-    if (!confirm(`Set ${selectedIds.size} product(s) to out-of-stock (quantity = 0)?`)) return
+    if (!selectedVisibleIds.length) return
+    if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
     let done = 0
-    for (const id of selectedIds) {
+    for (const id of selectedVisibleIds) {
       const p = products.find(x => x.id === id)
       if (!p) continue
       try {
@@ -258,13 +274,13 @@ export default function Products() {
   }
 
   const handleBulkChangeBranch = async (branchId) => {
-    if (!selectedIds.size || !branchId) return
+    if (!selectedVisibleIds.length || !branchId) return
     const branch = branches.find(b => String(b.id) === String(branchId))
     if (!branch) return
-    if (!confirm(`Move stock of ${selectedIds.size} product(s) to "${branch.name}"?`)) return
+    if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
     let done = 0
     const defaultBranch = branches.find(b => b.is_default)
-    for (const id of selectedIds) {
+    for (const id of selectedVisibleIds) {
       const p = products.find(x => x.id === id)
       if (!p) continue
       try {
@@ -295,13 +311,15 @@ export default function Products() {
 
   const [bulkAddModal, setBulkAddModal] = useState(null)
   const handleBulkAddStock = () => {
-    if (!selectedIds.size) return
-    setBulkAddModal({ ids: [...selectedIds] })
+    if (!selectedVisibleIds.length) return
+    setBulkAddModal({ ids: [...selectedVisibleIds] })
   }
 
-  const toggleSelect = (id) => setSelectedIds(prev => {
+  const toggleSelect = (id) => setSelectedIds((prev) => {
+    const numericId = Number(id)
+    if (!Number.isFinite(numericId)) return prev
     const n = new Set(prev)
-    n.has(id) ? n.delete(id) : n.add(id)
+    n.has(numericId) ? n.delete(numericId) : n.add(numericId)
     return n
   })
   const toggleSelectAll = (checked) => {
@@ -378,7 +396,9 @@ export default function Products() {
   }
 
   // Define helper functions before using them in filters
-  const getBranchQty = (p, branchId) => (p.branch_stock||[]).find(s=>String(s.branch_id)===String(branchId))?.quantity ?? 0
+  const getBranchQty = useCallback((p, branchId) => (
+    p.branch_stock || []
+  ).find((stock) => String(stock.branch_id) === String(branchId))?.quantity ?? 0, [])
   const getStockBadge = (p) => {
     const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
     if (qty<=(p.out_of_stock_threshold||0)) return <span className="badge-red">{t('out_of_stock')}</span>
@@ -388,34 +408,36 @@ export default function Products() {
 
   // Search: comma-separated terms. Mode AND = all terms must match. Mode OR = any term matches.
   // Spaces within a term are treated as part of the search string (no space=AND split).
-  const searchTerms = search.trim()
-    ? search.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
-    : []
-  const filtered = products.filter(p => {
-    const hay = `${p.name} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''}`.toLowerCase()
+  const searchTerms = useMemo(
+    () => (search.trim()
+      ? search.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
+      : []),
+    [search],
+  )
+  const filtered = useMemo(() => products.filter((p) => {
+    const hay = `${p.name} ${p.sku || ''} ${p.barcode || ''} ${p.category || ''} ${p.brand || ''} ${p.supplier || ''} ${p.description || ''}`.toLowerCase()
     const matchSearch = searchTerms.length === 0 || (
       searchMode === 'AND'
-        ? searchTerms.every(term => hay.includes(term))
-        : searchTerms.some(term => hay.includes(term))
+        ? searchTerms.every((term) => hay.includes(term))
+        : searchTerms.some((term) => hay.includes(term))
     )
-    const matchCat      = catFilter==='all' || p.category===catFilter
-    const matchBrand    = brandFilter==='all' || (p.brand||'').toLowerCase() === brandFilter.toLowerCase()
-    const matchBranch   = branchFilter==='all' || (p.branch_stock||[]).some(bs=>String(bs.branch_id)===branchFilter)
-    const matchSupplier = supplierFilter==='all' || (p.supplier||'').toLowerCase() === supplierFilter.toLowerCase()
+    const matchCat = catFilter === 'all' || p.category === catFilter
+    const matchBrand = brandFilter === 'all' || (p.brand || '').toLowerCase() === brandFilter.toLowerCase()
+    const matchBranch = branchFilter === 'all' || (p.branch_stock || []).some((bs) => String(bs.branch_id) === branchFilter)
+    const matchSupplier = supplierFilter === 'all' || (p.supplier || '').toLowerCase() === supplierFilter.toLowerCase()
     const matchCreated = matchesYearMonthFilters(p.created_at, { year: createdYearFilter, month: createdMonthFilter })
-    const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
+    const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
 
-    // When a branch is selected, fully hide products with no stock at that branch
-    // (unless the user is explicitly looking for out-of-stock items)
     if (branchFilter !== 'all' && stockFilter !== 'out' && qty <= (p.out_of_stock_threshold || 0)) return false
 
     const matchStock =
-      stockFilter === 'all'      ? true :
-      stockFilter === 'out'      ? qty <= (p.out_of_stock_threshold||0) :
-      stockFilter === 'low'      ? qty > (p.out_of_stock_threshold||0) && qty <= (p.low_stock_threshold||10) :
-      stockFilter === 'in_stock' ? qty > (p.low_stock_threshold||10) : true
+      stockFilter === 'all' ? true
+        : stockFilter === 'out' ? qty <= (p.out_of_stock_threshold || 0)
+          : stockFilter === 'low' ? qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
+            : stockFilter === 'in_stock' ? qty > (p.low_stock_threshold || 10)
+              : true
     return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchCreated && matchStock
-  })
+  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, getBranchQty, products, searchMode, searchTerms, stockFilter, supplierFilter])
 
   const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
     const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
@@ -464,10 +486,16 @@ export default function Products() {
     year: createdYearFilter,
     month: createdMonthFilter,
     timeMode: productTimeMode,
+    groupMode: 'time',
+    sortDirection: productSortDirection,
   }).map((section) => ({
     ...section,
-    items: section.groups.flatMap((group) => group.items),
-  })), [createdMonthFilter, createdYearFilter, filtered, productTimeMode])
+    items: [...section.groups.flatMap((group) => group.items)].sort((left, right) => {
+      const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
+      if (nameDelta !== 0) return nameDelta
+      return Number(left?.id || 0) - Number(right?.id || 0)
+    }),
+  })), [createdMonthFilter, createdYearFilter, filtered, productSortDirection, productTimeMode])
 
   const visibleProducts = useMemo(
     () => productSections.flatMap((section) => section.items),
@@ -478,49 +506,80 @@ export default function Products() {
     () => visibleProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)),
     [visibleProducts],
   )
+  const visibleIdsSignature = useMemo(() => visibleIds.join(','), [visibleIds])
+  const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIdsSignature])
+  const selectedVisibleIds = useMemo(
+    () => [...selectedIds].filter((id) => visibleIdSet.has(Number(id))),
+    [selectedIds, visibleIdSet],
+  )
+  const selectedVisibleIdsSet = useMemo(
+    () => new Set(selectedVisibleIds),
+    [selectedVisibleIds],
+  )
+  const selectedVisibleCount = selectedVisibleIds.length
 
   const selectedProducts = useMemo(
-    () => visibleProducts.filter((product) => selectedIds.has(product.id)),
-    [selectedIds, visibleProducts],
+    () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
+    [selectedVisibleIdsSet, visibleProducts],
   )
+  const visibleLetters = useMemo(
+    () => Array.from(new Set(
+      visibleProducts
+        .map((product) => String(product?.name || '').trim().charAt(0).toUpperCase())
+        .filter((letter) => /[A-Z]/.test(letter)),
+    )).sort((left, right) => left.localeCompare(right)),
+    [visibleProducts],
+  )
+  const hasSelected = selectedVisibleCount > 0
 
   useEffect(() => {
-    const validIds = new Set(visibleIds)
-    setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
-  }, [visibleIds])
+    productJumpRefs.current = {}
+  }, [productSections])
 
   useEffect(() => {
-    const indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
+    setCollapsedProductSections((current) => {
+      const validIds = new Set(productSections.map((section) => section.id))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [productSections])
+
+  useEffect(() => {
+    const indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length
     if (desktopSelectAllRef.current) desktopSelectAllRef.current.indeterminate = indeterminate
     if (mobileSelectAllRef.current) mobileSelectAllRef.current.indeterminate = indeterminate
-  }, [selectedIds.size, visibleIds.length])
+  }, [selectedVisibleCount, visibleIds.length])
 
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
-    (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id))),
-    [selectedIds],
+    (ids = []) => ids.length > 0 && ids.every((id) => selectedVisibleIdsSet.has(Number(id))),
+    [selectedVisibleIdsSet],
   )
 
   const isSelectionScopePartiallySelected = useCallback(
-    (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSelectionScopeFullySelected(ids),
-    [isSelectionScopeFullySelected, selectedIds],
+    (ids = []) => ids.some((id) => selectedVisibleIdsSet.has(Number(id))) && !isSelectionScopeFullySelected(ids),
+    [isSelectionScopeFullySelected, selectedVisibleIdsSet],
+  )
+  const isProductSelected = useCallback(
+    (id) => selectedVisibleIdsSet.has(Number(id)),
+    [selectedVisibleIdsSet],
   )
 
   const productExportItems = useMemo(() => ([
-    { label: 'Export visible products', onClick: () => exportProductsCsv(filtered, 'products-visible') },
-    selectedProducts.length ? { label: 'Export selected products', onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
-    stockFilter !== 'all' ? { label: 'Export current stock filter', onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
-    catFilter !== 'all' ? { label: 'Export current category', onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
-    brandFilter !== 'all' ? { label: 'Export current brand', onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
-    supplierFilter !== 'all' ? { label: 'Export current supplier', onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
-    branchFilter !== 'all' ? { label: 'Export current branch', onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
-    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
+    { label: tr('export_visible_products', 'Export visible products', 'នាំចេញផលិតផលដែលកំពុងបង្ហាញ'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
+    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products', 'នាំចេញផលិតផលដែលបានជ្រើស'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
+    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'នាំចេញតាមស្ថានភាពស្តុកដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
+    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category', 'នាំចេញតាមប្រភេទដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
+    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand', 'នាំចេញតាមម៉ាកដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
+    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier', 'នាំចេញតាមអ្នកផ្គត់ផ្គង់ដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
+    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch', 'នាំចេញតាមសាខាដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
+    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range', 'នាំចេញតាមពេលបង្កើតដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
     'divider',
-    { label: 'Export full product list', onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
-  ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter])
+    { label: tr('export_full_product_list', 'Export full product list', 'នាំចេញបញ្ជីផលិតផលទាំងមូល'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
+  ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
     () => [...new Set(products.map((product) => product.supplier).filter(Boolean))].sort(),
@@ -535,6 +594,7 @@ export default function Products() {
     stockFilter !== 'all' ? 1 : 0,
     createdYearFilter !== 'all' ? 1 : 0,
     createdMonthFilter !== 'all' ? 1 : 0,
+    productSortDirection !== 'desc' ? 1 : 0,
   ].reduce((sum, value) => sum + value, 0)
 
   const clearAllFilters = useCallback(() => {
@@ -545,6 +605,21 @@ export default function Products() {
     setStockFilter('all')
     setCreatedYearFilter('all')
     setCreatedMonthFilter('all')
+    setProductSortDirection('desc')
+  }, [])
+
+  const toggleProductSection = useCallback((sectionId) => {
+    setCollapsedProductSections((current) => {
+      const next = new Set(current)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }, [])
+
+  const jumpToLetter = useCallback((letter) => {
+    const node = productJumpRefs.current[String(letter || '').toUpperCase()]
+    node?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
   }, [])
 
   const productFilterSections = useMemo(() => ([
@@ -640,7 +715,15 @@ export default function Products() {
         })),
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, stockFilter, supplierFilter, suppliers, t])
+    {
+      id: 'sort',
+      label: t('sort') || 'Sort',
+      options: [
+        { id: 'created-desc', label: t('newest_first') || 'Newest first', active: productSortDirection === 'desc', onClick: () => setProductSortDirection('desc') },
+        { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
+      ],
+    },
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
   if (loadError) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -673,20 +756,20 @@ export default function Products() {
       </div>
 
       {/* ?�?� Search row + Filter toggle ?�?� */}
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          className="input min-w-0 flex-1 text-sm"
-          placeholder={t('search_products_placeholder') || `${t('search') || 'Search'} products`}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <div className="flex flex-1 overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600 sm:flex-none">
+      <div className="mb-3 overflow-x-auto pb-1">
+        <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
+          <input
+            className="input min-w-0 flex-1 text-sm"
+            placeholder={t('search_products_placeholder') || `${t('search') || 'Search'} products`}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <div className="flex shrink-0 overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600">
             {['AND', 'OR'].map((mode) => (
               <button
                 key={mode}
                 onClick={() => setSearchMode(mode)}
-                className={`flex-1 px-2.5 py-1.5 text-xs font-bold transition-colors sm:flex-none ${searchMode === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400'}`}
+                className={`min-w-[2.9rem] px-2 py-1.5 text-xs font-bold transition-colors ${searchMode === mode ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400'}`}
               >
                 {mode}
               </button>
@@ -703,11 +786,11 @@ export default function Products() {
       </div>
 
       {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div className="mb-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-xl overflow-hidden">
+      {hasSelected && (
+        <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
           {/* Primary action row */}
           <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
-            <span className="mr-1 w-full text-sm font-semibold text-blue-700 dark:text-blue-300 sm:w-auto">{selectedIds.size} selected</span>
+            <span className="mr-1 w-full text-sm font-semibold text-blue-700 dark:text-blue-300 sm:w-auto">{selectedVisibleCount} selected</span>
             {/* Collapsible edit options */}
             {[
               { id:'info', icon:'Edit', label:'Edit Info' },
@@ -729,7 +812,7 @@ export default function Products() {
           {/* Expanded edit panel */}
           {bulkEditMode === 'info' && (
             <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedIds.size}</strong> products</p>
+              <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <div><label className="text-xs text-gray-500 block mb-1">Category</label>
                   <select className="input text-xs py-1" value={bulkEditForm.category||''} onChange={e=>setBulkEditForm(f=>({...f,category:e.target.value}))}>
@@ -763,15 +846,15 @@ export default function Products() {
                 if (bulkEditForm.low_stock_threshold !== undefined && bulkEditForm.low_stock_threshold !== '') updates.low_stock_threshold = parseInt(bulkEditForm.low_stock_threshold)
                 if (!Object.keys(updates).length) return notify('No changes specified', 'warning')
                 let ok = 0
-                for (const id of selectedIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
+                for (const id of selectedVisibleIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
                 notify(`Updated ${ok} products`); load(); setBulkEditMode(null); setSelectedIds(new Set())
-              }}>Apply to {selectedIds.size} products</button>
+              }}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
 
           {bulkEditMode === 'pricing' && (
             <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedIds.size}</strong> products</p>
+              <p className="text-xs text-gray-500 mb-2">Update pricing for <strong>{selectedVisibleCount}</strong> products</p>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="text-xs text-gray-500 block mb-1">Selling Price (USD)</label>
                   <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
@@ -785,15 +868,15 @@ export default function Products() {
                 if (bulkEditForm.purchase_price_usd !== '' && bulkEditForm.purchase_price_usd !== undefined) updates.purchase_price_usd = parseFloat(bulkEditForm.purchase_price_usd)
                 if (!Object.keys(updates).length) return notify('No changes specified', 'warning')
                 let ok = 0
-                for (const id of selectedIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
+                for (const id of selectedVisibleIds) { try { await window.api.updateProduct(id, {...updates, userId: user.id, userName: user.name}); ok++ } catch {} }
                 notify(`Updated ${ok} products`); load(); setBulkEditMode(null); setSelectedIds(new Set())
-              }}>Apply to {selectedIds.size} products</button>
+              }}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
 
           {bulkEditMode === 'stock' && (
             <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Adjust stock for <strong>{selectedIds.size}</strong> products</p>
+              <p className="text-xs text-gray-500 mb-2">Adjust stock for <strong>{selectedVisibleCount}</strong> products</p>
               <div className="flex gap-3 flex-wrap items-end">
                 <div><label className="text-xs text-gray-500 block mb-1">Quantity</label>
                   <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} /></div>
@@ -805,13 +888,13 @@ export default function Products() {
                   </div>
                 </div>
               </div>
-              <button className="btn-primary text-xs py-1.5 px-4 mt-3" onClick={handleBulkAddStock}>Apply to {selectedIds.size} products</button>
+              <button className="btn-primary text-xs py-1.5 px-4 mt-3" onClick={handleBulkAddStock}>Apply to {selectedVisibleCount} products</button>
             </div>
           )}
 
           {bulkEditMode === 'branch' && (
             <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedIds.size}</strong> products</p>
+              <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedVisibleCount}</strong> products</p>
               <div className="flex gap-2 flex-wrap items-end">
                 <div><label className="text-xs text-gray-500 block mb-1">Target Branch</label>
                   <select className="input text-xs py-1" value={bulkEditForm.branchId||''} onChange={e=>setBulkEditForm(f=>({...f,branchId:e.target.value}))}>
@@ -826,6 +909,22 @@ export default function Products() {
         </div>
       )}
 
+      {visibleLetters.length ? (
+        <div className="fixed right-0.5 top-1/2 z-20 flex -translate-y-1/2 flex-col rounded-2xl border border-slate-200 bg-white/95 px-1 py-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+          {visibleLetters.map((letter) => (
+            <button
+              key={letter}
+              type="button"
+              className="flex h-4 w-4 items-center justify-center rounded text-[9px] font-semibold text-slate-500 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-blue-300"
+              onClick={() => jumpToLetter(letter)}
+              title={`Jump to ${letter}`}
+            >
+              {letter}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {/* Desktop table */}
       <div className="card sm:flex-1 sm:overflow-hidden flex-col hidden sm:flex">
         <div className="overflow-auto sm:flex-1">
@@ -835,7 +934,7 @@ export default function Products() {
                 <th className="px-3 py-3 w-8">
                   <input type="checkbox"
                     className="rounded"
-                    checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
+                    checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
                     ref={desktopSelectAllRef}
                     onChange={(event) => toggleSelectAll(event.target.checked)}
                   />
@@ -855,35 +954,57 @@ export default function Products() {
             <tbody>
               {loading ? <tr><td colSpan={11} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
               : visibleProducts.length === 0 ? <tr><td colSpan={11} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
-              : productSections.map((section) => (
+              : productSections.map((section) => {
+                const isCollapsed = collapsedProductSections.has(section.id)
+                return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                     <td colSpan={11} className="px-4 py-2">
-                      <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded"
-                          checked={isSelectionScopeFullySelected(section.ids)}
-                          ref={(node) => {
-                            if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                          }}
-                          onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                          aria-label={`Select ${section.label}`}
-                        />
-                        <span>{section.label}</span>
-                        <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-                      </label>
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(section.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                            aria-label={`Select ${section.label}`}
+                          />
+                          <span>{section.label}</span>
+                          <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                          onClick={() => toggleProductSection(section.id)}
+                        >
+                          {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                  {section.items.map(p => {
+                  {!isCollapsed ? section.items.map(p => {
                 const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
                 const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
                 const marginUsd   = p.selling_price_usd - purchaseUsd
                 const marginPct   = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
+                const firstLetter = String(p?.name || '').trim().charAt(0).toUpperCase()
                 return (
-                  <tr key={p.id} className={`table-row cursor-pointer ${selectedIds.has(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`} onClick={()=>setDetailProduct(p)}>
+                  <tr
+                    key={p.id}
+                    ref={(node) => {
+                      if (node && /[A-Z]/.test(firstLetter) && !productJumpRefs.current[firstLetter]) {
+                        productJumpRefs.current[firstLetter] = node
+                      }
+                    }}
+                    className={`table-row cursor-pointer ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                    onClick={()=>setDetailProduct(p)}
+                  >
                     <td className="px-3 py-2 w-8" onClick={e=>{e.stopPropagation();toggleSelect(p.id)}}>
-                      <input type="checkbox" className="rounded" checked={selectedIds.has(p.id)} onChange={()=>toggleSelect(p.id)} />
+                      <input type="checkbox" className="rounded" checked={isProductSelected(p.id)} onChange={()=>toggleSelect(p.id)} />
                     </td>
                     <td className="px-3 py-2">
                       {getProductGallery(p).length
@@ -942,9 +1063,9 @@ export default function Products() {
                     </td>
                   </tr>
                 )
-                  })}
+                  }) : null}
                 </Fragment>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -959,16 +1080,16 @@ export default function Products() {
             <input
               type="checkbox"
               className="w-4 h-4 cursor-pointer rounded flex-shrink-0"
-              checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
+              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
               ref={mobileSelectAllRef}
               onChange={(event) => toggleSelectAll(event.target.checked)}
             />
             <span className="text-sm text-gray-600 dark:text-gray-400">
-              {selectedIds.size > 0
-                ? `${selectedIds.size} / ${visibleProducts.length} ${t('selected')||'selected'}`
+              {hasSelected
+                ? `${selectedVisibleCount} / ${visibleProducts.length} ${t('selected')||'selected'}`
                 : `${t('select_all')||'Select all'} (${visibleProducts.length})`}
             </span>
-            {selectedIds.size > 0 && (
+            {hasSelected && (
               <button
                 className="ml-auto text-xs text-blue-500 hover:text-blue-700"
                 onClick={() => { setSelectedIds(new Set()); setBulkEditMode(null) }}
@@ -978,30 +1099,52 @@ export default function Products() {
         )}
         {loading ? <div className="text-center py-10 text-gray-400">{t('loading')}</div>
         : visibleProducts.length===0 ? <div className="text-center py-10 text-gray-400">{t('no_data')}</div>
-        : productSections.map((section) => (
+        : productSections.map((section) => {
+          const isCollapsed = collapsedProductSections.has(section.id)
+          return (
           <div key={section.id} className="space-y-2">
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded"
-                  checked={isSelectionScopeFullySelected(section.ids)}
-                  ref={(node) => {
-                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                  }}
-                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                  aria-label={`Select ${section.label}`}
-                />
-                <span>{section.label}</span>
-                <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-              </label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={isSelectionScopeFullySelected(section.ids)}
+                    ref={(node) => {
+                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                    }}
+                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                    aria-label={`Select ${section.label}`}
+                  />
+                  <span>{section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                </label>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                  onClick={() => toggleProductSection(section.id)}
+                >
+                  {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                </button>
+              </div>
             </div>
-            {section.items.map(p => {
+            {!isCollapsed ? section.items.map(p => {
           const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
           const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
+          const firstLetter = String(p?.name || '').trim().charAt(0).toUpperCase()
           return (
-            <div key={p.id} className={`card p-3 flex gap-3 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${selectedIds.has(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`} onClick={()=>setDetailProduct(p)}>
-              <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={selectedIds.has(p.id)} onChange={e=>{e.stopPropagation();toggleSelect(p.id)}} onClick={e=>e.stopPropagation()} />
+            <div
+              key={p.id}
+              ref={(node) => {
+                if (node && /[A-Z]/.test(firstLetter) && !productJumpRefs.current[firstLetter]) {
+                  productJumpRefs.current[firstLetter] = node
+                }
+              }}
+              className={`card p-3 flex gap-3 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+              onClick={()=>setDetailProduct(p)}
+            >
+              <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={e=>{e.stopPropagation();toggleSelect(p.id)}} onClick={e=>e.stopPropagation()} />
               <div className="flex-shrink-0">
                 {getProductGallery(p).length
                   ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={e=>{e.stopPropagation();openLightbox(getProductGallery(p),0,p.name)}} />
@@ -1039,9 +1182,9 @@ export default function Products() {
               </div>
             </div>
           )
-            })}
+            }) : null}
           </div>
-        ))}
+        )})}
       </div>
 
       {/* Product detail modal */}

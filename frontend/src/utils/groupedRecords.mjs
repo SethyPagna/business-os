@@ -65,8 +65,27 @@ export function buildTimeActionSections(items = [], {
   year = 'all',
   month = 'all',
   timeMode = 'month',
+  groupMode = 'time+action',
+  sortDirection = 'desc',
 } = {}) {
   const sections = new Map()
+  const getSortTime = (item) => {
+    const parsed = toDate(getDate(item))
+    return parsed?.getTime?.() || 0
+  }
+  const normalizedSortDirection = sortDirection === 'asc' ? 'asc' : 'desc'
+  const compareItemsByTime = (left, right) => {
+    const timeDelta = normalizedSortDirection === 'asc'
+      ? getSortTime(left) - getSortTime(right)
+      : getSortTime(right) - getSortTime(left)
+    if (timeDelta !== 0) return timeDelta
+    const leftId = Number(getItemId(left) || 0)
+    const rightId = Number(getItemId(right) || 0)
+    return normalizedSortDirection === 'asc'
+      ? leftId - rightId
+      : rightId - leftId
+  }
+  const normalizedGroupMode = groupMode === 'time' ? 'time' : 'time+action'
 
   for (const item of Array.isArray(items) ? items : []) {
     const dateValue = getDate(item)
@@ -96,29 +115,69 @@ export function buildTimeActionSections(items = [], {
     }
 
     currentSection.ids.push(getItemId(item))
+    currentSection.items = currentSection.items || []
+    currentSection.items.push(item)
+    currentSection.sortTime = Math.max(currentSection.sortTime, parts.date?.getTime?.() || 0)
 
-    const currentGroup = currentSection.groups.get(actionKey) || {
-      id: `${sectionId}:${actionKey}`,
-      actionKey,
-      label: actionLabel,
-      ids: [],
-      items: [],
+    if (normalizedGroupMode === 'time+action') {
+      const currentGroup = currentSection.groups.get(actionKey) || {
+        id: `${sectionId}:${actionKey}`,
+        actionKey,
+        label: actionLabel,
+        ids: [],
+        items: [],
+        sortTime: 0,
+      }
+
+      currentGroup.ids.push(getItemId(item))
+      currentGroup.items.push(item)
+      currentGroup.sortTime = Math.max(currentGroup.sortTime, parts.date?.getTime?.() || 0)
+      currentSection.groups.set(actionKey, currentGroup)
     }
-
-    currentGroup.ids.push(getItemId(item))
-    currentGroup.items.push(item)
-    currentSection.groups.set(actionKey, currentGroup)
     sections.set(sectionId, currentSection)
   }
 
   return [...sections.values()]
-    .sort((left, right) => right.sortTime - left.sortTime)
-    .map((section) => ({
-      id: section.id,
-      label: section.label,
-      ids: section.ids.filter((id) => id !== null && id !== undefined),
-      groups: [...section.groups.values()].sort((left, right) => left.label.localeCompare(right.label)),
-    }))
+    .sort((left, right) => normalizedSortDirection === 'asc'
+      ? left.sortTime - right.sortTime
+      : right.sortTime - left.sortTime)
+    .map((section) => {
+      const items = [...(section.items || [])].sort(compareItemsByTime)
+      const groups = normalizedGroupMode === 'time+action'
+        ? [...section.groups.values()]
+          .map((group) => {
+            const groupItems = [...group.items].sort(compareItemsByTime)
+            return {
+              ...group,
+              items: groupItems,
+              ids: groupItems.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
+            }
+          })
+          .sort((left, right) => {
+            if (left.sortTime !== right.sortTime) {
+              return normalizedSortDirection === 'asc'
+                ? left.sortTime - right.sortTime
+                : right.sortTime - left.sortTime
+            }
+            return left.label.localeCompare(right.label)
+          })
+        : [{
+          id: `${section.id}:all`,
+          actionKey: 'all',
+          label: section.label,
+          ids: items.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
+          items,
+          sortTime: section.sortTime,
+          synthetic: true,
+        }]
+      return {
+        id: section.id,
+        label: section.label,
+        ids: items.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
+        items,
+        groups,
+      }
+    })
 }
 
 export function toggleIdSet(currentSet, ids = [], checked) {

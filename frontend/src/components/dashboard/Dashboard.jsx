@@ -1,13 +1,15 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { useApp, useSync } from '../../AppContext'
+import { useMemo } from 'react'
 import { useRef } from 'react'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
-import { downloadCSV } from '../../utils/csv'
+import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
+import PortalMenu from '../shared/PortalMenu'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
@@ -126,7 +128,7 @@ export default function Dashboard() {
   }, [loadAnalytics])
 
   useEffect(() => {
-    if (!syncChannel) return
+    if (!syncChannel?.channel) return
     const ch = syncChannel.channel
     if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory') {
       const refreshId = beginTrackedRequest(refreshRequestRef)
@@ -140,15 +142,13 @@ export default function Dashboard() {
         }
       })
     }
-  }, [loadAnalytics, loadSummary, syncChannel])
+  }, [loadAnalytics, loadSummary, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
     invalidateTrackedRequest(summaryRequestRef)
     invalidateTrackedRequest(analyticsRequestRef)
     invalidateTrackedRequest(refreshRequestRef)
   }, [])
-
-  if (loading) return <div className="flex-1 flex items-center justify-center text-gray-400">{t('loading')}</div>
 
   const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
   const calcTrend = (curr, prev) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
@@ -289,60 +289,133 @@ export default function Dashboard() {
     },
   ]
 
+  const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
+
+  const buildDashboardKpiRows = useCallback(() => ([
+    { Section:'KPI', Metric:'Period', Value: periodShort, Period: rangeLabel },
+    { Section:'KPI', Metric:'Gross Sales (USD)', Value: aGrossSales, Period: rangeLabel },
+    { Section:'KPI', Metric:'Revenue (USD)', Value: aRevenue, Period: rangeLabel },
+    { Section:'KPI', Metric:'Discounts (USD)', Value: aDiscounts, Period: rangeLabel },
+    { Section:'KPI', Metric:'Store Discounts (USD)', Value: aStoreDiscounts, Period: rangeLabel },
+    { Section:'KPI', Metric:'Membership Discounts (USD)', Value: aMembershipDiscounts, Period: rangeLabel },
+    { Section:'KPI', Metric:'Tax (USD)', Value: aTax, Period: rangeLabel },
+    { Section:'KPI', Metric:'Delivery (USD)', Value: aDelivery, Period: rangeLabel },
+    { Section:'KPI', Metric:'COGS (USD)', Value: aCost, Period: rangeLabel },
+    { Section:'KPI', Metric:'Est. Profit (USD)', Value: aProfit, Period: rangeLabel },
+    { Section:'KPI', Metric:'Transactions', Value: aTxCount, Period: rangeLabel },
+    { Section:'KPI', Metric:'Avg Order (USD)', Value: aAvgOrder.toFixed(2), Period: rangeLabel },
+    { Section:'KPI', Metric:'Returns', Value: aReturns, Period: rangeLabel },
+    { Section:'KPI', Metric:'Refunded (USD)', Value: aRefundUsd, Period: rangeLabel },
+    { Section:'KPI', Metric:'Supplier Returns', Value: aSupplierReturns, Period: rangeLabel },
+    { Section:'KPI', Metric:'Business Loss (USD)', Value: aSupplierLossUsd, Period: rangeLabel },
+    { Section:'KPI', Metric:'Low Stock', Value: summary?.low_stock?.length || 0, Period:'all-time' },
+  ]), [
+    aAvgOrder,
+    aCost,
+    aDelivery,
+    aDiscounts,
+    aGrossSales,
+    aMembershipDiscounts,
+    aProfit,
+    aRefundUsd,
+    aReturns,
+    aRevenue,
+    aStoreDiscounts,
+    aSupplierLossUsd,
+    aSupplierReturns,
+    aTax,
+    aTxCount,
+    periodShort,
+    rangeLabel,
+    summary?.low_stock?.length,
+  ])
+
+  const buildDashboardFormulaRows = useCallback(() => ([
+    { Section: 'Calculation', Metric: 'Selected Range', Formula: rangeLabel, Example: periodShort },
+    { Section: 'Calculation', Metric: 'Net revenue', Formula: revenueFormulaText, Example: revenueExampleText },
+    { Section: 'Calculation', Metric: 'Collected total', Formula: collectedFormulaText, Example: collectedExampleText },
+    { Section: 'Calculation', Metric: 'Estimated profit', Formula: 'Profit = Net revenue - COGS', Example: `${fmtUSD(aProfit)} = ${fmtUSD(aRevenue)} - ${fmtUSD(aCost)}` },
+    { Section: 'Calculation', Metric: 'Average order', Formula: 'Average order = Net revenue / transaction count', Example: `${fmtUSD(aAvgOrder)} from ${aTxCount} transactions` },
+    { Section: 'Calculation', Metric: 'Returns effect', Formula: 'Returns decrease net revenue and loyalty points', Example: `${aReturns} returns, ${fmtUSD(aRefundUsd)} refunded` },
+  ]), [
+    aAvgOrder,
+    aCost,
+    aProfit,
+    aRefundUsd,
+    aReturns,
+    aRevenue,
+    aTxCount,
+    collectedExampleText,
+    collectedFormulaText,
+    fmtUSD,
+    periodShort,
+    rangeLabel,
+    revenueExampleText,
+    revenueFormulaText,
+  ])
+
   const buildExportAll = () => {
     if (!analytics || !summary) return
-    const kpiRows = [
-      { Section:'KPI', Metric:'Period',           Value: periodShort,          Period: rangeLabel },
-      { Section:'KPI', Metric:'Gross Sales (USD)', Value: aGrossSales,         Period: rangeLabel },
-      { Section:'KPI', Metric:'Revenue (USD)',     Value: aRevenue,             Period: rangeLabel },
-      { Section:'KPI', Metric:'Discounts (USD)',   Value: aDiscounts,           Period: rangeLabel },
-      { Section:'KPI', Metric:'Store Discounts (USD)', Value: aStoreDiscounts,  Period: rangeLabel },
-      { Section:'KPI', Metric:'Membership Discounts (USD)', Value: aMembershipDiscounts, Period: rangeLabel },
-      { Section:'KPI', Metric:'Tax (USD)',         Value: aTax,                 Period: rangeLabel },
-      { Section:'KPI', Metric:'Delivery (USD)',    Value: aDelivery,            Period: rangeLabel },
-      { Section:'KPI', Metric:'COGS (USD)',        Value: aCost,                Period: rangeLabel },
-      { Section:'KPI', Metric:'Est. Profit (USD)', Value: aProfit,              Period: rangeLabel },
-      { Section:'KPI', Metric:'Transactions',      Value: aTxCount,             Period: rangeLabel },
-      { Section:'KPI', Metric:'Avg Order (USD)',   Value: aAvgOrder.toFixed(2), Period: rangeLabel },
-      { Section:'KPI', Metric:'Returns',           Value: aReturns,             Period: rangeLabel },
-      { Section:'KPI', Metric:'Refunded (USD)',    Value: aRefundUsd,           Period: rangeLabel },
-      { Section:'KPI', Metric:'Supplier Returns',  Value: aSupplierReturns,     Period: rangeLabel },
-      { Section:'KPI', Metric:'Business Loss (USD)', Value: aSupplierLossUsd,   Period: rangeLabel },
-      { Section:'KPI', Metric:'Low Stock',         Value: summary.low_stock?.length||0, Period:'all-time' },
-    ]
+    const kpiRows = buildDashboardKpiRows()
     const salesRows    = (analytics.periodData||[]).map(d=>({ Section:'Period Sales', Period:d.period||'', Gross_Sales_USD:d.gross_sales_usd||0, Discounts_USD:d.discount_usd||0, Tax_USD:d.tax_usd||0, Delivery_USD:d.delivery_usd||0, Refund_USD:d.refund_usd||0, Revenue_USD:d.revenue_usd||0, COGS_USD:d.cost_usd||0, Profit_USD:d.profit_usd||0, Tx:d.count||0 }))
     const topRevRows   = (analytics.topProducts||[]).map((p,i)=>({ Section:'Top Products (Rev)', Rank:i+1, Product:p.product_name||'', Revenue_USD:p.revenue_usd||0, Qty:p.qty_sold||0 }))
     const topCustRows  = (analytics.topCustomers||[]).map((c,i)=>({ Section:'Top Customers', Rank:i+1, Customer:c.customer_name||'', Sales:c.sale_count||0, Gross:c.gross_revenue_usd||0, Store_Discounts:c.store_discount_usd||0, Membership_Discounts:c.membership_discount_usd||0, Returns:c.total_refund_usd||0, Net:c.net_revenue_usd||0 }))
     const pmRows       = (analytics.byPayment||[]).map(p=>({ Section:'Payments', Method:p.payment_method||'', Count:p.count||0, Revenue:p.revenue_usd||0 }))
     const branchRows   = (analytics.byBranch||[]).map(b=>({ Section:'Branches', Branch:b.branch_name||'', Tx:b.count||0, Revenue:b.revenue_usd||0 }))
     const lowRows      = (summary.low_stock||[]).map(p=>({ Section:'Low Stock', Product:p.name||'', Stock:p.stock_quantity||0, Threshold:p.low_stock_threshold||0 }))
-    const all = [...kpiRows,...salesRows,...topRevRows,...topCustRows,...pmRows,...branchRows,...lowRows]
+    const all = [...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
     const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
-    downloadCSV(`dashboard-full-${new Date().toISOString().slice(0,10)}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
+    downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
   }
 
+  const exportDashboardPackage = useCallback(() => {
+    if (!analytics || !summary) return
+    const salesRows = (analytics.periodData || []).map((d) => ({
+      Period: d.date || d.period || '',
+      Gross_Sales_USD: d.gross_sales_usd || 0,
+      Discounts_USD: d.discount_usd || 0,
+      Tax_USD: d.tax_usd || 0,
+      Delivery_USD: d.delivery_usd || 0,
+      Refund_USD: d.refund_usd || 0,
+      Revenue_USD: d.revenue_usd || 0,
+      COGS_USD: d.cost_usd || 0,
+      Profit_USD: d.profit_usd || 0,
+      Tx: d.count || 0,
+    }))
+    const topProductRows = (analytics.topProducts || []).map((p, i) => ({ Rank: i + 1, Product: p.product_name || '', Revenue_USD: p.revenue_usd || 0, Qty: p.qty_sold || 0 }))
+    const topCustomerRows = (analytics.topCustomers || []).map((c, i) => ({ Rank: i + 1, Customer: c.customer_name || '', Sales: c.sale_count || 0, Gross: c.gross_revenue_usd || 0, Store_Discounts: c.store_discount_usd || 0, Membership_Discounts: c.membership_discount_usd || 0, Returns: c.total_refund_usd || 0, Net: c.net_revenue_usd || 0 }))
+    const paymentRows = (analytics.byPayment || []).map((p) => ({ Method: p.payment_method, Count: p.count || 0, Revenue: p.revenue_usd || 0 }))
+    const branchRows = (analytics.byBranch || []).map((b) => ({ Branch: b.branch_name, Tx: b.count || 0, Revenue: b.revenue_usd || 0 }))
+    const lowRows = (summary.low_stock || []).map((p) => ({ Product: p.name || '', Stock: p.stock_quantity || 0, Threshold: p.low_stock_threshold || 0 }))
+    const recentRows = (summary.recent_sales || []).map((sale) => ({
+      Receipt: sale.receipt_number || '',
+      Created_At: sale.created_at || '',
+      Branch: sale.branch_name || '',
+      Customer: sale.customer_name || '',
+      Total_USD: sale.total_usd || sale.total || 0,
+      Total_KHR: sale.total_khr || 0,
+    }))
+    downloadZipFiles(`dashboard-report-${exportStamp}.zip`, [
+      { name: `dashboard-kpis-${exportStamp}.csv`, content: buildCSV(buildDashboardKpiRows()) },
+      { name: `dashboard-calculations-${exportStamp}.csv`, content: buildCSV(buildDashboardFormulaRows()) },
+      { name: `dashboard-sales-${exportStamp}.csv`, content: buildCSV(salesRows) },
+      { name: `dashboard-top-products-${exportStamp}.csv`, content: buildCSV(topProductRows) },
+      { name: `dashboard-top-customers-${exportStamp}.csv`, content: buildCSV(topCustomerRows) },
+      { name: `dashboard-payments-${exportStamp}.csv`, content: buildCSV(paymentRows) },
+      { name: `dashboard-branches-${exportStamp}.csv`, content: buildCSV(branchRows) },
+      { name: `dashboard-low-stock-${exportStamp}.csv`, content: buildCSV(lowRows) },
+      { name: `dashboard-recent-sales-${exportStamp}.csv`, content: buildCSV(recentRows) },
+    ])
+  }, [analytics, buildDashboardFormulaRows, buildDashboardKpiRows, exportStamp, summary])
+
   const dashboardExportItems = [
+    { label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage, color: 'green' },
     { label: t('export_all_report'), onClick: buildExportAll, color: 'green' },
     { label: t('export_kpi_summary'), onClick: () => {
       if (!summary || !analytics) return
-      const rows = [{
-        Period: rangeLabel,
-        Gross_Sales: aGrossSales,
-        Discounts: aDiscounts,
-        Store_Discounts: aStoreDiscounts,
-        Membership_Discounts: aMembershipDiscounts,
-        Tax: aTax,
-        Delivery: aDelivery,
-        Revenue: aRevenue,
-        COGS: aCost,
-        Profit: aProfit,
-        Tx: aTxCount,
-        Avg_Order: aAvgOrder.toFixed(2),
-        Returns: aReturns,
-        Refunded: aRefundUsd,
-      }]
-      downloadCSV(`dashboard-kpi-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-kpi-${exportStamp}.csv`, buildDashboardKpiRows())
     } },
+    { label: t('export_dashboard_calculations') || 'Export calculations and formulas', onClick: () => downloadCSV(`dashboard-calculations-${exportStamp}.csv`, buildDashboardFormulaRows()) },
     'divider',
     { label: t('export_sales_chart'), onClick: () => {
       const rows = chartData.map(d => ({
@@ -357,11 +430,11 @@ export default function Dashboard() {
         Profit_USD: d.profit_usd || 0,
         Tx: d.count || 0,
       }))
-      downloadCSV(`dashboard-sales-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-sales-${exportStamp}.csv`, rows)
     } },
     { label: t('export_top_products'), onClick: () => {
       const rows = topList.map((p, i) => ({ Rank: i + 1, Product: p.product_name || '', Revenue_USD: p.revenue_usd || 0, Qty: p.qty_sold || 0 }))
-      downloadCSV(`dashboard-top-products-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-top-products-${exportStamp}.csv`, rows)
     } },
     { label: t('export_top_customers'), onClick: () => {
       const rows = (analytics?.topCustomers || []).map((c, i) => ({
@@ -374,17 +447,19 @@ export default function Dashboard() {
         Returns: c.total_refund_usd || 0,
         Net: c.net_revenue_usd || 0,
       }))
-      downloadCSV(`dashboard-top-customers-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-top-customers-${exportStamp}.csv`, rows)
     } },
     { label: t('export_payment_methods'), onClick: () => {
       const rows = (analytics?.byPayment || []).map(p => ({ Method: p.payment_method, Count: p.count || 0, Revenue: p.revenue_usd || 0 }))
-      downloadCSV(`dashboard-payments-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-payments-${exportStamp}.csv`, rows)
     } },
     { label: t('export_branch_performance'), onClick: () => {
       const rows = (analytics?.byBranch || []).map(b => ({ Branch: b.branch_name, Tx: b.count || 0, Revenue: b.revenue_usd || 0 }))
-      downloadCSV(`dashboard-branches-${new Date().toISOString().slice(0,10)}.csv`, rows)
+      downloadCSV(`dashboard-branches-${exportStamp}.csv`, rows)
     } },
   ]
+
+  if (loading) return <div className="flex-1 flex items-center justify-center text-gray-400">{t('loading')}</div>
 
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">

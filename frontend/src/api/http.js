@@ -210,7 +210,7 @@ function sleep(ms) {
 
 function hasUsableLocalData(value) {
   if (value == null) return false
-  if (Array.isArray(value)) return value.length > 0
+  if (Array.isArray(value)) return true
   if (typeof value === 'object') return Object.keys(value).length > 0
   return true
 }
@@ -407,7 +407,12 @@ function emitCacheRefresh(channel) {
   const refreshKey = getChannelRefreshKey(channel)
   window.dispatchEvent(new CustomEvent('cache:updated', { detail: { channel } }))
   window.dispatchEvent(new CustomEvent('sync:update', {
-    detail: { channel: refreshKey, ts: Date.now() },
+    detail: {
+      channel: refreshKey,
+      ts: Date.now(),
+      reason: 'cache-refresh',
+      source: channel,
+    },
   }))
 }
 

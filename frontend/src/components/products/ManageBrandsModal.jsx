@@ -23,6 +23,10 @@ function toTitleCase(value) {
     .join(' ')
 }
 
+function normalizeLookup(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export default function ManageBrandsModal({
   onClose,
   onDone,
@@ -57,10 +61,15 @@ export default function ManageBrandsModal({
   }, [libraryBrands, products])
 
   const saveLibrary = async (brands) => {
-    const clean = Array.from(new Set((brands || [])
-      .map((entry) => String(entry || '').trim())
-      .filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b))
+    const normalizedMap = new Map()
+    ;(brands || [])
+      .map((entry) => toTitleCase(entry))
+      .filter(Boolean)
+      .forEach((entry) => {
+        const key = normalizeLookup(entry)
+        if (!normalizedMap.has(key)) normalizedMap.set(key, entry)
+      })
+    const clean = Array.from(normalizedMap.values()).sort((a, b) => a.localeCompare(b))
 
     await window.api.saveSettings({
       product_brand_options: JSON.stringify(clean),
@@ -93,7 +102,9 @@ export default function ManageBrandsModal({
     const from = String(fromName || '').trim()
     const to = toTitleCase(toNameRaw)
     if (!from || !to) return
-    if (from.toLowerCase() === to.toLowerCase()) {
+    const fromLookup = normalizeLookup(from)
+    const toLookup = normalizeLookup(to)
+    if (fromLookup === toLookup) {
       setRenamingBrand('')
       setRenameValue('')
       return
@@ -102,13 +113,10 @@ export default function ManageBrandsModal({
     setBusy(true)
     setError('')
     try {
-      const duplicates = brandsWithUsage.some((entry) => entry.name.toLowerCase() === to.toLowerCase())
-      if (duplicates) {
-        setError('Target brand already exists')
-        return
-      }
-
-      const affected = products.filter((product) => String(product?.brand || '').trim().toLowerCase() === from.toLowerCase())
+      const affected = products.filter((product) => {
+        const brandLookup = normalizeLookup(product?.brand)
+        return brandLookup === fromLookup || brandLookup === toLookup
+      })
       for (const product of affected) {
         await window.api.updateProduct(product.id, {
           ...product,
@@ -118,13 +126,15 @@ export default function ManageBrandsModal({
         })
       }
 
-      const nextLibrary = libraryBrands.map((entry) => {
-        if (String(entry || '').trim().toLowerCase() !== from.toLowerCase()) return entry
-        return to
-      })
+      const nextLibrary = [...libraryBrands, to]
+        .map((entry) => {
+          const lookup = normalizeLookup(entry)
+          if (lookup === fromLookup || lookup === toLookup) return to
+          return entry
+        })
       await saveLibrary(nextLibrary)
 
-      notify(`Brand renamed to "${to}"`, 'success')
+      notify(`Brand updated to "${to}"`, 'success')
       setRenamingBrand('')
       setRenameValue('')
       onDone?.()
@@ -139,7 +149,8 @@ export default function ManageBrandsModal({
     const brandName = String(name || '').trim()
     if (!brandName) return
 
-    const affected = products.filter((product) => String(product?.brand || '').trim().toLowerCase() === brandName.toLowerCase())
+    const brandLookup = normalizeLookup(brandName)
+    const affected = products.filter((product) => normalizeLookup(product?.brand) === brandLookup)
     const clearAppliedBrands = affected.length > 0
       ? window.confirm(`"${brandName}" is used by ${affected.length} product(s). Clear this brand from those products?`)
       : true
@@ -158,7 +169,7 @@ export default function ManageBrandsModal({
         })
       }
 
-      const nextLibrary = libraryBrands.filter((entry) => String(entry || '').trim().toLowerCase() !== brandName.toLowerCase())
+      const nextLibrary = libraryBrands.filter((entry) => normalizeLookup(entry) !== brandLookup)
       await saveLibrary(nextLibrary)
 
       notify('Brand removed', 'success')

@@ -1,7 +1,7 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database')
-const { ok, err, audit, broadcast, bulkImportCSV } = require('../helpers')
+const { ok, err, audit, broadcast, parseCSVRows } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 
@@ -24,6 +24,51 @@ function assertUniqueMembershipNumber(membershipNumber, excludeId = null) {
   `).get(normalized, excludeId, excludeId)
   if (existing) throw new Error(`Membership number "${normalized}" is already in use`)
   return normalized
+}
+
+function generateMembershipNumberCandidate() {
+  const stamp = Date.now().toString().slice(-8)
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
+  return `MEM-${stamp}-${rand}`
+}
+
+function ensureMembershipNumber(value, excludeId = null) {
+  const normalized = cleanMembershipNumber(value)
+  if (normalized) return assertUniqueMembershipNumber(normalized, excludeId)
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      return assertUniqueMembershipNumber(generateMembershipNumberCandidate(), excludeId)
+    } catch (_) {}
+  }
+  throw new Error('Could not generate a unique membership number')
+}
+
+function normalizeFieldRule(value, fallback) {
+  const rule = String(value || fallback || '').trim().toLowerCase()
+  return ['keep_existing', 'use_imported', 'merge_blank_only', 'clear_value'].includes(rule)
+    ? rule
+    : fallback
+}
+
+function resolveFieldValue(existingValue, incomingValue, rule, { defaultRule = 'merge_blank_only' } = {}) {
+  const effectiveRule = normalizeFieldRule(rule, defaultRule)
+  const existing = existingValue ?? null
+  const incoming = incomingValue ?? null
+
+  if (effectiveRule === 'clear_value') return null
+  if (effectiveRule === 'use_imported') return incoming
+  if (effectiveRule === 'keep_existing') return existing
+  return existing || incoming
+}
+
+function buildImportRows(payload = {}) {
+  if (Array.isArray(payload.rows)) {
+    return {
+      rows: payload.rows.map((row, index) => ({ row, rowNumber: Number(row?._rowNumber) || index + 2 })),
+      errors: [],
+    }
+  }
+  return parseCSVRows(payload.csvText)
 }
 
 function normalizeConflictMode(value) {
@@ -141,7 +186,7 @@ router.post('/customers', authToken, requirePermission('contacts'), (req, res) =
   const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
   try {
-    const membershipNumber = assertUniqueMembershipNumber(d.membership_number)
+    const membershipNumber = ensureMembershipNumber(d.membership_number)
     const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
       .run(d.name.trim(), membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null)
     audit(actor.userId, actor.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
@@ -157,7 +202,7 @@ router.put('/customers/:id', authToken, requirePermission('contacts'), (req, res
     const current = db.prepare('SELECT id, updated_at FROM customers WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Customer not found', 404)
     assertUpdatedAtMatch('customer', current, getExpectedUpdatedAt(d))
-    const membershipNumber = assertUniqueMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
+    const membershipNumber = ensureMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
     db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
       .run(d.name, membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null, req.params.id)
     audit(actor.userId, actor.userName, 'update', 'customer', req.params.id)
@@ -186,9 +231,9 @@ router.delete('/customers/:id', authToken, requirePermission('contacts'), (req, 
 })
 
 router.post('/customers/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
-  const { csvText } = req.body || {}
+  const payload = req.body || {}
   const actor = getAuditActor(req)
-  const conflictMode = normalizeConflictMode(req.body?.conflictMode)
+  const conflictMode = normalizeConflictMode(payload?.conflictMode)
   const findByMembership = db.prepare(`
     SELECT *
     FROM customers
@@ -234,82 +279,92 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
     return null
   }
 
-  const { imported, errors } = bulkImportCSV(
-    csvText, ['name', 'membership_number', 'phone', 'email', 'address', 'company', 'notes'],
-    row => {
-      const incoming = {
-        name: row.name?.trim() || '',
-        membership_number: cleanMembershipNumber(row.membership_number),
-        phone: row.phone?.trim() || null,
-        email: row.email?.trim() || null,
-        address: row.address?.trim() || null,
-        company: row.company?.trim() || null,
-        notes: row.notes?.trim() || null,
+  const parsed = buildImportRows(payload)
+  if (parsed.errors.length) return ok(res, { imported: 0, errors: parsed.errors })
+
+  let imported = 0
+  const errors = []
+
+  db.transaction(() => {
+    for (const entry of parsed.rows) {
+      const row = entry.row || {}
+      const rowNumber = entry.rowNumber
+      if (!String(row.name || '').trim()) {
+        errors.push(`Row ${rowNumber}: name is required`)
+        continue
       }
 
-      const existing = findExisting(row)
-      if (!existing) {
-        const membershipNumber = assertUniqueMembershipNumber(incoming.membership_number)
-        return insertCustomer.run(
-          incoming.name,
-          membershipNumber,
-          incoming.phone,
-          incoming.email,
-          incoming.address,
-          incoming.company,
-          incoming.notes
-        )
-      }
+      try {
+        const rowConflictMode = normalizeConflictMode(row._conflict_mode || conflictMode)
+        const rowFieldRules = row._field_rules && typeof row._field_rules === 'object' ? row._field_rules : {}
+        const incoming = {
+          name: row.name?.trim() || '',
+          membership_number: cleanMembershipNumber(row.membership_number),
+          phone: row.phone?.trim() || null,
+          email: row.email?.trim() || null,
+          address: row.address?.trim() || null,
+          company: row.company?.trim() || null,
+          notes: row.notes?.trim() || null,
+        }
 
-      if (conflictMode === 'skip') return false
+        const existing = findExisting(row)
+        if (!existing) {
+          const membershipNumber = ensureMembershipNumber(incoming.membership_number)
+          const result = insertCustomer.run(
+            incoming.name,
+            membershipNumber,
+            incoming.phone,
+            incoming.email,
+            incoming.address,
+            incoming.company,
+            incoming.notes
+          )
+          if (result?.changes) imported += 1
+          continue
+        }
 
-      if (conflictMode === 'overwrite') {
-        const membershipNumber = assertUniqueMembershipNumber(incoming.membership_number || existing.membership_number, existing.id)
-        return updateCustomer.run(
-          incoming.name || existing.name,
+        if (rowConflictMode === 'skip') continue
+
+        const defaultRule = rowConflictMode === 'overwrite' ? 'use_imported' : 'merge_blank_only'
+        const merged = {
+          name: resolveFieldValue(existing.name, incoming.name, rowFieldRules.name, { defaultRule }),
+          membership_number: resolveFieldValue(existing.membership_number, incoming.membership_number, rowFieldRules.membership_number, { defaultRule }),
+          phone: resolveFieldValue(existing.phone, incoming.phone, rowFieldRules.phone, { defaultRule }),
+          email: resolveFieldValue(existing.email, incoming.email, rowFieldRules.email, { defaultRule }),
+          address: resolveFieldValue(existing.address, incoming.address, rowFieldRules.address, { defaultRule }),
+          company: resolveFieldValue(existing.company, incoming.company, rowFieldRules.company, { defaultRule }),
+          notes: resolveFieldValue(existing.notes, incoming.notes, rowFieldRules.notes, { defaultRule }),
+        }
+        if (!String(merged.name || '').trim()) {
+          throw new Error('name is required after conflict handling')
+        }
+        const membershipNumber = ensureMembershipNumber(merged.membership_number, existing.id)
+        if (
+          merged.name === existing.name &&
+          membershipNumber === existing.membership_number &&
+          (merged.phone || null) === (existing.phone || null) &&
+          (merged.email || null) === (existing.email || null) &&
+          (merged.address || null) === (existing.address || null) &&
+          (merged.company || null) === (existing.company || null) &&
+          (merged.notes || null) === (existing.notes || null)
+        ) continue
+
+        const result = updateCustomer.run(
+          merged.name,
           membershipNumber,
-          incoming.phone,
-          incoming.email,
-          incoming.address,
-          incoming.company,
-          incoming.notes,
+          merged.phone,
+          merged.email,
+          merged.address,
+          merged.company,
+          merged.notes,
           existing.id
         )
+        if (result?.changes) imported += 1
+      } catch (error) {
+        errors.push(`Row ${rowNumber}: ${error.message}`)
       }
-
-      // merge: keep existing populated values, fill only blanks with incoming values
-      const merged = {
-        name: existing.name || incoming.name,
-        membership_number: existing.membership_number || incoming.membership_number,
-        phone: existing.phone || incoming.phone,
-        email: existing.email || incoming.email,
-        address: existing.address || incoming.address,
-        company: existing.company || incoming.company,
-        notes: existing.notes || incoming.notes,
-      }
-      const membershipNumber = assertUniqueMembershipNumber(merged.membership_number, existing.id)
-      if (
-        merged.name === existing.name &&
-        membershipNumber === existing.membership_number &&
-        merged.phone === existing.phone &&
-        merged.email === existing.email &&
-        merged.address === existing.address &&
-        merged.company === existing.company &&
-        merged.notes === existing.notes
-      ) return false
-
-      return updateCustomer.run(
-        merged.name,
-        membershipNumber,
-        merged.phone,
-        merged.email,
-        merged.address,
-        merged.company,
-        merged.notes,
-        existing.id
-      )
     }
-  )
+  })()
   audit(actor.userId, actor.userName, 'bulk_import', 'customer', null, { count: imported, conflictMode })
   broadcast('customers')
   ok(res, { imported, errors })
@@ -366,9 +421,9 @@ router.delete('/suppliers/:id', authToken, requirePermission('contacts'), (req, 
 })
 
 router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
-  const { csvText } = req.body || {}
+  const payload = req.body || {}
   const actor = getAuditActor(req)
-  const conflictMode = normalizeConflictMode(req.body?.conflictMode)
+  const conflictMode = normalizeConflictMode(payload?.conflictMode)
   const findByName = db.prepare(`
     SELECT *
     FROM suppliers
@@ -404,77 +459,82 @@ router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), 
     return null
   }
 
-  const { imported, errors } = bulkImportCSV(
-    csvText, ['name', 'phone', 'email', 'address', 'company', 'contact_person', 'notes'],
-    row => {
-      const incoming = {
-        name: row.name?.trim() || '',
-        phone: row.phone?.trim() || null,
-        email: row.email?.trim() || null,
-        address: row.address?.trim() || null,
-        company: row.company?.trim() || null,
-        contact_person: row.contact_person?.trim() || null,
-        notes: row.notes?.trim() || null,
-      }
-      const existing = findExisting(row)
-      if (!existing) {
-        return insertSupplier.run(
-          incoming.name,
-          incoming.phone,
-          incoming.email,
-          incoming.address,
-          incoming.company,
-          incoming.contact_person,
-          incoming.notes
-        )
-      }
+  const parsed = buildImportRows(payload)
+  if (parsed.errors.length) return ok(res, { imported: 0, errors: parsed.errors })
+  let imported = 0
+  const errors = []
 
-      if (conflictMode === 'skip') return false
-
-      if (conflictMode === 'overwrite') {
-        return updateSupplier.run(
-          incoming.name || existing.name,
-          incoming.phone,
-          incoming.email,
-          incoming.address,
-          incoming.company,
-          incoming.contact_person,
-          incoming.notes,
+  db.transaction(() => {
+    for (const entry of parsed.rows) {
+      const row = entry.row || {}
+      const rowNumber = entry.rowNumber
+      if (!String(row.name || '').trim()) {
+        errors.push(`Row ${rowNumber}: name is required`)
+        continue
+      }
+      try {
+        const rowConflictMode = normalizeConflictMode(row._conflict_mode || conflictMode)
+        const rowFieldRules = row._field_rules && typeof row._field_rules === 'object' ? row._field_rules : {}
+        const incoming = {
+          name: row.name?.trim() || '',
+          phone: row.phone?.trim() || null,
+          email: row.email?.trim() || null,
+          address: row.address?.trim() || null,
+          company: row.company?.trim() || null,
+          contact_person: row.contact_person?.trim() || null,
+          notes: row.notes?.trim() || null,
+        }
+        const existing = findExisting(row)
+        if (!existing) {
+          const result = insertSupplier.run(
+            incoming.name,
+            incoming.phone,
+            incoming.email,
+            incoming.address,
+            incoming.company,
+            incoming.contact_person,
+            incoming.notes
+          )
+          if (result?.changes) imported += 1
+          continue
+        }
+        if (rowConflictMode === 'skip') continue
+        const defaultRule = rowConflictMode === 'overwrite' ? 'use_imported' : 'merge_blank_only'
+        const merged = {
+          name: resolveFieldValue(existing.name, incoming.name, rowFieldRules.name, { defaultRule }),
+          phone: resolveFieldValue(existing.phone, incoming.phone, rowFieldRules.phone, { defaultRule }),
+          email: resolveFieldValue(existing.email, incoming.email, rowFieldRules.email, { defaultRule }),
+          address: resolveFieldValue(existing.address, incoming.address, rowFieldRules.address, { defaultRule }),
+          company: resolveFieldValue(existing.company, incoming.company, rowFieldRules.company, { defaultRule }),
+          contact_person: resolveFieldValue(existing.contact_person, incoming.contact_person, rowFieldRules.contact_person, { defaultRule }),
+          notes: resolveFieldValue(existing.notes, incoming.notes, rowFieldRules.notes, { defaultRule }),
+        }
+        if (!String(merged.name || '').trim()) throw new Error('name is required after conflict handling')
+        if (
+          merged.name === existing.name &&
+          (merged.phone || null) === (existing.phone || null) &&
+          (merged.email || null) === (existing.email || null) &&
+          (merged.address || null) === (existing.address || null) &&
+          (merged.company || null) === (existing.company || null) &&
+          (merged.contact_person || null) === (existing.contact_person || null) &&
+          (merged.notes || null) === (existing.notes || null)
+        ) continue
+        const result = updateSupplier.run(
+          merged.name,
+          merged.phone,
+          merged.email,
+          merged.address,
+          merged.company,
+          merged.contact_person,
+          merged.notes,
           existing.id
         )
+        if (result?.changes) imported += 1
+      } catch (error) {
+        errors.push(`Row ${rowNumber}: ${error.message}`)
       }
-
-      const merged = {
-        name: existing.name || incoming.name,
-        phone: existing.phone || incoming.phone,
-        email: existing.email || incoming.email,
-        address: existing.address || incoming.address,
-        company: existing.company || incoming.company,
-        contact_person: existing.contact_person || incoming.contact_person,
-        notes: existing.notes || incoming.notes,
-      }
-      if (
-        merged.name === existing.name &&
-        merged.phone === existing.phone &&
-        merged.email === existing.email &&
-        merged.address === existing.address &&
-        merged.company === existing.company &&
-        merged.contact_person === existing.contact_person &&
-        merged.notes === existing.notes
-      ) return false
-
-      return updateSupplier.run(
-        merged.name,
-        merged.phone,
-        merged.email,
-        merged.address,
-        merged.company,
-        merged.contact_person,
-        merged.notes,
-        existing.id
-      )
     }
-  )
+  })()
   audit(actor.userId, actor.userName, 'bulk_import', 'supplier', null, { count: imported, conflictMode })
   broadcast('suppliers')
   ok(res, { imported, errors })
@@ -538,9 +598,9 @@ router.delete('/delivery-contacts/:id', authToken, requirePermission('contacts')
 })
 
 router.post('/delivery-contacts/bulk-import', authToken, requirePermission('contacts'), (req, res) => {
-  const { csvText } = req.body || {}
+  const payload = req.body || {}
   const actor = getAuditActor(req)
-  const conflictMode = normalizeConflictMode(req.body?.conflictMode)
+  const conflictMode = normalizeConflictMode(payload?.conflictMode)
   const findByName = db.prepare(`
     SELECT *
     FROM delivery_contacts
@@ -576,71 +636,67 @@ router.post('/delivery-contacts/bulk-import', authToken, requirePermission('cont
     return null
   }
 
-  const { imported, errors } = bulkImportCSV(
-    csvText, ['name', 'phone', 'area', 'address', 'notes'],
-    row => {
-      const rawName = row.name?.trim() || ''
-      const rawPhone = row.phone?.trim() || ''
-      if (!rawName && !rawPhone) {
-        throw new Error('Driver name or phone is required')
-      }
-      const finalName = rawName || `Driver ${rawPhone}`
-      const incoming = {
-        name: finalName,
-        phone: rawPhone || null,
-        area: row.area?.trim() || null,
-        address: row.address?.trim() || null,
-        notes: row.notes?.trim() || null,
-      }
-      const existing = findExisting(row)
-      if (!existing) {
-        return insertDelivery.run(
-          incoming.name,
-          incoming.phone,
-          incoming.area,
-          incoming.address,
-          incoming.notes
-        )
-      }
+  const parsed = buildImportRows(payload)
+  if (parsed.errors.length) return ok(res, { imported: 0, errors: parsed.errors })
+  let imported = 0
+  const errors = []
 
-      if (conflictMode === 'skip') return false
-
-      if (conflictMode === 'overwrite') {
-        return updateDelivery.run(
-          incoming.name || existing.name,
-          incoming.phone,
-          incoming.area,
-          incoming.address,
-          incoming.notes,
+  db.transaction(() => {
+    for (const entry of parsed.rows) {
+      const row = entry.row || {}
+      const rowNumber = entry.rowNumber
+      try {
+        const rawName = row.name?.trim() || ''
+        const rawPhone = row.phone?.trim() || ''
+        if (!rawName && !rawPhone) throw new Error('Driver name or phone is required')
+        const rowConflictMode = normalizeConflictMode(row._conflict_mode || conflictMode)
+        const rowFieldRules = row._field_rules && typeof row._field_rules === 'object' ? row._field_rules : {}
+        const finalName = rawName || `Driver ${rawPhone}`
+        const incoming = {
+          name: finalName,
+          phone: rawPhone || null,
+          area: row.area?.trim() || null,
+          address: row.address?.trim() || null,
+          notes: row.notes?.trim() || null,
+        }
+        const existing = findExisting(row)
+        if (!existing) {
+          const result = insertDelivery.run(
+            incoming.name,
+            incoming.phone,
+            incoming.area,
+            incoming.address,
+            incoming.notes
+          )
+          if (result?.changes) imported += 1
+          continue
+        }
+        if (rowConflictMode === 'skip') continue
+        const defaultRule = rowConflictMode === 'overwrite' ? 'use_imported' : 'merge_blank_only'
+        const merged = {
+          name: resolveFieldValue(existing.name, incoming.name, rowFieldRules.name, { defaultRule }),
+          phone: resolveFieldValue(existing.phone, incoming.phone, rowFieldRules.phone, { defaultRule }),
+          area: resolveFieldValue(existing.area, incoming.area, rowFieldRules.area, { defaultRule }),
+          address: resolveFieldValue(existing.address, incoming.address, rowFieldRules.address, { defaultRule }),
+          notes: resolveFieldValue(existing.notes, incoming.notes, rowFieldRules.notes, { defaultRule }),
+        }
+        if (!String(merged.name || '').trim() && !String(merged.phone || '').trim()) {
+          throw new Error('Driver name or phone is required after conflict handling')
+        }
+        const result = updateDelivery.run(
+          merged.name || `Driver ${merged.phone}`,
+          merged.phone,
+          merged.area,
+          merged.address,
+          merged.notes,
           existing.id
         )
+        if (result?.changes) imported += 1
+      } catch (error) {
+        errors.push(`Row ${rowNumber}: ${error.message}`)
       }
-
-      const merged = {
-        name: existing.name || incoming.name,
-        phone: existing.phone || incoming.phone,
-        area: existing.area || incoming.area,
-        address: existing.address || incoming.address,
-        notes: existing.notes || incoming.notes,
-      }
-      if (
-        merged.name === existing.name &&
-        merged.phone === existing.phone &&
-        merged.area === existing.area &&
-        merged.address === existing.address &&
-        merged.notes === existing.notes
-      ) return false
-
-      return updateDelivery.run(
-        merged.name,
-        merged.phone,
-        merged.area,
-        merged.address,
-        merged.notes,
-        existing.id
-      )
     }
-  )
+  })()
   audit(actor.userId, actor.userName, 'bulk_import', 'delivery_contact', null, { count: imported, conflictMode })
   broadcast('deliveryContacts')
   ok(res, { imported, errors })

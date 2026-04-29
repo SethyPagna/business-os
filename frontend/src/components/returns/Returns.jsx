@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, RotateCcw, Search, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
@@ -77,6 +77,10 @@ export default function Returns() {
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editRet, setEditRet] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [returnGroupMode, setReturnGroupMode] = useState('time')
+  const [returnSortDirection, setReturnSortDirection] = useState('desc')
+  const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
+  const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
   const selectAllRef = useRef(null)
@@ -93,9 +97,14 @@ export default function Returns() {
     } catch (error) {
       if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
       console.error('[Returns] load failed:', error?.message)
-      setRows([])
+      if (!silent && !loadedOnceRef.current) {
+        setRows([])
+      }
     } finally {
-      if (isTrackedRequestCurrent(returnsRequestRef, requestId) && !silent) setLoading(false)
+      if (isTrackedRequestCurrent(returnsRequestRef, requestId)) {
+        loadedOnceRef.current = true
+        if (!silent) setLoading(false)
+      }
     }
   }, [scope])
 
@@ -105,11 +114,11 @@ export default function Returns() {
   }, [loadReturns])
 
   useEffect(() => {
-    if (!syncChannel) return
+    if (!syncChannel?.channel) return
     if (['returns', 'sales', 'inventory', 'products'].includes(syncChannel.channel)) {
       loadReturns(true)
     }
-  }, [syncChannel, loadReturns])
+  }, [loadReturns, syncChannel?.channel, syncChannel?.ts])
 
   const handleOpenEdit = async (ret) => {
     const requestId = beginTrackedRequest(editRequestRef)
@@ -174,7 +183,9 @@ export default function Returns() {
     year: yearFilter,
     month: monthFilter,
     timeMode,
-  }), [filtered, monthFilter, timeMode, tr, yearFilter])
+    groupMode: returnGroupMode,
+    sortDirection: returnSortDirection,
+  }), [filtered, monthFilter, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -185,6 +196,14 @@ export default function Returns() {
     const validIds = new Set(visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)))
     setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
   }, [visibleReturns])
+
+  useEffect(() => {
+    setCollapsedReturnSections((current) => {
+      const validIds = new Set(returnSections.map((section) => section.id))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [returnSections])
 
   const visibleIds = useMemo(
     () => visibleReturns.map((ret) => Number(ret.id)).filter((id) => Number.isFinite(id)),
@@ -217,6 +236,15 @@ export default function Returns() {
 
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
+  }, [])
+
+  const toggleReturnSection = useCallback((sectionId) => {
+    setCollapsedReturnSections((current) => {
+      const next = new Set(current)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
@@ -256,11 +284,14 @@ export default function Returns() {
   }, [exportVisible, notify, selectedReturns])
 
   const exportItems = useMemo(() => ([
-    { label: 'Export visible returns', onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
-    selectedReturns.length ? { label: 'Export selected returns', onClick: exportSelected, color: 'blue' } : null,
-    typeFilter !== 'all' ? { label: `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
-  ].filter(Boolean)), [exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, typeFilter, typeOptions, visibleReturns, yearFilter])
+    { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
+    selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'នាំចេញការត្រឡប់ដែលបានជ្រើស'), onClick: exportSelected, color: 'blue' } : null,
+    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+    scope !== CUSTOMER_SCOPE
+      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
+      : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
+  ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns, yearFilter])
 
   const filterSections = useMemo(() => ([
     {
@@ -317,12 +348,29 @@ export default function Returns() {
         })),
       ],
     },
-  ]), [availableYears, monthFilter, scope, tr, typeFilter, typeOptions, yearFilter])
+    {
+      id: 'grouping',
+      label: tr('group_by', 'Group by'),
+      options: [
+        { id: 'time', label: tr('group_by_time', 'Time only'), active: returnGroupMode === 'time', onClick: () => setReturnGroupMode('time') },
+        { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
+      ],
+    },
+    {
+      id: 'sort',
+      label: tr('sort', 'Sort'),
+      options: [
+        { id: 'desc', label: tr('newest_first', 'Newest first'), active: returnSortDirection === 'desc', onClick: () => setReturnSortDirection('desc') },
+        { id: 'asc', label: tr('oldest_first', 'Oldest first'), active: returnSortDirection === 'asc', onClick: () => setReturnSortDirection('asc') },
+      ],
+    },
+  ]), [availableYears, monthFilter, returnGroupMode, returnSortDirection, scope, tr, typeFilter, typeOptions, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => [yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE].filter(Boolean).length,
-    [monthFilter, scope, typeFilter, yearFilter],
+    () => [yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc'].filter(Boolean).length,
+    [monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter],
   )
+  const showReturnActionGroups = returnGroupMode === 'time+action'
 
   const renderAmount = (ret) => {
     const retScope = normalizeScope(ret.return_scope)
@@ -383,6 +431,8 @@ export default function Returns() {
             setYearFilter('all')
             setMonthFilter('all')
             setTypeFilter('all')
+            setReturnGroupMode('time')
+            setReturnSortDirection('desc')
           }}
           compact
         />
@@ -465,11 +515,13 @@ export default function Returns() {
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
-              ) : returnSections.map((section) => (
+              ) : returnSections.map((section) => {
+                const isCollapsed = collapsedReturnSections.has(section.id)
+                return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                     <td colSpan={8} className="px-4 py-2">
-                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                         <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
                             type="checkbox"
@@ -483,32 +535,40 @@ export default function Returns() {
                           />
                           <span>{section.label}</span>
                         </label>
-                        <span className="text-slate-400">{section.ids.length}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-400">{section.ids.length}</span>
+                          <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
+                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                            {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
-                  {section.groups.map((group) => (
+                  {!isCollapsed ? section.groups.map((group) => (
                     <Fragment key={group.id}>
-                      <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                        <td colSpan={8} className="px-6 py-2">
-                          <div className="flex flex-wrap items-center gap-3 text-xs">
-                            <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={isSelectionScopeFullySelected(group.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                }}
-                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                aria-label={`Select ${group.label}`}
-                              />
-                              <span>{group.label}</span>
-                            </label>
-                            <span className="text-slate-400">{group.items.length}</span>
-                          </div>
-                        </td>
-                      </tr>
+                      {showReturnActionGroups ? (
+                        <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                          <td colSpan={8} className="px-6 py-2">
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                              <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded"
+                                  checked={isSelectionScopeFullySelected(group.ids)}
+                                  ref={(node) => {
+                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                  }}
+                                  onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                  aria-label={`Select ${group.label}`}
+                                />
+                                <span>{group.label}</span>
+                              </label>
+                              <span className="text-slate-400">{group.items.length}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
                       {group.items.map((ret) => {
                         const retScope = normalizeScope(ret.return_scope)
                         const typeLabel = getReturnTypeLabel(ret, tr)
@@ -540,9 +600,9 @@ export default function Returns() {
                         )
                       })}
                     </Fragment>
-                  ))}
+                  )) : null}
                 </Fragment>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -553,42 +613,53 @@ export default function Returns() {
           <div className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</div>
         ) : filtered.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</div>
-        ) : returnSections.map((section) => (
+        ) : returnSections.map((section) => {
+          const isCollapsed = collapsedReturnSections.has(section.id)
+          return (
           <div key={section.id} className="space-y-2">
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded"
-                  checked={isSelectionScopeFullySelected(section.ids)}
-                  ref={(node) => {
-                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                  }}
-                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                  aria-label={`Select ${section.label}`}
-                />
-                <span>{section.label}</span>
-                <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
-              </label>
-            </div>
-            {section.groups.map((group) => (
-              <div key={group.id} className="space-y-2">
-                <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded"
-                      checked={isSelectionScopeFullySelected(group.ids)}
-                      ref={(node) => {
-                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                      }}
-                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                      aria-label={`Select ${group.label}`}
-                    />
-                    <span>{group.label}</span>
-                    <span className="text-slate-400">{group.items.length}</span>
-                  </label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={isSelectionScopeFullySelected(section.ids)}
+                    ref={(node) => {
+                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                    }}
+                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                    aria-label={`Select ${section.label}`}
+                  />
+                  <span>{section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
                 </div>
+              </div>
+            </div>
+            {!isCollapsed ? section.groups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                {showReturnActionGroups ? (
+                  <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={isSelectionScopeFullySelected(group.ids)}
+                        ref={(node) => {
+                          if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                        }}
+                        onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                        aria-label={`Select ${group.label}`}
+                      />
+                      <span>{group.label}</span>
+                      <span className="text-slate-400">{group.items.length}</span>
+                    </label>
+                  </div>
+                ) : null}
                 {group.items.map((ret) => {
                   const retScope = normalizeScope(ret.return_scope)
                   return (
@@ -601,7 +672,6 @@ export default function Returns() {
                           onChange={() => toggleSelected(ret.id)}
                           aria-label={`Select ${ret.return_number}`}
                         />
-                        <span className="text-xs text-gray-500">{tr('select', 'Select')}</span>
                       </div>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -618,9 +688,9 @@ export default function Returns() {
                   )
                 })}
               </div>
-            ))}
+            )) : null}
           </div>
-        ))}
+        )})}
       </div>
 
       {detailRet ? (

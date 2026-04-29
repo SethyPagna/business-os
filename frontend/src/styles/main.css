@@ -128,8 +128,8 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .dark .input                 { background-color: #111924 !important; border-color: #334155 !important; color: #eef2f7 !important; }
 .dark .input::placeholder    { color: #8392a8 !important; }
 .dark .input:focus           { border-color: var(--ui-accent,#3b82f6) !important; }
-.dark .btn-secondary         { background-color: #16202b !important; color: #dce6f3 !important; border: 1px solid #334155 !important; }
-.dark .btn-secondary:hover   { background-color: #1d2936 !important; }
+.dark .btn-secondary         { background-color: #16202b !important; color: #dce6f3 !important; border: 1px solid #415267 !important; box-shadow: inset 0 0 0 1px rgba(148,163,184,0.06); }
+.dark .btn-secondary:hover   { background-color: #1d2936 !important; border-color: #5b6f86 !important; }
 .dark .table-row             { border-color: #2c3949 !important; }
 .dark .table-row:hover       { background-color: rgba(37, 99, 235, 0.10) !important; }
 .dark .table-bordered th,
@@ -238,15 +238,15 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    ══════════════════════════════════════════════════════════════ */
 @layer components {
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700 shadow-sm;
     min-height: 2.5rem;
   }
   .btn-secondary {
-    @apply bg-gray-100 hover:bg-gray-200 active:bg-gray-300 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg font-medium transition-colors;
+    @apply bg-white hover:bg-blue-50 active:bg-blue-100 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg font-semibold transition-colors border border-slate-300 dark:border-slate-600 shadow-sm;
     min-height: 2.5rem;
   }
-  .btn-danger  { @apply bg-red-600   hover:bg-red-700   text-white px-4 py-2 rounded-lg font-medium transition-colors; min-height:2.5rem; }
-  .btn-success { @apply bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors; min-height:2.5rem; }
+  .btn-danger  { @apply bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors border border-red-700 shadow-sm; min-height:2.5rem; }
+  .btn-success { @apply bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors border border-green-700 shadow-sm; min-height:2.5rem; }
 
   .input {
     @apply w-full border border-gray-300 dark:border-zinc-600 rounded-lg px-3 py-2
@@ -391,8 +391,9 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .col-highlight-blue  { background:rgba(59,130,246,.05); }
 
 /* Accent color overrides */
-.btn-primary { background-color: var(--ui-accent,#2563eb) !important; }
-.btn-primary:hover { filter: brightness(0.9); }
+.btn-primary { background-color: var(--ui-accent,#2563eb) !important; border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 78%, #0f172a 22%) !important; }
+.btn-primary:hover { filter: brightness(0.94); }
+.btn-secondary:hover { border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 42%, #94a3b8 58%) !important; }
 .sidebar-item.active { color: var(--ui-accent,#2563eb) !important; }
 
 input:focus, select:focus, textarea:focus {

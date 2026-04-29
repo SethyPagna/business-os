@@ -1,8 +1,9 @@
-import { Boxes, Building2, Package, Tags, ToggleLeft, Truck } from 'lucide-react'
+import { Boxes, Building2, Package, Tags, ToggleLeft, Truck, X } from 'lucide-react'
 
 export default function POSFilterPanel({
   open,
   t,
+  onClose,
   categories = [],
   brands = [],
   branches = [],
@@ -55,7 +56,19 @@ export default function POSFilterPanel({
   )
 
   return (
-    <div className="card mb-2 space-y-3 border border-blue-100 p-3 dark:border-blue-800">
+    <div className="pointer-events-auto card mb-2 max-h-[min(26rem,48vh)] space-y-3 overflow-y-auto overscroll-contain border border-blue-100 p-3 shadow-lg touch-pan-y dark:border-blue-800">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-gray-900 dark:text-white">{T('filters', 'Filters')}</div>
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-white"
+          onClick={() => onClose?.()}
+          aria-label={T('close', 'Close')}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
       <div>
         <SectionLabel icon={ToggleLeft}>{T('quick_filters', 'Quick filters')}</SectionLabel>
         <div className="flex flex-wrap gap-1">

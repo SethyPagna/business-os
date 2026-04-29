@@ -1526,3 +1526,78 @@ runTest('bulk import override_replace with zero stock clears branch stock and ag
     await stopServer(server?.child)
   }
 })
+
+pendingTests.add('bulk import auto-creates missing product metadata and preserves stock placement')
+runTest('bulk import auto-creates missing product metadata and preserves stock placement', async () => {
+  const runtimeDir = makeTempRoot('bos-import-metadata-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+
+    const importBranchName = `QA Import Branch ${Date.now()}`
+    const importCategory = `QA Import Category ${Date.now()}`
+    const importUnit = `QA Import Unit ${Date.now()}`
+    const importBrand = `QA Import Brand ${Date.now()}`
+    const importSupplier = `QA Import Supplier ${Date.now()}`
+
+    const result = await fetchJson(server.baseUrl, '/api/products/bulk-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        products: [
+          {
+            _action: 'new',
+            name: 'Metadata Import Product',
+            sku: 'META-001',
+            branch: importBranchName,
+            category: importCategory,
+            unit: importUnit,
+            brand: importBrand,
+            supplier: importSupplier,
+            stock_quantity: 5,
+            purchase_price_usd: 3.5,
+            selling_price_usd: 8.25,
+            low_stock_threshold: 2,
+          },
+        ],
+      }),
+    })
+
+    assert.equal(result.imported, 1)
+    assert.equal(result.updated, 0)
+    assert.deepEqual(result.errors, [])
+
+    const categories = await getCategories(server.baseUrl, authToken)
+    assert.ok(categories.some((row) => row.name === importCategory), 'Expected imported category to be created')
+
+    const units = await getUnits(server.baseUrl, authToken)
+    assert.ok(units.some((row) => row.name === importUnit), 'Expected imported unit to be created')
+
+    const settings = await getSettings(server.baseUrl, authToken)
+    const brandOptions = JSON.parse(settings.product_brand_options || '[]')
+    assert.ok(Array.isArray(brandOptions) && brandOptions.includes(importBrand), 'Expected imported brand to be added to settings')
+
+    const branches = await fetchJson(server.baseUrl, '/api/branches', { authToken })
+    const branch = Array.isArray(branches) ? branches.find((row) => row.name === importBranchName) : null
+    assert.ok(branch?.id, 'Expected imported branch to be created')
+
+    const suppliers = await fetchJson(server.baseUrl, '/api/suppliers', { authToken })
+    assert.ok(Array.isArray(suppliers) && suppliers.some((row) => row.name === importSupplier), 'Expected imported supplier to be created')
+
+    const products = await fetchJson(server.baseUrl, '/api/products', { authToken })
+    const product = Array.isArray(products) ? products.find((row) => row.sku === 'META-001') : null
+    assert.ok(product, 'Expected imported product to exist')
+    assert.equal(product.category, importCategory)
+    assert.equal(product.unit, importUnit)
+    assert.equal(product.brand, importBrand)
+    assert.equal(product.supplier, importSupplier)
+    assert.equal(Number(product.stock_quantity), 5)
+    assert.equal(sumBranchStock(product), 5)
+    const branchRow = (product.branch_stock || []).find((row) => row.branch_id === branch.id)
+    assert.equal(Number(branchRow?.quantity || 0), 5)
+  } finally {
+    await stopServer(server?.child)
+  }
+})

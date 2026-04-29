@@ -1,11 +1,16 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
-import { Download, Plus, Upload } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useMemo } from 'react'
+import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import FilterMenu from '../shared/FilterMenu'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 
 export function parseContactOptions(raw) {
   if (!raw) return []
@@ -204,13 +209,19 @@ function CustomerForm({ customer, onSave, onClose, t }) {
 function CustomersTab({ t, notify }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
+  const loadRequestRef = useRef(0)
+  const loadedOnceRef = useRef(false)
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
+  const [sortDirection, setSortDirection] = useState('desc')
+  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
 
-  const filtered = customers.filter((customer) => {
+  const filteredBySearch = customers.filter((customer) => {
     const query = search.toLowerCase().trim()
     if (!query) return true
     return (
@@ -221,25 +232,127 @@ function CustomersTab({ t, notify }) {
     )
   })
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
+  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const availableYears = useMemo(
+    () => getAvailableYears(filteredBySearch, (customer) => customer?.created_at),
+    [filteredBySearch],
+  )
+  const filteredSections = useMemo(() => buildTimeActionSections(filteredBySearch, {
+    getDate: (customer) => customer?.created_at,
+    getItemId: (customer) => Number(customer?.id),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+    groupMode: 'time',
+    sortDirection,
+  }), [filteredBySearch, monthFilter, sortDirection, timeMode, yearFilter])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  useEffect(() => {
+    setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
+  }, [filteredSections])
+
+  const visibleCustomers = useMemo(
+    () => filteredSections.flatMap((section) => section.items),
+    [filteredSections],
+  )
+  const displayRows = useMemo(
+    () => filteredSections.flatMap((section) => {
+      const collapsed = collapsedSections.has(section.id)
+      return [
+        { __kind: 'section', section, collapsed },
+        ...(!collapsed ? section.items : []),
+      ]
+    }),
+    [collapsedSections, filteredSections],
+  )
+
+  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleCustomers)
+  const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']
+  const contactFilterSections = useMemo(() => ([
+    {
+      id: 'year',
+      label: tr(t, 'year', 'Year'),
+      options: [
+        { id: 'all-years', label: tr(t, 'all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: tr(t, 'month', 'Month'),
+      options: [
+        { id: 'all-months', label: tr(t, 'all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'sort',
+      label: tr(t, 'sort', 'Sort'),
+      options: [
+        { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
+        { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+      ],
+    },
+  ]), [availableYears, monthFilter, sortDirection, t, yearFilter])
+  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length
+  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+    const next = new Set(current)
+    if (next.has(sectionId)) next.delete(sectionId)
+    else next.add(sectionId)
+    return next
+  })
+  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids, checked) => {
+    ids.forEach((id) => {
+      const numericId = Number(id)
+      const isSelected = selectedIds.has(numericId)
+      if ((checked && !isSelected) || (!checked && isSelected)) toggleOne(numericId)
+    })
+  }
+
+  const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
+    if (!silent) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getCustomers(), 'Customers')
+      const data = await withLoaderTimeout(() => window.api.getCustomers(), label)
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setCustomers(Array.isArray(data) ? data : [])
+      loadedOnceRef.current = true
     } catch (error) {
-      setCustomers([])
-      notify(error?.message || 'Failed to load customers', 'error')
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!loadedOnceRef.current) setCustomers([])
+      notify(error?.message || 'Failed to load customers', silent ? 'warning' : 'error')
     } finally {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoading(false)
     }
   }, [notify])
 
-  useEffect(() => { load() }, [load])
   useEffect(() => {
-    if (syncChannel?.channel === 'customers') load()
-  }, [syncChannel, load])
+    load()
+    return () => invalidateTrackedRequest(loadRequestRef)
+  }, [load])
+  useEffect(() => {
+    if (syncChannel?.channel === 'customers') load({ silent: true, label: 'Customers refresh' })
+  }, [syncChannel?.channel, syncChannel?.ts, load])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) {
@@ -302,7 +415,7 @@ function CustomersTab({ t, notify }) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <span className="whitespace-nowrap text-sm text-gray-400">{filtered.length}</span>
+          <span className="whitespace-nowrap text-sm text-gray-400">{visibleCustomers.length}</span>
         </div>
 
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
@@ -311,6 +424,17 @@ function CustomersTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           ) : null}
+          <FilterMenu
+            label={tr(t, 'filters', 'Filters')}
+            activeCount={activeFilterCount}
+            sections={contactFilterSections}
+            onClear={() => {
+              setYearFilter('all')
+              setMonthFilter('all')
+              setSortDirection('desc')
+            }}
+            compact
+          />
           <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr(t, 'import_contacts', 'Import')}>
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">{tr(t, 'import_contacts', 'Import')}</span>
@@ -318,7 +442,7 @@ function CustomersTab({ t, notify }) {
           <button
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
             onClick={() => {
-              const rows = filtered.map((customer) => {
+              const rows = visibleCustomers.map((customer) => {
                 const options = parseContactOptions(customer.address)
                 return {
                   Name: customer.name || '',
@@ -346,14 +470,45 @@ function CustomersTab({ t, notify }) {
 
       <ContactTable
         loading={loading}
-        rows={filtered}
+        rows={displayRows}
         emptyLabel={tr(t, 'no_customers', 'No customers')}
-        columns={[tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']}
+        columns={customerColumns}
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
-        totalCount={filtered.length}
+        totalCount={visibleCustomers.length}
         t={t}
         renderRow={(customer) => {
+          if (customer?.__kind === 'section') {
+            const section = customer.section
+            return (
+              <tr key={section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
+                <td colSpan={customerColumns.length + 2} className="px-4 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={isSectionFullySelected(section.ids)}
+                        ref={(node) => {
+                          if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
+                        }}
+                        onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                        aria-label={`Select ${section.label}`}
+                      />
+                      <span>{section.label}</span>
+                      <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                        {customer.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        {customer.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            )
+          }
           const options = parseContactOptions(customer.address)
           return (
             <tr key={customer.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(customer.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
@@ -388,6 +543,34 @@ function CustomersTab({ t, notify }) {
           )
         }}
         renderCard={(customer) => {
+          if (customer?.__kind === 'section') {
+            const section = customer.section
+            return (
+              <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSectionFullySelected(section.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
+                      }}
+                      onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
+                      aria-label={`Select ${section.label}`}
+                    />
+                    <span>{section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                      {customer.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          }
           const options = parseContactOptions(customer.address)
           return (
             <div key={customer.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(customer.id) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
@@ -430,7 +613,7 @@ function CustomersTab({ t, notify }) {
             [tr(t, 'company', 'Company'), selected.company],
             ['Contact Options', buildOptionSummary(parseContactOptions(selected.address))],
             [tr(t, 'notes', 'Notes'), selected.notes],
-            [tr(t, 'col_added', 'Added'), fmtDate(selected.created_at)],
+            [tr(t, 'col_added', 'Added'), selected.created_at || fmtDate(selected.created_at)],
           ]}
           onEdit={() => setModal('form')}
           onDelete={() => handleDelete(selected)}

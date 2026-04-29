@@ -82,8 +82,8 @@ const RECEIPT_INLINE_STYLE_PROPS = [
   'transform-origin',
 ]
 
-function cloneWithInlineStyles(node) {
-  if (!node || !(node instanceof HTMLElement)) return ''
+function cloneElementWithInlineStyles(node) {
+  if (!node || !(node instanceof HTMLElement)) return null
 
   const cloned = node.cloneNode(true)
   const sourceElements = [node, ...node.querySelectorAll('*')]
@@ -102,7 +102,39 @@ function cloneWithInlineStyles(node) {
     clonedEl.setAttribute('style', `${existing}${existing ? ';' : ''}${styleText}`)
   }
 
-  return cloned.outerHTML
+  return cloned
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Failed to read receipt asset'))
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function inlineImageNodeSources(root) {
+  if (!root || !(root instanceof HTMLElement)) return
+  const images = Array.from(root.querySelectorAll('img'))
+  await Promise.all(images.map(async (image) => {
+    const src = String(image.getAttribute('src') || '').trim()
+    if (!src || /^data:/i.test(src)) return
+    try {
+      const absoluteSrc = new URL(src, window.location.href).toString()
+      const response = await fetch(absoluteSrc, {
+        mode: 'cors',
+        credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
+      })
+      if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`)
+      const blob = await response.blob()
+      const dataUrl = await blobToDataUrl(blob)
+      image.setAttribute('src', dataUrl)
+    } catch (_) {
+      image.removeAttribute('src')
+      image.style.visibility = 'hidden'
+    }
+  }))
 }
 
 function mmToPt(mm) {
@@ -308,7 +340,10 @@ async function renderElementToCanvas(element) {
     Math.ceil(element.scrollHeight || rect.height || element.offsetHeight || 200),
   )
   const scale = Math.min(2.25, Math.max(1.5, window.devicePixelRatio || 1.75))
-  const markup = cloneWithInlineStyles(element)
+  const cloned = cloneElementWithInlineStyles(element)
+  if (!cloned) throw new Error('Receipt preview element is unavailable')
+  await inlineImageNodeSources(cloned)
+  const markup = cloned.outerHTML
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
       <foreignObject width="100%" height="100%">
@@ -367,7 +402,7 @@ async function withReceiptElement(content, widthMm, action, printSettings = getP
     inner.style.width = `${100 / scaleFactor}%`
   }
   if (typeof HTMLElement !== 'undefined' && content instanceof HTMLElement) {
-    inner.innerHTML = cloneWithInlineStyles(content)
+    inner.innerHTML = cloneElementWithInlineStyles(content)?.outerHTML || ''
   } else {
     inner.innerHTML = String(content || '')
   }
@@ -426,9 +461,9 @@ export async function createReceiptPdfBlob(content, options = {}) {
   const title = options.title || 'Receipt'
   const pageWidthPt = mmToPt(widthMm)
 
-  try {
+  const renderPdfBlob = async () => {
     const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
-    const jpegUrl = canvas.toDataURL('image/jpeg', 0.96)
+    const jpegUrl = canvas.toDataURL('image/jpeg', 0.98)
     const jpegBytes = dataUrlToBytes(jpegUrl)
     const pdfBytes = buildSingleImagePdf({
       imageBytes: jpegBytes,
@@ -438,17 +473,21 @@ export async function createReceiptPdfBlob(content, options = {}) {
       title,
     })
     return new Blob([pdfBytes], { type: 'application/pdf' })
-  } catch (_) {
-    const textSource = await withReceiptElement(content, widthMm, async (element) => {
-      await waitForElementAssets(element)
-      return element.innerText || element.textContent || title
-    }, printSettings)
-    const lines = String(textSource || title)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line, index, all) => line || (index > 0 && all[index - 1]))
-    const pdfBytes = buildTextOnlyPdf({ lines, pageWidthPt, title })
-    return new Blob([pdfBytes], { type: 'application/pdf' })
+  }
+
+  try {
+    return await renderPdfBlob()
+  } catch (firstError) {
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 180))
+      return await renderPdfBlob()
+    } catch (secondError) {
+      throw new Error(
+        secondError?.message
+        || firstError?.message
+        || 'Unable to render receipt PDF. Please try again after the receipt preview finishes loading.',
+      )
+    }
   }
 }
 

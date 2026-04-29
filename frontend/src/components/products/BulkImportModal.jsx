@@ -97,6 +97,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [cleanRows, setCleanRows] = useState([])
   const [decisions, setDecisions] = useState({})
   const [imageDecisions, setImageDecisions] = useState({})
+  const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
+  const [fieldRules, setFieldRules] = useState({})
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
@@ -110,6 +112,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setCleanRows([])
     setDecisions({})
     setImageDecisions({})
+    setSelectedConflictIds(new Set())
+    setFieldRules({})
     setStep(1)
   }
 
@@ -245,6 +249,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setCleanRows(nextCleanRows)
       setDecisions(nextDecisions)
       setImageDecisions(nextImageDecisions)
+      setSelectedConflictIds(new Set(nextConflicts.map((entry) => entry.index)))
       setStep(2)
     } catch (error) {
       alert(`Failed to analyze CSV: ${error?.message || 'Unknown error'}`)
@@ -262,6 +267,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         ...row,
         _action: decisions[index] || 'new',
         _image_action: imageDecisions[index] || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
+        _field_rules: fieldRules,
       }))
       const response = await window.api.bulkImportProducts({
         products: instructions,
@@ -283,6 +289,44 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const pendingAsk = useMemo(() => conflicts.filter((item) => decisions[item.index] === 'ask'), [conflicts, decisions])
   const allDecided = pendingAsk.length === 0
   const totalCount = cleanRows.length + conflicts.length
+  const selectedConflictCount = selectedConflictIds.size
+
+  const toggleConflictSelection = (index) => {
+    setSelectedConflictIds((current) => {
+      const next = new Set(current)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const toggleSelectAllConflicts = (checked) => {
+    if (!checked) {
+      setSelectedConflictIds(new Set())
+      return
+    }
+    setSelectedConflictIds(new Set(conflicts.map((entry) => entry.index)))
+  }
+
+  const applyDecisionToSelection = (value) => {
+    setDecisions((current) => {
+      const next = { ...current }
+      conflicts.forEach((entry) => {
+        if (selectedConflictIds.has(entry.index)) next[entry.index] = value
+      })
+      return next
+    })
+  }
+
+  const applyImageDecisionToSelection = (value) => {
+    setImageDecisions((current) => {
+      const next = { ...current }
+      conflicts.forEach((entry) => {
+        if (selectedConflictIds.has(entry.index) && entry.incomingImages.length) next[entry.index] = value
+      })
+      return next
+    })
+  }
 
   return (
     <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide>
@@ -376,12 +420,68 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           </div>
 
           {conflicts.length ? (
-            <div className="max-h-72 space-y-2 overflow-y-auto">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
-              {conflicts.map(({ row, index, existing, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={selectedConflictCount > 0 && selectedConflictCount === conflicts.length}
+                      onChange={(event) => toggleSelectAllConflicts(event.target.checked)}
+                    />
+                    All matches
+                  </label>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge')}>Add stock only</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_add')}>Override + add stock</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_replace')}>Override + replace stock</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('new')}>Create selected as new</button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  {IMAGE_CONFLICT_OPTIONS.map((item) => (
+                    <button key={item.value} type="button" className="btn-secondary text-xs" onClick={() => applyImageDecisionToSelection(item.value)}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  {[
+                    ['category', 'Category'],
+                    ['brand', 'Brand'],
+                    ['unit', 'Unit'],
+                    ['supplier', 'Supplier'],
+                    ['description', 'Description'],
+                    ['selling_price_usd', 'Sell USD'],
+                    ['selling_price_khr', 'Sell KHR'],
+                    ['purchase_price_usd', 'Buy USD'],
+                    ['purchase_price_khr', 'Buy KHR'],
+                    ['low_stock_threshold', 'Threshold'],
+                  ].map(([field, label]) => (
+                    <div key={field}>
+                      <label htmlFor={`products-field-rule-${field}`} className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</label>
+                      <select
+                        id={`products-field-rule-${field}`}
+                        className="input text-xs"
+                        value={fieldRules[field] || 'merge_blank_only'}
+                        onChange={(event) => setFieldRules((current) => ({ ...current, [field]: event.target.value }))}
+                      >
+                        <option value="merge_blank_only">Fill blanks only</option>
+                        <option value="use_imported">Use imported value</option>
+                        <option value="keep_existing">Keep existing value</option>
+                        <option value="clear_value">Clear value</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
+                {conflicts.map(({ row, index, existing, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
                 <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium text-gray-900 dark:text-white">{row.name}</span>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
+                      <span className="font-medium text-gray-900 dark:text-white">{row.name}</span>
+                    </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       <span className={`rounded px-1.5 py-0.5 ${sameBasic ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Basic: {sameBasic ? 'Same' : 'Different'}</span>
                       <span className={`rounded px-1.5 py-0.5 ${samePricing ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Pricing: {samePricing ? 'Same' : 'Different'}</span>
@@ -420,7 +520,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     <p className="text-xs text-gray-400">No incoming image columns for this row.</p>
                   )}
                 </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
 

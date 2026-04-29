@@ -1,12 +1,16 @@
 ﻿// ?? DeliveryTab ???????????????????????????????????????????????????????????????
-import { useState, useEffect, useCallback } from 'react'
-import { Download, Plus, Upload } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import FilterMenu from '../shared/FilterMenu'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
+import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 
 // ?? Options helpers ????????????????????????????????????????????????????????????
 // Options stored as JSON array in the 'address' TEXT column.
@@ -161,6 +165,8 @@ function OptionsBadge({ raw }) {
 function DeliveryTab({ t, notify }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
+  const loadRequestRef = useRef(0)
+  const loadedOnceRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -172,28 +178,128 @@ function DeliveryTab({ t, notify }) {
   const [modal,    setModal]    = useState(null)
   const [selected, setSelected] = useState(null)
   const [loading,  setLoading]  = useState(true)
+  const [yearFilter, setYearFilter] = useState('all')
+  const [monthFilter, setMonthFilter] = useState('all')
+  const [sortDirection, setSortDirection] = useState('desc')
+  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
 
-  const filtered = contacts.filter(c => {
+  const filteredBySearch = contacts.filter(c => {
     const q = search.toLowerCase()
     return !q || c.name.toLowerCase().includes(q) || (c.phone||'').includes(q) || (c.area||'').toLowerCase().includes(q)
   })
 
-  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(filtered)
+  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const availableYears = useMemo(() => getAvailableYears(filteredBySearch, (contact) => contact?.created_at), [filteredBySearch])
+  const filteredSections = useMemo(() => buildTimeActionSections(filteredBySearch, {
+    getDate: (contact) => contact?.created_at,
+    getItemId: (contact) => Number(contact?.id),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+    groupMode: 'time',
+    sortDirection,
+  }), [filteredBySearch, monthFilter, sortDirection, timeMode, yearFilter])
+  useEffect(() => {
+    setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
+  }, [filteredSections])
+  const visibleContacts = useMemo(
+    () => filteredSections.flatMap((section) => section.items),
+    [filteredSections],
+  )
+  const displayRows = useMemo(
+    () => filteredSections.flatMap((section) => {
+      const collapsed = collapsedSections.has(section.id)
+      return [{ __kind: 'section', section, collapsed }, ...(!collapsed ? section.items : [])]
+    }),
+    [collapsedSections, filteredSections],
+  )
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const { selectedIds, toggleOne, clearSelection, selectAllProp } = useContactSelection(visibleContacts)
+  const deliveryColumns = [t('name'), t('phone'), t('area_zone')||'Area / Zone']
+  const contactFilterSections = useMemo(() => ([
+    {
+      id: 'year',
+      label: tr('year', 'Year'),
+      options: [
+        { id: 'all-years', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        ...availableYears.map((year) => ({
+          id: `year-${year}`,
+          label: year,
+          active: yearFilter === year,
+          onClick: () => {
+            const next = yearFilter === year ? 'all' : year
+            setYearFilter(next)
+            if (next === 'all') setMonthFilter('all')
+          },
+        })),
+      ],
+    },
+    {
+      id: 'month',
+      label: tr('month', 'Month'),
+      options: [
+        { id: 'all-months', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        ...Array.from({ length: 12 }, (_, index) => {
+          const month = String(index + 1)
+          return {
+            id: `month-${month}`,
+            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
+            active: monthFilter === month,
+            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
+          }
+        }),
+      ],
+    },
+    {
+      id: 'sort',
+      label: tr('sort', 'Sort'),
+      options: [
+        { id: 'sort-desc', label: tr('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
+        { id: 'sort-asc', label: tr('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+      ],
+    },
+  ]), [availableYears, monthFilter, sortDirection, tr, yearFilter])
+  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length
+  const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
+    const next = new Set(current)
+    if (next.has(sectionId)) next.delete(sectionId)
+    else next.add(sectionId)
+    return next
+  })
+  const isSectionFullySelected = (ids = []) => ids.length > 0 && ids.every((id) => selectedIds.has(Number(id)))
+  const isSectionPartiallySelected = (ids = []) => ids.some((id) => selectedIds.has(Number(id))) && !isSectionFullySelected(ids)
+  const toggleSectionSelection = (ids, checked) => {
+    ids.forEach((id) => {
+      const numericId = Number(id)
+      const isSelected = selectedIds.has(numericId)
+      if ((checked && !isSelected) || (!checked && isSelected)) toggleOne(numericId)
+    })
+  }
+
+  const load = useCallback(async ({ silent = false, label = 'Delivery contacts' } = {}) => {
+    const requestId = beginTrackedRequest(loadRequestRef)
+    if (!silent) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), 'Delivery contacts')
+      const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label)
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setContacts(Array.isArray(data) ? data : [])
+      loadedOnceRef.current = true
     } catch (error) {
-      setContacts([])
-      notify(error?.message || 'Failed to load delivery contacts', 'error')
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!loadedOnceRef.current) setContacts([])
+      notify(error?.message || 'Failed to load delivery contacts', silent ? 'warning' : 'error')
     } finally {
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoading(false)
     }
   }, [notify])
-  useEffect(() => { load() }, [load])
-  useEffect(() => { if (syncChannel?.channel === 'deliveryContacts') load() }, [syncChannel]) // eslint-disable-line
+  useEffect(() => {
+    load()
+    return () => invalidateTrackedRequest(loadRequestRef)
+  }, [load])
+  useEffect(() => {
+    if (syncChannel?.channel === 'deliveryContacts') load({ silent: true, label: 'Delivery contacts refresh' })
+  }, [syncChannel?.channel, syncChannel?.ts, load])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {
@@ -232,7 +338,7 @@ function DeliveryTab({ t, notify }) {
           <input id="delivery-search" name="delivery_search" className="input flex-1 min-w-0 max-w-xs"
             placeholder={t('search_delivery_placeholder')||`Search...`}
             value={search} onChange={e => setSearch(e.target.value)} />
-          <span className="text-sm text-gray-400 whitespace-nowrap">{filtered.length}</span>
+          <span className="text-sm text-gray-400 whitespace-nowrap">{visibleContacts.length}</span>
         </div>
         <div className="flex gap-1.5 items-center overflow-x-auto flex-nowrap flex-shrink-0">
           {selectedIds.size > 0 && (
@@ -240,12 +346,23 @@ function DeliveryTab({ t, notify }) {
               Delete {selectedIds.size}
             </button>
           )}
+          <FilterMenu
+            label={tr('filters', 'Filters')}
+            activeCount={activeFilterCount}
+            sections={contactFilterSections}
+            onClear={() => {
+              setYearFilter('all')
+              setMonthFilter('all')
+              setSortDirection('desc')
+            }}
+            compact
+          />
           <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => setModal('import')} title={tr('import_contacts', 'Import', 'នាំចូល')}>
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
           </button>
           <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => {
-            const rows = filtered.map(c => ({ Name: c.name||'', Phone: c.phone||'', Area: c.area||'', Notes: c.notes||'', Created: c.created_at||'' }))
+            const rows = visibleContacts.map(c => ({ Name: c.name||'', Phone: c.phone||'', Area: c.area||'', Notes: c.notes||'', Created: c.created_at||'' }))
             downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
           }} title={tr('export', 'Export', 'នាំចេញ')}>
             <Upload className="h-4 w-4" />
@@ -260,14 +377,42 @@ function DeliveryTab({ t, notify }) {
 
       <ContactTable
         loading={loading}
-        rows={filtered}
+        rows={displayRows}
         emptyLabel={t('no_delivery_contacts')||'No delivery contacts'}
-        columns={[t('name'), t('phone'), t('area_zone')||'Area / Zone']}
+        columns={deliveryColumns}
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
-        totalCount={filtered.length}
+        totalCount={visibleContacts.length}
         t={t}
         renderRow={c => (
+          c?.__kind === 'section' ? (
+            <tr key={c.section.id} className="bg-slate-100/90 dark:bg-slate-800/80">
+              <td colSpan={deliveryColumns.length + 2} className="px-4 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={isSectionFullySelected(c.section.ids)}
+                      ref={(node) => {
+                        if (node) node.indeterminate = isSectionPartiallySelected(c.section.ids)
+                      }}
+                      onChange={(event) => toggleSectionSelection(c.section.ids, event.target.checked)}
+                      aria-label={`Select ${c.section.label}`}
+                    />
+                    <span>{c.section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{c.section.items.length}</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(c.section.id)}>
+                      {c.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {c.collapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          ) : (
           <tr key={c.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(c.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <td className="px-3 py-2 w-10" onClick={e => e.stopPropagation()}>
               <label htmlFor={`delivery-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
@@ -280,8 +425,33 @@ function DeliveryTab({ t, notify }) {
               <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
             </td>
           </tr>
-        )}
+        ))}
         renderCard={c => (
+          c?.__kind === 'section' ? (
+            <div key={c.section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <div className="flex items-center justify-between gap-3">
+                <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={isSectionFullySelected(c.section.ids)}
+                    ref={(node) => {
+                      if (node) node.indeterminate = isSectionPartiallySelected(c.section.ids)
+                    }}
+                    onChange={(event) => toggleSectionSelection(c.section.ids, event.target.checked)}
+                    aria-label={`Select ${c.section.label}`}
+                  />
+                  <span>{c.section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{c.section.items.length}</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(c.section.id)}>
+                    {c.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div key={c.id} className={`card p-3 flex items-center gap-3 ${selectedIds.has(c.id) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}>
             <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(c.id) }}>
               <label htmlFor={`delivery-card-select-${c.id}`} className="sr-only">{`Select ${c.name}`}</label>
@@ -301,7 +471,7 @@ function DeliveryTab({ t, notify }) {
               <ThreeDotMenu onDetails={() => { setSelected(c); setModal('detail') }} onEdit={() => { setSelected(c); setModal('form') }} onDelete={() => handleDelete(c)} />
             </div>
           </div>
-        )}
+        ))}
       />
 
       {modal === 'form'   && <DeliveryForm contact={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} />}
@@ -313,7 +483,7 @@ function DeliveryTab({ t, notify }) {
             [t('phone'), selected.phone],
             [t('area_zone')||'Area / Zone', selected.area],
             [t('notes'), selected.notes],
-            [t('col_added')||'Added', fmtDate(selected.created_at)],
+            [t('col_added')||'Added', selected.created_at || fmtDate(selected.created_at)],
           ]}
           onEdit={() => setModal('form')} onDelete={() => handleDelete(selected)} onClose={() => { setModal(null); setSelected(null) }} t={t} />
       )}

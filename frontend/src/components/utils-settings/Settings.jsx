@@ -613,6 +613,18 @@ export default function Settings() {
     }
   }
 
+  const handleSaveSettings = async () => {
+    const result = await saveSettings(form)
+    if (result?.conflict) {
+      notify(
+        uiLanguage === 'km'
+          ? 'ការកំណត់ត្រូវបានផ្លាស់ប្តូរនៅកន្លែងផ្សេង។ យើងបានផ្ទុកទិន្នន័យថ្មីឡើងវិញ។ សូមពិនិត្យ ហើយរក្សាទុកម្តងទៀត។'
+          : 'Settings changed somewhere else. We reloaded the latest values. Please review and save again.',
+        'warning',
+      )
+    }
+  }
+
   return (
     <div className="page-scroll p-4 sm:p-6">
       <PageHeader
@@ -623,7 +635,7 @@ export default function Settings() {
         className="mb-6"
         stackOnMobile={false}
         actions={(
-          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={() => saveSettings(form)}>
+          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={handleSaveSettings}>
             <Save className="h-4 w-4" />
             <span>{t('save')}</span>
           </button>
@@ -1317,7 +1329,7 @@ export default function Settings() {
           </SettingsSection>
         ) : null}
 
-        <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={() => saveSettings(form)}>
+        <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings}>
           {t('save')}
         </button>
       </div>

@@ -157,7 +157,7 @@ function setTunnelSecurityHeaders(req, res) {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), usb=(), payment=()')
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(self), microphone=(), usb=(), payment=()')
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none')
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
   res.setHeader('Origin-Agent-Cluster', '?1')
@@ -175,10 +175,10 @@ function setTunnelSecurityHeaders(req, res) {
       "manifest-src 'self'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' data: https://fonts.gstatic.com",
-      "frame-src 'self' https://www.google.com https://maps.google.com",
-      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://*.supabase.co",
+      "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
+      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://*.supabase.co",
       "worker-src 'self' blob:",
-      "script-src 'self'",
+      "script-src 'self' https://translate.google.com https://translate.googleapis.com",
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()

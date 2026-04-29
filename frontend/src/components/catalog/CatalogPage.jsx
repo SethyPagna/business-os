@@ -1355,6 +1355,23 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
 ]
 
 function applyGoogleTranslateSelection(sourceLang, targetLang) {
+  if (typeof document === 'undefined') return false
+  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
+  const target = String(targetLang || 'original').trim().toLowerCase()
+  const cookieValue = target === 'original' || target === from
+    ? `/${from}/${from}`
+    : `/${from}/${target}`
+  document.cookie = `googtrans=${cookieValue}; path=/`
+  try {
+    window.localStorage?.setItem('business-os:portal-translate-target', target)
+  } catch (_) {}
+
+  const select = document.querySelector('.goog-te-combo')
+  if (!select) return false
+  const nextValue = target === 'original' ? from : target
+  if (String(select.value || '').toLowerCase() === nextValue) return true
+  select.value = nextValue
+  select.dispatchEvent(new Event('change', { bubbles: true }))
   return true
 }
 
@@ -1641,15 +1658,27 @@ export default function CatalogPage({ publicView = false }) {
 
   /** Fetch all portal data needed by current mode (public/editor). */
   async function loadPortal() {
-    const requestId = ++loadRequestRef.current
-    const [portalConfig, meta, portalProducts] = await Promise.all([
+    const requestId = beginTrackedRequest(loadRequestRef)
+    const [portalConfigResult, metaResult, productsResult] = await Promise.allSettled([
       window.api.getPortalConfig(),
       window.api.getPortalCatalogMeta(),
       window.api.getPortalCatalogProducts(),
     ])
-    if (requestId !== loadRequestRef.current) return
+    if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
-    const nextConfig = { ...DEFAULT_CONFIG, ...portalConfig }
+    const portalConfig = portalConfigResult.status === 'fulfilled' ? portalConfigResult.value : null
+    const meta = metaResult.status === 'fulfilled' ? metaResult.value : null
+    const portalProducts = productsResult.status === 'fulfilled' ? productsResult.value : null
+    if (!portalConfig && !meta && !portalProducts) {
+      throw new Error(
+        portalConfigResult.reason?.message
+        || metaResult.reason?.message
+        || productsResult.reason?.message
+        || 'Failed to load customer portal',
+      )
+    }
+
+    const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
     const nextMeta = {
       categories: Array.isArray(meta?.categories) ? meta.categories : [],
       brands: Array.isArray(meta?.brands) ? meta.brands : [],
@@ -1677,6 +1706,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   useEffect(() => {
+    aliveRef.current = true
     refreshPortalView()
 
     if (!publicView) {
@@ -1794,6 +1824,58 @@ export default function CatalogPage({ publicView = false }) {
     setTranslateReady(false)
     return undefined
   }, [publicView, previewConfig.translateWidgetEnabled, language])
+
+  useEffect(() => {
+    if (!publicView || !previewConfig.translateWidgetEnabled || typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined
+    }
+    const container = document.getElementById('business-os-portal-translate-widget')
+    if (!container) return undefined
+
+    let cancelled = false
+    const initWidget = () => {
+      if (cancelled || !window.google?.translate?.TranslateElement) return
+      try {
+        container.innerHTML = ''
+        window.google.translate.TranslateElement(
+          {
+            pageLanguage: language === 'km' ? 'km' : 'en',
+            includedLanguages: PUBLIC_TRANSLATE_LANG_OPTIONS
+              .map((option) => option.value)
+              .filter((value) => value !== 'original')
+              .join(','),
+            autoDisplay: false,
+            layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
+          },
+          'business-os-portal-translate-widget',
+        )
+        setTranslateReady(true)
+      } catch (_) {}
+    }
+
+    window.businessOsPortalTranslateInit = initWidget
+
+    if (window.google?.translate?.TranslateElement) {
+      initWidget()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const existingScript = document.querySelector('script[data-business-os-translate="true"]')
+    if (!existingScript) {
+      const script = document.createElement('script')
+      script.src = 'https://translate.google.com/translate_a/element.js?cb=businessOsPortalTranslateInit'
+      script.async = true
+      script.defer = true
+      script.dataset.businessOsTranslate = 'true'
+      document.body.appendChild(script)
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [language, previewConfig.translateWidgetEnabled, publicView])
 
   useEffect(() => {
     if (!syncChannel) return undefined
@@ -3439,7 +3521,7 @@ export default function CatalogPage({ publicView = false }) {
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
-  const showHeroToolsPanel = false
+  const showHeroToolsPanel = publicView && previewConfig.translateWidgetEnabled
   const showPortalToolsBar = false
 
   return (
@@ -3596,7 +3678,7 @@ export default function CatalogPage({ publicView = false }) {
                               <label className="block">
                                 <span className="sr-only">{copy('language', 'Portal language')}</span>
                                 <select
-                                  id="portal-language-tools"
+                                  id="portal-language-tools-hero"
                                   name="portal_language_tools"
                                   className="w-full rounded-xl border border-white/20 bg-slate-950/30 px-3 py-2 text-sm text-white outline-none"
                                   value={translateTarget}
@@ -3610,9 +3692,7 @@ export default function CatalogPage({ publicView = false }) {
                                 </select>
                               </label>
                               {!translateReady ? <div className="mt-2 text-xs text-white/70">{copy('preparingTranslations', 'Preparing translation tools...')}</div> : null}
-                              <div className="mt-2">
-                                <div id="business-os-portal-translate" />
-                              </div>
+                              <div className="mt-2 text-xs text-white/70">{copy('publicTranslation', 'Language tools')}</div>
                             </div>
                           ) : null}
                         </div>
@@ -3629,7 +3709,7 @@ export default function CatalogPage({ publicView = false }) {
                     <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                       <Globe className="h-4 w-4 shrink-0 text-slate-500" />
                       <select
-                        id="portal-language-tools"
+                        id="portal-language-tools-bar"
                         name="portal_language_tools"
                         className="min-w-[132px] bg-transparent text-sm text-slate-700 outline-none"
                         value={translateTarget}
@@ -3642,10 +3722,25 @@ export default function CatalogPage({ publicView = false }) {
                         ))}
                       </select>
                     </label>
-                    <div className="hidden">
-                      <div id="business-os-portal-translate" />
-                    </div>
                   </div>
+                </div>
+              ) : null}
+
+              {publicView && previewConfig.translateWidgetEnabled ? (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: '-9999px',
+                    top: '0',
+                    width: '1px',
+                    height: '1px',
+                    overflow: 'hidden',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <div id="business-os-portal-translate-widget" />
                 </div>
               ) : null}
 

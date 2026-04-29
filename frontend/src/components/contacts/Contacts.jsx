@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { downloadCSV } from '../../utils/csv'
+import { downloadZipFiles } from '../../utils/csv'
 import { CustomersTab } from './CustomersTab'
 import { SuppliersTab } from './SuppliersTab'
 import { DeliveryTab } from './DeliveryTab'
@@ -78,8 +78,12 @@ export default function Contacts() {
       const delivery = Array.isArray(result.values.delivery) ? result.values.delivery : []
       const today = new Date().toISOString().slice(0, 10)
 
+      const files = []
+
       if (customers.length > 0) {
-        downloadCSV(`contacts-customers-${today}.csv`, customers.map((c) => ({
+        files.push({
+          filename: `contacts-customers-${today}.csv`,
+          rows: customers.map((c) => ({
           Name: c.name || '',
           Membership_Number: c.membership_number || '',
           Phone: c.phone || '',
@@ -88,10 +92,13 @@ export default function Contacts() {
           Address: c.address || '',
           Notes: c.notes || '',
           Created: c.created_at || '',
-        })))
+          })),
+        })
       }
       if (suppliers.length > 0) {
-        downloadCSV(`contacts-suppliers-${today}.csv`, suppliers.map((s) => ({
+        files.push({
+          filename: `contacts-suppliers-${today}.csv`,
+          rows: suppliers.map((s) => ({
           Name: s.name || '',
           Phone: s.phone || '',
           Email: s.email || '',
@@ -100,17 +107,25 @@ export default function Contacts() {
           Address: s.address || '',
           Notes: s.notes || '',
           Created: s.created_at || '',
-        })))
+          })),
+        })
       }
       if (delivery.length > 0) {
-        downloadCSV(`contacts-delivery-${today}.csv`, delivery.map((d) => ({
+        files.push({
+          filename: `contacts-delivery-${today}.csv`,
+          rows: delivery.map((d) => ({
           Name: d.name || '',
           Phone: d.phone || '',
           Area: d.area || '',
           Address: d.address || '',
           Notes: d.notes || '',
           Created: d.created_at || '',
-        })))
+          })),
+        })
+      }
+
+      if (files.length) {
+        downloadZipFiles(`contacts-export-${today}.zip`, files)
       }
 
       const total = customers.length + suppliers.length + delivery.length

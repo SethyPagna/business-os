@@ -454,6 +454,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const actor = getAuditActor(req, req.body || {})
   const errors = []
   let imported = 0, updated = 0, images_matched = 0
+  const normalizeLookup = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 
   // Image-only mode: match uploaded images to products by filename ??product name
   if (imageOnly) {
@@ -505,6 +506,39 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultImportBranch = getDefaultBranch(activeBranches)
+  const categoryMap = new Map(
+    db.prepare('SELECT id, name FROM categories ORDER BY name COLLATE NOCASE ASC').all()
+      .map((row) => [normalizeLookup(row.name), row])
+  )
+  const unitMap = new Map(
+    db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all()
+      .map((row) => [normalizeLookup(row.name), row])
+  )
+  const settingsSupportsUpdatedAt = db.prepare('PRAGMA table_info(settings)').all()
+    .some((column) => String(column?.name || '').toLowerCase() === 'updated_at')
+  const upsertSetting = settingsSupportsUpdatedAt
+    ? db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+    `)
+    : db.prepare(`
+      INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `)
+  const brandSettingValue = db.prepare("SELECT value FROM settings WHERE key = 'product_brand_options'").get()?.value
+  const parsedBrandOptions = tryParse(brandSettingValue, [])
+  const brandOptions = Array.isArray(parsedBrandOptions) ? parsedBrandOptions : []
+  const brandMap = new Map(
+    brandOptions
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .map((value) => [normalizeLookup(value), value])
+  )
+  let categoriesChanged = false
+  let unitsChanged = false
+  let brandsChanged = false
+  let branchesChanged = false
+  let suppliersChanged = false
   const insertBS  = db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)')
   // logMove: movement_type is passed as a parameter so each action uses the correct type:
   //   'purchase' ??new product initial stock from CSV
@@ -533,6 +567,95 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     } catch { return null }
   }
 
+  const parseImportNumber = (row, field, fallbackValue, { allowNegative = false } = {}) => {
+    const raw = row?.[field]
+    if (raw === undefined || raw === null || String(raw).trim() === '') return fallbackValue
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid ${field}`)
+    }
+    if (!allowNegative && parsed < 0) {
+      throw new Error(`${field} cannot be negative`)
+    }
+    return parsed
+  }
+
+  const hasImportValue = (row, field) => {
+    const raw = row?.[field]
+    return !(raw === undefined || raw === null || String(raw).trim() === '')
+  }
+
+  const normalizeFieldRule = (value, fallback) => {
+    const rule = String(value || fallback || '').trim().toLowerCase()
+    return ['keep_existing', 'use_imported', 'merge_blank_only', 'clear_value'].includes(rule)
+      ? rule
+      : fallback
+  }
+
+  const resolveImportValue = (existingValue, incomingValue, hasIncomingValue, rule, fallbackRule = 'use_imported') => {
+    const effectiveRule = normalizeFieldRule(rule, fallbackRule)
+    if (effectiveRule === 'keep_existing') return existingValue
+    if (effectiveRule === 'clear_value') return null
+    if (effectiveRule === 'merge_blank_only') {
+      if (existingValue === undefined || existingValue === null || existingValue === '') {
+        return hasIncomingValue ? incomingValue : existingValue
+      }
+      return existingValue
+    }
+    return hasIncomingValue ? incomingValue : existingValue
+  }
+
+  const ensureCategory = (value) => {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return null
+    const lookup = normalizeLookup(trimmed)
+    const existing = categoryMap.get(lookup)
+    if (existing?.name) return existing.name
+    const now = new Date().toISOString()
+    const result = db.prepare('INSERT INTO categories (name, color, updated_at) VALUES (?, ?, ?)').run(trimmed, '#6366f1', now)
+    const created = { id: result.lastInsertRowid, name: trimmed }
+    categoryMap.set(lookup, created)
+    categoriesChanged = true
+    return created.name
+  }
+
+  const ensureUnit = (value) => {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return null
+    const lookup = normalizeLookup(trimmed)
+    const existing = unitMap.get(lookup)
+    if (existing?.name) return existing.name
+    const now = new Date().toISOString()
+    const result = db.prepare('INSERT INTO units (name, color, updated_at) VALUES (?, ?, ?)').run(trimmed, '#6366f1', now)
+    const created = { id: result.lastInsertRowid, name: trimmed }
+    unitMap.set(lookup, created)
+    unitsChanged = true
+    return created.name
+  }
+
+  const ensureBrand = (value) => {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return null
+    const lookup = normalizeLookup(trimmed)
+    const existing = brandMap.get(lookup)
+    if (existing) return existing
+    brandOptions.push(trimmed)
+    brandMap.set(lookup, trimmed)
+    brandsChanged = true
+    return trimmed
+  }
+
+  const ensureSupplier = (value) => {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return null
+    const existing = db.prepare('SELECT id, name FROM suppliers WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1').get(trimmed)
+    if (!existing) {
+      db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)').run(trimmed)
+      suppliersChanged = true
+    }
+    return trimmed
+  }
+
   const determineBranch = (branchName) => {
     let mb = null
     if (branchName?.trim()) {
@@ -540,7 +663,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       if (!mb) {
         const nb  = db.prepare('INSERT OR IGNORE INTO branches (name,is_default,is_active) VALUES (?,0,1)').run(branchName.trim())
         const nid = nb.lastInsertRowid || db.prepare('SELECT id FROM branches WHERE name=?').get(branchName.trim())?.id
-        if (nid) { mb = { id: nid, name: branchName.trim() }; activeBranches.push(mb) }
+        if (nid) {
+          mb = { id: nid, name: branchName.trim() }
+          activeBranches.push(mb)
+          branchesChanged = true
+        }
       }
     } else {
       mb = defaultImportBranch
@@ -649,6 +776,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   }
   for (const filename of allImageFilenames) {
     resolvedImages[filename] = await resolveImage(filename)
+    if (!resolvedImages[filename] && imageFiles?.[filename]) {
+      errors.push(`${filename}: image upload failed`)
+    }
   }
 
   db.transaction(() => {
@@ -656,12 +786,16 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       try {
         if (!p.name?.trim()) { errors.push('Row missing name'); continue }
         const action  = p._action || 'new'
-        const qty     = parseFloat(p.stock_quantity) || 0
-        const sellUsd = parseFloat(p.selling_price_usd) || 0
-        const sellKhr = parseFloat(p.selling_price_khr) || 0
-        const buyUsd  = parseFloat(p.purchase_price_usd) || 0
-        const buyKhr  = parseFloat(p.purchase_price_khr) || 0
-        const thresh  = parseFloat(p.low_stock_threshold) || 10
+        const qty     = parseImportNumber(p, 'stock_quantity', 0)
+        const sellUsd = parseImportNumber(p, 'selling_price_usd', 0)
+        const sellKhr = parseImportNumber(p, 'selling_price_khr', 0)
+        const buyUsd  = parseImportNumber(p, 'purchase_price_usd', 0)
+        const buyKhr  = parseImportNumber(p, 'purchase_price_khr', 0)
+        const thresh  = parseImportNumber(p, 'low_stock_threshold', 10)
+        const normalizedCategory = ensureCategory(p.category)
+        const normalizedUnit = ensureUnit(p.unit || 'pcs') || 'pcs'
+        const normalizedBrand = ensureBrand(p.brand)
+        const normalizedSupplier = ensureSupplier(p.supplier)
         const incomingImageGallery = normalizeImageGallery(
           parseIncomingImageRefs(p)
             .map((ref) => (isDirectImageRef(ref) ? ref : (resolvedImages[ref] || null)))
@@ -674,15 +808,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           incomingImageGallery.length > 0,
         )
 
-        // ?? Auto-create supplier in contacts table if a supplier name is provided ??
-        // Uses INSERT OR IGNORE so existing suppliers are never overwritten.
-        if (p.supplier?.trim()) {
-          db.prepare(
-            `INSERT OR IGNORE INTO suppliers (name) VALUES (?)`
-          ).run(p.supplier.trim())
-        }
-
         if (action === 'new') {
+          assertUniqueProductFields({ name: p.name, sku: p.sku, barcode: p.barcode })
           const newProductGallery = incomingImageGallery
           const newPrimaryImage = newProductGallery[0] || null
           const r = db.prepare(`
@@ -696,9 +823,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               is_active, supplier, image_path)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
-            p.name.trim(), p.sku || null, p.barcode || null, p.category || null, p.unit || 'pcs',
-            p.description || null, p.brand || null, sellUsd, sellKhr, buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
-            (p.is_active !== undefined ? p.is_active : 1), p.supplier || null, newPrimaryImage
+            p.name.trim(), p.sku || null, p.barcode || null, normalizedCategory, normalizedUnit,
+            p.description || null, normalizedBrand, sellUsd, sellKhr, buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
+            (p.is_active !== undefined ? p.is_active : 1), normalizedSupplier, newPrimaryImage
           )
           const pid = r.lastInsertRowid
           syncProductImageGallery(pid, newProductGallery)
@@ -716,6 +843,18 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           ).get(p.name.trim(), p.sku || '__NOSKUMATCH__')
           if (!ep) { errors.push(`${p.name}: existing product not found`); continue }
           const pid = ep.id
+          const fieldRules = p._field_rules && typeof p._field_rules === 'object' ? p._field_rules : {}
+          const defaultFieldRule = action === 'merge' ? 'merge_blank_only' : 'use_imported'
+          const resolvedCategory = resolveImportValue(ep.category, normalizedCategory, hasImportValue(p, 'category'), fieldRules.category, defaultFieldRule)
+          const resolvedUnit = resolveImportValue(ep.unit, normalizedUnit, hasImportValue(p, 'unit'), fieldRules.unit, defaultFieldRule)
+          const resolvedBrand = resolveImportValue(ep.brand, normalizedBrand, hasImportValue(p, 'brand'), fieldRules.brand, defaultFieldRule)
+          const resolvedDescription = resolveImportValue(ep.description, p.description || null, hasImportValue(p, 'description'), fieldRules.description, defaultFieldRule)
+          const resolvedSupplier = resolveImportValue(ep.supplier, normalizedSupplier, hasImportValue(p, 'supplier'), fieldRules.supplier, defaultFieldRule)
+          const resolvedSellUsd = resolveImportValue(ep.selling_price_usd, sellUsd, hasImportValue(p, 'selling_price_usd'), fieldRules.selling_price_usd, defaultFieldRule)
+          const resolvedSellKhr = resolveImportValue(ep.selling_price_khr, sellKhr, hasImportValue(p, 'selling_price_khr'), fieldRules.selling_price_khr, defaultFieldRule)
+          const resolvedBuyUsd = resolveImportValue(ep.purchase_price_usd, buyUsd, hasImportValue(p, 'purchase_price_usd'), fieldRules.purchase_price_usd, defaultFieldRule)
+          const resolvedBuyKhr = resolveImportValue(ep.purchase_price_khr, buyKhr, hasImportValue(p, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultFieldRule)
+          const resolvedThreshold = resolveImportValue(ep.low_stock_threshold, thresh, hasImportValue(p, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultFieldRule)
           const currentGallery = loadCurrentGallery(pid, ep.image_path || null)
           let nextGallery = currentGallery
           if (incomingImageGallery.length > 0) {
@@ -727,6 +866,44 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           }
 
           if (action === 'merge') {
+            const changedFields = (
+              resolvedCategory !== ep.category
+              || resolvedUnit !== ep.unit
+              || resolvedBrand !== ep.brand
+              || resolvedDescription !== ep.description
+              || resolvedSupplier !== ep.supplier
+              || resolvedSellUsd !== ep.selling_price_usd
+              || resolvedSellKhr !== ep.selling_price_khr
+              || resolvedBuyUsd !== ep.purchase_price_usd
+              || resolvedBuyKhr !== ep.purchase_price_khr
+              || resolvedThreshold !== ep.low_stock_threshold
+            )
+            if (changedFields) {
+              db.prepare(`
+                UPDATE products SET
+                  category=?, unit=?, brand=?, description=?, supplier=?,
+                  selling_price_usd=?, selling_price_khr=?,
+                  purchase_price_usd=?, purchase_price_khr=?,
+                  cost_price_usd=?, cost_price_khr=?,
+                  low_stock_threshold=?,
+                  updated_at=datetime('now')
+                WHERE id=?
+              `).run(
+                resolvedCategory,
+                resolvedUnit,
+                resolvedBrand,
+                resolvedDescription,
+                resolvedSupplier,
+                resolvedSellUsd || 0,
+                resolvedSellKhr || 0,
+                resolvedBuyUsd || 0,
+                resolvedBuyKhr || 0,
+                resolvedBuyUsd || 0,
+                resolvedBuyKhr || 0,
+                resolvedThreshold || 0,
+                pid,
+              )
+            }
             if (qty > 0) {
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, 'add', qty, ep.purchase_price_usd, ep.purchase_price_khr,
@@ -740,24 +917,25 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             const replaceStock = action === 'override_replace'
             db.prepare(`
               UPDATE products SET
-                category=COALESCE(NULLIF(?,''),category), unit=COALESCE(NULLIF(?,''),unit),
-                brand=COALESCE(NULLIF(?,''),brand),
-                description=COALESCE(NULLIF(?,''),description),
-                supplier=COALESCE(NULLIF(?,''),supplier),
-                selling_price_usd=CASE WHEN ?!=0 THEN ? ELSE selling_price_usd END,
-                selling_price_khr=CASE WHEN ?!=0 THEN ? ELSE selling_price_khr END,
-                purchase_price_usd=CASE WHEN ?!=0 THEN ? ELSE purchase_price_usd END,
-                purchase_price_khr=CASE WHEN ?!=0 THEN ? ELSE purchase_price_khr END,
-                cost_price_usd=CASE WHEN ?!=0 THEN ? ELSE cost_price_usd END,
-                cost_price_khr=CASE WHEN ?!=0 THEN ? ELSE cost_price_khr END,
-                low_stock_threshold=CASE WHEN ?!=0 THEN ? ELSE low_stock_threshold END,
+                category=?, unit=?, brand=?, description=?, supplier=?,
+                selling_price_usd=?, selling_price_khr=?,
+                purchase_price_usd=?, purchase_price_khr=?,
+                cost_price_usd=?, cost_price_khr=?,
+                low_stock_threshold=?,
                 updated_at=datetime('now') WHERE id=?
             `).run(
-              p.category || '', p.unit || '', p.brand || '', p.description || '', p.supplier || '',
-              sellUsd, sellUsd, sellKhr, sellKhr,
-              buyUsd, buyUsd, buyKhr, buyKhr,
-              buyUsd, buyUsd, buyKhr, buyKhr,
-              thresh, thresh,
+              resolvedCategory,
+              resolvedUnit,
+              resolvedBrand,
+              resolvedDescription,
+              resolvedSupplier,
+              resolvedSellUsd || 0,
+              resolvedSellKhr || 0,
+              resolvedBuyUsd || 0,
+              resolvedBuyKhr || 0,
+              resolvedBuyUsd || 0,
+              resolvedBuyKhr || 0,
+              resolvedThreshold || 0,
               pid,
             )
             if (JSON.stringify(nextGallery) !== JSON.stringify(currentGallery)) {
@@ -781,6 +959,14 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         }
       } catch (e) { errors.push(`${p.name || '?'}: ${e.message}`) }
     }
+    if (brandsChanged) {
+      const cleanBrands = Array.from(new Set(
+        brandOptions
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      ))
+      upsertSetting.run('product_brand_options', JSON.stringify(cleanBrands))
+    }
   })()
 
   audit(actor.userId, actor.userName, 'bulk_import', 'product', null, { imported, updated }, {
@@ -788,6 +974,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     deviceTz: deviceTz || null,
     clientTime: clientTime || null,
   })
+  if (categoriesChanged) broadcast('categories')
+  if (unitsChanged) broadcast('units')
+  if (brandsChanged) broadcast('settings')
+  if (branchesChanged) broadcast('branches')
+  if (suppliersChanged) broadcast('suppliers')
   broadcast('products')
   ok(res, { imported, updated, errors })
 })

@@ -459,7 +459,12 @@ export function AppProvider({ children }) {
             await loadSettings().catch(() => {})
           }
         }
-        setSyncChannel({ channel, ts: Date.now() })
+        setSyncChannel({
+          channel,
+          ts: Date.now(),
+          reason: e?.detail?.reason || null,
+          source: e?.detail?.source || null,
+        })
       }, SYNC.EVENT_DEBOUNCE_MS)
     }
     const onStatus = (e) => {

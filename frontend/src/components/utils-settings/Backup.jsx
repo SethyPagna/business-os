@@ -640,15 +640,26 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   const loadRequestRef = useRef(0)
   const retryTimerRef = useRef(null)
   const failureCountRef = useRef(0)
+  const failureNotifiedRef = useRef(false)
 
   const load = useCallback(async () => {
     if (!active) return
     const requestId = beginTrackedRequest(loadRequestRef)
     try {
       const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
-      const item = result?.item || result || null
+      const item = result?.item || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      failureCountRef.current = 0
+      if (result?.unavailable) {
+        const nextDelayMs = Math.max(30000, Number(result?.cooldownUntil || 0) - Date.now() || 5 * 60 * 1000)
+        failureCountRef.current = Math.max(1, failureCountRef.current)
+        window.clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = window.setTimeout(() => {
+          if (active) load()
+        }, nextDelayMs)
+      } else {
+        failureCountRef.current = 0
+        failureNotifiedRef.current = false
+      }
       setStatus(item)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
@@ -666,7 +677,10 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       retryTimerRef.current = window.setTimeout(() => {
         if (active) load()
       }, nextDelayMs)
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      if (!failureNotifiedRef.current) {
+        failureNotifiedRef.current = true
+        notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      }
     }
   }, [active, copy, notify])
 

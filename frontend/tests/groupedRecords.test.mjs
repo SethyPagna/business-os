@@ -38,9 +38,11 @@ await runTest('buildTimeActionSections builds day sections with subgroup ids', (
   })
 
   assert.equal(sections.length, 2)
-  assert.deepEqual(sections[0].ids, [1, 2])
+  assert.deepEqual(sections[0].ids, [2, 1])
   assert.equal(sections[0].groups.length, 2)
   assert.equal(sections[0].groups[0].label, 'closed')
+  assert.deepEqual(sections[0].groups[0].ids, [2])
+  assert.deepEqual(sections[0].groups[1].ids, [1])
 })
 
 if (failed > 0) {

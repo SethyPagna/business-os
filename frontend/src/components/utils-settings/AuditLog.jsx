@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, ClipboardList, Clock3, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ClipboardList, Clock3, MonitorSmartphone, RefreshCw, Search, User2, X } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
@@ -153,7 +153,9 @@ export default function AuditLog() {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
+  const [groupMode, setGroupMode] = useState('time')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
   const [detailLog, setDetailLog] = useState(null)
@@ -221,9 +223,9 @@ export default function AuditLog() {
     return ACTION_COLOR_CLASS[String(action).toLowerCase()] || DEFAULT_ACTION_CLASS
   }, [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
-    if (aliveRef.current) {
+    if (!silent && aliveRef.current) {
       setLoading(true)
       setError(null)
     }
@@ -234,12 +236,14 @@ export default function AuditLog() {
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       console.error('Failed to load audit logs:', err)
-      setLogs([])
-      setError(err?.message || 'Failed to load audit logs.')
+      if (!silent && !loadedOnceRef.current) {
+        setLogs([])
+        setError(err?.message || 'Failed to load audit logs.')
+      }
     } finally {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       loadedOnceRef.current = true
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
@@ -249,12 +253,13 @@ export default function AuditLog() {
       invalidateTrackedRequest(loadRequestRef)
       return
     }
+    aliveRef.current = true
     if (pageLoadRequestedRef.current) {
-      load()
+      load(true)
       return
     }
     pageLoadRequestedRef.current = true
-    load(loadedOnceRef.current)
+    load(false)
   }, [load, page])
 
   useEffect(() => () => {
@@ -318,7 +323,10 @@ export default function AuditLog() {
     year: yearFilter,
     month: monthFilter,
     timeMode,
-  }), [actionLabel, monthFilter, orderedLogs, timeMode, yearFilter])
+    groupMode,
+    sortDirection,
+  }), [actionLabel, groupMode, monthFilter, orderedLogs, sortDirection, timeMode, yearFilter])
+  const showActionGroups = groupMode === 'time+action'
 
   const visibleLogs = useMemo(
     () => groupedSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -329,6 +337,14 @@ export default function AuditLog() {
     const validIds = new Set(visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)))
     setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
   }, [visibleLogs])
+
+  useEffect(() => {
+    const validIds = new Set(groupedSections.map((section) => section.id))
+    setCollapsedSections((current) => {
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [groupedSections])
 
   const visibleIds = useMemo(
     () => visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)),
@@ -361,6 +377,15 @@ export default function AuditLog() {
 
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
+  }, [])
+
+  const toggleSectionCollapsed = useCallback((sectionId) => {
+    setCollapsedSections((current) => {
+      const next = new Set(current)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
   }, [])
 
   const isSelectionScopeFullySelected = useCallback(
@@ -399,11 +424,11 @@ export default function AuditLog() {
   }, [actionLabel, rowNumberById])
 
   const exportItems = useMemo(() => ([
-    { label: 'Export visible logs', onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
-    selectedLogs.length ? { label: 'Export selected logs', onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
-    actionFilter !== 'all' ? { label: `Export ${actionLabel(actionFilter)}`, onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: 'Export current time filter', onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
-  ].filter(Boolean)), [actionFilter, actionLabel, exportRows, monthFilter, selectedLogs.length, selectedLogs, visibleLogs, yearFilter])
+    { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
+    selectedLogs.length ? { label: copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស'), onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
+    actionFilter !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(actionFilter)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(actionFilter)}`), onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: copy('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
+  ].filter(Boolean)), [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
 
   const filterSections = useMemo(() => ([
     {
@@ -460,11 +485,19 @@ export default function AuditLog() {
         { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
       ],
     },
-  ]), [actionFilter, actionOptions, availableYears, copy, monthFilter, sortDirection, t, yearFilter])
+    {
+      id: 'group',
+      label: copy('group_by', 'Group by'),
+      options: [
+        { id: 'group-time', label: copy('group_time_created', 'Time created'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
+        { id: 'group-time-action', label: copy('group_time_action', 'Time + action'), active: groupMode === 'time+action', onClick: () => setGroupMode('time+action') },
+      ],
+    },
+  ]), [actionFilter, actionOptions, availableYears, copy, groupMode, monthFilter, sortDirection, t, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length,
-    [actionFilter, monthFilter, sortDirection, yearFilter],
+    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length,
+    [actionFilter, groupMode, monthFilter, sortDirection, yearFilter],
   )
 
   return (
@@ -504,6 +537,7 @@ export default function AuditLog() {
             setYearFilter('all')
             setMonthFilter('all')
             setActionFilter('all')
+            setGroupMode('time')
             setSortDirection('desc')
           }}
           compact
@@ -566,11 +600,13 @@ export default function AuditLog() {
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
               ) : visibleLogs.length === 0 ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
-              ) : groupedSections.map((section) => (
+              ) : groupedSections.map((section) => {
+                const isCollapsed = collapsedSections.has(section.id)
+                return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                     <td colSpan={8} className="px-4 py-2">
-                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                         <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
                             type="checkbox"
@@ -584,32 +620,40 @@ export default function AuditLog() {
                           />
                           <span>{section.label}</span>
                         </label>
-                        <span className="text-slate-400">{section.ids.length}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-400">{section.ids.length}</span>
+                          <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                            {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
-                  {section.groups.map((group) => (
+                  {!isCollapsed ? section.groups.map((group) => (
                     <Fragment key={group.id}>
-                      <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                        <td colSpan={8} className="px-6 py-2">
-                          <div className="flex flex-wrap items-center gap-3 text-xs">
-                            <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={isSelectionScopeFullySelected(group.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                }}
-                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                aria-label={`Select ${group.label}`}
-                              />
-                              <span>{group.label}</span>
-                            </label>
-                            <span className="text-slate-400">{group.items.length}</span>
-                          </div>
-                        </td>
-                      </tr>
+                      {showActionGroups ? (
+                        <tr className="bg-slate-50/80 dark:bg-slate-900/30">
+                          <td colSpan={8} className="px-6 py-2">
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                              <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded"
+                                  checked={isSelectionScopeFullySelected(group.ids)}
+                                  ref={(node) => {
+                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                  }}
+                                  onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                  aria-label={`Select ${group.label}`}
+                                />
+                                <span>{group.label}</span>
+                              </label>
+                              <span className="text-slate-400">{group.items.length}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
                       {group.items.map((log) => (
                         <tr
                           key={log.id}
@@ -650,9 +694,9 @@ export default function AuditLog() {
                         </tr>
                       ))}
                     </Fragment>
-                  ))}
+                  )) : null}
                 </Fragment>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -667,42 +711,53 @@ export default function AuditLog() {
           <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
         ) : visibleLogs.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>
-        ) : groupedSections.map((section) => (
+        ) : groupedSections.map((section) => {
+          const isCollapsed = collapsedSections.has(section.id)
+          return (
           <div key={section.id} className="space-y-2">
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded"
-                  checked={isSelectionScopeFullySelected(section.ids)}
-                  ref={(node) => {
-                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                  }}
-                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                  aria-label={`Select ${section.label}`}
-                />
-                <span>{section.label}</span>
-                <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
-              </label>
-            </div>
-            {section.groups.map((group) => (
-              <div key={group.id} className="space-y-2">
-                <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded"
-                      checked={isSelectionScopeFullySelected(group.ids)}
-                      ref={(node) => {
-                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                      }}
-                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                      aria-label={`Select ${group.label}`}
-                    />
-                    <span>{group.label}</span>
-                    <span className="text-slate-400">{group.items.length}</span>
-                  </label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded"
+                    checked={isSelectionScopeFullySelected(section.ids)}
+                    ref={(node) => {
+                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                    }}
+                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                    aria-label={`Select ${section.label}`}
+                  />
+                  <span>{section.label}</span>
+                  <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
                 </div>
+              </div>
+            </div>
+            {!isCollapsed ? section.groups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                {showActionGroups ? (
+                  <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={isSelectionScopeFullySelected(group.ids)}
+                        ref={(node) => {
+                          if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                        }}
+                        onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                        aria-label={`Select ${group.label}`}
+                      />
+                      <span>{group.label}</span>
+                      <span className="text-slate-400">{group.items.length}</span>
+                    </label>
+                  </div>
+                ) : null}
                 {group.items.map((log) => (
                   <button
                     key={log.id}
@@ -710,27 +765,25 @@ export default function AuditLog() {
                     className="card w-full p-3 text-left active:bg-blue-50 dark:active:bg-blue-900/10"
                     onClick={() => setDetailLog(log)}
                   >
-                    <div className="mb-2 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={selectedIds.has(Number(log.id))}
-                        onChange={() => toggleSelected(log.id)}
-                        aria-label={`Select ${sessionEntryLabel(log)}`}
-                      />
-                      <span className="text-xs text-gray-500">{t('select') || 'Select'}</span>
-                    </div>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <div className="mb-1 flex items-center gap-1 overflow-hidden text-[11px]">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={selectedIds.has(Number(log.id))}
+                            onChange={() => toggleSelected(log.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Select ${sessionEntryLabel(log)}`}
+                          />
+                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{log.user_name || '--'}</span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
-                          <span className="text-xs text-gray-500">{formatEntityName(log)}</span>
+                          <span className="truncate text-xs text-gray-500">{formatEntityName(log)}</span>
+                          <span className="shrink-0 text-xs text-gray-400">{sessionEntryLabel(log)}</span>
                         </div>
-                        <div className="text-xs font-semibold text-gray-500">{sessionEntryLabel(log)}</div>
                         {readableSummary(log) ? <div className="mt-1 text-xs text-gray-400 line-clamp-2">{readableSummary(log)}</div> : null}
-                        <div className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-300">{log.user_name || '--'}</div>
                         <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
                       </div>
                       <ChevronRight className="h-4 w-4 text-gray-300" />
@@ -738,9 +791,9 @@ export default function AuditLog() {
                   </button>
                 ))}
               </div>
-            ))}
+            )) : null}
           </div>
-        ))}
+        )})}
       </div>
 
       {detailLog ? (

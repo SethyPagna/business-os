@@ -123,6 +123,9 @@ function buildInventorySection() {
       tone: 'danger',
       label: product.name,
       meta: 'Out of stock',
+      kind: 'inventory_out_of_stock',
+      metaKey: 'notification_inventory_out_of_stock',
+      metaParams: {},
       pageId: 'inventory',
     })),
     ...lowStock.map((product) => ({
@@ -130,6 +133,9 @@ function buildInventorySection() {
       tone: 'warning',
       label: product.name,
       meta: `Low stock (${Number(product.stock_quantity || 0)})`,
+      kind: 'inventory_low_stock',
+      metaKey: 'notification_inventory_low_stock',
+      metaParams: { quantity: Number(product.stock_quantity || 0) },
       pageId: 'inventory',
     })),
   ]
@@ -142,6 +148,8 @@ function buildInventorySection() {
     pageId: 'inventory',
     enabledKey: 'notifications_inventory_enabled',
     count: Number(countLow || 0) + Number(countOut || 0),
+    summaryKey: 'notification_inventory_summary',
+    summaryParams: { outCount: Number(countOut || 0), lowCount: Number(countLow || 0) },
     summary: [
       countOut ? `${countOut} out of stock` : null,
       countLow ? `${countLow} low stock` : null,
@@ -180,6 +188,9 @@ function buildSalesSection() {
       tone: 'warning',
       label: sale.receipt_number || `Sale #${sale.id}`,
       meta: `Awaiting payment • $${Number(sale.total_usd || 0).toFixed(2)}`,
+      kind: 'sales_awaiting_payment',
+      metaKey: 'notification_sales_awaiting_payment',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
       pageId: 'sales',
     })),
     ...awaitingDelivery.map((sale) => ({
@@ -187,6 +198,9 @@ function buildSalesSection() {
       tone: 'info',
       label: sale.receipt_number || `Sale #${sale.id}`,
       meta: `Awaiting delivery • $${Number(sale.total_usd || 0).toFixed(2)}`,
+      kind: 'sales_awaiting_delivery',
+      metaKey: 'notification_sales_awaiting_delivery',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
       pageId: 'sales',
     })),
   ]
@@ -201,6 +215,8 @@ function buildSalesSection() {
     pageId: 'sales',
     enabledKey: 'notifications_sales_enabled',
     count: awaitingPaymentCount + awaitingDeliveryCount,
+    summaryKey: 'notification_sales_summary',
+    summaryParams: { awaitingPaymentCount, awaitingDeliveryCount },
     summary: [
       awaitingPaymentCount ? `${awaitingPaymentCount} awaiting payment` : null,
       awaitingDeliveryCount ? `${awaitingDeliveryCount} awaiting delivery` : null,
@@ -280,12 +296,17 @@ function buildLoyaltySection(threshold) {
     pageId: 'loyalty_points',
     enabledKey: 'notifications_loyalty_enabled',
     count: matches.length,
+    summaryKey: 'notification_loyalty_summary',
+    summaryParams: { count: matches.length, threshold },
     summary: `${matches.length} customer${matches.length === 1 ? '' : 's'} reached ${threshold}+ points`,
     items: matches.slice(0, 6).map((customer) => ({
       id: `loyalty-${customer.id}`,
       tone: 'success',
       label: customer.name,
       meta: `${customer.balance} points`,
+      kind: 'loyalty_points_balance',
+      metaKey: 'notification_loyalty_points_balance',
+      metaParams: { balance: customer.balance },
       pageId: 'loyalty_points',
     })),
   }
@@ -312,12 +333,17 @@ function buildPortalSection() {
     pageId: 'catalog',
     enabledKey: 'notifications_portal_enabled',
     count: pendingCount,
+    summaryKey: 'notification_portal_summary',
+    summaryParams: { count: pendingCount },
     summary: `${pendingCount} pending customer submission${pendingCount === 1 ? '' : 's'}`,
     items: pendingRows.map((entry) => ({
       id: `portal-${entry.id}`,
       tone: 'info',
       label: entry.customer_name || entry.membership_number || `Submission #${entry.id}`,
       meta: entry.platform ? `Pending review • ${entry.platform}` : 'Pending review',
+      kind: 'portal_pending_review',
+      metaKey: entry.platform ? 'notification_portal_pending_review_platform' : 'notification_portal_pending_review',
+      metaParams: { platform: entry.platform || '' },
       pageId: 'catalog',
     })),
   }
@@ -347,6 +373,8 @@ function buildSystemSection() {
     pageId: 'backup',
     enabledKey: 'notifications_system_enabled',
     count: 1,
+    summaryKey: 'notification_system_drive_sync_summary',
+    summaryParams: {},
     summary: 'Google Drive sync needs attention',
     items: [
       {
@@ -354,6 +382,9 @@ function buildSystemSection() {
         tone: 'warning',
         label: 'Google Drive sync',
         meta: 'Reconnect Google Drive to resume sync',
+        kind: 'system_drive_sync_reconnect',
+        metaKey: 'notification_system_drive_sync_reconnect',
+        metaParams: {},
         pageId: 'backup',
       },
     ],
