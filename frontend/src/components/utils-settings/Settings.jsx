@@ -311,6 +311,10 @@ export default function Settings() {
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState(null)
   const otpStatusRequestRef = useRef(0)
+  const faviconPreviewRequestRef = useRef(0)
+  const uploadInFlightRef = useRef(false)
+  const aliveRef = useRef(true)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   const uiLanguage = form.language || settings.language || 'en'
   const copy = useCopy(uiLanguage, t)
@@ -350,6 +354,15 @@ export default function Settings() {
       }
 
   useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      invalidateTrackedRequest(otpStatusRequestRef)
+      invalidateTrackedRequest(faviconPreviewRequestRef)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!user?.id) {
       invalidateTrackedRequest(otpStatusRequestRef)
       setOtpStatus(false)
@@ -372,22 +385,27 @@ export default function Settings() {
   }, [user])
 
   useEffect(() => {
-    let cancelled = false
     const source = String(form.ui_app_favicon_image || settings.ui_app_favicon_image || '').trim()
     if (!source) {
+      invalidateTrackedRequest(faviconPreviewRequestRef)
       setAppFaviconPreview('')
       return undefined
     }
-    createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 })
+    const requestId = beginTrackedRequest(faviconPreviewRequestRef)
+    withLoaderTimeout(
+      () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
+      'Settings favicon preview',
+      8000,
+    )
       .then((preview) => {
-        if (!cancelled) setAppFaviconPreview(preview || source)
+        if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
+        setAppFaviconPreview(preview || source)
       })
       .catch(() => {
-        if (!cancelled) setAppFaviconPreview(source)
+        if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
+        setAppFaviconPreview(source)
       })
-    return () => {
-      cancelled = true
-    }
+    return () => invalidateTrackedRequest(faviconPreviewRequestRef)
   }, [form.ui_app_favicon_image, settings.ui_app_favicon_image])
 
   useEffect(() => {
@@ -534,6 +552,9 @@ export default function Settings() {
   }
 
   const uploadImageSetting = async (key) => {
+    if (uploadInFlightRef.current) return
+    uploadInFlightRef.current = true
+    if (aliveRef.current) setUploadingImage(true)
     try {
       const file = await new Promise((resolve) => {
         const input = document.createElement('input')
@@ -545,9 +566,15 @@ export default function Settings() {
       if (!file) return
       const uploaded = await window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name })
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
+      if (!aliveRef.current) return
       setValue(key, uploaded.public_path)
     } catch (error) {
-      notify(error?.message || 'Image upload failed', 'error')
+      if (aliveRef.current) {
+        notify(error?.message || 'Image upload failed', 'error')
+      }
+    } finally {
+      uploadInFlightRef.current = false
+      if (aliveRef.current) setUploadingImage(false)
     }
   }
 
@@ -617,13 +644,13 @@ export default function Settings() {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={() => uploadImageSetting('ui_app_favicon_image')}>
+              <button type="button" className="btn-secondary text-sm" onClick={() => uploadImageSetting('ui_app_favicon_image')} disabled={uploadingImage}>
                 <ImagePlus className="h-4 w-4" />
-                <span>Upload icon</span>
+                <span>{uploadingImage ? (t('uploading') || 'Uploading...') : (t('upload_image') || 'Upload Image')}</span>
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setValue('ui_app_favicon_image', '')}>
+              <button type="button" className="btn-secondary text-sm" onClick={() => setValue('ui_app_favicon_image', '')} disabled={uploadingImage}>
                 <Trash2 className="h-4 w-4" />
-                <span>Clear</span>
+                <span>{t('clear_btn') || 'Clear'}</span>
               </button>
             </div>
           </div>
