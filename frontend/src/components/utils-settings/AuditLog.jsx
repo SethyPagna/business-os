@@ -162,6 +162,7 @@ export default function AuditLog() {
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const aliveRef = useRef(true)
 
   const actionLabels = useMemo(() => ({
     create: t('create') || 'Create',
@@ -222,26 +223,26 @@ export default function AuditLog() {
     return ACTION_COLOR_CLASS[String(action).toLowerCase()] || DEFAULT_ACTION_CLASS
   }, [])
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     const requestId = beginTrackedRequest(loadRequestRef)
-    setLoading(true)
-    setError(null)
-    withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
-      .then((data) => {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setLogs(Array.isArray(data) ? data : [])
-      })
-      .catch((err) => {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        console.error('Failed to load audit logs:', err)
-        setLogs([])
-        setError(err?.message || 'Failed to load audit logs.')
-      })
-      .finally(() => {
-        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        loadedOnceRef.current = true
-        setLoading(false)
-      })
+    if (aliveRef.current) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const data = await withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      setLogs(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      console.error('Failed to load audit logs:', err)
+      setLogs([])
+      setError(err?.message || 'Failed to load audit logs.')
+    } finally {
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      loadedOnceRef.current = true
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -257,7 +258,10 @@ export default function AuditLog() {
     pageLoadRequestedRef.current = true
     load(loadedOnceRef.current)
   }, [load, page])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(loadRequestRef)
+  }, [])
 
   const query = search.trim().toLowerCase()
   const searchedLogs = useMemo(() => logs.filter((log) => {
