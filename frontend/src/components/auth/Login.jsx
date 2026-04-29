@@ -15,6 +15,12 @@ import { useApp } from '../../AppContext'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.js'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.mjs'
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 
@@ -88,6 +94,9 @@ export default function Login() {
     }
   })
   const sessionDurationTouchedRef = useRef(false)
+  const capabilityRequestRef = useRef(0)
+  const organizationBootstrapRequestRef = useRef(0)
+  const organizationSearchRequestRef = useRef(0)
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -164,11 +173,14 @@ export default function Login() {
   }, [settings?.login_session_duration])
 
   useEffect(() => {
-    let active = true
     const loadCapabilities = async () => {
+      const requestId = beginTrackedRequest(capabilityRequestRef)
       try {
-        const result = await window.api.getVerificationCapabilities?.()
-        if (!active || !result || result.success === false) return
+        const result = await withLoaderTimeout(
+          () => window.api.getVerificationCapabilities?.(),
+          'Verification capabilities',
+        )
+        if (!isTrackedRequestCurrent(capabilityRequestRef, requestId) || !result || result.success === false) return
         setVerificationCaps({
           googleOauth: result.google_oauth === true,
           supabaseAuth: result.supabase_auth === true,
@@ -177,16 +189,19 @@ export default function Login() {
       } catch (_) {}
     }
     loadCapabilities()
-    return () => { active = false }
+    return () => { invalidateTrackedRequest(capabilityRequestRef) }
   }, [])
 
   useEffect(() => {
-    let active = true
     const bootstrap = async () => {
+      const requestId = beginTrackedRequest(organizationBootstrapRequestRef)
       try {
         const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
-        const boot = await window.api.getOrganizationBootstrap?.()
-        if (!active) return
+        const boot = await withLoaderTimeout(
+          () => window.api.getOrganizationBootstrap?.(),
+          'Organization bootstrap',
+        )
+        if (!isTrackedRequestCurrent(organizationBootstrapRequestRef, requestId)) return
         const fallbackOrg = remembered || boot?.organization || null
         if (fallbackOrg) {
           setOrganizationSearch(fallbackOrg.name || fallbackOrg.slug || '')
@@ -201,30 +216,35 @@ export default function Login() {
       } catch (_) {}
     }
     bootstrap()
-    return () => { active = false }
+    return () => { invalidateTrackedRequest(organizationBootstrapRequestRef) }
   }, [])
 
   useEffect(() => {
-    let active = true
     const query = String(organizationSearch || '').trim()
     if (!query) {
+      invalidateTrackedRequest(organizationSearchRequestRef)
       setOrganizationMatches([])
-      return () => { active = false }
+      setOrganizationLoading(false)
+      return undefined
     }
     const timer = setTimeout(async () => {
+      const requestId = beginTrackedRequest(organizationSearchRequestRef)
       setOrganizationLoading(true)
       try {
-        const result = await window.api.searchOrganizations?.(query)
-        if (!active) return
+        const result = await withLoaderTimeout(
+          () => window.api.searchOrganizations?.(query),
+          'Organization search',
+        )
+        if (!isTrackedRequestCurrent(organizationSearchRequestRef, requestId)) return
         setOrganizationMatches(Array.isArray(result?.items) ? result.items : [])
       } catch (_) {
-        if (active) setOrganizationMatches([])
+        if (isTrackedRequestCurrent(organizationSearchRequestRef, requestId)) setOrganizationMatches([])
       } finally {
-        if (active) setOrganizationLoading(false)
+        if (isTrackedRequestCurrent(organizationSearchRequestRef, requestId)) setOrganizationLoading(false)
       }
     }, 180)
     return () => {
-      active = false
+      invalidateTrackedRequest(organizationSearchRequestRef)
       clearTimeout(timer)
     }
   }, [organizationSearch])
