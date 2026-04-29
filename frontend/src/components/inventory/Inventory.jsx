@@ -6,6 +6,7 @@ import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } f
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
+import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportReports'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import DualMoney from './DualMoney'
@@ -508,12 +509,118 @@ export default function Inventory() {
   const inventoryBrands = [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
   const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const movementDateRangeLabel = useMemo(() => {
+    const timestamps = visibleMovementGroups
+      .map((group) => group.latest_at || group.items?.[0]?.created_at || '')
+      .map((raw) => {
+        if (!raw) return null
+        const parsed = new Date(raw.includes('T') ? raw : `${raw}Z`)
+        return Number.isNaN(parsed.getTime()) ? null : parsed
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.getTime() - right.getTime())
+    if (!timestamps.length) {
+      if (movementYearFilter !== 'all' || movementMonthFilter !== 'all') {
+        return `${movementYearFilter === 'all' ? 'All years' : movementYearFilter} / ${movementMonthFilter === 'all' ? 'All months' : movementMonthFilter}`
+      }
+      return 'All available movement dates'
+    }
+    return `${timestamps[0].toLocaleDateString()} - ${timestamps[timestamps.length - 1].toLocaleDateString()}`
+  }, [movementMonthFilter, movementYearFilter, visibleMovementGroups])
+
+  const visibleMovementQuantity = useMemo(
+    () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.totalQuantity || 0), 0),
+    [visibleMovementGroups],
+  )
+  const movementActivityRows = useMemo(() => {
+    const map = new Map()
+    visibleMovementGroups.forEach((group) => {
+      const key = String(group.movement_type || group.movementLabel || 'other')
+      const current = map.get(key) || {
+        name: group.movementLabel || key,
+        groups: 0,
+        quantity: 0,
+        total_cost_usd: 0,
+      }
+      current.groups += 1
+      current.quantity += Number(group.totalQuantity || 0)
+      current.total_cost_usd += Number(group.totalCostUsd || 0)
+      map.set(key, current)
+    })
+    return [...map.values()].sort((left, right) => right.quantity - left.quantity || right.groups - left.groups)
+  }, [visibleMovementGroups])
+
+  const movementVolumeRows = useMemo(() => {
+    const map = new Map()
+    visibleMovementGroups.forEach((group) => {
+      const raw = group.latest_at || group.items?.[0]?.created_at || ''
+      if (!raw) return
+      const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
+      if (Number.isNaN(date.getTime())) return
+      const period = movementTimeMode === 'year'
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+        : movementTimeMode === 'month'
+          ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      const current = map.get(period) || { period, count: 0, quantity: 0, total_cost_usd: 0 }
+      current.count += Number(group.items?.length || 0)
+      current.quantity += Number(group.totalQuantity || 0)
+      current.total_cost_usd += Number(group.totalCostUsd || 0)
+      map.set(period, current)
+    })
+    return [...map.values()]
+  }, [movementTimeMode, visibleMovementGroups])
+
+  const stockStatusRows = useMemo(() => ([
+    { name: tr('in_stock', 'In Stock', 'មានស្តុក'), value: filteredSummary.filter((product) => getStockQty(product) > (product.low_stock_threshold || 0)).length },
+    { name: tr('low_stock', 'Low Stock', 'ស្តុកទាប'), value: lowStockCount },
+    { name: tr('out_of_stock', 'Out of Stock', 'អស់ស្តុក'), value: outStockCount },
+  ]), [filteredSummary, getStockQty, lowStockCount, outStockCount, tr])
+
+  const topStockValueRows = useMemo(() => (
+    [...filteredSummary]
+      .sort((left, right) => Number(right.stock_value_usd || 0) - Number(left.stock_value_usd || 0))
+      .slice(0, 10)
+      .map((product) => ({
+        Product: product.name || '',
+        Stock_Value_USD: Number(product.stock_value_usd || 0),
+        Stock_Qty: getStockQty(product),
+        Revenue_USD: Number(product.revenue_usd || 0),
+        Brand: product.brand || '',
+      }))
+  ), [filteredSummary, getStockQty])
+
+  const branchComparisonRows = useMemo(() => {
+    const map = new Map()
+    filteredSummary.forEach((product) => {
+      const cost = Number(product.purchase_price_usd || product.cost_price_usd || 0)
+      if (Array.isArray(product.branch_stock) && product.branch_stock.length) {
+        product.branch_stock.forEach((branchStock) => {
+          const key = String(branchStock.branch_id || branchStock.branch_name || '')
+          if (!key) return
+          const current = map.get(key) || {
+            branch_name: branchStock.branch_name || branches.find((branch) => String(branch.id) === key)?.name || key,
+            quantity: 0,
+            stock_value_usd: 0,
+            product_count: 0,
+          }
+          const quantity = Number(branchStock.quantity || 0)
+          current.quantity += quantity
+          current.stock_value_usd += quantity * cost
+          if (quantity > 0) current.product_count += 1
+          map.set(key, current)
+        })
+      }
+    })
+    return [...map.values()].sort((left, right) => right.stock_value_usd - left.stock_value_usd || right.quantity - left.quantity)
+  }, [branches, filteredSummary])
 
   const buildInventoryStatsRows = useCallback(() => ([
     { Section: 'Inventory Stats', Metric: 'View Tab', Value: tab },
     { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
     { Section: 'Inventory Stats', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
     { Section: 'Inventory Stats', Metric: 'Stock Filter', Value: stockFilter },
+    { Section: 'Inventory Stats', Metric: 'Visible Movement Date Range', Value: movementDateRangeLabel },
     { Section: 'Inventory Stats', Metric: 'Search', Value: search || '' },
     { Section: 'Inventory Stats', Metric: 'Movement Year Filter', Value: movementYearFilter },
     { Section: 'Inventory Stats', Metric: 'Movement Month Filter', Value: movementMonthFilter },
@@ -546,6 +653,7 @@ export default function Inventory() {
     movementGroupMode,
     movementMonthFilter,
     movementSortDirection,
+    movementDateRangeLabel,
     movementYearFilter,
     outStockCount,
     returnStats?.count,
@@ -564,6 +672,57 @@ export default function Inventory() {
     totalStoreDiscounts,
     totalValue,
     visibleMovementGroups.length,
+  ])
+
+  const buildInventoryFormulaRows = useCallback(() => ([
+    {
+      Section: 'Calculation',
+      Metric: 'Visible stock value',
+      Formula: 'Stock value = sum(stock quantity * unit cost)',
+      Example: `${fmtUSD(totalValue)} across ${filteredSummary.length} visible products`,
+    },
+    {
+      Section: 'Calculation',
+      Metric: 'Gross profit',
+      Formula: 'Gross profit = revenue - COGS',
+      Example: `${fmtUSD(totalProfit)} = ${fmtUSD(totalRevenue)} - ${fmtUSD(totalCOGS)}`,
+    },
+    {
+      Section: 'Calculation',
+      Metric: 'In-stock count',
+      Formula: 'In stock = quantity greater than the low-stock threshold',
+      Example: `${stockStatusRows[0]?.value || 0} visible products`,
+    },
+    {
+      Section: 'Calculation',
+      Metric: 'Low-stock count',
+      Formula: 'Low stock = quantity above out-of-stock threshold and at or below low-stock threshold',
+      Example: `${lowStockCount} visible products`,
+    },
+    {
+      Section: 'Calculation',
+      Metric: 'Out-of-stock count',
+      Formula: 'Out of stock = quantity at or below out-of-stock threshold',
+      Example: `${outStockCount} visible products`,
+    },
+    {
+      Section: 'Calculation',
+      Metric: 'Visible movement quantity',
+      Formula: 'Visible movement quantity = sum(group quantities after filters/grouping)',
+      Example: `${visibleMovementQuantity} units across ${visibleMovementGroups.length} visible movement groups`,
+    },
+  ]), [
+    filteredSummary.length,
+    fmtUSD,
+    lowStockCount,
+    outStockCount,
+    stockStatusRows,
+    totalCOGS,
+    totalProfit,
+    totalRevenue,
+    totalValue,
+    visibleMovementGroups.length,
+    visibleMovementQuantity,
   ])
 
   const buildMovementFilterRows = useCallback(() => ([
@@ -625,32 +784,182 @@ export default function Inventory() {
   }, [buildInventoryProductRows, exportStamp, filteredSummary])
 
   const exportInventoryStats = useCallback((filePrefix = 'inventory-stats') => {
-    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryStatsRows())
-  }, [buildInventoryStatsRows, exportStamp])
+    const rows = [
+      ...buildInventoryStatsRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: row.Value,
+        Formula: '',
+        Example: '',
+      })),
+      ...buildInventoryFormulaRows().map((row) => ({
+        Section: row.Section,
+        Metric: row.Metric,
+        Value: '',
+        Formula: row.Formula,
+        Example: row.Example,
+      })),
+    ]
+    downloadCSV(`${filePrefix}-${exportStamp}.csv`, rows)
+  }, [buildInventoryFormulaRows, buildInventoryStatsRows, exportStamp])
 
   const exportInventoryPackage = useCallback((mode = tab) => {
-    const files = mode === 'movements'
-      ? [
-          { name: `inventory-movement-filters-${exportStamp}.csv`, content: buildCSV(buildMovementFilterRows()) },
-          { name: `inventory-movement-groups-${exportStamp}.csv`, content: buildCSV(buildMovementRows(visibleMovementGroups)) },
-          { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(buildInventoryStatsRows()) },
-          { name: `inventory-products-reference-${exportStamp}.csv`, content: buildCSV(buildInventoryProductRows(filteredSummary)) },
-        ]
-      : [
-          { name: `inventory-filters-${exportStamp}.csv`, content: buildCSV(buildInventoryStatsRows()) },
-          { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(buildInventoryProductRows(filteredSummary)) },
-          { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(buildMovementRows(visibleMovementGroups)) },
-        ]
+    const movementRows = buildMovementRows(visibleMovementGroups)
+    const productRows = buildInventoryProductRows(filteredSummary)
+    const statsRows = buildInventoryStatsRows()
+    const formulaRows = buildInventoryFormulaRows()
+    const manifestRows = buildReportManifestRows([
+      { metric: 'View Tab', value: mode },
+      { metric: 'Branch Filter', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+      { metric: 'Brand Filter', value: brandFilter === 'all' ? 'All brands' : brandFilter },
+      { metric: 'Stock Filter', value: stockFilter },
+      { metric: 'Movement Type Filter', value: movFilter },
+      { metric: 'Movement Date Range', value: movementDateRangeLabel },
+      { metric: 'Movement Group Mode', value: movementGroupMode },
+      { metric: 'Movement Sort Direction', value: movementSortDirection },
+      { metric: 'Search', value: search || '' },
+      { metric: 'Generated At', value: new Date().toISOString() },
+    ])
+    const files = buildReportPackageFiles({
+      baseName: 'inventory',
+      exportStamp,
+      manifestRows,
+      csvFiles: mode === 'movements'
+        ? [
+            { name: `inventory-movement-filters-${exportStamp}.csv`, content: buildCSV(buildMovementFilterRows()) },
+            { name: `inventory-movement-groups-${exportStamp}.csv`, content: buildCSV(movementRows) },
+            { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(statsRows) },
+            { name: `inventory-calculations-${exportStamp}.csv`, content: buildCSV(formulaRows) },
+            { name: `inventory-products-reference-${exportStamp}.csv`, content: buildCSV(productRows) },
+          ]
+        : [
+            { name: `inventory-filters-${exportStamp}.csv`, content: buildCSV(statsRows) },
+            { name: `inventory-calculations-${exportStamp}.csv`, content: buildCSV(formulaRows) },
+            { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(productRows) },
+            { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(movementRows) },
+          ],
+      report: {
+        fileName: 'inventory-report.html',
+        title: 'Inventory Report',
+        subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} • ${movementDateRangeLabel}`,
+        exportedAt: new Date().toISOString(),
+        summaryCards: [
+          { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
+          { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
+          { label: 'Stock Value', value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
+          { label: 'Revenue', value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'ថ្លៃដើម')} ${fmtUSD(totalCOGS)}` },
+          { label: 'Low Stock', value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
+          { label: 'Returns', value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
+        ],
+        metadataGroups: [
+          {
+            title: 'Active Filters',
+            subtitle: 'Visible inventory scope captured in this export',
+            rows: [
+              { label: 'View', value: mode },
+              { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || branchFilter) },
+              { label: 'Brand', value: brandFilter === 'all' ? 'All brands' : brandFilter },
+              { label: 'Stock status', value: stockFilter },
+              { label: 'Search', value: search || 'None' },
+            ],
+          },
+          {
+            title: 'Movement Filters',
+            subtitle: 'Grouping and date metadata for the visible movement set',
+            rows: [
+              { label: 'Date range', value: movementDateRangeLabel },
+              { label: 'Year filter', value: movementYearFilter },
+              { label: 'Month filter', value: movementMonthFilter },
+              { label: 'Activity type', value: movFilter },
+              { label: 'Group mode', value: movementGroupMode },
+              { label: 'Sort direction', value: movementSortDirection },
+            ],
+          },
+        ],
+        charts: [
+          {
+            type: 'donut',
+            title: 'Stock status distribution',
+            subtitle: 'Visible products by current stock state',
+            props: { data: stockStatusRows, valueKey: 'value' },
+          },
+          {
+            type: 'bar',
+            title: 'Top stock-value products',
+            subtitle: 'Highest stock value in the visible set',
+            props: { data: topStockValueRows.map((row) => ({ product_name: row.Product, stock_value_usd: row.Stock_Value_USD })), valueKey: 'stock_value_usd', labelKey: 'product_name', color: '#2563eb' },
+          },
+          {
+            type: 'donut',
+            title: 'Movement activity mix',
+            subtitle: 'Visible movement groups by activity type',
+            props: { data: movementActivityRows.map((row) => ({ name: row.name, value: row.quantity })), valueKey: 'value' },
+          },
+          {
+            type: 'bar',
+            title: 'Movement volume over time',
+            subtitle: 'Visible movement quantity by period bucket',
+            props: { data: movementVolumeRows, valueKey: 'quantity', labelKey: 'period', color: '#7c3aed', isCount: true },
+          },
+          ...(branchComparisonRows.length > 1 ? [{
+            type: 'bar',
+            title: 'Branch comparison',
+            subtitle: 'Stock value by branch',
+            props: { data: branchComparisonRows, valueKey: 'stock_value_usd', labelKey: 'branch_name', color: '#0891b2' },
+          }] : []),
+        ],
+        tables: [
+          { title: 'Inventory stats', subtitle: 'Core figures and active filters', rows: statsRows },
+          { title: 'Inventory calculations', subtitle: 'Formula reference used in the visible summary', rows: formulaRows },
+          { title: 'Top stock-value products', subtitle: 'Visible product leaders by stock value', rows: topStockValueRows, limit: 10 },
+          { title: 'Movement activity mix', subtitle: 'Visible grouped movements by type', rows: movementActivityRows.map((row) => ({ Activity: row.name, Groups: row.groups, Quantity: row.quantity, Total_Cost_USD: row.total_cost_usd })), limit: 10 },
+          { title: 'Movement volume timeline', subtitle: 'Visible movement quantity over the current time window', rows: movementVolumeRows, limit: 12 },
+          ...(branchComparisonRows.length > 1 ? [{ title: 'Branch comparison', subtitle: 'Visible branch stock totals', rows: branchComparisonRows, limit: 10 }] : []),
+        ],
+        notes: [
+          'Package includes raw CSV data, calculations, active filter metadata, and this self-contained HTML report.',
+          'Single CSV exports remain available from the Export menu when you only need one dataset.',
+        ],
+      },
+    })
     downloadZipFiles(`inventory-report-${mode}-${exportStamp}.zip`, files)
   }, [
+    branchComparisonRows,
+    branchFilter,
+    branches,
+    brandFilter,
+    buildInventoryFormulaRows,
     buildInventoryProductRows,
     buildInventoryStatsRows,
     buildMovementFilterRows,
     buildMovementRows,
     exportStamp,
     filteredSummary,
+    fmtUSD,
+    lowStockCount,
+    movFilter,
+    movementDateRangeLabel,
+    movementGroupMode,
+    movementMonthFilter,
+    movementSortDirection,
+    movementYearFilter,
+    outStockCount,
+    returnStats?.count,
+    returnStats?.refund_usd,
+    search,
+    stockFilter,
+    stockStatusRows,
     tab,
+    topStockValueRows,
+    totalCOGS,
+    totalProducts,
+    totalProfit,
+    totalRevenue,
+    totalValue,
+    tr,
     visibleMovementGroups,
+    movementActivityRows,
+    movementVolumeRows,
   ])
 
   const inventoryExportItems = useMemo(() => {
@@ -1157,33 +1466,35 @@ export default function Inventory() {
               const isLow = qty > 0 && qty <= p.low_stock_threshold
               const isOut = qty <= (p.out_of_stock_threshold || 0)
               const scls  = isOut ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : isLow ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700' : 'bg-green-100 dark:bg-green-900/30 text-green-700'
-              const slbl  = isOut ? 'Out' : isLow ? 'Low' : 'OK'
+              const slbl  = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
+              const soldQty = Math.max(0, p.qty_sold || 0)
+              const revenue = Math.max(0, p.revenue_usd || 0)
               return (
-                <div key={p.id} className="card p-3 cursor-pointer" onClick={() => setDetailProduct(p)}>
+                <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
                       {p.category && <div className="text-xs text-gray-400">{p.category}</div>}
-                      <div className="flex gap-3 mt-1 text-xs text-gray-500">
-                        <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
-                        <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
-                      </div>
-                    </div>
-                    <div className="flex-shrink-0 text-right">
-                      <div className={`text-xl font-bold ${isOut ? 'text-red-600' : isLow ? 'text-yellow-600' : 'text-green-600'}`}>{qty}</div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${scls}`}>{slbl}</span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-                    <div className="text-xs text-gray-500 truncate">
-                      {Math.max(0, p.qty_sold || 0) > 0 && (
-                        <span>Sold {Math.max(0, p.qty_sold)} - Rev {fmtUSD(Math.max(0, p.revenue_usd || 0))}</span>
-                      )}
-                    </div>
-                    <button onClick={e => { e.stopPropagation(); openAdjust(p) }}
-                      className="text-xs text-blue-600 dark:text-blue-400 font-medium px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex-shrink-0">
+                  <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <span className={`font-semibold ${isOut ? 'text-red-600' : isLow ? 'text-yellow-600' : 'text-green-600'}`}>{qty}</span>
+                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                    <span className={`rounded-full px-1.5 py-0.5 font-medium ${scls}`}>{slbl}</span>
+                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); openAdjust(p) }}
+                      className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                    >
                       {t('adjust')}
                     </button>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
+                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                    <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
+                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                    <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
                   </div>
                 </div>
               )

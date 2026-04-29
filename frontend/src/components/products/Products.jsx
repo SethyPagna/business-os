@@ -52,6 +52,34 @@ const CREATED_MONTH_OPTIONS = [
   ['12', 'Dec'],
 ]
 
+const PRODUCT_JUMP_OFFSET = 88
+
+function getScrollContainer(node) {
+  let current = node?.parentElement
+  while (current) {
+    const style = window.getComputedStyle(current)
+    if (/(auto|scroll)/.test(style.overflowY || '') && current.scrollHeight > current.clientHeight) {
+      return current
+    }
+    current = current.parentElement
+  }
+  return document.scrollingElement || document.documentElement
+}
+
+function scrollNodeWithOffset(node, offset = PRODUCT_JUMP_OFFSET) {
+  if (!node) return
+  const container = getScrollContainer(node)
+  if (!container || container === document.documentElement || container === document.body || container === document.scrollingElement) {
+    const top = window.scrollY + node.getBoundingClientRect().top - offset
+    window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
+    return
+  }
+  const containerRect = container.getBoundingClientRect()
+  const nodeRect = node.getBoundingClientRect()
+  const top = container.scrollTop + (nodeRect.top - containerRect.top) - offset
+  container.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
+}
+
 // ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 export default function Products() {
@@ -96,7 +124,6 @@ export default function Products() {
   const loadRequestRef = useRef(0)
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
-  const productJumpRefs = useRef({})
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -522,19 +549,23 @@ export default function Products() {
     () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
     [selectedVisibleIdsSet, visibleProducts],
   )
+  const jumpTargetIdsByLetter = useMemo(() => {
+    const targets = new Map()
+    productSections.forEach((section) => {
+      if (collapsedProductSections.has(section.id)) return
+      section.items.forEach((product) => {
+        const letter = String(product?.name || '').trim().charAt(0).toUpperCase()
+        if (!/[A-Z]/.test(letter) || targets.has(letter)) return
+        targets.set(letter, Number(product.id))
+      })
+    })
+    return targets
+  }, [collapsedProductSections, productSections])
   const visibleLetters = useMemo(
-    () => Array.from(new Set(
-      visibleProducts
-        .map((product) => String(product?.name || '').trim().charAt(0).toUpperCase())
-        .filter((letter) => /[A-Z]/.test(letter)),
-    )).sort((left, right) => left.localeCompare(right)),
-    [visibleProducts],
+    () => [...jumpTargetIdsByLetter.keys()].sort((left, right) => left.localeCompare(right)),
+    [jumpTargetIdsByLetter],
   )
   const hasSelected = selectedVisibleCount > 0
-
-  useEffect(() => {
-    productJumpRefs.current = {}
-  }, [productSections])
 
   useEffect(() => {
     setCollapsedProductSections((current) => {
@@ -618,9 +649,12 @@ export default function Products() {
   }, [])
 
   const jumpToLetter = useCallback((letter) => {
-    const node = productJumpRefs.current[String(letter || '').toUpperCase()]
-    node?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-  }, [])
+    const targetId = jumpTargetIdsByLetter.get(String(letter || '').toUpperCase())
+    if (!targetId) return
+    const nodes = Array.from(document.querySelectorAll(`[data-product-jump-id="${targetId}"]`))
+    const node = nodes.find((entry) => entry.getClientRects().length > 0) || nodes[0]
+    scrollNodeWithOffset(node)
+  }, [jumpTargetIdsByLetter])
 
   const productFilterSections = useMemo(() => ([
     {
@@ -991,15 +1025,10 @@ export default function Products() {
                 const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
                 const marginUsd   = p.selling_price_usd - purchaseUsd
                 const marginPct   = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
-                const firstLetter = String(p?.name || '').trim().charAt(0).toUpperCase()
                 return (
                   <tr
                     key={p.id}
-                    ref={(node) => {
-                      if (node && /[A-Z]/.test(firstLetter) && !productJumpRefs.current[firstLetter]) {
-                        productJumpRefs.current[firstLetter] = node
-                      }
-                    }}
+                    data-product-jump-id={p.id}
                     className={`table-row cursor-pointer ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                     onClick={()=>setDetailProduct(p)}
                   >
@@ -1132,15 +1161,10 @@ export default function Products() {
             {!isCollapsed ? section.items.map(p => {
           const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
           const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
-          const firstLetter = String(p?.name || '').trim().charAt(0).toUpperCase()
           return (
             <div
               key={p.id}
-              ref={(node) => {
-                if (node && /[A-Z]/.test(firstLetter) && !productJumpRefs.current[firstLetter]) {
-                  productJumpRefs.current[firstLetter] = node
-                }
-              }}
+              data-product-jump-id={p.id}
               className={`card p-3 flex gap-3 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
               onClick={()=>setDetailProduct(p)}
             >

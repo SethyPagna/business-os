@@ -6,6 +6,7 @@ import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
 import { BarChart, LineChart, DonutChart } from './charts'
 import MiniStat from './MiniStat'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
+import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportReports'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
@@ -354,23 +355,8 @@ export default function Dashboard() {
     revenueFormulaText,
   ])
 
-  const buildExportAll = () => {
-    if (!analytics || !summary) return
-    const kpiRows = buildDashboardKpiRows()
-    const salesRows    = (analytics.periodData||[]).map(d=>({ Section:'Period Sales', Period:d.period||'', Gross_Sales_USD:d.gross_sales_usd||0, Discounts_USD:d.discount_usd||0, Tax_USD:d.tax_usd||0, Delivery_USD:d.delivery_usd||0, Refund_USD:d.refund_usd||0, Revenue_USD:d.revenue_usd||0, COGS_USD:d.cost_usd||0, Profit_USD:d.profit_usd||0, Tx:d.count||0 }))
-    const topRevRows   = (analytics.topProducts||[]).map((p,i)=>({ Section:'Top Products (Rev)', Rank:i+1, Product:p.product_name||'', Revenue_USD:p.revenue_usd||0, Qty:p.qty_sold||0 }))
-    const topCustRows  = (analytics.topCustomers||[]).map((c,i)=>({ Section:'Top Customers', Rank:i+1, Customer:c.customer_name||'', Sales:c.sale_count||0, Gross:c.gross_revenue_usd||0, Store_Discounts:c.store_discount_usd||0, Membership_Discounts:c.membership_discount_usd||0, Returns:c.total_refund_usd||0, Net:c.net_revenue_usd||0 }))
-    const pmRows       = (analytics.byPayment||[]).map(p=>({ Section:'Payments', Method:p.payment_method||'', Count:p.count||0, Revenue:p.revenue_usd||0 }))
-    const branchRows   = (analytics.byBranch||[]).map(b=>({ Section:'Branches', Branch:b.branch_name||'', Tx:b.count||0, Revenue:b.revenue_usd||0 }))
-    const lowRows      = (summary.low_stock||[]).map(p=>({ Section:'Low Stock', Product:p.name||'', Stock:p.stock_quantity||0, Threshold:p.low_stock_threshold||0 }))
-    const all = [...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
-    const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
-    downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
-  }
-
-  const exportDashboardPackage = useCallback(() => {
-    if (!analytics || !summary) return
-    const salesRows = (analytics.periodData || []).map((d) => ({
+  const buildDashboardSalesRows = useCallback(() => (
+    (analytics?.periodData || []).map((d) => ({
       Period: d.date || d.period || '',
       Gross_Sales_USD: d.gross_sales_usd || 0,
       Discounts_USD: d.discount_usd || 0,
@@ -382,12 +368,56 @@ export default function Dashboard() {
       Profit_USD: d.profit_usd || 0,
       Tx: d.count || 0,
     }))
-    const topProductRows = (analytics.topProducts || []).map((p, i) => ({ Rank: i + 1, Product: p.product_name || '', Revenue_USD: p.revenue_usd || 0, Qty: p.qty_sold || 0 }))
-    const topCustomerRows = (analytics.topCustomers || []).map((c, i) => ({ Rank: i + 1, Customer: c.customer_name || '', Sales: c.sale_count || 0, Gross: c.gross_revenue_usd || 0, Store_Discounts: c.store_discount_usd || 0, Membership_Discounts: c.membership_discount_usd || 0, Returns: c.total_refund_usd || 0, Net: c.net_revenue_usd || 0 }))
-    const paymentRows = (analytics.byPayment || []).map((p) => ({ Method: p.payment_method, Count: p.count || 0, Revenue: p.revenue_usd || 0 }))
-    const branchRows = (analytics.byBranch || []).map((b) => ({ Branch: b.branch_name, Tx: b.count || 0, Revenue: b.revenue_usd || 0 }))
-    const lowRows = (summary.low_stock || []).map((p) => ({ Product: p.name || '', Stock: p.stock_quantity || 0, Threshold: p.low_stock_threshold || 0 }))
-    const recentRows = (summary.recent_sales || []).map((sale) => ({
+  ), [analytics?.periodData])
+
+  const buildDashboardTopProductRows = useCallback(() => (
+    (analytics?.topProducts || []).map((p, i) => ({
+      Rank: i + 1,
+      Product: p.product_name || '',
+      Revenue_USD: p.revenue_usd || 0,
+      Qty: p.qty_sold || 0,
+    }))
+  ), [analytics?.topProducts])
+
+  const buildDashboardTopCustomerRows = useCallback(() => (
+    (analytics?.topCustomers || []).map((c, i) => ({
+      Rank: i + 1,
+      Customer: c.customer_name || '',
+      Sales: c.sale_count || 0,
+      Gross: c.gross_revenue_usd || 0,
+      Store_Discounts: c.store_discount_usd || 0,
+      Membership_Discounts: c.membership_discount_usd || 0,
+      Returns: c.total_refund_usd || 0,
+      Net: c.net_revenue_usd || 0,
+    }))
+  ), [analytics?.topCustomers])
+
+  const buildDashboardPaymentRows = useCallback(() => (
+    (analytics?.byPayment || []).map((p) => ({
+      Method: p.payment_method || '',
+      Count: p.count || 0,
+      Revenue: p.revenue_usd || 0,
+    }))
+  ), [analytics?.byPayment])
+
+  const buildDashboardBranchRows = useCallback(() => (
+    (analytics?.byBranch || []).map((b) => ({
+      Branch: b.branch_name || '',
+      Tx: b.count || 0,
+      Revenue: b.revenue_usd || 0,
+    }))
+  ), [analytics?.byBranch])
+
+  const buildDashboardLowStockRows = useCallback(() => (
+    (summary?.low_stock || []).map((p) => ({
+      Product: p.name || '',
+      Stock: p.stock_quantity || 0,
+      Threshold: p.low_stock_threshold || 0,
+    }))
+  ), [summary?.low_stock])
+
+  const buildDashboardRecentRows = useCallback(() => (
+    (summary?.recent_sales || []).map((sale) => ({
       Receipt: sale.receipt_number || '',
       Created_At: sale.created_at || '',
       Branch: sale.branch_name || '',
@@ -395,18 +425,173 @@ export default function Dashboard() {
       Total_USD: sale.total_usd || sale.total || 0,
       Total_KHR: sale.total_khr || 0,
     }))
-    downloadZipFiles(`dashboard-report-${exportStamp}.zip`, [
-      { name: `dashboard-kpis-${exportStamp}.csv`, content: buildCSV(buildDashboardKpiRows()) },
-      { name: `dashboard-calculations-${exportStamp}.csv`, content: buildCSV(buildDashboardFormulaRows()) },
-      { name: `dashboard-sales-${exportStamp}.csv`, content: buildCSV(salesRows) },
-      { name: `dashboard-top-products-${exportStamp}.csv`, content: buildCSV(topProductRows) },
-      { name: `dashboard-top-customers-${exportStamp}.csv`, content: buildCSV(topCustomerRows) },
-      { name: `dashboard-payments-${exportStamp}.csv`, content: buildCSV(paymentRows) },
-      { name: `dashboard-branches-${exportStamp}.csv`, content: buildCSV(branchRows) },
-      { name: `dashboard-low-stock-${exportStamp}.csv`, content: buildCSV(lowRows) },
-      { name: `dashboard-recent-sales-${exportStamp}.csv`, content: buildCSV(recentRows) },
+  ), [summary?.recent_sales])
+
+  const buildExportAll = () => {
+    if (!analytics || !summary) return
+    const kpiRows = buildDashboardKpiRows()
+    const salesRows    = buildDashboardSalesRows().map((row) => ({ Section: 'Period Sales', ...row }))
+    const topRevRows   = buildDashboardTopProductRows().map((row) => ({ Section: 'Top Products (Rev)', ...row }))
+    const topCustRows  = buildDashboardTopCustomerRows().map((row) => ({ Section: 'Top Customers', ...row }))
+    const pmRows       = buildDashboardPaymentRows().map((row) => ({ Section: 'Payments', ...row }))
+    const branchRows   = buildDashboardBranchRows().map((row) => ({ Section: 'Branches', ...row }))
+    const lowRows      = buildDashboardLowStockRows().map((row) => ({ Section: 'Low Stock', ...row }))
+    const all = [...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
+    const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
+    downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
+  }
+
+  const exportDashboardPackage = useCallback(() => {
+    if (!analytics || !summary) return
+    const salesRows = buildDashboardSalesRows()
+    const topProductRows = buildDashboardTopProductRows()
+    const topCustomerRows = buildDashboardTopCustomerRows()
+    const paymentRows = buildDashboardPaymentRows()
+    const branchRows = buildDashboardBranchRows()
+    const lowRows = buildDashboardLowStockRows()
+    const recentRows = buildDashboardRecentRows()
+    const manifestRows = buildReportManifestRows([
+      { metric: 'Range Preset', value: periodShort },
+      { metric: 'Date Range', value: rangeLabel },
+      { metric: 'Active Chart Mode', value: activeChart },
+      { metric: 'Top Ranking Mode', value: topMode },
+      { metric: 'Visible Sales Periods', value: chartData.length },
+      { metric: 'Payment Methods', value: paymentRows.length },
+      { metric: 'Visible Branches', value: branchRows.length },
+      { metric: 'Low Stock Items', value: lowRows.length },
+      { metric: 'Generated At', value: new Date().toISOString() },
     ])
-  }, [analytics, buildDashboardFormulaRows, buildDashboardKpiRows, exportStamp, summary])
+    const files = buildReportPackageFiles({
+      baseName: 'dashboard',
+      exportStamp,
+      manifestRows,
+      csvFiles: [
+        { name: `dashboard-kpis-${exportStamp}.csv`, content: buildCSV(buildDashboardKpiRows()) },
+        { name: `dashboard-calculations-${exportStamp}.csv`, content: buildCSV(buildDashboardFormulaRows()) },
+        { name: `dashboard-sales-${exportStamp}.csv`, content: buildCSV(salesRows) },
+        { name: `dashboard-top-products-${exportStamp}.csv`, content: buildCSV(topProductRows) },
+        { name: `dashboard-top-customers-${exportStamp}.csv`, content: buildCSV(topCustomerRows) },
+        { name: `dashboard-payments-${exportStamp}.csv`, content: buildCSV(paymentRows) },
+        { name: `dashboard-branches-${exportStamp}.csv`, content: buildCSV(branchRows) },
+        { name: `dashboard-low-stock-${exportStamp}.csv`, content: buildCSV(lowRows) },
+        { name: `dashboard-recent-sales-${exportStamp}.csv`, content: buildCSV(recentRows) },
+      ],
+      report: {
+        fileName: 'dashboard-report.html',
+        title: 'Dashboard Analytics Report',
+        subtitle: `${periodShort} • ${rangeLabel}`,
+        exportedAt: new Date().toISOString(),
+        summaryCards: periodKpis.slice(0, 6).map((kpi) => ({
+          label: kpi.label,
+          value: kpi.value,
+          sub: kpi.sub,
+        })),
+        metadataGroups: [
+          {
+            title: 'Active Range',
+            subtitle: 'Filters and export context for this package',
+            rows: [
+              { label: 'Range preset', value: periodShort },
+              { label: 'Date range', value: rangeLabel },
+              { label: 'Chart mode', value: activeChart },
+              { label: 'Top ranking mode', value: topMode },
+            ],
+          },
+          {
+            title: 'Visible Data',
+            subtitle: 'Counts for the exported data slices',
+            rows: [
+              { label: 'Sales periods', value: chartData.length },
+              { label: 'Payment methods', value: paymentRows.length },
+              { label: 'Branches', value: branchRows.length },
+              { label: 'Low-stock items', value: lowRows.length },
+            ],
+          },
+        ],
+        charts: [
+          {
+            type: 'line',
+            title: 'Revenue over time',
+            subtitle: periodShort,
+            props: { data: chartData, lines: [{ key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' }] },
+          },
+          {
+            type: 'line',
+            title: 'Revenue vs COGS vs Profit',
+            subtitle: 'Visible period comparison',
+            props: {
+              data: chartData,
+              lines: [
+                { key: 'revenue_usd', color: '#2563eb', label: t('revenue') || 'Revenue' },
+                { key: 'cost_usd', color: '#dc2626', label: t('cogs') || 'COGS' },
+                { key: 'profit_usd', color: '#16a34a', label: t('profit') || 'Profit' },
+              ],
+            },
+          },
+          {
+            type: 'bar',
+            title: 'Transactions over time',
+            subtitle: 'Sales activity volume',
+            props: { data: chartData, valueKey: 'count', labelKey: 'period', color: '#7c3aed', isCount: true },
+          },
+          {
+            type: 'donut',
+            title: 'Payment distribution',
+            subtitle: 'Revenue share by payment method',
+            props: { data: analytics?.byPayment || [], valueKey: 'revenue_usd' },
+          },
+          {
+            type: 'bar',
+            title: 'Branch performance',
+            subtitle: 'Revenue by branch',
+            props: { data: analytics?.byBranch || [], valueKey: 'revenue_usd', labelKey: 'branch_name', color: '#0891b2' },
+          },
+          {
+            type: 'bar',
+            title: 'Top products by revenue',
+            subtitle: 'Current visible ranking',
+            props: { data: analytics?.topProducts || [], valueKey: 'revenue_usd', labelKey: 'product_name', color: '#ea580c' },
+          },
+        ],
+        tables: [
+          { title: 'Top products', subtitle: 'Revenue leaders in the selected range', rows: topProductRows, limit: 10 },
+          { title: 'Top customers', subtitle: 'Highest-value customers in the selected range', rows: topCustomerRows, limit: 10 },
+          { title: 'Payment methods', subtitle: 'Count and revenue by payment type', rows: paymentRows },
+          { title: 'Branch performance', subtitle: 'Transaction and revenue totals', rows: branchRows },
+          { title: 'Low-stock summary', subtitle: 'Current low-stock items from all-time inventory state', rows: lowRows, limit: 12 },
+          { title: 'Recent sales', subtitle: 'Latest receipts included in the dashboard summary', rows: recentRows, limit: 12 },
+        ],
+        notes: [
+          revenueFormulaText,
+          collectedFormulaText,
+          'Package includes raw CSV exports, formulas, and this self-contained HTML report.',
+        ],
+      },
+    })
+    downloadZipFiles(`dashboard-report-${exportStamp}.zip`, files)
+  }, [
+    activeChart,
+    analytics,
+    buildDashboardBranchRows,
+    buildDashboardFormulaRows,
+    buildDashboardKpiRows,
+    buildDashboardLowStockRows,
+    buildDashboardPaymentRows,
+    buildDashboardRecentRows,
+    buildDashboardSalesRows,
+    buildDashboardTopCustomerRows,
+    buildDashboardTopProductRows,
+    chartData,
+    collectedFormulaText,
+    exportStamp,
+    periodKpis,
+    periodShort,
+    rangeLabel,
+    revenueFormulaText,
+    summary,
+    t,
+    topMode,
+  ])
 
   const dashboardExportItems = [
     { label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage, color: 'green' },
