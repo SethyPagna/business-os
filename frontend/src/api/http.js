@@ -71,8 +71,10 @@ function readAuthTokenFromStorage() {
 const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt = {}
+const _writeInflight = new Map()
 const CACHE_TTL   = 20_000   // 20 seconds
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
+const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 
 export function cacheGet(key) {
   const e = _cache[key]
@@ -86,6 +88,7 @@ export function cacheClearAll() {
   Object.keys(_cache).forEach(k => delete _cache[k])
   Object.keys(_inflight).forEach(k => delete _inflight[k])
   Object.keys(_inflightStartedAt).forEach(k => delete _inflightStartedAt[k])
+  _writeInflight.clear()
 }
 
 // Invalidate only the affected cache group on real sync updates. Cache-refresh
@@ -243,8 +246,47 @@ async function resolveLocalRead(channel, localFn, source = 'local') {
   return localResult
 }
 
+function stableStringifyForDedupe(value) {
+  if (value === undefined) return ''
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringifyForDedupe).join(',')}]`
+  const keys = Object.keys(value)
+    .filter(key => !['client_request_id', 'clientRequestId', 'request_id', 'idempotency_key'].includes(key))
+    .sort()
+  return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringifyForDedupe(value[key])}`).join(',')}}`
+}
+
+function clampDedupeBody(value) {
+  const bodyKey = stableStringifyForDedupe(value)
+  if (bodyKey.length <= 20_000) return bodyKey
+  return `${bodyKey.slice(0, 20_000)}:${bodyKey.length}`
+}
+
+export function buildApiRequestDedupeKey(method, path, body) {
+  const verb = String(method || 'GET').toUpperCase()
+  if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS') return ''
+  return `${verb} ${String(path || '')} ${clampDedupeBody(body)}`
+}
+
+export function __resetApiWriteDedupeForTests() {
+  _writeInflight.clear()
+}
+
 // HTTP helpers ?????????????????????????????????????????????????????????????
-export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS) {
+export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS, options = {}) {
+  const normalizedMethod = String(method || 'GET').toUpperCase()
+  const dedupeKey = options.skipWriteDedupe ? '' : buildApiRequestDedupeKey(normalizedMethod, path, body)
+  if (dedupeKey) {
+    const existing = _writeInflight.get(dedupeKey)
+    if (existing && Date.now() - existing.startedAt <= Math.max(timeoutMs, WRITE_INFLIGHT_REUSE_WINDOW_MS)) {
+      return existing.promise
+    }
+    if (existing) {
+      _writeInflight.delete(dedupeKey)
+    }
+  }
+
+  const requestPromise = (async () => {
   const base    = syncServerUrl.replace(/\/$/, '')
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
   if (syncToken) headers['x-sync-token'] = syncToken
@@ -261,7 +303,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
 
   try {
     const res = await fetch(`${base}${path}`, {
-      method,
+      method: normalizedMethod,
       headers,
       body:   body !== undefined ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
@@ -277,12 +319,12 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
         const storedToken = readAuthTokenFromStorage()
         const canRetryWithCurrentToken = latestInMemoryToken && latestInMemoryToken !== requestAuthSessionToken
         if (canRetryWithCurrentToken) {
-          return apiFetch(method, path, body, timeoutMs)
+          return apiFetch(normalizedMethod, path, body, timeoutMs, { skipWriteDedupe: true })
         }
         const canRetryWithStoredToken = storedToken && storedToken !== requestAuthSessionToken
         if (canRetryWithStoredToken) {
           authSessionToken = storedToken
-          return apiFetch(method, path, body, timeoutMs)
+          return apiFetch(normalizedMethod, path, body, timeoutMs, { skipWriteDedupe: true })
         }
         if (authSessionToken === requestAuthSessionToken) {
           authSessionToken = ''
@@ -305,6 +347,19 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     }
     throw e
   }
+  })()
+
+  if (dedupeKey) {
+    _writeInflight.set(dedupeKey, { promise: requestPromise, startedAt: Date.now() })
+    requestPromise.finally(() => {
+      const current = _writeInflight.get(dedupeKey)
+      if (current?.promise === requestPromise) {
+        _writeInflight.delete(dedupeKey)
+      }
+    }).catch(() => {})
+  }
+
+  return requestPromise
 }
 
 export function isNetErr(e) {

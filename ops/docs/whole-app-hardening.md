@@ -43,6 +43,13 @@ Last updated: 2026-04-30
 - Folder backup export now requires `backup`.
 - Data-path read/reset now require `backup` or `settings`.
 - Start/setup scripts no longer attempt global PM2 installation automatically; they use the tracked app runtime and fall back to Node/background mode unless PM2 is already installed.
+- Shared API writes now dedupe identical in-flight JSON mutations, ignoring generated request/idempotency keys for the dedupe comparison so double-clicked creates/updates still collapse to one request across product, POS, inventory, backup, settings, profile, upload, and reset surfaces while individual page guards continue to be hardened.
+
+## Session 2 Notes
+
+- Added frontend regression coverage for in-flight write dedupe, including stable JSON body ordering and post-settle cleanup.
+- Refreshed Tailscale Funnel mapping to `https://leangcosmetics.crane-qilin.ts.net/ -> http://127.0.0.1:4000`; local health at `http://127.0.0.1:4000/health` passed. This Windows client still closes the HTTPS handshake when requesting the Funnel domain locally, so external-device verification remains open.
+- This is a cross-cutting guardrail, not the final Session 2 sweep. Remaining work is to keep tightening individual high-risk actions with explicit busy states, idempotency keys, and loader timeout/retry UX.
 
 ## Remaining Reports To Fill
 
