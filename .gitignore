@@ -43,3 +43,9 @@ scanbot-web-sdk-*/
 
 # Browser verification artifacts
 .playwright-cli/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
