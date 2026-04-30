@@ -4,6 +4,7 @@ import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
 import { useApp } from '../../AppContext'
+import { parseCsvRows } from '../../utils/csvImport'
 
 /**
  * 1. useContactSelection
@@ -246,17 +247,9 @@ export function ContactTable({
  * 5.2 Enforces explicit conflict mode before submit.
  */
 function parseCsvText(text) {
-  const lines = String(text || '').trim().split('\n').filter(Boolean)
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map((header) => header.trim().replace(/"/g, '').toLowerCase())
-  return lines.slice(1).map((line, index) => {
-    const values = line.match(/(\".*?\"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || line.split(',')
-    const row = {}
-    headers.forEach((header, headerIndex) => {
-      row[header] = String(values[headerIndex] || '').trim().replace(/^\"|\"$/g, '')
-    })
-    return { row, rowNumber: index + 2 }
-  }).filter((entry) => String(entry.row?.name || '').trim())
+  return parseCsvRows(text)
+    .map((row, index) => ({ row, rowNumber: Number(row._rowNumber || index + 2) }))
+    .filter((entry) => String(entry.row?.name || '').trim())
 }
 
 const CONTACT_IMPORT_CONFIG = {

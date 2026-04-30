@@ -65,6 +65,12 @@ if errorlevel 1 exit /b 1
 echo [OK] Frontend UI coverage verification passed
 echo.
 
+echo [4c/5] Verifying frontend performance guardrails...
+call npm.cmd run verify:performance
+if errorlevel 1 exit /b 1
+echo [OK] Frontend performance guardrails passed
+echo.
+
 cd /d "%ROOT%\backend"
 echo [5/5] Running backend utility/security/core tests...
 call npm.cmd run test:utils

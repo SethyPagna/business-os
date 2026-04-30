@@ -11,7 +11,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
@@ -157,6 +157,7 @@ function SuppliersTab({ t, notify, active = true }) {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
@@ -179,15 +180,23 @@ function SuppliersTab({ t, notify, active = true }) {
     () => getAvailableYears(filteredBySearch, (supplier) => supplier?.created_at),
     [filteredBySearch],
   )
-  const filteredSections = useMemo(() => buildTimeActionSections(filteredBySearch, {
-    getDate: (supplier) => supplier?.created_at,
-    getItemId: (supplier) => Number(supplier?.id),
-    year: yearFilter,
-    month: monthFilter,
-    timeMode,
-    groupMode: 'time',
-    sortDirection,
-  }), [filteredBySearch, monthFilter, sortDirection, timeMode, yearFilter])
+  const filteredSections = useMemo(() => (
+    groupMode === 'alphabet'
+      ? buildAlphabetActionSections(filteredBySearch, {
+        getName: (supplier) => supplier?.name,
+        getItemId: (supplier) => Number(supplier?.id),
+        sortDirection: 'asc',
+      })
+      : buildTimeActionSections(filteredBySearch, {
+        getDate: (supplier) => supplier?.created_at,
+        getItemId: (supplier) => Number(supplier?.id),
+        year: yearFilter,
+        month: monthFilter,
+        timeMode,
+        groupMode: 'time',
+        sortDirection,
+      })
+  ), [filteredBySearch, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
@@ -208,6 +217,14 @@ function SuppliersTab({ t, notify, active = true }) {
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleSuppliers)
   const supplierColumns = [t('name'), t('phone'), t('email'), t('company'), t('contact_person') || 'Contact']
   const contactFilterSections = useMemo(() => ([
+    {
+      id: 'group',
+      label: tr('group_by', 'Group by'),
+      options: [
+        { id: 'group-time', label: tr('date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
+        { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
+      ],
+    },
     {
       id: 'year',
       label: tr('year', 'Year'),
@@ -249,8 +266,8 @@ function SuppliersTab({ t, notify, active = true }) {
         { id: 'sort-asc', label: tr('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
       ],
     },
-  ]), [availableYears, monthFilter, sortDirection, tr, yearFilter])
-  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length
+  ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
+  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -535,6 +552,7 @@ function SuppliersTab({ t, notify, active = true }) {
               setYearFilter('all')
               setMonthFilter('all')
               setSortDirection('desc')
+              setGroupMode('time')
             }}
             compact
           />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
-import { normalizeCsvKey, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
+import { normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -152,8 +152,8 @@ export default function SalesImportModal({ onClose, onDone }) {
           total_khr: 0,
         }
 
-        const appliedPriceUsd = parseCsvNumber(row.unit_price_usd, 0)
-        const appliedPriceKhr = parseCsvNumber(row.unit_price_khr, 0)
+        const appliedPriceUsd = normalizeCsvMoney(row.unit_price_usd, 0)
+        const appliedPriceKhr = normalizeCsvMoney(row.unit_price_khr, 0)
         sale.items.push({
           id: product.id,
           product_id: product.id,
@@ -162,8 +162,8 @@ export default function SalesImportModal({ onClose, onDone }) {
           quantity,
           applied_price_usd: appliedPriceUsd,
           applied_price_khr: appliedPriceKhr,
-          cost_price_usd: parseCsvNumber(product.cost_price_usd ?? product.purchase_price_usd, 0),
-          cost_price_khr: parseCsvNumber(product.cost_price_khr ?? product.purchase_price_khr, 0),
+          cost_price_usd: normalizeCsvMoney(product.cost_price_usd ?? product.purchase_price_usd, 0),
+          cost_price_khr: normalizeCsvMoney(product.cost_price_khr ?? product.purchase_price_khr, 0),
           branch_id: rowBranch?.id || null,
           branch_name: rowBranch?.name || null,
         })

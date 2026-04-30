@@ -2,8 +2,45 @@ function normalizeText(value) {
   return String(value || '').trim().replace(/\s+/g, ' ')
 }
 
+const KHMER_INITIALS = [
+  'ក', 'ខ', 'គ', 'ឃ', 'ង',
+  'ច', 'ឆ', 'ជ', 'ឈ', 'ញ',
+  'ដ', 'ឋ', 'ឌ', 'ឍ', 'ណ',
+  'ត', 'ថ', 'ទ', 'ធ', 'ន',
+  'ប', 'ផ', 'ព', 'ភ', 'ម',
+  'យ', 'រ', 'ល', 'វ',
+  'ស', 'ហ', 'ឡ', 'អ',
+]
+const KHMER_INITIAL_ORDER = new Map(KHMER_INITIALS.map((letter, index) => [letter, index]))
+const khmerCollator = typeof Intl !== 'undefined'
+  ? new Intl.Collator('km', { sensitivity: 'base' })
+  : null
+
 export function normalizeProductGroupName(value) {
   return normalizeText(value).toLowerCase()
+}
+
+export function getNameInitialSection(value) {
+  const firstChar = [...normalizeText(value)][0] || ''
+  const upper = firstChar.toUpperCase()
+  if (/[A-Z]/.test(upper)) return upper
+  if (KHMER_INITIAL_ORDER.has(firstChar)) return firstChar
+  if (/[\u1780-\u17FF]/.test(firstChar)) return firstChar
+  return '#'
+}
+
+function compareSectionLabels(left, right) {
+  if (left === right) return 0
+  if (left === '#') return 1
+  if (right === '#') return -1
+  const leftKhmer = KHMER_INITIAL_ORDER.has(left)
+  const rightKhmer = KHMER_INITIAL_ORDER.has(right)
+  if (leftKhmer && rightKhmer) return KHMER_INITIAL_ORDER.get(left) - KHMER_INITIAL_ORDER.get(right)
+  if (leftKhmer !== rightKhmer) return leftKhmer ? 1 : -1
+  if (/[\u1780-\u17FF]/.test(left) && /[\u1780-\u17FF]/.test(right) && khmerCollator) {
+    return khmerCollator.compare(left, right)
+  }
+  return String(left || '').localeCompare(String(right || ''), undefined, { sensitivity: 'base' })
 }
 
 function compareProducts(left, right, { rootId = 0 } = {}) {
@@ -204,8 +241,7 @@ export function buildProductGroupSections(products = [], {
 
   const sections = new Map()
   orderedGroups.forEach((group) => {
-    const firstChar = String(group?.name || '').trim().charAt(0).toUpperCase()
-    const letter = /[A-Z]/.test(firstChar) ? firstChar : '#'
+    const letter = getNameInitialSection(group?.name || '')
     if (!sections.has(letter)) {
       sections.set(letter, {
         id: `product-letter:${letter}`,
@@ -222,8 +258,6 @@ export function buildProductGroupSections(products = [], {
   })
 
   return [...sections.values()].sort((left, right) => {
-    if (left.label === '#') return 1
-    if (right.label === '#') return -1
-    return left.label.localeCompare(right.label)
+    return compareSectionLabels(left.label, right.label)
   })
 }

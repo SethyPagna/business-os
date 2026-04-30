@@ -111,7 +111,7 @@ function findProductByClientRequestId(clientRequestId) {
   `).get(clientRequestId)
 }
 
-function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
+function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allowDuplicateName = false }) {
   const trimmedName = String(name || '').trim()
   if (!trimmedName) throw new Error('Product name required')
 
@@ -119,14 +119,14 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
     SELECT id, name, sku, barcode
     FROM products
     WHERE (
-      lower(trim(name)) = lower(trim(?))
+      (? = 0 AND lower(trim(name)) = lower(trim(?)))
       OR (? IS NOT NULL AND ? != '' AND sku = ?)
       OR (? IS NOT NULL AND ? != '' AND barcode = ?)
     )
     AND (? IS NULL OR id != ?)
     LIMIT 1
   `).get(
-    trimmedName,
+    allowDuplicateName ? 1 : 0, trimmedName,
     sku || null, sku || '', sku || null,
     barcode || null, barcode || '', barcode || null,
     excludeId, excludeId,
@@ -135,7 +135,7 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null }) {
   if (!conflicts) return
   if ((sku || '') && conflicts.sku === sku) throw new Error(`Duplicate SKU "${sku}" is not allowed`)
   if ((barcode || '') && conflicts.barcode === barcode) throw new Error(`Duplicate barcode "${barcode}" is not allowed`)
-  throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+  if (!allowDuplicateName) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
 function hasOwnField(source, key) {
@@ -159,6 +159,99 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
 function markParentProductAsGroup(parentId) {
   if (!parentId) return
   db.prepare("UPDATE products SET is_group = 1, updated_at = datetime('now') WHERE id = ?").run(parentId)
+}
+
+function normalizeImportLookup(value) {
+  return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeImportFlagValue(value, fallback = 0) {
+  const text = normalizeImportLookup(value)
+  if (!text) return Number(fallback || 0) ? 1 : 0
+  if (['1', 'true', 'yes', 'y', 'on'].includes(text)) return 1
+  if (['0', 'false', 'no', 'n', 'off'].includes(text)) return 0
+  return Number(fallback || 0) ? 1 : 0
+}
+
+const IMPORT_DETAIL_FIELDS = [
+  'sku',
+  'barcode',
+  'category',
+  'brand',
+  'unit',
+  'description',
+  'supplier',
+  'selling_price_usd',
+  'selling_price_khr',
+  'special_price_usd',
+  'special_price_khr',
+  'discount_enabled',
+  'discount_type',
+  'discount_percent',
+  'discount_amount_usd',
+  'discount_amount_khr',
+  'discount_label',
+  'discount_badge_color',
+  'discount_starts_at',
+  'discount_ends_at',
+  'purchase_price_usd',
+  'purchase_price_khr',
+  'cost_price_usd',
+  'cost_price_khr',
+  'low_stock_threshold',
+]
+const IMPORT_MONEY_FIELDS = new Set([
+  'selling_price_usd',
+  'selling_price_khr',
+  'special_price_usd',
+  'special_price_khr',
+  'discount_amount_usd',
+  'discount_amount_khr',
+  'purchase_price_usd',
+  'purchase_price_khr',
+  'cost_price_usd',
+  'cost_price_khr',
+])
+const IMPORT_NUMERIC_FIELDS = new Set(['discount_percent', 'low_stock_threshold'])
+
+function getProductImportDetailSignature(source = {}) {
+  return IMPORT_DETAIL_FIELDS.map((field) => {
+    const value = source?.[field]
+    if (IMPORT_MONEY_FIELDS.has(field)) return `${field}:${normalizePriceValue(value || 0)}`
+    if (IMPORT_NUMERIC_FIELDS.has(field)) return `${field}:${normalizePriceValue(value || 0)}`
+    if (field === 'discount_enabled') return `${field}:${normalizeImportFlagValue(value, 0)}`
+    return `${field}:${normalizeImportLookup(value)}`
+  }).join('|')
+}
+
+function chooseImportParentProduct(rows = []) {
+  return [...rows].sort((left, right) => {
+    const leftGroup = Number(left?.is_group || 0) ? 0 : 1
+    const rightGroup = Number(right?.is_group || 0) ? 0 : 1
+    if (leftGroup !== rightGroup) return leftGroup - rightGroup
+    const leftChild = Number(left?.parent_id || 0) ? 1 : 0
+    const rightChild = Number(right?.parent_id || 0) ? 1 : 0
+    if (leftChild !== rightChild) return leftChild - rightChild
+    const leftCreated = String(left?.created_at || '')
+    const rightCreated = String(right?.created_at || '')
+    if (leftCreated !== rightCreated) return leftCreated.localeCompare(rightCreated)
+    return Number(left?.id || 0) - Number(right?.id || 0)
+  })[0] || null
+}
+
+function normalizeImportAction(value) {
+  const action = String(value || '').trim().toLowerCase()
+  if (action === 'merge_stock' || action === 'link_variant') return 'merge'
+  if (action === 'create_variant') return 'new'
+  if (['new', 'merge', 'override_add', 'override_replace'].includes(action)) return action
+  return ''
+}
+
+function parseOptionalImportId(row, field) {
+  const raw = row?.[field]
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0
+  const numeric = Number(raw)
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : 0
 }
 
 function discountInsertColumns() {
@@ -862,7 +955,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     for (const p of products) {
       try {
         if (!p.name?.trim()) { errors.push('Row missing name'); continue }
-        const action  = p._action || 'new'
+        let importActionLabel = String(p._action || '').trim().toLowerCase()
         const qty     = parseImportNumber(p, 'stock_quantity', 0)
         const sellUsd = normalizePriceValue(parseImportNumber(p, 'selling_price_usd', 0))
         const sellKhr = normalizePriceValue(parseImportNumber(p, 'selling_price_khr', 0))
@@ -870,7 +963,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         const specialKhr = normalizePriceValue(parseImportNumber(p, 'special_price_khr', sellKhr))
         const importDiscount = normalizeProductDiscount({
           discount_enabled: p.discount_enabled ?? p.promotion_enabled ?? p.on_promotion,
-          discount_type: p.discount_type || (hasImportValue(p, 'discount_percent') ? 'percent' : 'fixed'),
+          discount_type: p.discount_type || (hasImportValue(p, 'discount_amount_usd') || hasImportValue(p, 'discount_amount_khr') ? 'fixed' : 'percent'),
           discount_percent: parseImportNumber(p, 'discount_percent', 0),
           discount_amount_usd: parseImportNumber(p, 'discount_amount_usd', 0),
           discount_amount_khr: parseImportNumber(p, 'discount_amount_khr', 0),
@@ -882,7 +975,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         const buyUsd  = normalizePriceValue(parseImportNumber(p, 'purchase_price_usd', 0))
         const buyKhr  = normalizePriceValue(parseImportNumber(p, 'purchase_price_khr', 0))
         const thresh  = parseImportNumber(p, 'low_stock_threshold', 10)
-        const parentId = parseImportNumber(p, 'parent_id', 0)
+        const explicitParentId = parseOptionalImportId(p, 'parent_id')
+        const plannedParentId = parseOptionalImportId(p, '_parent_id')
+        const plannedTargetId = parseOptionalImportId(p, '_target_product_id')
         const isGroup = parseImportFlag(p, 'is_group', 0)
         const normalizedCategory = ensureCategory(p.category)
         const normalizedUnit = ensureUnit(p.unit || 'pcs') || 'pcs'
@@ -894,6 +989,49 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             .filter(Boolean),
           null,
         )
+        const sameNameProducts = db.prepare("SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC").all(p.name.trim())
+        const importSignature = getProductImportDetailSignature({
+          ...p,
+          category: normalizedCategory,
+          unit: normalizedUnit,
+          brand: normalizedBrand,
+          supplier: normalizedSupplier,
+          selling_price_usd: sellUsd,
+          selling_price_khr: sellKhr,
+          special_price_usd: specialUsd,
+          special_price_khr: specialKhr,
+          discount_enabled: importDiscount.discount_enabled,
+          discount_type: importDiscount.discount_type,
+          discount_percent: importDiscount.discount_percent,
+          discount_amount_usd: importDiscount.discount_amount_usd,
+          discount_amount_khr: importDiscount.discount_amount_khr,
+          discount_label: importDiscount.discount_label,
+          discount_badge_color: importDiscount.discount_badge_color,
+          discount_starts_at: importDiscount.discount_starts_at,
+          discount_ends_at: importDiscount.discount_ends_at,
+          purchase_price_usd: buyUsd,
+          purchase_price_khr: buyKhr,
+          cost_price_usd: buyUsd,
+          cost_price_khr: buyKhr,
+          low_stock_threshold: thresh,
+        })
+        const matchingSameNameProduct = sameNameProducts.find((product) => getProductImportDetailSignature(product) === importSignature) || null
+        const selectedParent = chooseImportParentProduct(sameNameProducts)
+        if (!importActionLabel || importActionLabel === 'ask') {
+          if (matchingSameNameProduct) {
+            importActionLabel = sameNameProducts.length > 1 ? 'link_variant' : 'merge_stock'
+            p._target_product_id = matchingSameNameProduct.id
+          } else if (sameNameProducts.length) {
+            importActionLabel = 'create_variant'
+            p._parent_id = selectedParent?.parent_id || selectedParent?.id || null
+          } else {
+            importActionLabel = 'new'
+          }
+        }
+        const action = normalizeImportAction(importActionLabel) || 'new'
+        const parentId = importActionLabel === 'create_variant'
+          ? (plannedParentId || selectedParent?.parent_id || selectedParent?.id || explicitParentId || null)
+          : explicitParentId
         const imageConflictMode = normalizeImageConflictMode(
           p._image_action || p.image_conflict_mode,
           action,
@@ -903,7 +1041,12 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         if (action === 'new') {
           const parentRecord = ensureParentProductExists(parentId || null)
           const normalizedParentId = parentRecord?.id || null
-          assertUniqueProductFields({ name: p.name, sku: p.sku, barcode: p.barcode })
+          assertUniqueProductFields({
+            name: p.name,
+            sku: p.sku,
+            barcode: p.barcode,
+            allowDuplicateName: importActionLabel === 'create_variant' && !!normalizedParentId,
+          })
           const newProductGallery = incomingImageGallery
           const newPrimaryImage = newProductGallery[0] || null
           const r = db.prepare(`
@@ -940,9 +1083,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           handleBranch(pid, p.branch, qty, true)
           imported++
         } else {
-          const ep = db.prepare(
-            "SELECT * FROM products WHERE lower(trim(name))=lower(trim(?)) OR (sku IS NOT NULL AND sku=?)"
-          ).get(p.name.trim(), p.sku || '__NOSKUMATCH__')
+          const ep = plannedTargetId
+            ? db.prepare('SELECT * FROM products WHERE id = ?').get(plannedTargetId)
+            : db.prepare(
+              "SELECT * FROM products WHERE lower(trim(name))=lower(trim(?)) OR (sku IS NOT NULL AND sku=?)"
+            ).get(p.name.trim(), p.sku || '__NOSKUMATCH__')
           if (!ep) { errors.push(`${p.name}: existing product not found`); continue }
           const pid = ep.id
           const fieldRules = p._field_rules && typeof p._field_rules === 'object' ? p._field_rules : {}

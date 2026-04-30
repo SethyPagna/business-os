@@ -103,8 +103,15 @@ function shouldCompressImage(fileName = '', mimeType = '') {
 }
 
 async function compressBufferForAsset(buffer, { fileName = '', mimeType = '' } = {}) {
-  if (!sharp) return buffer
-  if (!shouldCompressImage(fileName, mimeType)) return buffer
+  const baseResult = {
+    buffer,
+    original_byte_size: buffer?.length || null,
+    optimized_byte_size: buffer?.length || null,
+    optimization_status: 'not_optimized',
+    optimization_note: '',
+  }
+  if (!sharp) return { ...baseResult, optimization_note: 'Sharp unavailable' }
+  if (!shouldCompressImage(fileName, mimeType)) return { ...baseResult, optimization_status: 'not_applicable' }
   try {
     const ext = String(path.extname(String(fileName || '')).toLowerCase() || '.jpg')
     const pipeline = sharp(buffer).rotate().resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
@@ -112,9 +119,26 @@ async function compressBufferForAsset(buffer, { fileName = '', mimeType = '' } =
     if (ext === '.png') compressed = await pipeline.png({ compressionLevel: 9, palette: true, quality: 90, effort: 8 }).toBuffer()
     else if (ext === '.webp') compressed = await pipeline.webp({ quality: 82, alphaQuality: 100, effort: 5 }).toBuffer()
     else compressed = await pipeline.jpeg({ quality: 82, progressive: true, mozjpeg: true }).toBuffer()
-    return compressed && compressed.length < buffer.length ? compressed : buffer
-  } catch (_) {
-    return buffer
+    if (!compressed || compressed.length >= buffer.length) {
+      return {
+        ...baseResult,
+        optimization_status: 'kept_original',
+        optimization_note: 'Optimized output was not smaller',
+      }
+    }
+    return {
+      buffer: compressed,
+      original_byte_size: buffer.length,
+      optimized_byte_size: compressed.length,
+      optimization_status: 'optimized',
+      optimization_note: '',
+    }
+  } catch (error) {
+    return {
+      ...baseResult,
+      optimization_status: 'failed',
+      optimization_note: error?.message || 'Image optimization failed',
+    }
   }
 }
 
@@ -140,8 +164,13 @@ function createFileAssetRecord(payload = {}) {
       mime_type,
       media_type,
       byte_size,
+      original_byte_size,
+      optimized_byte_size,
+      optimization_status,
+      optimization_note,
       width,
       height,
+      duration_seconds,
       source,
       created_by_id,
       created_by_name,
@@ -154,8 +183,13 @@ function createFileAssetRecord(payload = {}) {
       @mime_type,
       @media_type,
       @byte_size,
+      @original_byte_size,
+      @optimized_byte_size,
+      @optimization_status,
+      @optimization_note,
       @width,
       @height,
+      @duration_seconds,
       @source,
       @created_by_id,
       @created_by_name,
@@ -168,8 +202,13 @@ function createFileAssetRecord(payload = {}) {
       mime_type = excluded.mime_type,
       media_type = excluded.media_type,
       byte_size = excluded.byte_size,
+      original_byte_size = excluded.original_byte_size,
+      optimized_byte_size = excluded.optimized_byte_size,
+      optimization_status = excluded.optimization_status,
+      optimization_note = excluded.optimization_note,
       width = excluded.width,
       height = excluded.height,
+      duration_seconds = excluded.duration_seconds,
       source = excluded.source,
       created_by_id = COALESCE(excluded.created_by_id, file_assets.created_by_id),
       created_by_name = COALESCE(excluded.created_by_name, file_assets.created_by_name),
@@ -182,8 +221,13 @@ function createFileAssetRecord(payload = {}) {
     mime_type: payload.mime_type,
     media_type: payload.media_type,
     byte_size: payload.byte_size,
+    original_byte_size: payload.original_byte_size || payload.byte_size || null,
+    optimized_byte_size: payload.optimized_byte_size || payload.byte_size || null,
+    optimization_status: payload.optimization_status || 'not_optimized',
+    optimization_note: payload.optimization_note || null,
     width: payload.width,
     height: payload.height,
+    duration_seconds: payload.duration_seconds || null,
     source: payload.source || 'upload',
     created_by_id: payload.created_by_id || null,
     created_by_name: payload.created_by_name || null,
@@ -273,6 +317,7 @@ async function registerStoredAsset({
   createdById = null,
   createdByName = null,
   source = 'upload',
+  optimization = null,
 }) {
   const publicPath = `/uploads/${storedName}`
   const absPath = path.join(UPLOADS_PATH, storedName)
@@ -286,6 +331,11 @@ async function registerStoredAsset({
     mime_type: mimeType || getMimeTypeFromName(storedName),
     media_type: mediaType,
     byte_size: stats?.size || null,
+    original_byte_size: optimization?.original_byte_size || stats?.size || null,
+    optimized_byte_size: optimization?.optimized_byte_size || stats?.size || null,
+    optimization_status: optimization?.optimization_status || (mediaType === 'image' ? 'not_optimized' : 'not_applicable'),
+    optimization_note: optimization?.optimization_note || null,
+    duration_seconds: optimization?.duration_seconds || null,
     width: dimensions.width,
     height: dimensions.height,
     source,
@@ -303,6 +353,7 @@ async function registerUploadFromRequest(file, actor = {}) {
     createdById: actor.userId || null,
     createdByName: actor.userName || null,
     source: 'upload',
+    optimization: file.optimization || null,
   })
 }
 
@@ -316,8 +367,8 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
   const normalizedOriginalName = sanitizeOriginalFileName(fileName || `upload${MIME_TO_EXT[mimeType] || '.bin'}`)
   const displayOriginalName = preserveOriginalDisplayName(fileName || normalizedOriginalName)
   const storedName = buildUniqueStoredName(normalizedOriginalName)
-  const compressed = await compressBufferForAsset(buffer, { fileName: normalizedOriginalName, mimeType })
-  fs.writeFileSync(path.join(UPLOADS_PATH, storedName), compressed)
+  const optimized = await compressBufferForAsset(buffer, { fileName: normalizedOriginalName, mimeType })
+  fs.writeFileSync(path.join(UPLOADS_PATH, storedName), optimized.buffer)
   return registerStoredAsset({
     storedName,
     originalName: displayOriginalName,
@@ -325,6 +376,7 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
     createdById,
     createdByName,
     source,
+    optimization: optimized,
   })
 }
 

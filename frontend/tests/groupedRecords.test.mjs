@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildTimeActionSections, getTimeGroupingMode } from '../src/utils/groupedRecords.mjs'
+import { buildAlphabetActionSections, buildTimeActionSections, getAlphabetInitialSection, getTimeGroupingMode } from '../src/utils/groupedRecords.mjs'
 
 let failed = 0
 
@@ -43,6 +43,23 @@ await runTest('buildTimeActionSections builds day sections with subgroup ids', (
   assert.equal(sections[0].groups[0].label, 'closed')
   assert.deepEqual(sections[0].groups[0].ids, [2])
   assert.deepEqual(sections[0].groups[1].ids, [1])
+})
+
+await runTest('buildAlphabetActionSections supports Latin and Khmer contact initials', () => {
+  const rows = [
+    { id: 1, name: 'Sokha' },
+    { id: 2, name: 'ក្រុមហ៊ុន ខ្មែរ' },
+    { id: 3, name: 'Alpha' },
+    { id: 4, name: 'សុភា' },
+  ]
+  const sections = buildAlphabetActionSections(rows, {
+    getName: (row) => row.name,
+    getItemId: (row) => row.id,
+  })
+
+  assert.equal(getAlphabetInitialSection('ក្រុមហ៊ុន ខ្មែរ'), 'ក')
+  assert.deepEqual(sections.map((section) => section.label), ['A', 'S', 'ក', 'ស'])
+  assert.deepEqual(sections[0].ids, [3])
 })
 
 if (failed > 0) {

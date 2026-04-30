@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildProductGroups, buildProductGroupSections, normalizeProductGroupName } from '../src/utils/productGrouping.mjs'
+import { buildProductGroups, buildProductGroupSections, getNameInitialSection, normalizeProductGroupName } from '../src/utils/productGrouping.mjs'
 
 let failed = 0
 
@@ -75,6 +75,20 @@ await runTest('buildProductGroups merges same-name roots into one option group',
   assert.equal(groups[0].items.length, 3)
   assert.equal(groups[0].groupKind, 'option')
   assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [20, 21, 22])
+})
+
+await runTest('buildProductGroupSections supports Khmer initial sections', () => {
+  const products = [
+    { id: 1, name: 'ក្រែមលាបមុខ', stock_quantity: 1, selling_price_usd: 5 },
+    { id: 2, name: 'Alpha', stock_quantity: 1, selling_price_usd: 6 },
+    { id: 3, name: 'សាប៊ូ', stock_quantity: 1, selling_price_usd: 7 },
+  ]
+  const sections = buildProductGroupSections(products, {
+    productsById: new Map(products.map((product) => [product.id, product])),
+  })
+
+  assert.equal(getNameInitialSection('ក្រែមលាបមុខ'), 'ក')
+  assert.deepEqual(sections.map((section) => section.label), ['A', 'ក', 'ស'])
 })
 
 await runTest('buildProductGroups expands a filtered child back to the full product family', () => {

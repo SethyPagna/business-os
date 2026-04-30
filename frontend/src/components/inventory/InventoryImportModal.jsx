@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
-import { normalizeCsvKey, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
+import { normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -128,8 +128,8 @@ export default function InventoryImportModal({ onClose, onDone }) {
             productName: product.name,
             type: normalizeAction(row.action || row.type || row.movement_type),
             quantity,
-            unitCostUsd: parseCsvNumber(row.unit_cost_usd, 0),
-            unitCostKhr: parseCsvNumber(row.unit_cost_khr, 0),
+            unitCostUsd: normalizeCsvMoney(row.unit_cost_usd, 0),
+            unitCostKhr: normalizeCsvMoney(row.unit_cost_khr, 0),
             reason: String(row.reason || '').trim() || tr('inventory_import_reason', 'Inventory import', 'នាំចូលស្តុក'),
             branchId: branch?.id || null,
             userId: user?.id || null,

@@ -3,6 +3,47 @@ function toDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
+const KHMER_INITIALS = [
+  'ក', 'ខ', 'គ', 'ឃ', 'ង',
+  'ច', 'ឆ', 'ជ', 'ឈ', 'ញ',
+  'ដ', 'ឋ', 'ឌ', 'ឍ', 'ណ',
+  'ត', 'ថ', 'ទ', 'ធ', 'ន',
+  'ប', 'ផ', 'ព', 'ភ', 'ម',
+  'យ', 'រ', 'ល', 'វ',
+  'ស', 'ហ', 'ឡ', 'អ',
+]
+const KHMER_INITIAL_ORDER = new Map(KHMER_INITIALS.map((letter, index) => [letter, index]))
+const khmerCollator = typeof Intl !== 'undefined'
+  ? new Intl.Collator('km', { sensitivity: 'base' })
+  : null
+
+function normalizeName(value) {
+  return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ')
+}
+
+export function getAlphabetInitialSection(value) {
+  const firstChar = [...normalizeName(value)][0] || ''
+  const upper = firstChar.toUpperCase()
+  if (/[A-Z]/.test(upper)) return upper
+  if (KHMER_INITIAL_ORDER.has(firstChar)) return firstChar
+  if (/[\u1780-\u17FF]/.test(firstChar)) return firstChar
+  return '#'
+}
+
+function compareAlphabetLabels(left, right) {
+  if (left === right) return 0
+  if (left === '#') return 1
+  if (right === '#') return -1
+  const leftKhmer = KHMER_INITIAL_ORDER.has(left)
+  const rightKhmer = KHMER_INITIAL_ORDER.has(right)
+  if (leftKhmer && rightKhmer) return KHMER_INITIAL_ORDER.get(left) - KHMER_INITIAL_ORDER.get(right)
+  if (leftKhmer !== rightKhmer) return leftKhmer ? 1 : -1
+  if (/[\u1780-\u17FF]/.test(left) && /[\u1780-\u17FF]/.test(right) && khmerCollator) {
+    return khmerCollator.compare(left, right)
+  }
+  return String(left || '').localeCompare(String(right || ''), undefined, { sensitivity: 'base' })
+}
+
 export function getTimeParts(value) {
   const parsed = toDate(value)
   if (!parsed) {
@@ -176,6 +217,55 @@ export function buildTimeActionSections(items = [], {
         ids: items.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
         items,
         groups,
+      }
+    })
+}
+
+export function buildAlphabetActionSections(items = [], {
+  getName = (item) => item?.name,
+  getItemId = (item) => item?.id,
+  sortDirection = 'asc',
+} = {}) {
+  const normalizedSortDirection = sortDirection === 'desc' ? 'desc' : 'asc'
+  const sections = new Map()
+  for (const item of Array.isArray(items) ? items : []) {
+    const label = getAlphabetInitialSection(getName(item))
+    const current = sections.get(label) || {
+      id: `alpha:${label}`,
+      label,
+      ids: [],
+      items: [],
+      groups: new Map(),
+    }
+    current.ids.push(getItemId(item))
+    current.items.push(item)
+    sections.set(label, current)
+  }
+
+  const compareItems = (left, right) => {
+    const nameDelta = normalizeName(getName(left)).localeCompare(normalizeName(getName(right)), undefined, { sensitivity: 'base' })
+    if (nameDelta !== 0) return normalizedSortDirection === 'asc' ? nameDelta : -nameDelta
+    const leftId = Number(getItemId(left) || 0)
+    const rightId = Number(getItemId(right) || 0)
+    return leftId - rightId
+  }
+
+  return [...sections.values()]
+    .sort((left, right) => compareAlphabetLabels(left.label, right.label))
+    .map((section) => {
+      const sortedItems = [...section.items].sort(compareItems)
+      return {
+        ...section,
+        ids: sortedItems.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
+        items: sortedItems,
+        groups: [{
+          id: `${section.id}:all`,
+          actionKey: 'all',
+          label: section.label,
+          ids: sortedItems.map((item) => getItemId(item)).filter((id) => id !== null && id !== undefined),
+          items: sortedItems,
+          synthetic: true,
+        }],
       }
     })
 }

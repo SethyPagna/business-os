@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 import FilePickerModal from '../files/FilePickerModal'
+import { analyzeProductImportText } from './productImportPlanner.mjs'
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
@@ -16,18 +17,31 @@ function getBaseName(value) {
     .trim()
 }
 
-function parseCSVContent(text) {
-  const lines = String(text || '').trim().split('\n').filter(Boolean)
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, '').toLowerCase())
-  return lines.slice(1).map((line) => {
-    const values = line.match(/(\".*?\"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || line.split(',')
-    const row = {}
-    headers.forEach((header, index) => {
-      row[header] = String(values[index] || '').trim().replace(/^\"|\"$/g, '')
-    })
-    return row
-  }).filter((row) => row.name?.trim())
+function analyzeProductCsvInWorker({ text, existingProducts, onProgress }) {
+  if (typeof Worker === 'undefined') {
+    return Promise.resolve(analyzeProductImportText(text, existingProducts))
+  }
+  return new Promise((resolve, reject) => {
+    const id = `product-import-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const worker = new Worker(new URL('./productImportWorker.mjs', import.meta.url), { type: 'module' })
+    const cleanup = () => worker.terminate()
+    worker.onmessage = (event) => {
+      const message = event.data || {}
+      if (message.id !== id) return
+      if (message.type === 'progress') {
+        onProgress?.({ progress: message.progress || 0, label: message.label || '' })
+        return
+      }
+      cleanup()
+      if (message.type === 'result') resolve(message.result)
+      else reject(new Error(message.error || 'Import analysis failed'))
+    }
+    worker.onerror = (error) => {
+      cleanup()
+      reject(new Error(error?.message || 'Import analysis worker failed'))
+    }
+    worker.postMessage({ id, text, existingProducts })
+  })
 }
 
 /**
@@ -87,6 +101,55 @@ function getExistingImageFilenames(product = {}) {
   return names
 }
 
+function isBrowserFile(value) {
+  return typeof File !== 'undefined' && value instanceof File
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (event) => resolve(event.target.result)
+    reader.onerror = () => reject(new Error(`Failed to read ${file?.name || 'image file'}`))
+    reader.readAsDataURL(file)
+  })
+}
+
+function getReferencedImageNames(rows = []) {
+  const names = new Set()
+  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
+    getIncomingImageFilenames(row).forEach((name) => names.add(name))
+  })
+  return names
+}
+
+async function buildImagePayloadForImport({ rows = [], imageFiles = {}, includeAll = false, onProgress }) {
+  const sourceEntries = Object.entries(imageFiles || {})
+  if (!sourceEntries.length) return {}
+  const wanted = includeAll ? null : getReferencedImageNames(rows)
+  const entries = includeAll
+    ? sourceEntries
+    : sourceEntries.filter(([name]) => wanted.has(name))
+  const payload = {}
+  const batchSize = 4
+  for (let offset = 0; offset < entries.length; offset += batchSize) {
+    const batch = entries.slice(offset, offset + batchSize)
+    const resolved = await Promise.all(batch.map(async ([name, value]) => {
+      if (typeof value === 'string') return [name, value]
+      if (isBrowserFile(value)) return [name, await readFileAsDataUrl(value)]
+      return [name, null]
+    }))
+    resolved.forEach(([name, value]) => {
+      if (value) payload[name] = value
+    })
+    onProgress?.({
+      progress: entries.length ? Math.round(((offset + batch.length) / entries.length) * 100) : 100,
+      label: `Preparing images ${Math.min(offset + batch.length, entries.length)} / ${entries.length}`,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  return payload
+}
+
 export default function BulkImportModal({ onClose, onDone, t }) {
   const [mode, setMode] = useState('products')
   const [step, setStep] = useState(1)
@@ -95,6 +158,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [imageFiles, setImageFiles] = useState({})
   const [conflicts, setConflicts] = useState([])
   const [cleanRows, setCleanRows] = useState([])
+  const [importRows, setImportRows] = useState([])
+  const [analysisSummary, setAnalysisSummary] = useState(null)
+  const [analysisProgress, setAnalysisProgress] = useState(null)
   const [decisions, setDecisions] = useState({})
   const [imageDecisions, setImageDecisions] = useState({})
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
@@ -110,6 +176,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setCsvData(null)
     setConflicts([])
     setCleanRows([])
+    setImportRows([])
+    setAnalysisSummary(null)
+    setAnalysisProgress(null)
     setDecisions({})
     setImageDecisions({})
     setSelectedConflictIds(new Set())
@@ -131,14 +200,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'))
       if (!files.length) return
       const map = {}
-      await Promise.all(files.map((file) => new Promise((resolve) => {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          map[file.name] = e.target.result
-          resolve()
-        }
-        reader.readAsDataURL(file)
-      })))
+      files.forEach((file) => {
+        map[file.name] = file
+      })
       setImageFiles(map)
       const folderName = files[0]?.webkitRelativePath?.split('/')[0] || 'Folder'
       setImageDir(`${folderName} (${files.length})`)
@@ -165,10 +229,16 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const handleImageOnlyImport = async () => {
     if (!Object.keys(imageFiles).length) return
     setLoading(true)
+    setAnalysisProgress({ progress: 0, label: 'Preparing images' })
     try {
+      const imagePayload = await buildImagePayloadForImport({
+        imageFiles,
+        includeAll: true,
+        onProgress: setAnalysisProgress,
+      })
       const response = await window.api.bulkImportProducts({
         products: [],
-        imageFiles,
+        imageFiles: imagePayload,
         imageOnly: true,
         userId: user.id,
         userName: user.name,
@@ -181,6 +251,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
     } finally {
       setLoading(false)
+      setAnalysisProgress(null)
     }
   }
 
@@ -189,66 +260,39 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     if (!picked) return
     setCsvData(picked)
     setLoading(true)
+    setAnalysisProgress({ progress: 0, label: 'Preparing import' })
     try {
-      const rows = parseCSVContent(picked.content)
       const existingProducts = await window.api.getProducts()
-      const existingMap = {}
-      existingProducts.forEach((product) => {
-        const byName = String(product?.name || '').trim().toLowerCase()
-        if (byName) existingMap[byName] = product
-        if (product?.sku) existingMap[`sku:${String(product.sku).trim().toLowerCase()}`] = product
+      const analysis = await analyzeProductCsvInWorker({
+        text: picked.content,
+        existingProducts: Array.isArray(existingProducts) ? existingProducts : [],
+        onProgress: setAnalysisProgress,
       })
-
-      const nextConflicts = []
-      const nextCleanRows = []
-      const nextDecisions = {}
-      const nextImageDecisions = {}
-
-      rows.forEach((row, index) => {
-        const key = String(row?.name || '').trim().toLowerCase()
-        const bySku = row?.sku ? existingMap[`sku:${String(row.sku).trim().toLowerCase()}`] : null
-        const existing = existingMap[key] || bySku
-        const incomingImages = getIncomingImageFilenames(row)
-        if (!existing) {
-          nextCleanRows.push({ row, index, incomingImages })
-          nextDecisions[index] = 'new'
-          nextImageDecisions[index] = incomingImages.length ? 'replace_with_csv' : 'keep_existing'
-          return
-        }
-
-        const sameBasic = (
-          (!row.sku || String(row.sku).trim() === String(existing.sku || '')) &&
-          (!row.barcode || String(row.barcode).trim() === String(existing.barcode || '')) &&
-          (!row.category || String(row.category).trim() === String(existing.category || '')) &&
-          (!row.unit || String(row.unit).trim() === String(existing.unit || '')) &&
-          (!row.supplier || String(row.supplier).trim() === String(existing.supplier || ''))
-        )
-        const sellingOk = !row.selling_price_usd || Math.abs(parseFloat(row.selling_price_usd || 0) - (existing.selling_price_usd || 0)) < 0.001
-        const specialOk = !row.special_price_usd || Math.abs(parseFloat(row.special_price_usd || 0) - (existing.special_price_usd || 0)) < 0.001
-        const purchaseOk = !row.purchase_price_usd || Math.abs(parseFloat(row.purchase_price_usd || 0) - (existing.purchase_price_usd || 0)) < 0.001
-        const existingImages = getExistingImageFilenames(existing)
-        const sameImages = !incomingImages.length || (
-          incomingImages.length === existingImages.length &&
-          incomingImages.every((value, i) => value.toLowerCase() === String(existingImages[i] || '').toLowerCase())
-        )
-
-        nextConflicts.push({
-          row,
-          index,
-          existing,
-          sameBasic,
-          samePricing: sellingOk && specialOk && purchaseOk,
-          sameImages,
+      const nextConflicts = (analysis.conflicts || []).map((entry) => {
+        const incomingImages = getIncomingImageFilenames(entry.row)
+        const existingImages = getExistingImageFilenames(entry.existing)
+        return {
+          ...entry,
           incomingImages,
           existingImages,
-        })
-        nextDecisions[index] = (sameBasic && sellingOk && purchaseOk) ? 'merge' : 'ask'
-        nextImageDecisions[index] = incomingImages.length ? (sameBasic && sellingOk && purchaseOk ? 'keep_existing' : 'replace_with_csv') : 'keep_existing'
+          sameImages: !incomingImages.length || (
+            incomingImages.length === existingImages.length &&
+            incomingImages.every((value, i) => value.toLowerCase() === String(existingImages[i] || '').toLowerCase())
+          ),
+        }
+      })
+      const nextImageDecisions = {}
+      ;[...(analysis.cleanRows || []), ...nextConflicts].forEach((entry) => {
+        const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
+        const incomingImages = getIncomingImageFilenames(entry.row)
+        nextImageDecisions[index] = incomingImages.length ? (entry.plannedAction === 'merge_stock' ? 'keep_existing' : 'replace_with_csv') : 'keep_existing'
       })
 
       setConflicts(nextConflicts)
-      setCleanRows(nextCleanRows)
-      setDecisions(nextDecisions)
+      setCleanRows(analysis.cleanRows || [])
+      setImportRows(analysis.rows || [])
+      setAnalysisSummary(analysis.summary || null)
+      setDecisions(analysis.decisions || {})
       setImageDecisions(nextImageDecisions)
       setSelectedConflictIds(new Set(nextConflicts.map((entry) => entry.index)))
       setStep(2)
@@ -256,23 +300,37 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       alert(`Failed to analyze CSV: ${error?.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
+      setAnalysisProgress(null)
     }
   }
 
   const handleImport = async () => {
     if (!csvData?.content) return
     setLoading(true)
+    setAnalysisProgress({ progress: 0, label: 'Preparing import' })
     try {
-      const rows = parseCSVContent(csvData.content)
-      const instructions = rows.map((row, index) => ({
+      const rows = importRows.length ? importRows : analyzeProductImportText(csvData.content, []).rows
+      const instructions = rows.map((row, index) => {
+        const rowIndex = Number(row?._import_row_index ?? index)
+        const action = decisions[rowIndex] || row?._planned_action || 'new'
+        return ({
         ...row,
-        _action: decisions[index] || 'new',
-        _image_action: imageDecisions[index] || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
+        _action: action,
+        _image_action: imageDecisions[rowIndex] || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
         _field_rules: fieldRules,
-      }))
+        _target_product_id: row?._target_product_id || null,
+        _parent_id: row?._parent_id || null,
+      })
+      })
+      const imagePayload = await buildImagePayloadForImport({
+        rows: instructions,
+        imageFiles,
+        includeAll: false,
+        onProgress: setAnalysisProgress,
+      })
       const response = await window.api.bulkImportProducts({
         products: instructions,
-        imageFiles,
+        imageFiles: imagePayload,
         userId: user.id,
         userName: user.name,
       })
@@ -284,13 +342,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
     } finally {
       setLoading(false)
+      setAnalysisProgress(null)
     }
   }
 
   const pendingAsk = useMemo(() => conflicts.filter((item) => decisions[item.index] === 'ask'), [conflicts, decisions])
   const allDecided = pendingAsk.length === 0
-  const totalCount = cleanRows.length + conflicts.length
+  const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
+  const visibleConflicts = useMemo(() => conflicts.slice(0, 200), [conflicts])
 
   const toggleConflictSelection = (index) => {
     setSelectedConflictIds((current) => {
@@ -355,6 +415,17 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           <div key={value} className={`h-1 flex-1 rounded-full ${step >= value ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`} />
         ))}
       </div>
+      {analysisProgress && step !== 1 ? (
+        <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span>{analysisProgress.label || T('analysing', 'Analyzing...')}</span>
+            <span>{Math.round(analysisProgress.progress || 0)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
+            <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
+          </div>
+        </div>
+      ) : null}
 
       {step === 1 && mode === 'products' ? (
         <div className="space-y-4">
@@ -372,6 +443,17 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               {loading ? T('analysing', 'Analyzing...') : T('csv_template_upload', 'Upload CSV')}
             </button>
           </div>
+          {analysisProgress ? (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span>{analysisProgress.label || T('analysing', 'Analyzing...')}</span>
+                <span>{Math.round(analysisProgress.progress || 0)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
+                <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -415,8 +497,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <div className="text-yellow-600 dark:text-yellow-500">{T('existing_matches_count', 'Existing matches')}</div>
             </div>
             <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
-              <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{pendingAsk.length}</div>
-              <div className="text-blue-600 dark:text-blue-500">{T('need_decision_count', 'Need decision')}</div>
+              <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{analysisSummary?.variantCount ?? pendingAsk.length}</div>
+              <div className="text-blue-600 dark:text-blue-500">{T('variant_rows_count', 'Variant rows')}</div>
             </div>
           </div>
 
@@ -432,7 +514,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     />
                     All matches
                   </label>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge')}>Add stock only</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge_stock')}>Add stock only</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('create_variant')}>Create variants</button>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_add')}>Override + add stock</button>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_replace')}>Override + replace stock</button>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('new')}>Create selected as new</button>
@@ -481,6 +564,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                         <option value="merge_blank_only">Fill blanks only</option>
                         <option value="use_imported">Use imported value</option>
                         <option value="keep_existing">Keep existing value</option>
+                        <option value="append_unique">Append unique values</option>
                         <option value="clear_value">Clear value</option>
                       </select>
                     </div>
@@ -489,7 +573,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
-                {conflicts.map(({ row, index, existing, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
+                {visibleConflicts.map(({ row, index, existing, plannedAction, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
                 <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -497,6 +581,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       <span className="font-medium text-gray-900 dark:text-white">{row.name}</span>
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
                       <span className={`rounded px-1.5 py-0.5 ${sameBasic ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Basic: {sameBasic ? 'Same' : 'Different'}</span>
                       <span className={`rounded px-1.5 py-0.5 ${samePricing ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Pricing: {samePricing ? 'Same' : 'Different'}</span>
                       <span className={`rounded px-1.5 py-0.5 ${sameImages ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>Images: {sameImages ? 'Same' : 'Different'}</span>
@@ -511,7 +596,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   ) : null}
 
                   <div className="flex flex-wrap gap-1.5 text-xs">
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'merge' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'merge' ? 'border-green-600 bg-green-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Add stock only</button>
+                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'merge_stock' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'merge_stock' ? 'border-green-600 bg-green-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Add stock only</button>
+                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'create_variant' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'create_variant' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create variant</button>
                     <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_add' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_add' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override info + add stock</button>
                     <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_replace' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_replace' ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override all + replace stock</button>
                     <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'new' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'new' ? 'border-purple-600 bg-purple-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create new row</button>
@@ -535,6 +621,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   )}
                 </div>
                 ))}
+                {conflicts.length > visibleConflicts.length ? (
+                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                    Showing first {visibleConflicts.length} of {conflicts.length} planned conflict/variant rows. All rows will still be imported with their selected action.
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : null}

@@ -11,7 +11,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
@@ -224,6 +224,7 @@ function CustomersTab({ t, notify, active = true }) {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
@@ -245,15 +246,23 @@ function CustomersTab({ t, notify, active = true }) {
     () => getAvailableYears(filteredBySearch, (customer) => customer?.created_at),
     [filteredBySearch],
   )
-  const filteredSections = useMemo(() => buildTimeActionSections(filteredBySearch, {
-    getDate: (customer) => customer?.created_at,
-    getItemId: (customer) => Number(customer?.id),
-    year: yearFilter,
-    month: monthFilter,
-    timeMode,
-    groupMode: 'time',
-    sortDirection,
-  }), [filteredBySearch, monthFilter, sortDirection, timeMode, yearFilter])
+  const filteredSections = useMemo(() => (
+    groupMode === 'alphabet'
+      ? buildAlphabetActionSections(filteredBySearch, {
+        getName: (customer) => customer?.name,
+        getItemId: (customer) => Number(customer?.id),
+        sortDirection: 'asc',
+      })
+      : buildTimeActionSections(filteredBySearch, {
+        getDate: (customer) => customer?.created_at,
+        getItemId: (customer) => Number(customer?.id),
+        year: yearFilter,
+        month: monthFilter,
+        timeMode,
+        groupMode: 'time',
+        sortDirection,
+      })
+  ), [filteredBySearch, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
@@ -277,6 +286,14 @@ function CustomersTab({ t, notify, active = true }) {
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleCustomers)
   const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']
   const contactFilterSections = useMemo(() => ([
+    {
+      id: 'group',
+      label: tr(t, 'group_by', 'Group by'),
+      options: [
+        { id: 'group-time', label: tr(t, 'date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
+        { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
+      ],
+    },
     {
       id: 'year',
       label: tr(t, 'year', 'Year'),
@@ -318,8 +335,8 @@ function CustomersTab({ t, notify, active = true }) {
         { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
       ],
     },
-  ]), [availableYears, monthFilter, sortDirection, t, yearFilter])
-  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc'].filter(Boolean).length
+  ]), [availableYears, groupMode, monthFilter, sortDirection, t, yearFilter])
+  const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -614,6 +631,7 @@ function CustomersTab({ t, notify, active = true }) {
               setYearFilter('all')
               setMonthFilter('all')
               setSortDirection('desc')
+              setGroupMode('time')
             }}
             compact
           />

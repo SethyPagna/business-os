@@ -1697,3 +1697,69 @@ runTest('bulk import auto-creates missing product metadata and preserves stock p
     await stopServer(server?.child)
   }
 })
+
+pendingTests.add('bulk import groups same-name conflicts into stock merges and variants')
+runTest('bulk import groups same-name conflicts into stock merges and variants', async () => {
+  const runtimeDir = makeTempRoot('bos-import-variant-policy-')
+  let server = null
+  try {
+    server = await startServer(runtimeDir)
+    const authToken = await loginAsAdmin(server.baseUrl)
+    const branch = await getDefaultBranch(server.baseUrl, authToken)
+    const productName = `Variant Policy Product ${Date.now()}`
+    const skuA = `VP-${Date.now()}-A`
+    const skuB = `VP-${Date.now()}-B`
+    const productId = await createProduct(server.baseUrl, authToken, branch.id, {
+      name: productName,
+      sku: skuA,
+      stock_quantity: 2,
+      purchase_price_usd: 5,
+      selling_price_usd: 10,
+      supplier: 'Supplier A',
+    })
+
+    const result = await fetchJson(server.baseUrl, '/api/products/bulk-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken,
+      body: JSON.stringify({
+        products: [
+          {
+            name: productName,
+            sku: skuA,
+            stock_quantity: '3',
+            purchase_price_usd: '5.000',
+            selling_price_usd: '10.000',
+            supplier: 'Supplier A',
+            branch: branch.name,
+          },
+          {
+            name: productName,
+            sku: skuB,
+            stock_quantity: '4',
+            purchase_price_usd: '6.000',
+            selling_price_usd: '12.000',
+            supplier: 'Supplier B',
+            branch: branch.name,
+          },
+        ],
+      }),
+    })
+
+    assert.equal(result.updated, 1)
+    assert.equal(result.imported, 1)
+    assert.deepEqual(result.errors, [])
+
+    const products = await fetchJson(server.baseUrl, '/api/products', { authToken })
+    const groupRows = products.filter((row) => row.name === productName)
+    assert.equal(groupRows.length, 2)
+    const parent = groupRows.find((row) => row.id === productId)
+    const variant = groupRows.find((row) => row.id !== productId)
+    assert.equal(Number(parent.stock_quantity), 5)
+    assert.equal(Number(parent.is_group), 1)
+    assert.equal(Number(variant.parent_id), productId)
+    assert.equal(Number(variant.stock_quantity), 4)
+  } finally {
+    await stopServer(server?.child)
+  }
+})

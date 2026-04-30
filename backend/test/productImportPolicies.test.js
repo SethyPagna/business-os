@@ -42,6 +42,17 @@ runTest('resolveImportValue respects keep, merge blank, and clear policies', () 
   assert.equal(resolveImportValue('Existing', 'Incoming', true, 'use_imported'), 'Incoming')
 })
 
+runTest('parseImportNumber handles Khmer digits and mixed decimal separators', () => {
+  assert.equal(parseImportNumber({ price: '៛១២៣៤.៥៦៧' }, 'price', 0), 1234.567)
+  assert.equal(parseImportNumber({ price: '1 234,567' }, 'price', 0), 1234.567)
+})
+
+runTest('resolveImportValue appends unique list-style values', () => {
+  assert.equal(resolveImportValue('front | side', 'side | back', true, 'append_unique'), 'front | side | back')
+  assert.equal(resolveImportValue('', 'new', true, 'append_unique'), 'new')
+  assert.equal(normalizeFieldRule('append_unique', 'merge_blank_only'), 'append_unique')
+})
+
 runTest('normalizeImageConflictMode maps aliases and defaults by import action', () => {
   assert.equal(normalizeImageConflictMode('append', 'merge', true), 'append_csv')
   assert.equal(normalizeImageConflictMode('replace', 'merge', true), 'replace_with_csv')
