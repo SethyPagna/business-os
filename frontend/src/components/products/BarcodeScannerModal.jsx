@@ -269,12 +269,6 @@ export default function BarcodeScannerModal({
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
 
-    if (nextPermissionState === 'denied') {
-      setStatus('blocked')
-      setError(labels.cameraPermissionBlocked)
-      return
-    }
-
     startCamera({ preserveManualValue: true })
   }, [cleanup, labels.cameraPermissionBlocked, labels.scanUnsupported, startCamera])
 

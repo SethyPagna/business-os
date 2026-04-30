@@ -30,8 +30,8 @@ async function run() {
   })
   {
     const result = await getPreferredScannerMode()
-    assert.equal(result.mode, 'fallback')
-    assert.equal(result.reason, 'blocked')
+    assert.equal(result.mode, 'scanbot')
+    assert.equal(result.reason, 'retry-after-denied')
     assert.equal(result.permissionState, 'denied')
   }
 
@@ -43,7 +43,7 @@ async function run() {
   })
   {
     const result = await getPreferredScannerMode()
-    assert.equal(result.mode, 'fallback')
+    assert.equal(result.mode, 'scanbot')
     assert.equal(result.reason, 'permission-prompt')
     assert.equal(result.permissionState, 'prompt')
   }

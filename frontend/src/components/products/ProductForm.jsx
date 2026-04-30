@@ -275,7 +275,7 @@ export default function ProductForm({
   async function openScanner(field) {
     if (saving || scannerLaunchingField) return
     const preferredScanner = await getPreferredScannerMode()
-    if (preferredScanner.mode !== 'scanbot') {
+    if (preferredScanner.mode === 'fallback') {
       setScannerField(field)
       return
     }

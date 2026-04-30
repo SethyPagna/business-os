@@ -1,5 +1,11 @@
-const SCANBOT_SCRIPT_PATH = '/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js'
-const SCANBOT_ENGINE_PATH = '/scanbot-web-sdk/bundle/bin/barcode-scanner/'
+const publicBasePath = (() => {
+  const base = String(import.meta.env?.BASE_URL || '/')
+  if (!base) return '/'
+  return base.endsWith('/') ? base : `${base}/`
+})()
+
+const SCANBOT_SCRIPT_PATH = `${publicBasePath}scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
+const SCANBOT_ENGINE_PATH = `${publicBasePath}scanbot-web-sdk/bundle/bin/barcode-scanner/`
 
 let scriptPromise = null
 let sdkPromise = null
@@ -55,15 +61,15 @@ export async function getPreferredScannerMode() {
   }
 
   const permissionState = await readCameraPermissionState()
-  if (permissionState === 'denied') {
-    return { mode: 'fallback', reason: 'blocked', permissionState }
+  return {
+    mode: 'scanbot',
+    reason: permissionState === 'granted'
+      ? 'granted'
+      : permissionState === 'denied'
+        ? 'retry-after-denied'
+        : 'permission-prompt',
+    permissionState,
   }
-
-  if (permissionState !== 'granted') {
-    return { mode: 'fallback', reason: 'permission-prompt', permissionState }
-  }
-
-  return { mode: 'scanbot', reason: 'granted', permissionState }
 }
 
 async function getInitializedScanbot() {
