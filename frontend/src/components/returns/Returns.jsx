@@ -5,6 +5,7 @@ import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import { useIsPageActive } from '../shared/pageActivity'
 import ReturnDetailModal from './ReturnDetailModal'
 import EditReturnModal from './EditReturnModal'
 import NewReturnModal from './NewReturnModal'
@@ -65,6 +66,7 @@ export default function Returns() {
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('returns')
   const [scope, setScope] = useState(CUSTOMER_SCOPE)
   const [rows, setRows] = useState([])
   const [search, setSearch] = useState('')
@@ -135,20 +137,27 @@ export default function Returns() {
   }, [scope])
 
   useEffect(() => {
-    loadReturns()
+    if (!isActive) {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(returnsRequestRef)
+      loadPromiseRef.current = null
+      setLoading(false)
+      return undefined
+    }
+    loadReturns(loadedOnceRef.current)
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(returnsRequestRef)
       loadPromiseRef.current = null
     }
-  }, [loadReturns])
+  }, [isActive, loadReturns])
 
   useEffect(() => {
-    if (!syncChannel?.channel) return
+    if (!isActive || !syncChannel?.channel) return
     if (['returns', 'sales', 'inventory', 'products'].includes(syncChannel.channel)) {
       loadReturns(true)
     }
-  }, [loadReturns, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, loadReturns, syncChannel?.channel, syncChannel?.ts])
 
   const handleOpenEdit = async (ret) => {
     const requestId = beginTrackedRequest(editRequestRef)

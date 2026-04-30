@@ -3,6 +3,7 @@ import { getPreferredScannerMode } from '../src/components/products/scanbotScann
 
 const originalWindow = globalThis.window
 const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+const originalDocument = globalThis.document
 
 function setNavigator(value) {
   Object.defineProperty(globalThis, 'navigator', {
@@ -14,6 +15,7 @@ function setNavigator(value) {
 
 async function run() {
   globalThis.window = {}
+  globalThis.document = {}
 
   setNavigator({})
   {
@@ -21,6 +23,28 @@ async function run() {
     assert.equal(result.mode, 'fallback')
     assert.equal(result.reason, 'unsupported')
   }
+
+  globalThis.document = {
+    permissionsPolicy: {
+      allowsFeature(feature) {
+        return feature !== 'camera'
+      },
+    },
+  }
+  setNavigator({
+    mediaDevices: { getUserMedia: async () => ({}) },
+    permissions: {
+      query: async () => ({ state: 'granted' }),
+    },
+  })
+  {
+    const result = await getPreferredScannerMode()
+    assert.equal(result.mode, 'fallback')
+    assert.equal(result.reason, 'document-policy')
+    assert.equal(result.permissionState, 'blocked')
+  }
+
+  globalThis.document = {}
 
   setNavigator({
     mediaDevices: { getUserMedia: async () => ({}) },
@@ -69,6 +93,7 @@ run()
     } else {
       delete globalThis.navigator
     }
+    globalThis.document = originalDocument
     globalThis.window = originalWindow
     console.log('scanbotScanner tests passed')
   })
@@ -78,6 +103,7 @@ run()
     } else {
       delete globalThis.navigator
     }
+    globalThis.document = originalDocument
     globalThis.window = originalWindow
     console.error(error)
     process.exit(1)

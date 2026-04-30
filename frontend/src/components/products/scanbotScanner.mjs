@@ -14,6 +14,30 @@ function getScanbotGlobal() {
   return globalThis?.ScanbotSDK || globalThis?.window?.ScanbotSDK || null
 }
 
+function isCameraBlockedByDocumentPolicy() {
+  try {
+    const policy = globalThis?.document?.permissionsPolicy || globalThis?.document?.featurePolicy
+    if (!policy?.allowsFeature) return false
+    return policy.allowsFeature('camera') === false
+  } catch (_) {
+    return false
+  }
+}
+
+function normalizeScanbotError(error) {
+  const message = String(error?.message || error || '').trim()
+  if (/permissions policy|camera is not allowed in this document/i.test(message)) {
+    return new Error('Camera access is blocked by this browser view before scanning can start.')
+  }
+  if (/content security policy|unsafe-eval|webassembly|wasm/i.test(message)) {
+    return new Error('Scanner startup was blocked by the current server security policy.')
+  }
+  if (/enginepath|worker/i.test(message)) {
+    return new Error('Scanner assets could not finish loading for this page.')
+  }
+  return error instanceof Error ? error : new Error(message || 'Scanner could not start.')
+}
+
 function loadScanbotScript() {
   if (getScanbotGlobal()) return Promise.resolve(getScanbotGlobal())
   if (scriptPromise) return scriptPromise
@@ -60,6 +84,10 @@ export async function getPreferredScannerMode() {
     return { mode: 'fallback', reason: 'unsupported', permissionState: 'unsupported' }
   }
 
+  if (isCameraBlockedByDocumentPolicy()) {
+    return { mode: 'fallback', reason: 'document-policy', permissionState: 'blocked' }
+  }
+
   const permissionState = await readCameraPermissionState()
   return {
     mode: 'scanbot',
@@ -73,13 +101,15 @@ export async function getPreferredScannerMode() {
 }
 
 async function getInitializedScanbot() {
-  const ScanbotSDK = await loadScanbotScript()
+  const ScanbotSDK = await loadScanbotScript().catch((error) => {
+    throw normalizeScanbotError(error)
+  })
   if (sdkPromise) return sdkPromise
   sdkPromise = ScanbotSDK.initialize({
     enginePath: SCANBOT_ENGINE_PATH,
   }).catch((error) => {
     sdkPromise = null
-    throw error
+    throw normalizeScanbotError(error)
   })
   return sdkPromise
 }

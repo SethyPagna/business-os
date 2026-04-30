@@ -102,7 +102,7 @@ runTest('mapServerError maps known errors and defaults to 500', () => {
   assert.equal(mapServerError(new Error('boom')).status, 500)
 })
 
-runTest('setTunnelSecurityHeaders emits strict script CSP without unsafe-inline or unsafe-eval', () => {
+runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and explicit camera policy', () => {
   const headers = new Map()
   const res = {
     setHeader(name, value) {
@@ -126,13 +126,17 @@ runTest('setTunnelSecurityHeaders emits strict script CSP without unsafe-inline 
     .find((part) => part.startsWith('script-src')) || ''
   assert.match(scriptSrc, /^script-src\b/)
   assert.match(scriptSrc, /'self'/)
+  assert.match(scriptSrc, /'wasm-unsafe-eval'/)
   assert.match(scriptSrc, /https:\/\/translate\.google\.com/)
   assert.match(scriptSrc, /https:\/\/translate\.googleapis\.com/)
   assert.doesNotMatch(scriptSrc, /unsafe-inline/)
-  assert.doesNotMatch(scriptSrc, /unsafe-eval/)
+  assert.doesNotMatch(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
+  const permissionsPolicy = headers.get('Permissions-Policy') || ''
+  assert.match(permissionsPolicy, /camera=\(self/)
+  assert.match(permissionsPolicy, /"https:\/\/localhost:4000"/)
 })
 
 if (failed > 0) {
