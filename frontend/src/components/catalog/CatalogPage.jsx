@@ -2830,7 +2830,7 @@ export default function CatalogPage({ publicView = false }) {
         title={copy('studioTitle', 'Portal Editor')}
         subtitle={copy('studioHint', 'Edit the customer-facing portal here. The public page remains read-only.')}
       >
-        <div className="space-y-5">
+        <div className="space-y-5 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.border-slate-300]:border-slate-700 dark:[&_.bg-white]:bg-slate-950/80 dark:[&_.bg-slate-50]:bg-slate-900/60 dark:[&_.bg-slate-100]:bg-slate-800 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500 dark:[&_.input]:border-slate-700 dark:[&_.input]:bg-slate-950 dark:[&_.input]:text-slate-100 dark:[&_.input]:placeholder:text-slate-500 dark:[&_video]:bg-slate-950">
           <div id="portal-section-display" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'display' ? '' : 'hidden'}`}>
             <div className="mb-2 text-sm font-semibold text-slate-900">{copy('display', 'Display settings')}</div>
             <div className="grid gap-3">
@@ -2940,7 +2940,7 @@ export default function CatalogPage({ publicView = false }) {
               </div>
               <div className="mt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="block text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</label>
+                  <div className="block text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</div>
                   <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">{copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')}</p>
@@ -3159,8 +3159,8 @@ export default function CatalogPage({ publicView = false }) {
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
                 </label>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
-                  <input className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
+                  <label htmlFor="portal-faq-title" className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
+                  <input id="portal-faq-title" className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
                 </div>
                 <div className="space-y-3">
                   {faqItems.length ? faqItems.map((item, index) => (
@@ -3171,12 +3171,12 @@ export default function CatalogPage({ publicView = false }) {
                       </div>
                       <div className="mt-3 grid gap-3">
                         <div>
-                          <label className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
-                          <input className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
+                          <label htmlFor={`portal-faq-question-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
+                          <input id={`portal-faq-question-${item.id}`} className="input mt-1" value={item.question} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
-                          <textarea className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
+                          <label htmlFor={`portal-faq-answer-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('faqAnswer', 'Answer')}</label>
+                          <textarea id={`portal-faq-answer-${item.id}`} className="input mt-1 resize-none" rows={3} value={item.answer} onChange={(event) => updateFaqItem(item.id, 'answer', event.target.value)} />
                         </div>
                       </div>
                     </article>
@@ -3204,12 +3204,12 @@ export default function CatalogPage({ publicView = false }) {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">{copy('assistantTitle', 'Assistant title')}</label>
-                  <input className="input mt-1" value={editorDraft.customer_portal_ai_title || ''} onChange={(event) => setDraft('customer_portal_ai_title', event.target.value)} />
+                  <label htmlFor="portal-ai-title" className="block text-sm font-medium text-slate-700">{copy('assistantTitle', 'Assistant title')}</label>
+                  <input id="portal-ai-title" className="input mt-1" value={editorDraft.customer_portal_ai_title || ''} onChange={(event) => setDraft('customer_portal_ai_title', event.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry', 'AI provider')}</label>
-                  <select className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
+                  <label htmlFor="portal-ai-provider" className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry', 'AI provider')}</label>
+                  <select id="portal-ai-provider" className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
                     <option value="">{copy('assistantProviderAuto', 'Automatic (best available)', 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)')}</option>
                     {aiProviders.map((provider) => (
                       <option key={provider.id} value={String(provider.id)}>
@@ -3221,18 +3221,18 @@ export default function CatalogPage({ publicView = false }) {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantIntro', 'Assistant intro')}</label>
-                <textarea className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_intro || ''} onChange={(event) => setDraft('customer_portal_ai_intro', event.target.value)} />
+                <label htmlFor="portal-ai-intro" className="block text-sm font-medium text-slate-700">{copy('assistantIntro', 'Assistant intro')}</label>
+                <textarea id="portal-ai-intro" className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_intro || ''} onChange={(event) => setDraft('customer_portal_ai_intro', event.target.value)} />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantDisclaimer', 'Assistant disclaimer')}</label>
-                <textarea className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_disclaimer || ''} onChange={(event) => setDraft('customer_portal_ai_disclaimer', event.target.value)} />
+                <label htmlFor="portal-ai-disclaimer" className="block text-sm font-medium text-slate-700">{copy('assistantDisclaimer', 'Assistant disclaimer')}</label>
+                <textarea id="portal-ai-disclaimer" className="input mt-1 resize-none" rows={3} value={editorDraft.customer_portal_ai_disclaimer || ''} onChange={(event) => setDraft('customer_portal_ai_disclaimer', event.target.value)} />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
-                <textarea className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
+                <label htmlFor="portal-ai-prompt" className="block text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
+                <textarea id="portal-ai-prompt" className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
                 <p className="mt-2 text-xs text-slate-500">{copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')}</p>
               </div>
 
