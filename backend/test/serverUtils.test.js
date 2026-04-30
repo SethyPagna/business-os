@@ -102,7 +102,7 @@ runTest('mapServerError maps known errors and defaults to 500', () => {
   assert.equal(mapServerError(new Error('boom')).status, 500)
 })
 
-runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and explicit camera policy', () => {
+runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and same-origin camera policy', () => {
   const headers = new Map()
   const res = {
     setHeader(name, value) {
@@ -135,8 +135,7 @@ runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and 
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
   const permissionsPolicy = headers.get('Permissions-Policy') || ''
-  assert.match(permissionsPolicy, /camera=\(self/)
-  assert.match(permissionsPolicy, /"https:\/\/localhost:4000"/)
+  assert.equal(permissionsPolicy, 'geolocation=(), camera=(self), microphone=(), usb=(), payment=()')
 })
 
 if (failed > 0) {

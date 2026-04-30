@@ -24,7 +24,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
-import { orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -496,6 +496,7 @@ export default function Products() {
     try {
       const snapshot = cloneHistorySnapshot(p)
       await window.api.deleteProduct(p.id, user.id, user.name)
+      await load(true)
       let restoredEntries = []
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),
@@ -512,7 +513,6 @@ export default function Products() {
       })
       notify('Product deleted')
       setDetailProduct(null)
-      await load(true)
     } catch(e) { notify(e.message || 'Failed', 'error') }
   }
 
@@ -947,6 +947,7 @@ export default function Products() {
           ...snapshot,
           parent_id: resolvedParentId || null,
         }),
+        client_request_id: createProductHistoryRequestId('product_restore'),
         branch_id: preferredBranchId || defaultBranchId || '',
         stock_quantity: 0,
       }

@@ -103,13 +103,9 @@ function getTrustedDocumentOrigins(req) {
 }
 
 function buildPermissionsPolicy(req) {
-  const cameraOrigins = getTrustedDocumentOrigins(req)
-    .map((origin) => `"${origin}"`)
-    .join(' ')
-  const cameraPolicy = cameraOrigins ? `camera=(self ${cameraOrigins})` : 'camera=(self)'
   return [
     'geolocation=()',
-    cameraPolicy,
+    'camera=(self)',
     'microphone=()',
     'usb=()',
     'payment=()',

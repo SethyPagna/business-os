@@ -2291,6 +2291,7 @@
   "group_by_time": "Time created",
   "group_by_time_action": "Time + action",
   "month": "Month",
+  "day": "Day",
   "notifications": "Notifications",
   "row_added": "Row added",
   "row_updated": "Row updated",

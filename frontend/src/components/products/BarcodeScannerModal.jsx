@@ -3,6 +3,7 @@ import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } fr
 import Modal from '../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.mjs'
 import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.mjs'
+import { scanBarcodeFromImageFile } from './barcodeImageScanner.mjs'
 
 const KNOWN_FORMATS = [
   'aztec',
@@ -63,12 +64,14 @@ export default function BarcodeScannerModal({
   const zxingReaderRef = useRef(null)
   const zxingControlsRef = useRef(null)
   const permissionCleanupRef = useRef(() => {})
+  const photoInputRef = useRef(null)
   const startTokenRef = useRef(0)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState('unknown')
+  const [photoBusy, setPhotoBusy] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -85,8 +88,11 @@ export default function BarcodeScannerModal({
     cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
     requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
+    scanFromPhoto: tr('scan_from_photo', 'Scan from photo', 'ស្កេនពីរូបថត'),
+    scanFromPhotoBusy: tr('scan_from_photo_busy', 'Reading photo...', 'កំពុងអានរូបថត...'),
     requestingCamera: tr('requesting_camera', 'Requesting camera access...', 'កំពុងស្នើសុំការអនុញ្ញាតកាមេរ៉ា...'),
     scanFailed: tr('scan_failed', 'Unable to start camera scanning right now.', 'មិនអាចចាប់ផ្តើមការស្កេនកាមេរ៉ាបានទេនៅពេលនេះ។'),
+    scanPhotoFailed: tr('scan_photo_failed', 'We could not read a barcode from that photo. Try another photo or type the code manually.', 'យើងមិនអាចអានបារកូដពីរូបថតនោះបានទេ។ សាករូបថ្មី ឬបញ្ចូលកូដដោយដៃ។'),
     scanFallbackActive: tr('scan_fallback_active', 'Using compatibility scan mode for this browser.', 'កំពុងប្រើរបៀបស្កេនដែលអាចប្រើជាមួយកម្មវិធីរុករកនេះ។'),
     manualEntry: tr('manual_entry', 'Manual entry', 'បញ្ចូលដោយដៃ'),
     detectedValue: tr('detected_value', 'Detected value', 'តម្លៃដែលបានរកឃើញ'),
@@ -292,6 +298,33 @@ export default function BarcodeScannerModal({
     startCamera({ preserveManualValue: true })
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported, startCamera])
 
+  const openPhotoPicker = useCallback(() => {
+    if (photoBusy) return
+    cleanup()
+    setStatus('manual')
+    photoInputRef.current?.click?.()
+  }, [cleanup, photoBusy])
+
+  const handlePhotoSelection = useCallback(async (event) => {
+    const file = event?.target?.files?.[0]
+    if (!file) return
+    setPhotoBusy(true)
+    setError('')
+    try {
+      const value = await scanBarcodeFromImageFile(file)
+      const nextValue = String(value || '').trim()
+      if (!nextValue) throw new Error(labels.scanPhotoFailed)
+      setManualValue(nextValue)
+      onDetected(nextValue)
+    } catch (scanError) {
+      setStatus('manual')
+      setError(scanError?.message || labels.scanPhotoFailed)
+    } finally {
+      if (event?.target) event.target.value = ''
+      setPhotoBusy(false)
+    }
+  }, [labels.scanPhotoFailed, onDetected])
+
   useEffect(() => {
     if (!open) return undefined
     prepareScanner()
@@ -454,6 +487,14 @@ export default function BarcodeScannerModal({
                       {status === 'starting' ? labels.requestingCamera : requestCameraLabel}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="btn-secondary w-full border-white/20 bg-white/10 text-white hover:bg-white/15"
+                    disabled={photoBusy}
+                    onClick={openPhotoPicker}
+                  >
+                    {photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto}
+                  </button>
                   {permissionState === 'denied' ? (
                     <p className="text-xs leading-5 text-slate-300">{labels.cameraPermissionResetHint}</p>
                   ) : null}
@@ -510,10 +551,28 @@ export default function BarcodeScannerModal({
               {labels.useValue}
             </button>
           </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              disabled={photoBusy}
+              onClick={openPhotoPicker}
+            >
+              {photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto}
+            </button>
+          </div>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             {tr('manual_entry_hint', 'Manual entry stays available if the camera is unavailable.', 'ការបញ្ចូលដោយដៃនៅតែអាចប្រើបាន ប្រសិនបើកាមេរ៉ាមិនអាចប្រើបាន។')}
           </p>
         </div>
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handlePhotoSelection}
+        />
       </div>
     </Modal>
   )

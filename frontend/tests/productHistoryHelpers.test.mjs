@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { orderProductRestoreSnapshots } from '../src/components/products/productHistoryHelpers.mjs'
+import { createProductHistoryRequestId, orderProductRestoreSnapshots } from '../src/components/products/productHistoryHelpers.mjs'
 
 let failed = 0
 
@@ -31,6 +31,11 @@ await runTest('orderProductRestoreSnapshots preserves independent items while ho
   assert.equal(ordered[0].id, 4)
   assert.equal(ordered[1].id, 1)
   assert.equal(ordered[2].id, 2)
+})
+
+await runTest('createProductHistoryRequestId creates a stable prefixed restore token', () => {
+  const value = createProductHistoryRequestId('product_restore')
+  assert.match(value, /^product_restore_\d+_[a-z0-9]+$/)
 })
 
 if (failed > 0) {
