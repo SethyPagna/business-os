@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleUserRound, UserPlus } from 'lucide-react'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { fmtDate } from '../../utils/formatters'
 import { useApp, useSync } from '../../AppContext'
 import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -95,6 +98,7 @@ export default function Users() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(null)
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   /**
    * 2. Authorization Guards
@@ -292,6 +296,26 @@ export default function Users() {
       .join(', ')
   }
 
+  const buildUserWritePayload = useCallback((account = {}, overrides = {}) => ({
+    name: String(overrides.name ?? account.name ?? '').trim(),
+    username: String(overrides.username ?? account.username ?? '').trim(),
+    phone: String(overrides.phone ?? account.phone ?? '').trim(),
+    email: String(overrides.email ?? account.email ?? '').trim(),
+    avatar_path: String(overrides.avatar_path ?? account.avatar_path ?? '').trim(),
+    role_id: overrides.role_id ?? account.role_id ?? null,
+    is_active: overrides.is_active ?? account.is_active ?? 1,
+    userId: currentUser?.id,
+    userName: currentUser?.name,
+    ...(overrides.delete_user ? { delete_user: 1 } : {}),
+  }), [currentUser?.id, currentUser?.name])
+
+  const buildRoleWritePayload = useCallback((role = {}) => ({
+    name: String(role.name || '').trim(),
+    permissions: typeof role.permissions === 'string' ? JSON.parse(role.permissions || '{}') : (role.permissions || {}),
+    userId: currentUser?.id,
+    userName: currentUser?.name,
+  }), [currentUser?.id, currentUser?.name])
+
   /**
    * 4. Mutations
    * 4.1 User create/update.
@@ -334,6 +358,24 @@ export default function Users() {
       if (result?.success === false) {
         notify(result.error || 'Failed to save user', 'error')
         return
+      }
+
+      if (selectedUser) {
+        const previousSnapshot = cloneHistorySnapshot(selectedUser)
+        const nextSnapshot = cloneHistorySnapshot({ ...selectedUser, ...payload, id: selectedUser.id })
+        actionHistory.pushAction({
+          label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const undoResult = await window.api.updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot))
+            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
+            await load({ silent: true })
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
+            await load({ silent: true })
+          },
+        })
       }
 
       notify(selectedUser ? tr('user_updated', 'User updated') : tr('user_created', 'User created'), 'success')
@@ -424,6 +466,43 @@ export default function Users() {
         return
       }
 
+      if (selectedRole) {
+        const previousSnapshot = cloneHistorySnapshot(selectedRole)
+        const nextSnapshot = cloneHistorySnapshot({ ...selectedRole, ...payload, id: selectedRole.id })
+        actionHistory.pushAction({
+          label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const undoResult = await window.api.updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot))
+            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
+            await load({ silent: true })
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply role changes')
+            await load({ silent: true })
+          },
+        })
+      } else {
+        let createdRoleId = extractHistoryResultId(result)
+        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdRoleId })
+        if (createdRoleId > 0) {
+          actionHistory.pushAction({
+            label: `Add role ${createdSnapshot.name || ''}`.trim(),
+            undo: async () => {
+              const undoResult = await window.api.deleteRole(createdRoleId, { userId: currentUser?.id, userName: currentUser?.name })
+              if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo role creation')
+              await load({ silent: true })
+            },
+            redo: async () => {
+              const redoResult = await window.api.createRole(buildRoleWritePayload(createdSnapshot))
+              if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to recreate role')
+              createdRoleId = extractHistoryResultId(redoResult)
+              await load({ silent: true })
+            },
+          })
+        }
+      }
+
       notify(selectedRole ? tr('role_updated', 'Role updated') : tr('role_created', 'Role created'), 'success')
       setModal(null)
       setSelectedRole(null)
@@ -447,6 +526,7 @@ export default function Users() {
     if (!window.confirm(`Delete role "${role.name}"?`)) return
 
     try {
+      const snapshot = cloneHistorySnapshot(role)
       const result = await window.api.deleteRole(role.id, {
         userId: currentUser?.id,
         userName: currentUser?.name,
@@ -455,6 +535,23 @@ export default function Users() {
         notify(result.error || 'Failed to delete role', 'error')
         return
       }
+      let restoredRoleId = 0
+      actionHistory.pushAction({
+        label: `Delete role ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          const undoResult = await window.api.createRole(buildRoleWritePayload(snapshot))
+          if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
+          restoredRoleId = extractHistoryResultId(undoResult)
+          await load({ silent: true })
+        },
+        redo: async () => {
+          const targetId = restoredRoleId || Number(snapshot.id || 0)
+          if (!targetId) return
+          const redoResult = await window.api.deleteRole(targetId, { userId: currentUser?.id, userName: currentUser?.name })
+          if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to delete role again')
+          await load({ silent: true })
+        },
+      })
       notify(tr('role_deleted', 'Role deleted'), 'success')
       await load()
     } catch (error) {
@@ -519,6 +616,8 @@ export default function Users() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      <ActionHistoryBar history={actionHistory} className="mb-4" />
 
       {loadError ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">

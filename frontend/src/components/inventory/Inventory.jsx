@@ -11,10 +11,13 @@ import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/ex
 import { formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -77,6 +80,7 @@ export default function Inventory() {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const actionHistory = useActionHistory({ limit: 3, notify })
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
@@ -196,10 +200,26 @@ export default function Inventory() {
     if (adjustSaving) return
     const qty = parseFloat(adjustForm.quantity)
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
+    const previousSnapshot = cloneHistorySnapshot(adjustModal)
+    const numericBranchId = adjustForm.branch_id ? parseInt(adjustForm.branch_id, 10) : null
+    const previousQuantity = numericBranchId
+      ? Number((adjustModal.branch_stock || []).find((entry) => Number(entry?.branch_id || 0) === numericBranchId)?.quantity || 0)
+      : Number(getStockQty(adjustModal) || 0)
+    const adjustmentRequest = {
+      productId: adjustModal.id,
+      productName: adjustModal.name,
+      type: adjustForm.type,
+      quantity: qty,
+      unitCostUsd: parseFloat(adjustForm.unit_cost_usd) || 0,
+      unitCostKhr: parseFloat(adjustForm.unit_cost_khr) || 0,
+      reason: adjustForm.reason || '',
+      branchId: numericBranchId,
+      userId: user?.id,
+      userName: user?.name || user?.username,
+    }
     if (adjustForm.type === 'remove') {
-      const branchId = adjustForm.branch_id ? parseInt(adjustForm.branch_id) : null
-      if (branchId) {
-        const bs = (adjustModal.branch_stock || []).find(s => s.branch_id === branchId)
+      if (numericBranchId) {
+        const bs = (adjustModal.branch_stock || []).find(s => s.branch_id === numericBranchId)
         const available = bs?.quantity || 0
         if (available <= 0) { notify(t('error')||'No stock in this branch to remove', 'error'); return }
         if (qty > available) { notify(`Cannot remove ${qty} - only ${available} available`, 'error'); return }
@@ -211,16 +231,30 @@ export default function Inventory() {
     }
     setAdjustSaving(true)
     try {
-      const res = await window.api.adjustStock({
-        productId: adjustModal.id, productName: adjustModal.name,
-        type: adjustForm.type, quantity: qty,
-        unitCostUsd: parseFloat(adjustForm.unit_cost_usd) || 0,
-        unitCostKhr: parseFloat(adjustForm.unit_cost_khr) || 0,
-        reason: adjustForm.reason || '',
-        branchId: adjustForm.branch_id ? parseInt(adjustForm.branch_id) : null,
-        userId: user?.id, userName: user?.name || user?.username,
-      })
-      if (res?.success) { notify('Stock adjusted'); setAdjustModal(null); load() }
+      const res = await window.api.adjustStock(adjustmentRequest)
+      if (res?.success) {
+        actionHistory.pushAction({
+          label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
+          undo: async () => {
+            const inverseRequest = adjustmentRequest.type === 'set'
+              ? { ...adjustmentRequest, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+              : adjustmentRequest.type === 'remove'
+                ? { ...adjustmentRequest, type: 'add', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                : { ...adjustmentRequest, type: 'remove', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+            const undoResult = await window.api.adjustStock(inverseRequest)
+            if (!undoResult?.success) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
+            await load(true)
+          },
+          redo: async () => {
+            const redoResult = await window.api.adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` })
+            if (!redoResult?.success) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
+            await load(true)
+          },
+        })
+        notify('Stock adjusted')
+        setAdjustModal(null)
+        await load(true)
+      }
       else notify(res?.error || 'Adjustment failed', 'error')
     } catch (e) { notify(e?.message || 'Error', 'error') }
     finally { setAdjustSaving(false) }
@@ -1336,6 +1370,8 @@ export default function Inventory() {
           ) : null}
         </div>
       </div>
+
+      <ActionHistoryBar history={actionHistory} className="mb-3" />
 
       {selectedMovementGroups.length > 0 ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">

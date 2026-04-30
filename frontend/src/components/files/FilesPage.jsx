@@ -18,7 +18,10 @@ import {
 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -116,6 +119,7 @@ export default function FilesPage() {
   const fileLoadRequestRef = useRef(0)
   const providerLoadRequestRef = useRef(0)
   const responseLoadRequestRef = useRef(0)
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallback, fallbackKm = fallback) => {
@@ -149,6 +153,36 @@ export default function FilesPage() {
 
   const providerOptions = useMemo(() => Object.entries(providerMeta || {}), [providerMeta])
   const selectedProviderMeta = providerMeta?.[providerForm.provider] || null
+
+  const buildProviderPayload = useCallback((provider = {}, overrides = {}) => ({
+    name: String(overrides.name ?? provider.name ?? '').trim(),
+    provider: overrides.provider ?? provider.provider ?? 'groq',
+    provider_type: overrides.provider_type ?? provider.provider_type ?? 'chat',
+    account_email: String(overrides.account_email ?? provider.account_email ?? '').trim(),
+    project_name: String(overrides.project_name ?? provider.project_name ?? '').trim(),
+    api_key: String(overrides.api_key ?? '').trim(),
+    default_model: String(overrides.default_model ?? provider.default_model ?? '').trim(),
+    supported_models: Array.isArray(overrides.supported_models)
+      ? overrides.supported_models
+      : Array.isArray(provider.supported_models)
+        ? provider.supported_models
+        : String(overrides.supported_models_text ?? '')
+          .split('\n')
+          .map((entry) => entry.trim())
+          .filter(Boolean),
+    endpoint_override: String(overrides.endpoint_override ?? provider.endpoint_override ?? '').trim(),
+    notes: String(overrides.notes ?? provider.notes ?? '').trim(),
+    enabled: overrides.enabled ?? provider.enabled ?? true,
+    priority: Math.max(1, Number(overrides.priority ?? provider.priority ?? 50) || 50),
+    requests_per_minute: Math.max(1, Number(overrides.requests_per_minute ?? provider.requests_per_minute ?? 10) || 10),
+    max_input_chars: Math.max(200, Number(overrides.max_input_chars ?? provider.max_input_chars ?? 1000) || 1000),
+    max_completion_tokens: Math.max(128, Number(overrides.max_completion_tokens ?? provider.max_completion_tokens ?? 1200) || 1200),
+    timeout_ms: Math.max(3000, Number(overrides.timeout_ms ?? provider.timeout_ms ?? 15000) || 15000),
+    cooldown_seconds: Math.max(5, Number(overrides.cooldown_seconds ?? provider.cooldown_seconds ?? 20) || 20),
+    userId: user?.id,
+    userName: user?.name,
+    expectedUpdatedAt: overrides.updated_at ?? provider.updated_at ?? undefined,
+  }), [user?.id, user?.name])
 
   const loadFiles = useCallback(async () => {
     const requestId = beginTrackedRequest(fileLoadRequestRef)
@@ -343,6 +377,9 @@ export default function FilesPage() {
   }
 
   async function saveProvider() {
+    const previousSnapshot = providerForm.id
+      ? cloneHistorySnapshot(providers.find((provider) => Number(provider?.id || 0) === Number(providerForm.id)))
+      : null
     const payload = {
       ...providerForm,
       supported_models: String(providerForm.supported_models_text || '')
@@ -374,11 +411,45 @@ export default function FilesPage() {
 
     setSavingProvider(true)
     try {
-      if (providerForm.id) await window.api.updateAiProvider(providerForm.id, payload)
-      else await window.api.createAiProvider(payload)
+      const result = providerForm.id
+        ? await window.api.updateAiProvider(providerForm.id, payload)
+        : await window.api.createAiProvider(payload)
+      const savedProvider = cloneHistorySnapshot(result?.item || { ...payload, id: providerForm.id || extractHistoryResultId(result) })
       notify(providerForm.id ? 'Provider updated' : 'Provider added', 'success')
       startCreateProvider()
       await loadProviders()
+      if (previousSnapshot?.id && !String(payload.api_key || '').trim()) {
+        actionHistory.pushAction({
+          label: `Edit provider ${previousSnapshot.name || savedProvider.name || ''}`.trim(),
+          undo: async () => {
+            const undoResult = await window.api.updateAiProvider(previousSnapshot.id, buildProviderPayload(previousSnapshot))
+            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore provider')
+            await loadProviders()
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateAiProvider(savedProvider.id, buildProviderPayload(savedProvider))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply provider changes')
+            await loadProviders()
+          },
+        })
+      } else if (!previousSnapshot?.id && savedProvider?.id) {
+        let createdProviderId = Number(savedProvider.id || 0)
+        const createdProviderPayload = buildProviderPayload(savedProvider, { api_key: payload.api_key })
+        actionHistory.pushAction({
+          label: `Add provider ${savedProvider.name || ''}`.trim(),
+          undo: async () => {
+            const undoResult = await window.api.deleteAiProvider(createdProviderId, { userId: user?.id, userName: user?.name, expectedUpdatedAt: savedProvider.updated_at || undefined })
+            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to undo provider creation')
+            await loadProviders()
+          },
+          redo: async () => {
+            const redoResult = await window.api.createAiProvider(createdProviderPayload)
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to recreate provider')
+            createdProviderId = extractHistoryResultId(redoResult)
+            await loadProviders()
+          },
+        })
+      }
     } catch (error) {
       notify(error?.message || 'Failed to save provider', 'error')
     } finally {
@@ -439,6 +510,8 @@ export default function FilesPage() {
           </div>
         )}
       />
+
+      <ActionHistoryBar history={actionHistory} className="mb-1" />
 
       {activeTab === 'assets' ? (
         <>

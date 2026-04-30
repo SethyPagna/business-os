@@ -13,6 +13,7 @@ import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -312,6 +313,16 @@ function DeliveryTab({ t, notify, active = true }) {
     })
   }
 
+  const buildDeliveryPayload = useCallback((contact = {}) => ({
+    name: contact.name || '',
+    phone: contact.phone || '',
+    area: contact.area || '',
+    address: contact.address || '',
+    notes: contact.notes || '',
+    userId: user?.id,
+    userName: user?.name,
+  }), [user?.id, user?.name])
+
   const load = useCallback(async ({ silent = false, label = 'Delivery contacts' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -384,19 +395,77 @@ function DeliveryTab({ t, notify, active = true }) {
       return notify('Driver name or phone is required', 'error')
     }
     try {
+      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const res = selected
         ? await window.api.updateDeliveryContact(selected.id, payload)
         : await window.api.createDeliveryContact(payload)
       if (res?.success === false) { notify(res.error||'Failed', 'error'); return }
+      if (selected && existingSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        actionHistory.pushAction({
+          label: `Edit delivery contact ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const restoreResult = await window.api.updateDeliveryContact(existingSnapshot.id, buildDeliveryPayload(existingSnapshot))
+            if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
+            await load({ silent: true, label: 'Delivery contacts undo edit' })
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateDeliveryContact(nextSnapshot.id, buildDeliveryPayload(nextSnapshot))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply delivery contact changes')
+            await load({ silent: true, label: 'Delivery contacts redo edit' })
+          },
+        })
+      } else {
+        let createdContactId = extractHistoryResultId(res)
+        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdContactId })
+        if (createdContactId > 0) {
+          actionHistory.pushAction({
+            label: `Add delivery contact ${createdSnapshot.name || ''}`.trim(),
+            undo: async () => {
+              await window.api.deleteDeliveryContact(createdContactId)
+              await load({ silent: true, label: 'Delivery contacts undo create' })
+            },
+            redo: async () => {
+              const recreateResult = await window.api.createDeliveryContact(buildDeliveryPayload(createdSnapshot))
+              if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate delivery contact')
+              createdContactId = extractHistoryResultId(recreateResult)
+              await load({ silent: true, label: 'Delivery contacts redo create' })
+            },
+          })
+        }
+      }
       notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
-      setModal(null); setSelected(null); load()
+      setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
     } catch (e) { notify(e.message||'Failed', 'error') }
   }
 
   const handleDelete = async (c) => {
     if (!confirm(`Delete "${c.name}"?`)) return
-    try { await window.api.deleteDeliveryContact(c.id); notify(t('delivery_contact_deleted')||'Deleted'); setModal(null); setSelected(null); load() }
+    try {
+      const snapshot = cloneHistorySnapshot(c)
+      await window.api.deleteDeliveryContact(c.id)
+      let restoredContactId = 0
+      actionHistory.pushAction({
+        label: `Delete delivery contact ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          const restoreResult = await window.api.createDeliveryContact(buildDeliveryPayload(snapshot))
+          if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore delivery contact')
+          restoredContactId = extractHistoryResultId(restoreResult)
+          await load({ silent: true, label: 'Delivery contacts undo delete' })
+        },
+        redo: async () => {
+          const targetId = restoredContactId || Number(snapshot.id || 0)
+          if (!targetId) return
+          await window.api.deleteDeliveryContact(targetId)
+          await load({ silent: true, label: 'Delivery contacts redo delete' })
+        },
+      })
+      notify(t('delivery_contact_deleted')||'Deleted')
+      setModal(null)
+      setSelected(null)
+      await load({ silent: true, label: 'Delivery contacts after delete' })
+    }
     catch (e) { notify(e.message||'Failed', 'error') }
   }
 

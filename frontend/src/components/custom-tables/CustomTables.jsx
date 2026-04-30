@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useSync } from '../../AppContext'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -50,6 +53,7 @@ export default function CustomTables() {
   const [deletingRowId, setDeletingRowId] = useState(null)
   const tablesRequestRef = useRef(0)
   const rowsRequestRef = useRef(0)
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   const activeSchema = useMemo(() => {
     try {
@@ -193,13 +197,15 @@ export default function CustomTables() {
   const handleSaveRow = async () => {
     if (!activeTable?.name || savingRow) return
     const payload = buildRowPayload(activeSchema, rowForm)
+    const previousSnapshot = rowModal && rowModal !== 'create' ? cloneHistorySnapshot(rowModal) : null
     setSavingRow(true)
     try {
+      let nextRow = null
       if (rowModal === 'create') {
-        await window.api.insertCustomRow({ tableName: activeTable.name, data: payload })
+        nextRow = await window.api.insertCustomRow({ tableName: activeTable.name, data: payload })
         notify(t('row_added') || 'Row added')
       } else {
-        await window.api.updateCustomRow({
+        nextRow = await window.api.updateCustomRow({
           tableName: activeTable.name,
           id: rowModal.id,
           data: payload,
@@ -210,6 +216,49 @@ export default function CustomTables() {
       setRowModal(null)
       setRowForm({})
       await loadTableData(activeTable.name)
+      if (rowModal === 'create') {
+        let createdRowId = extractHistoryResultId(nextRow)
+        const createdSnapshot = cloneHistorySnapshot(nextRow || { ...payload, id: createdRowId })
+        if (createdRowId > 0) {
+          actionHistory.pushAction({
+            label: `Add row to ${activeTable.display_name || activeTable.name}`,
+            undo: async () => {
+              await window.api.deleteCustomRow({
+                tableName: activeTable.name,
+                id: createdRowId,
+                payload: {},
+              })
+              await loadTableData(activeTable.name)
+            },
+            redo: async () => {
+              const redoResult = await window.api.insertCustomRow({ tableName: activeTable.name, data: buildRowPayload(activeSchema, createdSnapshot) })
+              createdRowId = extractHistoryResultId(redoResult)
+              await loadTableData(activeTable.name)
+            },
+          })
+        }
+      } else if (previousSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot(nextRow || { ...previousSnapshot, ...payload, id: previousSnapshot.id })
+        actionHistory.pushAction({
+          label: `Edit row in ${activeTable.display_name || activeTable.name}`,
+          undo: async () => {
+            await window.api.updateCustomRow({
+              tableName: activeTable.name,
+              id: previousSnapshot.id,
+              data: buildRowPayload(activeSchema, previousSnapshot),
+            })
+            await loadTableData(activeTable.name)
+          },
+          redo: async () => {
+            await window.api.updateCustomRow({
+              tableName: activeTable.name,
+              id: nextSnapshot.id,
+              data: buildRowPayload(activeSchema, nextSnapshot),
+            })
+            await loadTableData(activeTable.name)
+          },
+        })
+      }
     } catch (error) {
       notify(error?.message || 'Failed to save row', 'error')
     } finally {
@@ -222,13 +271,30 @@ export default function CustomTables() {
     if (!confirm(t('confirm_delete_row') || 'Delete this row?')) return
     setDeletingRowId(id)
     try {
-      const row = tableData.find((entry) => Number(entry.id) === Number(id))
+      const row = cloneHistorySnapshot(tableData.find((entry) => Number(entry.id) === Number(id)))
       await window.api.deleteCustomRow({
         tableName: activeTable.name,
         id,
         payload: { expectedUpdatedAt: row?.updated_at || undefined },
       })
       await loadTableData(activeTable.name)
+      let restoredRowId = 0
+      if (row) {
+        actionHistory.pushAction({
+          label: `Delete row from ${activeTable.display_name || activeTable.name}`,
+          undo: async () => {
+            const undoResult = await window.api.insertCustomRow({ tableName: activeTable.name, data: buildRowPayload(activeSchema, row) })
+            restoredRowId = extractHistoryResultId(undoResult)
+            await loadTableData(activeTable.name)
+          },
+          redo: async () => {
+            const targetId = restoredRowId || Number(row.id || 0)
+            if (!targetId) return
+            await window.api.deleteCustomRow({ tableName: activeTable.name, id: targetId, payload: {} })
+            await loadTableData(activeTable.name)
+          },
+        })
+      }
     } catch (error) {
       notify(error?.message || 'Failed to delete row', 'error')
     } finally {
@@ -294,6 +360,7 @@ export default function CustomTables() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
+              <ActionHistoryBar history={actionHistory} className="mb-3" />
               <div className="card overflow-hidden">
                 {rowsError ? <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20">{rowsError}</div> : null}
                 <div className="overflow-x-auto">

@@ -23,6 +23,7 @@ import ProductsHeaderActions from './HeaderActions'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -285,6 +286,7 @@ export default function Products() {
   const handleSaveWithGallery = async (form) => {
     if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
     try {
+      const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const galleryInput = normalizeGallery(form.image_gallery, form.image_path || null)
       const uploadedGallery = await uploadGalleryImages(selected?.id || null, galleryInput)
       const payload = {
@@ -294,20 +296,52 @@ export default function Products() {
         userId: user.id,
         userName: user.name,
       }
+      let createdProductId = 0
 
       if (!selected) {
         const res = await window.api.createProduct(payload)
         if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
+        createdProductId = extractHistoryResultId(res)
       } else {
         const res = await window.api.updateProduct(selected.id, payload)
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
+      }
+
+      await load(true)
+      const targetProductId = selected ? Number(selected.id || 0) : createdProductId
+      const latestProducts = await window.api.getProducts()
+      const latestProductSnapshot = cloneHistorySnapshot(
+        (latestProducts || []).find((product) => Number(product?.id || 0) === targetProductId)
+        || { ...payload, id: targetProductId },
+      )
+
+      if (previousSnapshot && targetProductId) {
+        actionHistory.pushAction({
+          label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
+          undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
+          redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
+        })
+      } else if (createdProductId > 0) {
+        let restoredEntries = []
+        actionHistory.pushAction({
+          label: `Add product ${latestProductSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const result = await window.api.deleteProduct(createdProductId)
+            if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
+            await load(true)
+          },
+          redo: async () => {
+            restoredEntries = await restoreDeletedProducts([latestProductSnapshot], 'Redo product create')
+            createdProductId = Number(restoredEntries[0]?.restoredId || createdProductId)
+          },
+        })
       }
 
       notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
       setModal(null)
       setSelected(null)
       setDetailProduct(null)
-      load()
+      await load(true)
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
       notify(e.message || 'Failed to save product', 'error')
@@ -460,8 +494,25 @@ export default function Products() {
   const handleDelete = async (p) => {
     if (!confirm(`${t('confirm_delete')} "${p.name}"?`)) return
     try {
+      const snapshot = cloneHistorySnapshot(p)
       await window.api.deleteProduct(p.id, user.id, user.name)
-      notify('Product deleted'); setDetailProduct(null); load()
+      let restoredEntries = []
+      actionHistory.pushAction({
+        label: `Delete product ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          restoredEntries = await restoreDeletedProducts([snapshot], 'Undo product delete')
+        },
+        redo: async () => {
+          const targetId = Number(restoredEntries[0]?.restoredId || snapshot.id || 0)
+          if (!targetId) return
+          const result = await window.api.deleteProduct(targetId)
+          if (result?.success === false) throw new Error(result.error || 'Failed to delete product again')
+          await load(true)
+        },
+      })
+      notify('Product deleted')
+      setDetailProduct(null)
+      await load(true)
     } catch(e) { notify(e.message || 'Failed', 'error') }
   }
 

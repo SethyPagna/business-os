@@ -1184,6 +1184,7 @@ export const attachSaleCustomer = async (id, payload) => {
     await dexieDb.sales.update(id, {
       customer_id: result?.customer?.id || null,
       customer_name: result?.customer?.name || null,
+      customer_membership_number: result?.customer?.membership_number || null,
       customer_phone: result?.customer?.phone || null,
       customer_address: result?.customer?.address || null,
       updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),

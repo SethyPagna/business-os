@@ -13,6 +13,7 @@ import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -335,6 +336,18 @@ function CustomersTab({ t, notify, active = true }) {
     })
   }
 
+  const buildCustomerPayload = useCallback((customer = {}) => ({
+    name: String(customer.name || '').trim(),
+    membership_number: String(customer.membership_number || '').trim().toUpperCase(),
+    phone: customer.phone || '',
+    email: customer.email || '',
+    address: customer.address || '',
+    company: customer.company || '',
+    notes: customer.notes || '',
+    userId: user?.id,
+    userName: user?.name,
+  }), [user?.id, user?.name])
+
   const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -414,6 +427,7 @@ function CustomersTab({ t, notify, active = true }) {
     }
 
     try {
+      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
         ? await window.api.updateCustomer(selected.id, payload)
@@ -422,10 +436,44 @@ function CustomersTab({ t, notify, active = true }) {
         notify(result.error || 'Failed', 'error')
         return
       }
+      if (selected && existingSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        actionHistory.pushAction({
+          label: `Edit customer ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const restoreResult = await window.api.updateCustomer(existingSnapshot.id, buildCustomerPayload(existingSnapshot))
+            if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
+            await load({ silent: true, label: 'Customers undo edit' })
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateCustomer(nextSnapshot.id, buildCustomerPayload(nextSnapshot))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply customer changes')
+            await load({ silent: true, label: 'Customers redo edit' })
+          },
+        })
+      } else {
+        let createdCustomerId = extractHistoryResultId(result)
+        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdCustomerId })
+        if (createdCustomerId > 0) {
+          actionHistory.pushAction({
+            label: `Add customer ${createdSnapshot.name || ''}`.trim(),
+            undo: async () => {
+              await window.api.deleteCustomer(createdCustomerId)
+              await load({ silent: true, label: 'Customers undo create' })
+            },
+            redo: async () => {
+              const recreateResult = await window.api.createCustomer(buildCustomerPayload(createdSnapshot))
+              if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate customer')
+              createdCustomerId = extractHistoryResultId(recreateResult)
+              await load({ silent: true, label: 'Customers redo create' })
+            },
+          })
+        }
+      }
       notify(selected ? tr(t, 'customer_updated', 'Updated') : tr(t, 'customer_added', 'Added'))
       setModal(null)
       setSelected(null)
-      load()
+      await load({ silent: true, label: 'Customers after save' })
     } catch (error) {
       notify(error.message || 'Failed', 'error')
     }
@@ -434,11 +482,28 @@ function CustomersTab({ t, notify, active = true }) {
   const handleDelete = async (customer) => {
     if (!confirm(`Delete customer "${customer.name}"?`)) return
     try {
+      const snapshot = cloneHistorySnapshot(customer)
       await window.api.deleteCustomer(customer.id)
+      let restoredCustomerId = 0
+      actionHistory.pushAction({
+        label: `Delete customer ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          const restoreResult = await window.api.createCustomer(buildCustomerPayload(snapshot))
+          if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore customer')
+          restoredCustomerId = extractHistoryResultId(restoreResult)
+          await load({ silent: true, label: 'Customers undo delete' })
+        },
+        redo: async () => {
+          const targetId = restoredCustomerId || Number(snapshot.id || 0)
+          if (!targetId) return
+          await window.api.deleteCustomer(targetId)
+          await load({ silent: true, label: 'Customers redo delete' })
+        },
+      })
       notify(tr(t, 'customer_deleted', 'Deleted'))
       setModal(null)
       setSelected(null)
-      load()
+      await load({ silent: true, label: 'Customers after delete' })
     } catch (error) {
       notify(error.message || 'Failed', 'error')
     }

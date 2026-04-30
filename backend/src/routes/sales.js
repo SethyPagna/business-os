@@ -550,17 +550,21 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
   const {
     customerId,
     membershipNumber,
+    clearAssignment,
     device_name,
     device_tz,
   } = payload
 
   if (!saleId) return err(res, 'Invalid sale id')
 
-  const customer = findCustomerForSaleAssignment({ customerId, membershipNumber })
-  if (!customer) return err(res, 'Customer or membership number not found', 404)
-
   const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId)
   if (!sale) return err(res, 'Sale not found', 404)
+
+  const shouldClearAssignment = !!clearAssignment
+  const customer = shouldClearAssignment
+    ? null
+    : findCustomerForSaleAssignment({ customerId, membershipNumber })
+  if (!shouldClearAssignment && !customer) return err(res, 'Customer or membership number not found', 404)
 
   try {
     db.transaction(() => {
@@ -571,10 +575,10 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
       SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = datetime('now')
       WHERE id = ?
       `).run(
-      customer.id,
-      customer.name || null,
-      customer.phone || null,
-      customer.address || null,
+      customer?.id || null,
+      customer?.name || null,
+      customer?.phone || null,
+      customer?.address || null,
       saleId
       )
 
@@ -583,8 +587,8 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
       SET customer_id = ?, customer_name = ?, updated_at = datetime('now')
       WHERE sale_id = ?
       `).run(
-      customer.id,
-      customer.name || null,
+      customer?.id || null,
+      customer?.name || null,
       saleId
       )
 
@@ -596,16 +600,17 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
         saleId,
         {
           previous_customer_id: sale.customer_id || null,
-          next_customer_id: customer.id,
-          membership_number: customer.membership_number || null,
+          next_customer_id: customer?.id || null,
+          membership_number: customer?.membership_number || null,
+          cleared: shouldClearAssignment ? 1 : 0,
         },
         {
           tableName: 'sales',
           recordId: saleId,
           newValue: {
-            customer_id: customer.id,
-            customer_name: customer.name || null,
-            membership_number: customer.membership_number || null,
+            customer_id: customer?.id || null,
+            customer_name: customer?.name || null,
+            membership_number: customer?.membership_number || null,
           },
           deviceName: device_name || null,
           deviceTz: device_tz || null,
@@ -622,13 +627,13 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
   const updatedSale = db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get(saleId)
   ok(res, {
     ...(updatedSale || { id: saleId }),
-    customer: {
+    customer: customer ? {
       id: customer.id,
       name: customer.name || null,
       membership_number: customer.membership_number || null,
       phone: customer.phone || null,
       address: customer.address || null,
-    },
+    } : null,
   })
 })
 

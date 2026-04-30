@@ -138,17 +138,28 @@ export default function Sales() {
     loadPromiseRef.current = null
   }, [])
 
-  const handleStatusChange = async (saleId, newStatus, notes) => {
+  const handleStatusChange = async (saleId, newStatus, notes, recordHistory = true) => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     if (statusActionRef.current.has(numericId)) return false
+    const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
+    const previousStatus = previousSale?.sale_status || 'completed'
     statusActionRef.current.add(numericId)
     try {
       await window.api.updateSaleStatus(saleId, newStatus, notes)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
-      loadSales()
+      await loadSales(true)
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+      window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+      if (recordHistory && previousSale && previousStatus !== newStatus) {
+        actionHistory.pushAction({
+          label: `Update sale ${previousSale.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}`,
+          undo: () => handleStatusChange(saleId, previousStatus, 'Undo sale status update', false),
+          redo: () => handleStatusChange(saleId, newStatus, notes || 'Redo sale status update', false),
+        })
+      }
       return true
     } catch (error) {
       if (error?.conflict || error?.code === 'write_conflict') {
@@ -166,11 +177,14 @@ export default function Sales() {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     if (membershipActionRef.current.has(numericId)) return false
+    const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
+    const previousMembershipNumber = String(previousSale?.customer_membership_number || '').trim()
+    const nextMembershipNumber = String(membershipNumber || '').trim()
     membershipActionRef.current.add(numericId)
     try {
       const device = getClientDeviceInfo()
       await window.api.attachSaleCustomer(saleId, {
-        membershipNumber,
+        membershipNumber: nextMembershipNumber,
         userId: user?.id || null,
         userName: user?.name || null,
         device_name: device.deviceName || '',
@@ -180,6 +194,46 @@ export default function Sales() {
       await loadSales()
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+      if (previousSale && previousMembershipNumber.toLowerCase() !== nextMembershipNumber.toLowerCase()) {
+        actionHistory.pushAction({
+          label: `Link membership on sale ${previousSale.receipt_number || numericId}`,
+          undo: async () => {
+            const deviceInfo = getClientDeviceInfo()
+            const payload = previousMembershipNumber
+              ? {
+                  membershipNumber: previousMembershipNumber,
+                  userId: user?.id || null,
+                  userName: user?.name || null,
+                  device_name: deviceInfo.deviceName || '',
+                  device_tz: deviceInfo.deviceTz || '',
+                }
+              : {
+                  clearAssignment: true,
+                  userId: user?.id || null,
+                  userName: user?.name || null,
+                  device_name: deviceInfo.deviceName || '',
+                  device_tz: deviceInfo.deviceTz || '',
+                }
+            await window.api.attachSaleCustomer(saleId, payload)
+            await loadSales(true)
+            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+          },
+          redo: async () => {
+            const deviceInfo = getClientDeviceInfo()
+            await window.api.attachSaleCustomer(saleId, {
+              membershipNumber: nextMembershipNumber,
+              userId: user?.id || null,
+              userName: user?.name || null,
+              device_name: deviceInfo.deviceName || '',
+              device_tz: deviceInfo.deviceTz || '',
+            })
+            await loadSales(true)
+            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+            window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+          },
+        })
+      }
       return true
     } catch (error) {
       if (error?.conflict || error?.code === 'write_conflict') {

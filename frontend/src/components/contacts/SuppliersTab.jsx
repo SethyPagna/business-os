@@ -13,6 +13,7 @@ import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -266,6 +267,18 @@ function SuppliersTab({ t, notify, active = true }) {
     })
   }
 
+  const buildSupplierPayload = useCallback((supplier = {}) => ({
+    name: supplier.name || '',
+    phone: supplier.phone || '',
+    email: supplier.email || '',
+    company: supplier.company || '',
+    contact_person: supplier.contact_person || '',
+    address: supplier.address || '',
+    notes: supplier.notes || '',
+    userId: user?.id,
+    userName: user?.name,
+  }), [user?.id, user?.name])
+
   const load = useCallback(async ({ silent = false, label = 'Suppliers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -337,6 +350,7 @@ function SuppliersTab({ t, notify, active = true }) {
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) return notify(t('name_required') || 'Name required', 'error')
     try {
+      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const result = selected
         ? await window.api.updateSupplier(selected.id, payload)
@@ -345,10 +359,44 @@ function SuppliersTab({ t, notify, active = true }) {
         notify(result.error || 'Failed', 'error')
         return
       }
+      if (selected && existingSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        actionHistory.pushAction({
+          label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const restoreResult = await window.api.updateSupplier(existingSnapshot.id, buildSupplierPayload(existingSnapshot))
+            if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
+            await load({ silent: true, label: 'Suppliers undo edit' })
+          },
+          redo: async () => {
+            const redoResult = await window.api.updateSupplier(nextSnapshot.id, buildSupplierPayload(nextSnapshot))
+            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply supplier changes')
+            await load({ silent: true, label: 'Suppliers redo edit' })
+          },
+        })
+      } else {
+        let createdSupplierId = extractHistoryResultId(result)
+        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdSupplierId })
+        if (createdSupplierId > 0) {
+          actionHistory.pushAction({
+            label: `Add supplier ${createdSnapshot.name || ''}`.trim(),
+            undo: async () => {
+              await window.api.deleteSupplier(createdSupplierId)
+              await load({ silent: true, label: 'Suppliers undo create' })
+            },
+            redo: async () => {
+              const recreateResult = await window.api.createSupplier(buildSupplierPayload(createdSnapshot))
+              if (recreateResult?.success === false) throw new Error(recreateResult.error || 'Failed to recreate supplier')
+              createdSupplierId = extractHistoryResultId(recreateResult)
+              await load({ silent: true, label: 'Suppliers redo create' })
+            },
+          })
+        }
+      }
       notify(selected ? (t('supplier_updated') || 'Updated') : (t('supplier_added') || 'Added'))
       setModal(null)
       setSelected(null)
-      load()
+      await load({ silent: true, label: 'Suppliers after save' })
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
     }
@@ -357,11 +405,28 @@ function SuppliersTab({ t, notify, active = true }) {
   const handleDelete = async (supplier) => {
     if (!confirm(`Delete supplier "${supplier.name}"?`)) return
     try {
+      const snapshot = cloneHistorySnapshot(supplier)
       await window.api.deleteSupplier(supplier.id)
+      let restoredSupplierId = 0
+      actionHistory.pushAction({
+        label: `Delete supplier ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          const restoreResult = await window.api.createSupplier(buildSupplierPayload(snapshot))
+          if (restoreResult?.success === false) throw new Error(restoreResult.error || 'Failed to restore supplier')
+          restoredSupplierId = extractHistoryResultId(restoreResult)
+          await load({ silent: true, label: 'Suppliers undo delete' })
+        },
+        redo: async () => {
+          const targetId = restoredSupplierId || Number(snapshot.id || 0)
+          if (!targetId) return
+          await window.api.deleteSupplier(targetId)
+          await load({ silent: true, label: 'Suppliers redo delete' })
+        },
+      })
       notify(t('supplier_deleted') || 'Deleted')
       setModal(null)
       setSelected(null)
-      load()
+      await load({ silent: true, label: 'Suppliers after delete' })
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
     }

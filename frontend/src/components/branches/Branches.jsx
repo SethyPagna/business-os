@@ -8,6 +8,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 /**
@@ -102,6 +103,18 @@ export default function Branches() {
   const activeBranches = useMemo(() => branches.filter((branch) => branch.is_active), [branches])
   const selectedCount = selectedIds.size
 
+  const buildBranchPayload = useCallback((branch = {}) => ({
+    name: branch.name || '',
+    location: branch.location || '',
+    phone: branch.phone || '',
+    manager: branch.manager || '',
+    notes: branch.notes || '',
+    is_default: branch.is_default ? 1 : 0,
+    is_active: branch.is_active ?? 1,
+    userId: user?.id,
+    userName: user?.name,
+  }), [user?.id, user?.name])
+
   /**
    * 5. Branch Stock Expansion
    * 5.1 Lazy-load stock per branch on first open.
@@ -123,6 +136,7 @@ export default function Branches() {
    */
   const handleSaveBranch = async (form) => {
     try {
+      const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const payload = { ...form, userId: user?.id, userName: user?.name }
       const res = selected
         ? await window.api.updateBranch(selected.id, payload)
@@ -131,10 +145,43 @@ export default function Branches() {
         notify(res.error || 'Failed to save branch', 'error')
         return
       }
+      let createdBranchId = extractHistoryResultId(res)
+      if (selected && existingSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+        actionHistory.pushAction({
+          label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const result = await window.api.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot))
+            if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+            await load()
+          },
+          redo: async () => {
+            const result = await window.api.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot))
+            if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
+            await load()
+          },
+        })
+      } else if (createdBranchId > 0) {
+        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdBranchId })
+        actionHistory.pushAction({
+          label: `Add branch ${createdSnapshot.name || ''}`.trim(),
+          undo: async () => {
+            const result = await window.api.deleteBranch(createdBranchId, user?.id, user?.name)
+            if (!result?.success) throw new Error(result?.error || 'Failed to undo branch creation')
+            await load()
+          },
+          redo: async () => {
+            const result = await window.api.createBranch(buildBranchPayload(createdSnapshot))
+            if (result?.success === false) throw new Error(result.error || 'Failed to recreate branch')
+            createdBranchId = extractHistoryResultId(result)
+            await load()
+          },
+        })
+      }
       notify(selected ? (t('branch_updated') || 'Branch updated') : (t('branch_created') || 'Branch created'))
       setModal(null)
       setSelected(null)
-      load()
+      await load()
     } catch (error) {
       notify(error?.message || 'Failed to save branch', 'error')
     }
@@ -143,13 +190,31 @@ export default function Branches() {
   const handleDelete = async (branch) => {
     if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) return
     try {
+      const snapshot = cloneHistorySnapshot(branch)
       const res = await window.api.deleteBranch(branch.id, user?.id, user?.name)
       if (!res?.success) {
         notify(res?.error || 'Cannot delete branch', 'error')
         return
       }
+      let restoredBranchId = 0
+      actionHistory.pushAction({
+        label: `Delete branch ${snapshot.name || ''}`.trim(),
+        undo: async () => {
+          const result = await window.api.createBranch(buildBranchPayload(snapshot))
+          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+          restoredBranchId = extractHistoryResultId(result)
+          await load()
+        },
+        redo: async () => {
+          const targetId = restoredBranchId || Number(snapshot.id || 0)
+          if (!targetId) return
+          const result = await window.api.deleteBranch(targetId, user?.id, user?.name)
+          if (!result?.success) throw new Error(result?.error || 'Failed to delete branch again')
+          await load()
+        },
+      })
       notify(t('branch_deleted') || 'Branch deleted')
-      load()
+      await load()
     } catch (error) {
       notify(error?.message || 'Failed to delete branch', 'error')
     }
