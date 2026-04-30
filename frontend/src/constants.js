@@ -69,9 +69,9 @@ export const STOCK = {
 // ─── Sync / networking ────────────────────────────────────────────────────────
 export const SYNC = {
   /** Milliseconds before a sync server HTTP request times out. */
-  REQUEST_TIMEOUT_MS: 15_000,
+  REQUEST_TIMEOUT_MS: 12_000,
   /** Serve IndexedDB/local fallback if a read is still waiting after this long. */
-  READ_LOCAL_FALLBACK_MS: 700,
+  READ_LOCAL_FALLBACK_MS: 350,
   /** Retry a failed read once after this short pause before falling back locally. */
   READ_SERVER_RETRY_DELAY_MS: 450,
   /** Milliseconds before the WebSocket attempts to reconnect after a drop. */

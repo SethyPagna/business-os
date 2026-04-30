@@ -1419,17 +1419,25 @@ function applyGoogleTranslateSelection(sourceLang, targetLang) {
   if (typeof document === 'undefined') return false
   const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
   const target = String(targetLang || 'original').trim().toLowerCase()
-  const cookieValue = target === 'original' || target === from
-    ? `/${from}/${from}`
-    : `/${from}/${target}`
-  document.cookie = `googtrans=${cookieValue}; path=/; SameSite=Lax`
+  const cookieValue = target === 'original' || target === from ? '' : `/auto/${target}`
+  const cookieTargets = [
+    'path=/; SameSite=Lax',
+    typeof window !== 'undefined' && window.location?.hostname?.includes('.')
+      ? `domain=.${window.location.hostname}; path=/; SameSite=Lax`
+      : '',
+  ].filter(Boolean)
+  cookieTargets.forEach((suffix) => {
+    document.cookie = cookieValue
+      ? `googtrans=${cookieValue}; ${suffix}`
+      : `googtrans=; ${suffix}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  })
   try {
     window.localStorage?.setItem('business-os:portal-translate-target', target)
   } catch (_) {}
 
   const selects = Array.from(document.querySelectorAll('.goog-te-combo'))
   if (!selects.length) return false
-  const nextValue = target === 'original' ? from : target
+  const nextValue = target === 'original' ? '' : target
   selects.forEach((select) => {
     if (String(select.value || '').toLowerCase() === nextValue) return
     select.value = nextValue
@@ -1449,7 +1457,7 @@ function readStoredTranslateTarget(sourceLang) {
       const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
       const parts = cookieValue.split('/').filter(Boolean)
       const target = String(parts[1] || '').trim().toLowerCase()
-      if (target && target !== from) return target
+      if (target && !['auto', from].includes(target)) return target
     }
   }
   if (typeof window !== 'undefined') {
@@ -1691,9 +1699,17 @@ export default function CatalogPage({ publicView = false }) {
     if (!publicView || !previewConfig.translateWidgetEnabled) return
     if (!translateReady) return
     const applied = applyGoogleTranslateSelection(language, nextTarget)
-    if (!applied || typeof window === 'undefined') return
+    if (typeof window === 'undefined') return
     window.setTimeout(() => {
-      applyGoogleTranslateSelection(language, nextTarget)
+      const reapplied = applyGoogleTranslateSelection(language, nextTarget)
+      if (!applied && !reapplied) {
+        const markerKey = 'business-os:portal-translate-last-reload'
+        const lastReload = Number(window.sessionStorage?.getItem(markerKey) || 0)
+        if (Date.now() - lastReload > 5000) {
+          window.sessionStorage?.setItem(markerKey, String(Date.now()))
+          window.location.reload()
+        }
+      }
     }, 120)
   }
 

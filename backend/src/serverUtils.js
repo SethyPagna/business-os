@@ -210,6 +210,7 @@ function isCustomerPortalRoutePath(reqPath) {
 function setTunnelSecurityHeaders(req, res) {
   const allowPortalTranslateEval = isCustomerPortalRoutePath(req?.path)
   const portalTranslateEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
+  const portalTranslateElemEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
 
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -236,8 +237,8 @@ function setTunnelSecurityHeaders(req, res) {
       "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
       "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://*.supabase.co",
       "worker-src 'self' blob:",
-      `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com`,
-      "script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com",
+      `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com`,
+      `script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'${portalTranslateElemEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com`,
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()

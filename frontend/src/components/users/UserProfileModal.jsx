@@ -3,9 +3,11 @@ import { Chrome, Link2, LogOut, Mail, ShieldCheck } from 'lucide-react'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.mjs'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 
 /**
  * 1. User Profile Modal
@@ -255,6 +257,7 @@ function AvatarEditorModal({
 
 export default function UserProfileModal({ onClose }) {
   const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile' })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -295,6 +298,9 @@ export default function UserProfileModal({ onClose }) {
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
   const avatarFileInputRef = useRef(null)
+  const loadProfileRequestRef = useRef(0)
+  const saveSessionInFlightRef = useRef(false)
+  const oauthRequestInFlightRef = useRef(false)
 
   /**
    * 2. Derived State
@@ -325,7 +331,8 @@ export default function UserProfileModal({ onClose }) {
    */
   const loadProfile = async () => {
     if (!user?.id) return
-    setLoading(true)
+    const requestId = beginTrackedRequest(loadProfileRequestRef)
+    if (!profile) setLoading(true)
     try {
       const result = await settleLoaderMap({
         profile: () => window.api.getUserProfile(user.id),
@@ -338,6 +345,7 @@ export default function UserProfileModal({ onClose }) {
       const capsResult = result.values.caps
       const authMethodsResult = result.values.authMethods
 
+      if (!isTrackedRequestCurrent(loadProfileRequestRef, requestId)) return
       if (!result.hasAnySuccess || !profileResult) {
         throw new Error(getFirstLoaderError(result.errors, 'Failed to load profile'))
       }
@@ -360,13 +368,15 @@ export default function UserProfileModal({ onClose }) {
         notify(tr('profile_partial_load', 'Some sign-in details are still catching up. The main profile is ready.'), 'warning')
       }
     } catch (error) {
+      if (!isTrackedRequestCurrent(loadProfileRequestRef, requestId)) return
       notify(error?.message || 'Failed to load profile', 'error')
     } finally {
-      setLoading(false)
+      if (isTrackedRequestCurrent(loadProfileRequestRef, requestId)) setLoading(false)
     }
   }
 
   useEffect(() => { loadProfile() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => invalidateTrackedRequest(loadProfileRequestRef), [])
 
   useEffect(() => {
     const preferred = String(settings?.login_session_duration || '').trim()
@@ -387,6 +397,7 @@ export default function UserProfileModal({ onClose }) {
    * 4.3 Session-duration preference update.
    */
   const handleProfileSave = async () => {
+    if (savingProfile) return
     if (!profile?.name?.trim() || !profile?.username?.trim()) {
       notify(tr('name_username_required', 'Name and username are required'), 'error')
       return
@@ -399,7 +410,7 @@ export default function UserProfileModal({ onClose }) {
     setSavingProfile(true)
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
-      const result = await window.api.updateUserProfile(user.id, {
+      const result = await withLoaderTimeout(() => window.api.updateUserProfile(user.id, {
         name: profile.name,
         username: profile.username,
         phone: profile.phone,
@@ -410,7 +421,7 @@ export default function UserProfileModal({ onClose }) {
         adminOverride: canAdminOverride,
         userId: user.id,
         userName: user.name,
-      })
+      }), 'Save profile', 20000)
       if (result?.success === false) {
         notify(result.error || 'Failed to save profile', 'error')
         return
@@ -420,7 +431,7 @@ export default function UserProfileModal({ onClose }) {
         window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
         setProfile(nextUser)
       }
-      const authResult = await window.api.getUserAuthMethods?.(user.id).catch(() => null)
+      const authResult = await withLoaderTimeout(() => window.api.getUserAuthMethods?.(user.id), 'Profile sign-in methods', 12000).catch(() => null)
       if (authResult && authResult.success !== false) {
         const { success: _authSuccess, ...authData } = authResult || {}
         setAuthMethods(authData)
@@ -433,6 +444,12 @@ export default function UserProfileModal({ onClose }) {
       } else {
         notify(tr('profile_updated', 'Profile updated'), 'success')
       }
+      actionHistory.pushAction({
+        scope: 'profile',
+        entity: 'user',
+        entity_id: user.id,
+        label: tr('profile_updated', 'Profile updated'),
+      })
     } catch (error) {
       notify(error?.message || 'Failed to save profile', 'error')
     } finally {
@@ -441,19 +458,20 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const handlePasswordSave = async () => {
+    if (savingPassword) return
     if (newPassword.length < 4) return notify(tr('new_password_min_length', 'Use at least 4 characters for the new password'), 'error')
     if (newPassword !== confirmPassword) return notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
     if (!canAdminOverride && !currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
 
     setSavingPassword(true)
     try {
-      const result = await window.api.changeUserPassword(user.id, {
+      const result = await withLoaderTimeout(() => window.api.changeUserPassword(user.id, {
         currentPassword: canAdminOverride ? undefined : currentPassword,
         newPassword,
         adminOverride: canAdminOverride,
         userId: user.id,
         userName: user.name,
-      })
+      }), 'Change password', 20000)
       if (result?.success === false) {
         notify(result.error || 'Failed to change password', 'error')
         return
@@ -462,6 +480,12 @@ export default function UserProfileModal({ onClose }) {
       setNewPassword('')
       setConfirmPassword('')
       notify(tr('password_updated', 'Password updated'), 'success')
+      actionHistory.pushAction({
+        scope: 'profile',
+        entity: 'user',
+        entity_id: user.id,
+        label: tr('password_updated', 'Password updated'),
+      })
     } catch (error) {
       notify(error?.message || 'Failed to change password', 'error')
     } finally {
@@ -470,15 +494,34 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const handleSessionSave = () => {
+    if (saveSessionInFlightRef.current) return
+    saveSessionInFlightRef.current = true
     Promise.resolve(saveSettings?.({ login_session_duration: sessionDuration }))
+      .then(() => {
+        actionHistory.pushAction({
+          scope: 'profile',
+          entity: 'user',
+          entity_id: user.id,
+          label: tr('save_login_duration', 'Save login duration'),
+        })
+      })
       .catch((error) => {
         notify(error?.message || 'Failed to save login duration preference', 'error')
+      })
+      .finally(() => {
+        saveSessionInFlightRef.current = false
       })
   }
 
   const refreshOtpState = async () => {
     setOtpMode(null)
     await loadProfile()
+    actionHistory.pushAction({
+      scope: 'profile',
+      entity: 'otp',
+      entity_id: user.id,
+      label: tr('security_settings_updated', 'Security settings updated'),
+    })
     notify(tr('security_settings_updated', 'Security settings updated'), 'success')
   }
 
@@ -505,6 +548,7 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const handleStartOauthLink = async (provider) => {
+    if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
     if (!verificationCaps.supabaseAuth) {
@@ -512,6 +556,7 @@ export default function UserProfileModal({ onClose }) {
       return
     }
 
+    oauthRequestInFlightRef.current = true
     setOauthConnecting(normalizedProvider)
     try {
       try {
@@ -523,11 +568,11 @@ export default function UserProfileModal({ onClose }) {
         }))
       } catch (_) {}
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(normalizedProvider)}`
-      const result = await window.api.startSupabaseOauth({
+      const result = await withLoaderTimeout(() => window.api.startSupabaseOauth({
         provider: normalizedProvider,
         mode: 'link',
         redirectTo,
-      })
+      }), 'Start sign-in provider', 20000)
       if (result?.success === false || !result?.url) {
         notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
         return
@@ -536,11 +581,13 @@ export default function UserProfileModal({ onClose }) {
     } catch (error) {
       notify(error?.message || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
     } finally {
+      oauthRequestInFlightRef.current = false
       setOauthConnecting('')
     }
   }
 
   const handleDisconnectOauthProvider = async (provider) => {
+    if (disconnectingProvider) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
     if (!currentPassword.trim()) {
@@ -550,10 +597,10 @@ export default function UserProfileModal({ onClose }) {
 
     setDisconnectingProvider(normalizedProvider)
     try {
-      const result = await window.api.disconnectUserAuthProvider(user.id, {
+      const result = await withLoaderTimeout(() => window.api.disconnectUserAuthProvider(user.id, {
         provider: normalizedProvider,
         currentPassword,
-      })
+      }), 'Disconnect sign-in provider', 20000)
       if (result?.success === false) {
         notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
@@ -569,6 +616,12 @@ export default function UserProfileModal({ onClose }) {
       }
       setCurrentPassword('')
       notify(tr('identity_unlinked_success', 'Sign-in method disconnected.'), 'success')
+      actionHistory.pushAction({
+        scope: 'profile',
+        entity: 'auth_provider',
+        entity_id: user.id,
+        label: tr('identity_unlinked_success', 'Sign-in method disconnected.'),
+      })
     } catch (error) {
       notify(error?.message || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
     } finally {
@@ -598,6 +651,7 @@ export default function UserProfileModal({ onClose }) {
   }
 
   const saveAvatarFromEditor = async () => {
+    if (uploadingAvatar) return
     setUploadingAvatar(true)
     try {
       const blob = await renderAvatarCropBlob({
@@ -607,10 +661,16 @@ export default function UserProfileModal({ onClose }) {
         positionY: avatarPositionY,
       })
       const file = new File([blob], 'avatar.png', { type: 'image/png' })
-      const uploadResult = await window.api.uploadUserAvatar({ file })
+      const uploadResult = await withLoaderTimeout(() => window.api.uploadUserAvatar({ file }), 'Upload avatar', 30000)
       if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
       setProfile((current) => ({ ...current, avatar_path: uploadResult.path }))
       notify(tr('avatar_uploaded', 'Avatar uploaded'), 'success')
+      actionHistory.pushAction({
+        scope: 'profile',
+        entity: 'user_avatar',
+        entity_id: user.id,
+        label: tr('avatar_uploaded', 'Avatar uploaded'),
+      })
       closeAvatarEditor()
     } catch (error) {
       notify(error?.message || tr('avatar_upload_failed', 'Avatar upload failed'), 'error')
@@ -626,6 +686,7 @@ export default function UserProfileModal({ onClose }) {
           <div className="py-10 text-center text-sm text-gray-400">{tr('loading_account', 'Loading account...')}</div>
         ) : (
           <div className="space-y-6">
+            <ActionHistoryBar history={actionHistory} className="mb-1" />
             <div className="flex flex-col gap-4 rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800/70 sm:flex-row sm:items-center">
               <AvatarPreview name={profile.name} avatarPath={profile.avatar_path} />
               <div className="min-w-0 flex-1">

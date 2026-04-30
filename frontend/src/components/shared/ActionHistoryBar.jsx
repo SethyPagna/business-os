@@ -6,6 +6,13 @@ function formatHistoryList(items = []) {
   return items.map((item) => item?.label).filter(Boolean).slice(-3).reverse()
 }
 
+function formatServerStatus(item, T) {
+  if (item?.status === 'undoable') return T('undo_available', 'Undo available')
+  if (item?.status === 'redoable') return T('redo_available', 'Redo available')
+  if (item?.status === 'failed') return T('failed', 'Failed')
+  return T('recorded', 'Recorded')
+}
+
 export default function ActionHistoryBar({
   history,
   align = 'left',
@@ -23,8 +30,9 @@ export default function ActionHistoryBar({
   }
   const undoItems = formatHistoryList(history.undoItems)
   const redoItems = formatHistoryList(history.redoItems)
+  const recordedItems = Array.isArray(history.serverItems) ? history.serverItems.slice(0, 3) : []
   const wrapperAlign = align === 'right' ? 'justify-end' : 'justify-start'
-  const hasItems = !!((history.undoItems || []).length || (history.redoItems || []).length)
+  const hasItems = !!((history.undoItems || []).length || (history.redoItems || []).length || recordedItems.length)
 
   return (
     <div className={`relative flex flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
@@ -42,7 +50,8 @@ export default function ActionHistoryBar({
         <div className="hidden min-w-0 items-center gap-2 md:flex">
           {undoItems.length ? <span className="truncate text-slate-500">{T('undo', 'Undo')}: {undoItems.join(' / ')}</span> : null}
           {redoItems.length ? <span className="truncate text-slate-400">{T('redo', 'Redo')}: {redoItems.join(' / ')}</span> : null}
-          {!undoItems.length && !redoItems.length ? <span>{T('no_recent_actions', 'No recent actions')}</span> : null}
+          {!undoItems.length && !redoItems.length && recordedItems.length ? <span className="truncate text-slate-500">{recordedItems[0]?.label}</span> : null}
+          {!undoItems.length && !redoItems.length && !recordedItems.length ? <span>{T('no_recent_actions', 'No recent actions')}</span> : null}
         </div>
         <button
           type="button"
@@ -94,6 +103,15 @@ export default function ActionHistoryBar({
               <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{item.label}</span>
               <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">{T('redo', 'Redo')}</span>
             </button>
+          ))}
+          {recordedItems.map((item) => (
+            <div
+              key={`recorded-${item.id}`}
+              className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left"
+            >
+              <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{item.label}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T)}</span>
+            </div>
           ))}
         </div>
       ) : null}

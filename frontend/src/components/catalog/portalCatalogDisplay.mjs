@@ -84,7 +84,7 @@ export function buildPortalHighlightBadges(product, config, copy) {
   if (config?.showRecommendedBadge && product?.portal_recommended) {
     badges.push({
       key: 'recommended',
-      tone: 'violet',
+      tone: 'emerald',
       label: copy('recommendedBadge', 'Recommended'),
     })
   }
@@ -92,7 +92,7 @@ export function buildPortalHighlightBadges(product, config, copy) {
   if (config?.showPromotionBadge && promotion.active) {
     badges.push({
       key: 'promotion',
-      tone: 'custom',
+      tone: 'rose',
       color: promotion.badgeColor,
       label: promotion.percentOff >= 5
         ? replaceRankVars(copy('promotionBadgePercent', '-{value}%'), promotion.percentOff)
@@ -104,6 +104,7 @@ export function buildPortalHighlightBadges(product, config, copy) {
     badges.push({
       key: 'top-seller',
       tone: 'amber',
+      rank: Number(product.top_seller_rank),
       label: replaceRankVars(copy('topSellerBadge', 'Top {value} Seller'), Number(product.top_seller_rank)),
     })
   }
@@ -112,6 +113,7 @@ export function buildPortalHighlightBadges(product, config, copy) {
     badges.push({
       key: 'top-product',
       tone: 'blue',
+      rank: Number(product.top_product_rank),
       label: replaceRankVars(copy('topProductBadge', 'Top {value} Product'), Number(product.top_product_rank)),
     })
   }
@@ -119,7 +121,7 @@ export function buildPortalHighlightBadges(product, config, copy) {
   if (config?.showNewArrivalBadge && Number(product?.new_arrival_rank || 0) > 0 && Number(product.new_arrival_rank) <= rankLimit) {
     badges.push({
       key: 'new-arrival',
-      tone: 'emerald',
+      tone: 'violet',
       label: copy('newArrivalBadge', 'New'),
     })
   }

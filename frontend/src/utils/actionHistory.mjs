@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 function normalizeEntry(entry = {}, index = 0) {
   return {
@@ -16,12 +16,29 @@ function normalizeEntry(entry = {}, index = 0) {
 export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])
+  const [serverItems, setServerItems] = useState([])
   const [busy, setBusy] = useState('')
+
+  const refreshServerItems = useCallback(() => {
+    if (typeof window === 'undefined' || !window.api?.getActionHistory) return
+    window.api.getActionHistory(scope, Math.max(3, limit))
+      .then((result) => {
+        setServerItems(Array.isArray(result?.items) ? result.items : [])
+      })
+      .catch(() => {})
+  }, [limit, scope])
+
+  useEffect(() => {
+    refreshServerItems()
+  }, [refreshServerItems])
 
   const pushAction = useCallback((entry) => {
     const nextEntry = normalizeEntry(entry)
-    setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), nextEntry])
-    setRedoStack([])
+    const reversible = typeof nextEntry.undo === 'function' && typeof nextEntry.redo === 'function'
+    if (reversible) {
+      setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), nextEntry])
+      setRedoStack([])
+    }
     if (typeof window !== 'undefined' && window.api?.createActionHistory) {
       window.api.createActionHistory({
         scope: entry.scope || scope,
@@ -30,17 +47,18 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
         label: nextEntry.label,
         undo_label: entry.undoLabel || `Undo ${nextEntry.label}`,
         redo_label: entry.redoLabel || `Redo ${nextEntry.label}`,
-        reversible: typeof nextEntry.undo === 'function' && typeof nextEntry.redo === 'function',
+        reversible,
         undo_payload: entry.undo_payload || {},
         redo_payload: entry.redo_payload || {},
       }).then((result) => {
         const serverId = result?.id
+        refreshServerItems()
         if (!serverId) return
         setUndoStack((current) => current.map((item) => item.id === nextEntry.id ? { ...item, serverId } : item))
       }).catch(() => {})
     }
     return nextEntry
-  }, [limit, scope])
+  }, [limit, refreshServerItems, scope])
 
   const runEntry = useCallback(async (direction, entryId = null) => {
     const source = direction === 'undo' ? undoStack : redoStack
@@ -54,21 +72,21 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).catch(() => {})
+        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).then(refreshServerItems).catch(() => {})
       } else {
         setRedoStack((current) => current.filter((item) => item.id !== entry.id))
         setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).catch(() => {})
+        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).then(refreshServerItems).catch(() => {})
       }
       return true
     } catch (error) {
-      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'failed', last_error: error?.message || String(error || '') }).catch(() => {})
+      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'failed', last_error: error?.message || String(error || '') }).then(refreshServerItems).catch(() => {})
       notify?.(error?.message || `Unable to ${direction} that action right now.`, 'error')
       return false
     } finally {
       setBusy('')
     }
-  }, [busy, limit, notify, redoStack, undoStack])
+  }, [busy, limit, notify, redoStack, refreshServerItems, undoStack])
 
   const undo = useCallback((entryId = null) => runEntry('undo', entryId), [runEntry])
   const redo = useCallback((entryId = null) => runEntry('redo', entryId), [runEntry])
@@ -81,8 +99,10 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
     lastRedoLabel: redoStack[redoStack.length - 1]?.label || '',
     undoItems: undoStack,
     redoItems: redoStack,
+    serverItems,
+    refreshServerItems,
     pushAction,
     undo,
     redo,
-  }), [busy, pushAction, redo, redoStack, undo, undoStack])
+  }), [busy, pushAction, redo, redoStack, refreshServerItems, serverItems, undo, undoStack])
 }

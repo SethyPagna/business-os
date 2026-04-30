@@ -84,7 +84,7 @@ function ConfirmReset({
   )
 }
 
-function ResetData() {
+function ResetData({ actionHistory = null }) {
   const { t, notify, hasPermission } = useApp()
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
   const [mode, setMode] = useState('sales')
@@ -114,11 +114,18 @@ function ResetData() {
   const selected = MODES.find((entry) => entry.id === mode)
 
   const doReset = async () => {
+    if (working) return
     if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
     setWorking(true)
     try {
       const result = await window.api.resetData(mode)
       if (result?.success) {
+        actionHistory?.pushAction?.({
+          scope: 'backup',
+          entity: 'reset_data',
+          label: result.message || T('reset_complete', 'Reset complete'),
+          undo_payload: { mode },
+        })
         notify(result.message || T('reset_complete', 'Reset complete'), 'success')
         setTimeout(() => refreshAppData(), 200)
       } else {
@@ -171,7 +178,7 @@ function ResetData() {
   )
 }
 
-function FactoryReset() {
+function FactoryReset({ actionHistory = null }) {
   const { t, notify, hasPermission } = useApp()
   const T = (key, fallback) => (t && t(key)) || fallback
   const [step, setStep] = useState(0)
@@ -180,11 +187,17 @@ function FactoryReset() {
   const CONFIRM_WORD = 'FACTORY RESET'
 
   async function doFactoryReset() {
+    if (working) return
     if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
     setWorking(true)
     try {
       const result = await window.api.factoryReset()
       if (result?.success) {
+        actionHistory?.pushAction?.({
+          scope: 'backup',
+          entity: 'factory_reset',
+          label: T('factory_reset_complete', 'Factory reset complete. Restarting...'),
+        })
         notify(T('factory_reset_complete', 'Factory reset complete. Restarting...'), 'success')
         setTimeout(() => refreshAppData(), 200)
       } else {

@@ -4,6 +4,7 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
 import { refreshAppData } from '../../utils/appRefresh'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -12,6 +13,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import PageHeader from '../shared/PageHeader'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
 
 const BACKUP_SECTION_CONFIG = [
   { key: 'products', labelKey: 'products', label: 'Products' },
@@ -212,6 +214,53 @@ function buildBackupPreview(backup, fileName, copy = (_key, fallback) => fallbac
   }
 }
 
+function yieldToBrowser() {
+  if (typeof window === 'undefined') return Promise.resolve()
+  return new Promise((resolve) => window.setTimeout(resolve, 0))
+}
+
+async function parseBackupJsonFile(file) {
+  const text = await file.text()
+  await yieldToBrowser()
+  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') {
+    return JSON.parse(text)
+  }
+  const workerSource = `
+    self.onmessage = function(event) {
+      try {
+        var parsed = JSON.parse(event.data || '{}');
+        self.postMessage({ ok: true, parsed: parsed });
+      } catch (error) {
+        self.postMessage({ ok: false, message: error && error.message ? error.message : 'Invalid JSON' });
+      }
+    };
+  `
+  const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }))
+  try {
+    return await new Promise((resolve, reject) => {
+      const worker = new Worker(workerUrl)
+      const timer = window.setTimeout(() => {
+        worker.terminate()
+        reject(new Error('Backup preview took too long to parse.'))
+      }, 45000)
+      worker.onmessage = (event) => {
+        window.clearTimeout(timer)
+        worker.terminate()
+        if (event.data?.ok) resolve(event.data.parsed)
+        else reject(new Error(event.data?.message || 'Invalid backup JSON'))
+      }
+      worker.onerror = (error) => {
+        window.clearTimeout(timer)
+        worker.terminate()
+        reject(new Error(error?.message || 'Invalid backup JSON'))
+      }
+      worker.postMessage(text)
+    })
+  } finally {
+    URL.revokeObjectURL(workerUrl)
+  }
+}
+
 function SectionChip({ label, value, tone = 'slate' }) {
   const toneClass = {
     slate: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
@@ -340,7 +389,7 @@ function FolderBrowserPanel({
   )
 }
 
-function DataFolderLocation({ t, notify, active = true }) {
+function DataFolderLocation({ t, notify, active = true, actionHistory = null }) {
   const copy = useCopy(t)
   const [info, setInfo] = useState(null)
   const [systemConfig, setSystemConfig] = useState(null)
@@ -397,6 +446,7 @@ function DataFolderLocation({ t, notify, active = true }) {
   )
 
   const openBrowser = async (dir) => {
+    if (busy) return
     try {
       setBusy(true)
       const result = await window.api.browseDir(dir || inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
@@ -413,6 +463,7 @@ function DataFolderLocation({ t, notify, active = true }) {
   }
 
   const pickFolderNatively = async () => {
+    if (busy) return
     if (!hostUiAvailable) {
       notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
       setShowAdvancedBrowser(true)
@@ -469,6 +520,7 @@ function DataFolderLocation({ t, notify, active = true }) {
   }
 
   const handleApply = async () => {
+    if (busy) return
     const target = String(previewPath || '').trim()
     if (!target) return notify(copy('data_folder_path_required', 'Please enter a folder path'), 'error')
     if (!confirm(`${copy('data_folder_change_prompt', 'Copy current live Business OS data to')}:\n\n${target}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}\n\n${copy('proceed', 'Proceed?')}`)) return
@@ -477,6 +529,13 @@ function DataFolderLocation({ t, notify, active = true }) {
       setBusy(true)
       const result = await window.api.setDataPath(target)
       if (result?.success) {
+        actionHistory?.pushAction?.({
+          scope: 'backup',
+          entity: 'data_path',
+          label: copy('data_folder_updated', 'Data folder updated. Restart the server to apply.'),
+          undo_payload: { previousPath: info?.dataRoot || null },
+          redo_payload: { nextPath: target },
+        })
         notify(copy('data_folder_updated', 'Data folder updated. Restart the server to apply.'), 'success')
         load()
         return
@@ -490,6 +549,7 @@ function DataFolderLocation({ t, notify, active = true }) {
   }
 
   const handleReset = async () => {
+    if (busy) return
     if (!confirm(`${copy('data_folder_reset_prompt', 'Copy current live data back to the default business-os-data folder?')}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}`)) return
     try {
       setBusy(true)
@@ -499,6 +559,12 @@ function DataFolderLocation({ t, notify, active = true }) {
         return
       }
       notify(copy('data_folder_reset_done', 'Reverted to default folder. Restart the server to apply.'))
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'data_path',
+        label: copy('data_folder_reset_done', 'Reverted to default folder. Restart the server to apply.'),
+        undo_payload: { previousPath: info?.dataRoot || null },
+      })
       load()
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -625,7 +691,7 @@ function DataFolderLocation({ t, notify, active = true }) {
   )
 }
 
-function GoogleDriveSyncSection({ t, notify, active = true }) {
+function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }) {
   const copy = useCopy(t)
   const [busy, setBusy] = useState('')
   const [status, setStatus] = useState(null)
@@ -744,6 +810,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   }, [active, copy, load, notify])
 
   const savePreferences = async () => {
+    if (busy) return
     setBusy('save')
     try {
       const result = await window.api.saveGoogleDriveSyncPreferences?.({
@@ -753,6 +820,11 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         syncIntervalSeconds: form.syncIntervalSeconds,
       })
       setStatus(result?.item || status)
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'google_drive_sync',
+        label: copy('drive_sync_preferences_saved', 'Google Drive sync preferences saved'),
+      })
       notify(copy('saved', 'Saved'), 'success')
       await load({ force: true })
     } catch (error) {
@@ -763,6 +835,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   }
 
   const connectGoogleDrive = async () => {
+    if (busy) return
     if (!String(form.clientId || '').trim() && !status?.clientId) {
       notify(copy('drive_sync_client_required', 'Google OAuth client ID is required'), 'error')
       return
@@ -786,6 +859,11 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       })
       const authUrl = result?.authUrl
       if (!authUrl) throw new Error(copy('drive_sync_connect_failed', 'Google Drive connection failed'))
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'google_drive_sync',
+        label: copy('drive_sync_connect_started', 'Google Drive connection started'),
+      })
       const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
       if (!popup) window.location.assign(authUrl)
       notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
@@ -797,11 +875,18 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   }
 
   const syncNow = async () => {
+    if (busy) return
     setBusy('sync')
     try {
       const result = await window.api.syncGoogleDriveNow?.()
       const summary = result?.summary || {}
       await load({ force: true })
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'google_drive_sync',
+        label: copy('drive_sync_complete', 'Drive sync complete'),
+        undo_payload: summary,
+      })
       notify(
         `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
         'success',
@@ -814,12 +899,18 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   }
 
   const disconnect = async () => {
+    if (busy) return
     if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
     setBusy('disconnect')
     try {
       await window.api.disconnectGoogleDriveSync?.()
       setForm((current) => ({ ...current, clientSecret: '' }))
       await load({ force: true })
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'google_drive_sync',
+        label: copy('drive_sync_disconnected', 'Google Drive disconnected'),
+      })
       notify(copy('drive_sync_disconnected', 'Google Drive disconnected'), 'success')
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -829,6 +920,7 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
   }
 
   const forgetCredentials = async () => {
+    if (busy) return
     if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
     setBusy('forget')
     try {
@@ -839,6 +931,11 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
         clientSecret: '',
       }))
       await load({ force: true })
+      actionHistory?.pushAction?.({
+        scope: 'backup',
+        entity: 'google_drive_sync',
+        label: copy('drive_sync_credentials_forgotten', 'Saved Google Drive app credentials were removed'),
+      })
       notify(copy('drive_sync_credentials_forgotten', 'Saved Google Drive app credentials were removed'), 'success')
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -964,24 +1061,24 @@ function GoogleDriveSyncSection({ t, notify, active = true }) {
       ) : null}
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <PrimaryActionButton onClick={savePreferences} disabled={busy === 'save'}>
+        <PrimaryActionButton onClick={savePreferences} disabled={!!busy}>
           {busy === 'save' ? copy('saving', 'Saving...') : copy('save', 'Save')}
         </PrimaryActionButton>
-        <PathActionButton onClick={connectGoogleDrive} disabled={busy === 'connect'}>
+        <PathActionButton onClick={connectGoogleDrive} disabled={!!busy}>
           <Link2 className="h-4 w-4" />
           {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
         </PathActionButton>
-        <PathActionButton onClick={syncNow} disabled={busy === 'sync' || !status?.connected}>
+        <PathActionButton onClick={syncNow} disabled={!!busy || !status?.connected}>
           <RefreshCw className="h-4 w-4" />
           {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
         </PathActionButton>
         {status?.connected ? (
-          <PathActionButton onClick={disconnect} disabled={busy === 'disconnect'}>
+          <PathActionButton onClick={disconnect} disabled={!!busy}>
             <Link2Off className="h-4 w-4" />
             {busy === 'disconnect' ? copy('disconnecting', 'Disconnecting...') : copy('disconnect', 'Disconnect')}
           </PathActionButton>
         ) : null}
-        <PathActionButton onClick={forgetCredentials} disabled={busy === 'forget'}>
+        <PathActionButton onClick={forgetCredentials} disabled={!!busy}>
           <Link2Off className="h-4 w-4" />
           {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
         </PathActionButton>
@@ -994,6 +1091,7 @@ export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
   const isActive = useIsPageActive('backup')
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' })
   const [loading, setLoading] = useState('')
   const [pendingImport, setPendingImport] = useState(null)
   const [folderExportPath, setFolderExportPath] = useState('')
@@ -1073,11 +1171,19 @@ export default function Backup() {
   }
 
   const handleExport = async () => {
+    if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     setLoading('export')
     try {
       const result = await window.api.exportBackup()
-      if (result?.success) notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
+      if (result?.success) {
+        actionHistory.pushAction({
+          scope: 'backup',
+          entity: 'backup',
+          label: copy('export_backup_success', 'Backup exported successfully'),
+        })
+        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
+      }
       else notify(copy('export_failed', 'Export failed'), 'error')
     } catch (error) {
       notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
@@ -1099,12 +1205,19 @@ export default function Backup() {
   }
 
   const handleFolderExport = async () => {
+    if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderExportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
     setLoading('folder-export')
     try {
       const result = await window.api.exportBackupFolder(folderExportPath)
       if (result?.success) {
+        actionHistory.pushAction({
+          scope: 'backup',
+          entity: 'backup',
+          label: copy('export_backup_success', 'Backup exported successfully'),
+          redo_payload: { destinationDir: folderExportPath },
+        })
         notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
         if (result.backupRoot) setFolderImportPath(result.backupRoot)
       } else {
@@ -1117,6 +1230,7 @@ export default function Backup() {
   }
 
   const handleFolderImport = async () => {
+    if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
     if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
@@ -1126,6 +1240,12 @@ export default function Backup() {
       const result = await window.api.importBackupFolder(folderImportPath)
       if (result?.success) {
         cacheClearAll()
+        actionHistory.pushAction({
+          scope: 'backup',
+          entity: 'backup',
+          label: copy('import_backup_success', 'Backup imported successfully'),
+          undo_payload: { sourceDir: folderImportPath },
+        })
         notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
         setTimeout(() => refreshAppData(), 200)
       } else {
@@ -1138,11 +1258,13 @@ export default function Backup() {
   }
 
   const handleChooseImportFile = async () => {
+    if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     try {
       const file = await window.api.pickBackupFile?.()
       if (!file) return
-      const parsed = JSON.parse(await file.text())
+      setLoading('preview-import')
+      const parsed = await parseBackupJsonFile(file)
       setPendingImport({
         data: parsed,
         preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json', copy),
@@ -1150,10 +1272,13 @@ export default function Backup() {
       notify(copy('backup_file_ready', 'Backup file loaded. Review it, then confirm restore.'), 'success')
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setLoading((current) => (current === 'preview-import' ? '' : current))
     }
   }
 
   const handleConfirmImport = async () => {
+    if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!pendingImport?.data) return
     if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
@@ -1164,6 +1289,12 @@ export default function Backup() {
       if (result?.success) {
         cacheClearAll()
         setPendingImport(null)
+        actionHistory.pushAction({
+          scope: 'backup',
+          entity: 'backup',
+          label: copy('import_backup_success', 'Backup imported successfully'),
+          undo_payload: { fileName: pendingImport.preview?.fileName || '' },
+        })
         notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
         setTimeout(() => refreshAppData(), 200)
       } else {
@@ -1184,6 +1315,7 @@ export default function Backup() {
           title={copy('backup', 'Backup')}
           subtitle={copy('export_backup_desc', 'Export a full folder backup, or download the legacy JSON version when needed.')}
         />
+        <ActionHistoryBar history={actionHistory} className="mb-3" />
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -1247,11 +1379,11 @@ export default function Backup() {
             ) : null}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderExport} disabled={loading === 'folder-export'}>
+              <PrimaryActionButton onClick={handleFolderExport} disabled={!!loading}>
                 <ArchiveRestore className="h-4 w-4" />
                 {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleExport} disabled={loading === 'export'}>
+              <PathActionButton onClick={handleExport} disabled={!!loading}>
                 <Download className="h-4 w-4" />
                 {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'JSON')}
               </PathActionButton>
@@ -1315,16 +1447,16 @@ export default function Backup() {
             ) : null}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderImport} disabled={loading === 'folder-import'}>
+              <PrimaryActionButton onClick={handleFolderImport} disabled={!!loading}>
                 <Upload className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleChooseImportFile} disabled={loading === 'import'}>
+              <PathActionButton onClick={handleChooseImportFile} disabled={!!loading}>
                 <FileArchive className="h-4 w-4" />
-                {copy('legacy_json_backup', 'Legacy JSON')}
+                {loading === 'preview-import' ? copy('loading', 'Loading...') : copy('legacy_json_backup', 'Legacy JSON')}
               </PathActionButton>
               {pendingImport ? (
-                <PathActionButton onClick={handleConfirmImport} disabled={loading === 'import'}>
+                <PathActionButton onClick={handleConfirmImport} disabled={!!loading}>
                   <Upload className="h-4 w-4" />
                   {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Import JSON')}
                 </PathActionButton>
@@ -1382,10 +1514,10 @@ export default function Backup() {
           ) : null}
         </div>
 
-        {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} /> : null}
-        {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} /> : null}
-        <ResetData />
-        <FactoryReset />
+        {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        <ResetData actionHistory={actionHistory} />
+        <FactoryReset actionHistory={actionHistory} />
       </div>
     </div>
   )

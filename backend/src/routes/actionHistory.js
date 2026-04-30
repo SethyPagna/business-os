@@ -2,7 +2,7 @@
 
 const express = require('express')
 const { db } = require('../database')
-const { ok, err } = require('../helpers')
+const { ok, err, audit } = require('../helpers')
 const { authToken, getAuditActor } = require('../middleware')
 
 const router = express.Router()
@@ -88,12 +88,29 @@ router.patch('/:id', authToken, (req, res) => {
   const body = req.body || {}
   const status = String(body.status || '').trim()
   if (!['undoable', 'redoable', 'recorded', 'failed'].includes(status)) return err(res, 'Invalid action history status')
+  const actor = getAuditActor(req, body)
   try {
+    const existing = db.prepare('SELECT * FROM action_history WHERE id = ?').get(req.params.id)
     db.prepare(`
       UPDATE action_history
       SET status = ?, last_error = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(status, body.last_error ? String(body.last_error) : null, req.params.id)
+    if (existing && (status === 'redoable' || status === 'undoable')) {
+      audit(
+        actor.userId,
+        actor.userName,
+        status === 'redoable' ? 'action_undo' : 'action_redo',
+        existing.entity || 'action_history',
+        existing.entity_id || existing.id,
+        {
+          actionHistoryId: existing.id,
+          scope: existing.scope,
+          label: existing.label,
+          status,
+        },
+      )
+    }
     ok(res, {})
   } catch (error) {
     err(res, error.message || 'Failed to update action history')

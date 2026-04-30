@@ -1,8 +1,25 @@
 import React from 'react'
-import { BadgePercent, Search, ShoppingBag, Sparkles } from 'lucide-react'
+import { BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
+
+function getBadgeIcon(badge) {
+  if (badge?.key === 'promotion') return BadgePercent
+  if (badge?.key === 'recommended') return BadgeCheck
+  if (badge?.key === 'top-seller') return Number(badge.rank) === 1 ? Trophy : Medal
+  if (badge?.key === 'top-product') return Number(badge.rank) === 1 ? Flame : Medal
+  return Sparkles
+}
+
+function getBadgeToneClass(badge) {
+  if (badge?.tone === 'amber') return 'bg-amber-400/95 text-slate-950 ring-1 ring-amber-200/80'
+  if (badge?.tone === 'emerald') return 'bg-emerald-600/95 text-white ring-1 ring-emerald-200/40'
+  if (badge?.tone === 'rose') return 'bg-rose-600/95 text-white ring-1 ring-rose-200/40'
+  if (badge?.tone === 'violet') return 'bg-violet-600/95 text-white ring-1 ring-violet-200/40'
+  if (badge?.tone === 'blue') return 'bg-sky-600/95 text-white ring-1 ring-sky-200/40'
+  return 'bg-slate-900/90 text-white ring-1 ring-white/20'
+}
 
 /**
  * Product-facing portal catalog view. Kept separate so the editor shell can
@@ -186,24 +203,27 @@ export default function CatalogProductsSection(props) {
                 {highlightBadges.length ? (
                   <div className="absolute right-3 top-3 flex max-w-[78%] flex-col items-end gap-1.5">
                     {highlightBadges.map((badge) => (
-                      <span
-                        key={badge.key}
-                        style={badge.color ? { backgroundColor: badge.color, color: '#fff' } : undefined}
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] shadow-sm backdrop-blur ${
-                          badge.tone === 'violet'
-                            ? 'bg-violet-600/90 text-white'
-                            : badge.tone === 'custom'
-                              ? ''
-                              : badge.tone === 'amber'
-                                ? 'bg-amber-400/95 text-slate-950'
-                                : badge.tone === 'emerald'
-                                  ? 'bg-emerald-500/90 text-white'
-                                  : 'bg-sky-600/90 text-white'
-                        }`}
-                      >
-                        {badge.key === 'promotion' ? <BadgePercent className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
-                        {badge.label}
-                      </span>
+                      (() => {
+                        const BadgeIcon = getBadgeIcon(badge)
+                        const customStyle = badge.color && badge.key === 'promotion'
+                          ? { backgroundColor: badge.color, color: '#fff', boxShadow: '0 8px 20px rgba(15, 23, 42, 0.16)' }
+                          : undefined
+                        return (
+                          <span
+                            key={badge.key}
+                            style={customStyle}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] shadow-sm backdrop-blur ${customStyle ? 'ring-1 ring-white/30' : getBadgeToneClass(badge)}`}
+                          >
+                            {badge.rank ? (
+                              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/90 px-1 text-[9px] font-black text-slate-900">
+                                {badge.rank}
+                              </span>
+                            ) : null}
+                            <BadgeIcon className="h-3 w-3" />
+                            {badge.label}
+                          </span>
+                        )
+                      })()
                     ))}
                   </div>
                 ) : null}
