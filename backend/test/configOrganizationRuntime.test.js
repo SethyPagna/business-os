@@ -84,6 +84,58 @@ runTest('config promotes legacy shared runtime data into organization runtime ro
   assert.equal(fs.existsSync(path.join(legacyUploadsDir, 'demo.txt')), true)
 })
 
+runTest('config falls back to healthy legacy organization db when canonical db is corrupt', () => {
+  const runtimeDir = makeTempRoot('bos-config-fallback-')
+  const storageRoot = path.join(runtimeDir, 'business-os-data')
+  const organizationsRoot = path.join(storageRoot, 'organizations')
+  const legacyRoot = path.join(organizationsRoot, 'org_runtime_fallback')
+  const canonicalRoot = path.join(organizationsRoot, 'org_runtime_fallback (Leang Cosmetics)')
+  const legacyDbDir = path.join(legacyRoot, 'db')
+  const canonicalDbDir = path.join(canonicalRoot, 'db')
+
+  fs.mkdirSync(legacyDbDir, { recursive: true })
+  fs.mkdirSync(canonicalDbDir, { recursive: true })
+
+  const legacyDbPath = path.join(legacyDbDir, 'business.db')
+  const legacyDb = new Database(legacyDbPath)
+  legacyDb.exec(`
+    CREATE TABLE organizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      slug TEXT,
+      public_id TEXT
+    );
+    INSERT INTO organizations (name, slug, public_id)
+    VALUES ('Leang Cosmetics', 'leangcosmetics', 'org_runtime_fallback');
+  `)
+  legacyDb.close()
+
+  fs.writeFileSync(path.join(canonicalDbDir, 'business.db'), 'not-a-real-sqlite-db')
+
+  const probe = spawnSync(process.execPath, ['-e', `
+    const config = require('./src/config')
+    process.stdout.write(JSON.stringify({
+      dataRoot: config.DATA_ROOT,
+      dbPath: config.DB_PATH,
+      canonicalRoot: ${JSON.stringify(canonicalRoot)},
+      legacyRoot: ${JSON.stringify(legacyRoot)},
+    }))
+  `], {
+    cwd: path.resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      BUSINESS_OS_RUNTIME_DIR: runtimeDir,
+      _BOS_CONFIG_LOGGED: '1',
+    },
+    encoding: 'utf8',
+  })
+
+  assert.equal(probe.status, 0, probe.stderr || probe.stdout)
+  const output = JSON.parse(String(probe.stdout || '{}'))
+  assert.equal(output.dataRoot, legacyRoot)
+  assert.equal(output.dbPath, path.join(legacyRoot, 'db', 'business.db'))
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

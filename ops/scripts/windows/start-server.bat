@@ -29,6 +29,7 @@ set "TAILSCALE_CMD="
 set "USING_PM2=0"
 set "TAILSCALE_URL_FOUND="
 set "LOCAL_API=http://127.0.0.1:4000"
+set "SERVER_ALREADY_RUNNING=0"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
@@ -80,6 +81,31 @@ echo.
 
 cd /d "%ROOT%\backend"
 
+set "PRESTART_HTTP=0"
+for /f "tokens=*" %%r in ('powershell -Command "try { (Invoke-WebRequest -Uri %LOCAL_API%/health -UseBasicParsing -TimeoutSec 2).StatusCode } catch { 0 }" 2^>nul') do set "PRESTART_HTTP=%%r"
+if "!PRESTART_HTTP!"=="200" (
+    echo [OK] Server is already responding on http://localhost:%PORT%
+    set "SERVER_ALREADY_RUNNING=1"
+) else (
+    set "PORT_PID="
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING" 2^>nul') do if not defined PORT_PID set "PORT_PID=%%a"
+    if defined PORT_PID (
+        powershell -NoProfile -Command "$pid=%PORT_PID%; try { $proc = Get-CimInstance Win32_Process -Filter \"ProcessId=$pid\"; $name = [string]$proc.Name; $cmd = [string]$proc.CommandLine; if (($name -match '^(node|business-os-server)\.exe$') -or ($cmd -match 'backend[\\/]+server\.js') -or ($cmd -match 'ProcessContainerFork\.js')) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+        if not errorlevel 1 (
+            echo [WARN] Clearing stale Business OS listener on port %PORT% ^(PID !PORT_PID!^)...
+            powershell -NoProfile -Command "try { Stop-Process -Id %PORT_PID% -Force -ErrorAction Stop; exit 0 } catch { exit 1 }" >nul 2>&1
+            timeout /t 2 /nobreak >nul
+        ) else (
+            echo [ERROR] Port %PORT% is already being used by another program ^(PID !PORT_PID!^).
+            echo         Stop that program or change PORT= in %ENV_FILE%, then try again.
+            echo.
+            pause
+            echo [%DATE% %TIME%] START failed: port %PORT% owned by foreign process !PORT_PID!>>"%RUN_LOG%"
+            exit /b 1
+        )
+    )
+)
+
 echo [INFO] Checking PM2 (process manager)...
 REM Prefer PM2 because it gives restart/log/status support for support cases.
 for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
@@ -107,6 +133,11 @@ if not defined PM2_CMD (
     goto :background_start
 )
 
+if "!SERVER_ALREADY_RUNNING!"=="1" (
+    echo [INFO] Reusing the running server instance.
+    goto :after_pm2_start
+)
+
 echo [OK] Using PM2: !PM2_CMD!
 echo.
 echo [INFO] Starting Business OS server with PM2...
@@ -129,11 +160,12 @@ if errorlevel 1 (
     call "!PM2_CMD!" save >nul 2>&1
 )
 if "!USING_PM2!"=="1" (
-    echo [OK] Server started with PM2 (auto-restart enabled)
+    echo [OK] Server started with PM2 ^(auto-restart enabled^)
 ) else (
     echo [INFO] Continuing without PM2 control.
 )
 
+:after_pm2_start
 echo.
 echo [INFO] Checking Tailscale for remote access...
 if defined TAILSCALE_CMD (
@@ -160,7 +192,7 @@ if defined TAILSCALE_CMD (
             powershell -Command "$p='%ENV_FILE%'; if(Test-Path $p){$lines=Get-Content $p; if($lines -match '^TAILSCALE_URL='){ $lines=$lines -replace '^TAILSCALE_URL=.*','TAILSCALE_URL=!CLEAN_URL!' } else { $lines += 'TAILSCALE_URL=!CLEAN_URL!' }; Set-Content $p $lines }" >nul 2>&1
             echo [OK] Tailscale Funnel active: !CLEAN_URL!
         ) else (
-            echo [OK] Tailscale Funnel started (URL could not be detected automatically)
+            echo [OK] Tailscale Funnel started ^(URL could not be detected automatically^)
             echo      Run: tailscale funnel status
         )
     ) else (

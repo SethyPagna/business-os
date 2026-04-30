@@ -167,6 +167,23 @@ function isSamePath(a, b) {
   return normalizePathForCompare(a) === normalizePathForCompare(b)
 }
 
+function getOrganizationDbPath(runtimeRoot) {
+  return path.join(runtimeRoot, 'db', 'business.db')
+}
+
+function isHealthySqliteDatabase(dbPath) {
+  if (!pathExists(dbPath)) return false
+  let sqlite = null
+  try {
+    sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
+    return sqlite.pragma('integrity_check', { simple: true }) === 'ok'
+  } catch (_) {
+    return false
+  } finally {
+    try { sqlite?.close?.() } catch (_) {}
+  }
+}
+
 function isOrganizationRuntimeRoot(root) {
   const resolved = path.resolve(String(root || ''))
   return path.basename(path.dirname(resolved)).toLowerCase() === 'organizations'
@@ -290,7 +307,29 @@ const DATA_ROOT = (() => {
   }
 
   const canonicalRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_FOLDER_NAME)
+  const legacyExactRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_PUBLIC_ID)
   const existingRoot = detectExistingOrganizationRuntimeRoot(STORAGE_ROOT, ORGANIZATION_PUBLIC_ID)
+  const canonicalDbPath = getOrganizationDbPath(canonicalRoot)
+  const legacyExactDbPath = getOrganizationDbPath(legacyExactRoot)
+
+  if (pathExists(canonicalDbPath) && isHealthySqliteDatabase(canonicalDbPath)) {
+    ensureOrganizationRuntimeLayout(canonicalRoot)
+    return canonicalRoot
+  }
+
+  if (pathExists(canonicalDbPath) && !isHealthySqliteDatabase(canonicalDbPath)) {
+    if (pathExists(legacyExactDbPath) && isHealthySqliteDatabase(legacyExactDbPath)) {
+      ensureOrganizationRuntimeLayout(legacyExactRoot)
+      writeMigrationMarker(legacyExactRoot, {
+        sourceRoot: canonicalRoot,
+        targetRoot: legacyExactRoot,
+        reason: 'canonical-db-corrupt-fallback',
+        note: 'Canonical organization DB failed integrity check, so runtime fell back to the healthy legacy organization folder.',
+      })
+      return legacyExactRoot
+    }
+  }
+
   if (existingRoot && !isSamePath(existingRoot, canonicalRoot)) {
     return moveOrganizationRootPreservingSource(existingRoot, canonicalRoot, 'canonical-folder-name')
   }
