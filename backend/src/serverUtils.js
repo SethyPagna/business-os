@@ -226,7 +226,7 @@ function setTunnelSecurityHeaders(req, res) {
       "img-src 'self' data: blob: https:",
       "media-src 'self' data: blob: https:",
       "manifest-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
       "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://*.supabase.co",

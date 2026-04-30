@@ -629,10 +629,22 @@ export default function UserProfileModal({ onClose }) {
             <div className="flex flex-col gap-4 rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800/70 sm:flex-row sm:items-center">
               <AvatarPreview name={profile.name} avatarPath={profile.avatar_path} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-semibold text-gray-900 dark:text-white">{profile.name}</div>
-                <div className="truncate text-sm text-gray-500 dark:text-gray-400">@{profile.username}</div>
-                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  {profile.role_name || tr('no_role', 'No role')} {' | '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-lg font-semibold text-gray-900 dark:text-white">{profile.name}</div>
+                    <div className="truncate text-sm text-gray-500 dark:text-gray-400">@{profile.username}</div>
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      {profile.role_name || tr('no_role', 'No role')} {' | '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-800/60 dark:bg-zinc-900/70 dark:text-red-300 dark:hover:bg-red-950/20 sm:w-auto"
+                    onClick={logout}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {tr('logout', 'Logout')}
+                  </button>
                 </div>
               </div>
             </div>
@@ -909,7 +921,7 @@ export default function UserProfileModal({ onClose }) {
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
               </div>
 
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20">
+              <div className="hidden rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20 sm:block">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-semibold text-red-700 dark:text-red-300">{tr('sign_out', 'Sign out')}</div>

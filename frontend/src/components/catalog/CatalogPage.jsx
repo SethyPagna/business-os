@@ -1358,6 +1358,8 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
   { value: 'ta', label: 'Tamil' },
 ]
 
+const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
+
 function applyGoogleTranslateSelection(sourceLang, targetLang) {
   if (typeof document === 'undefined') return false
   const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
@@ -1885,7 +1887,7 @@ export default function CatalogPage({ publicView = false }) {
     if (!publicView || !previewConfig.translateWidgetEnabled || typeof window === 'undefined' || typeof document === 'undefined') {
       return undefined
     }
-    const container = document.getElementById('business-os-portal-translate-widget')
+    const container = document.getElementById(PORTAL_TRANSLATE_WIDGET_HOST_ID)
     if (!container) return undefined
 
     let cancelled = false
@@ -1904,7 +1906,7 @@ export default function CatalogPage({ publicView = false }) {
             autoDisplay: false,
             layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
           },
-          'business-os-portal-translate-widget',
+          PORTAL_TRANSLATE_WIDGET_HOST_ID,
         )
         let widgetChecks = 0
         const waitForWidget = () => {
@@ -1938,6 +1940,9 @@ export default function CatalogPage({ publicView = false }) {
       script.async = true
       script.defer = true
       script.dataset.businessOsTranslate = 'true'
+      script.onerror = () => {
+        if (!cancelled) setTranslateReady(false)
+      }
       document.body.appendChild(script)
     }
 
@@ -3818,11 +3823,11 @@ export default function CatalogPage({ publicView = false }) {
                         ))}
                       </select>
                     </label>
-                    <div
-                      id="business-os-portal-translate-widget"
-                      className="notranslate"
-                      translate="no"
-                    />
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      {translateReady
+                        ? copy('translationReady', 'Translation tools are ready')
+                        : copy('preparingTranslations', 'Preparing translation tools...')}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -3842,7 +3847,7 @@ export default function CatalogPage({ publicView = false }) {
                     zIndex: -1,
                   }}
                 >
-                  <div id="business-os-portal-translate-widget" className="notranslate" translate="no" />
+                  <div id={PORTAL_TRANSLATE_WIDGET_HOST_ID} className="notranslate" translate="no" />
                 </div>
               ) : null}
 
