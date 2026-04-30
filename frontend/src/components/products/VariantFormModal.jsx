@@ -3,6 +3,7 @@ import { useApp } from '../../AppContext'
 import Modal from '../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from './primitives'
 import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
+import { extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 
 export default function VariantFormModal({ parent, units, branches, user, onClose, onDone, t, usdSymbol }) {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -45,7 +46,9 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
     setSaving(true)
     setErr('')
     try {
+      const clientRequestId = `variant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       const response = await window.api.createProductVariant({
+        client_request_id: clientRequestId,
         ...form,
         parent_id: parent.id,
         purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
@@ -72,7 +75,24 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
           .replace('{product}', parent.name),
         'success',
       )
-      onDone()
+      onDone?.({
+        createdProductId: extractHistoryResultId(response),
+        clientRequestId,
+        snapshot: {
+          ...form,
+          parent_id: parent.id,
+          is_group: 0,
+          stock_quantity: parseNumericInput(form.stock_quantity),
+          purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
+          purchase_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
+          selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
+          selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
+          special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
+          special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+          cost_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
+          cost_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
+        },
+      })
     } catch (error) {
       setErr(error?.message || tr('failed', 'Failed', 'បរាជ័យ'))
     } finally {

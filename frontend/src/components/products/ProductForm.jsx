@@ -54,6 +54,15 @@ function pickImageFiles(maxCount = 1, options = {}) {
   })
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Failed to read the selected image.'))
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function ProductForm({
   product,
   categories,
@@ -203,14 +212,14 @@ export default function ProductForm({
       if (!remaining) return
       const files = await pickImageFiles(remaining, options)
       if (!files.length) return
-      const uploadedPaths = []
+      const stagedImages = []
       for (const file of files) {
-        const asset = await window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name })
-        if (asset?.public_path) uploadedPaths.push(asset.public_path)
+        const dataUrl = await readFileAsDataUrl(file)
+        if (dataUrl) stagedImages.push(dataUrl)
       }
       setImageList((current) => {
         const next = [...current]
-        uploadedPaths.forEach((url) => {
+        stagedImages.forEach((url) => {
           if (!next.includes(url) && next.length < 5) next.push(url)
         })
         return next

@@ -23,7 +23,8 @@ import ProductsHeaderActions from './HeaderActions'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
-import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
+import { orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -289,10 +290,14 @@ export default function Products() {
       const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const galleryInput = normalizeGallery(form.image_gallery, form.image_path || null)
       const uploadedGallery = await uploadGalleryImages(selected?.id || null, galleryInput)
+      const createClientRequestId = !selected
+        ? `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        : ''
       const payload = {
         ...form,
         image_gallery: uploadedGallery,
         image_path: uploadedGallery[0] || null,
+        client_request_id: createClientRequestId || form.client_request_id || undefined,
         userId: user.id,
         userName: user.name,
       }
@@ -308,12 +313,19 @@ export default function Products() {
       }
 
       await load(true)
-      const targetProductId = selected ? Number(selected.id || 0) : createdProductId
       const latestProducts = await window.api.getProducts()
-      const latestProductSnapshot = cloneHistorySnapshot(
-        (latestProducts || []).find((product) => Number(product?.id || 0) === targetProductId)
-        || { ...payload, id: targetProductId },
-      )
+      const targetProductId = selected ? Number(selected.id || 0) : createdProductId
+      const latestProductSnapshot = selected
+        ? cloneHistorySnapshot(
+            (latestProducts || []).find((product) => Number(product?.id || 0) === targetProductId)
+            || { ...payload, id: targetProductId },
+          )
+        : resolveCreatedHistorySnapshot({
+            result: { id: createdProductId },
+            latestItems: latestProducts,
+            clientRequestId: createClientRequestId,
+            fallbackSnapshot: { ...payload, id: createdProductId },
+          }).snapshot
 
       if (previousSnapshot && targetProductId) {
         actionHistory.pushAction({
@@ -321,20 +333,8 @@ export default function Products() {
           undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
           redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
         })
-      } else if (createdProductId > 0) {
-        let restoredEntries = []
-        actionHistory.pushAction({
-          label: `Add product ${latestProductSnapshot.name || ''}`.trim(),
-          undo: async () => {
-            const result = await window.api.deleteProduct(createdProductId)
-            if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
-            await load(true)
-          },
-          redo: async () => {
-            restoredEntries = await restoreDeletedProducts([latestProductSnapshot], 'Redo product create')
-            createdProductId = Number(restoredEntries[0]?.restoredId || createdProductId)
-          },
-        })
+      } else if (latestProductSnapshot?.id) {
+        pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
       }
 
       notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
@@ -928,16 +928,33 @@ export default function Products() {
     if (!snapshots.length) return []
     const defaultBranchId = Number(branches.find((branch) => branch.is_default)?.id || branches[0]?.id || 0)
     const restored = []
-    for (const snapshot of snapshots) {
+    const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
+    const restoredIdMap = new Map()
+    const deletedIdSet = new Set(
+      orderedSnapshots
+        .map((snapshot) => Number(snapshot?.id || 0))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    )
+    for (const snapshot of orderedSnapshots) {
       const preferredBranchId = Number((snapshot?.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)?.branch_id || defaultBranchId || 0)
+      const originalParentId = Number(snapshot?.parent_id || 0)
+      const parentWasDeleted = originalParentId > 0 && deletedIdSet.has(originalParentId)
+      const resolvedParentId = parentWasDeleted
+        ? Number(restoredIdMap.get(originalParentId) || 0)
+        : originalParentId
       const createPayload = {
-        ...buildProductWritePayload(snapshot),
+        ...buildProductWritePayload({
+          ...snapshot,
+          parent_id: resolvedParentId || null,
+        }),
         branch_id: preferredBranchId || defaultBranchId || '',
         stock_quantity: 0,
       }
       const result = await window.api.createProduct(createPayload)
       const restoredId = Number(result?.id || result?.data?.id || 0)
       if (!restoredId) throw new Error(result?.error || 'Failed to restore deleted product')
+      const snapshotId = Number(snapshot?.id || 0)
+      if (snapshotId > 0) restoredIdMap.set(snapshotId, restoredId)
       restored.push({ snapshot, restoredId })
     }
     const latestProducts = await window.api.getProducts()
@@ -949,6 +966,40 @@ export default function Products() {
     await load(true)
     return restored
   }, [branches, buildProductWritePayload, load, restoreProductBranchStock])
+
+  const pushCreatedProductHistory = useCallback((snapshot, label = '') => {
+    const baseSnapshot = cloneHistorySnapshot(snapshot)
+    let activeCreatedProductId = Number(baseSnapshot?.id || 0)
+    if (!activeCreatedProductId) return false
+    let restoredEntries = []
+    actionHistory.pushAction({
+      label: label || `Add product ${baseSnapshot?.name || ''}`.trim(),
+      undo: async () => {
+        const result = await window.api.deleteProduct(activeCreatedProductId)
+        if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
+        await load(true)
+      },
+      redo: async () => {
+        restoredEntries = await restoreDeletedProducts([baseSnapshot], 'Redo product create')
+        activeCreatedProductId = Number(restoredEntries[0]?.restoredId || activeCreatedProductId)
+      },
+    })
+    return true
+  }, [actionHistory, load, restoreDeletedProducts])
+
+  const handleVariantDone = useCallback(async (payload = {}) => {
+    setVariantModal(null)
+    await load(true)
+    const latestProducts = await window.api.getProducts()
+    const createdProductId = Number(payload?.createdProductId || 0)
+    const latestVariantSnapshot = cloneHistorySnapshot(
+      (latestProducts || []).find((product) => Number(product?.id || 0) === createdProductId)
+      || { ...(payload?.snapshot || {}), id: createdProductId },
+    )
+    if (latestVariantSnapshot?.id) {
+      pushCreatedProductHistory(latestVariantSnapshot, `Add variant ${latestVariantSnapshot.name || ''}`.trim())
+    }
+  }, [load, pushCreatedProductHistory])
 
   const clearProductStockByIds = useCallback(async (productIds = [], reason = 'Set products out of stock') => {
     if (!productIds.length) return
@@ -1928,7 +1979,7 @@ export default function Products() {
           parent={variantModal}
           categories={categories} units={units} branches={branches} user={user}
           onClose={()=>setVariantModal(null)}
-          onDone={()=>{setVariantModal(null);load()}}
+          onDone={handleVariantDone}
           t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
         />
       )}
