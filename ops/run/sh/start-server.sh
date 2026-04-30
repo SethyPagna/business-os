@@ -9,6 +9,7 @@ LOG_DIR="$RUNTIME_DIR/logs"
 DATA_DIR="$HOME/business-os-data"
 ENV_FILE="$BACKEND_DIR/.env"
 ECOSYSTEM="$ROOT/ops/config/ecosystem.config.js"
+PUBLIC_CHECK_SCRIPT="$ROOT/ops/scripts/runtime/check-public-url.mjs"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
@@ -93,5 +94,18 @@ echo -e "${GREEN}  Business OS is running${NC}"
 echo "=============================================================="
 echo ""
 PORT=$(grep -E '^PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "4000")
+TAILSCALE_URL=$(grep -E '^TAILSCALE_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+CUSTOMER_PORTAL_PATH=$(node -e "fetch('http://127.0.0.1:' + process.argv[1] + '/api/portal/config').then(r => r.ok ? r.json() : null).then(cfg => { const path = String(cfg?.publicPath || '/customer-portal'); process.stdout.write(path.startsWith('/') ? path : '/' + path); }).catch(() => process.stdout.write('/customer-portal'))" "$PORT")
 echo "  Local URL: http://localhost:${PORT}"
+echo "  Local Portal: http://localhost:${PORT}${CUSTOMER_PORTAL_PATH}"
+if [ -n "${TAILSCALE_URL:-}" ] && [ -f "$PUBLIC_CHECK_SCRIPT" ]; then
+  info "Verifying public URL with Node HTTPS..."
+  if node "$PUBLIC_CHECK_SCRIPT" "$TAILSCALE_URL" "$CUSTOMER_PORTAL_PATH"; then
+    ok "Public URL verification passed"
+    echo "  Remote Admin: ${TAILSCALE_URL}"
+    echo "  Customer URL: ${TAILSCALE_URL%/}${CUSTOMER_PORTAL_PATH}"
+  else
+    warn "Public URL verification failed"
+  fi
+fi
 echo ""

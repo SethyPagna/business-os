@@ -284,6 +284,21 @@ for /f "tokens=*" %%r in ('powershell -Command "try { $cfg = Invoke-RestMethod -
 if not "!CUSTOMER_PORTAL_PATH!"=="" if not "!CUSTOMER_PORTAL_PATH:~0,1!"=="/" set "CUSTOMER_PORTAL_PATH=/!CUSTOMER_PORTAL_PATH!"
 set "CUSTOMER_PUBLIC_URL="
 for /f "tokens=*" %%r in ('powershell -Command "try { $cfg = Invoke-RestMethod -Uri %LOCAL_API%/api/portal/config -UseBasicParsing -TimeoutSec 3; if ($cfg.publicUrl) { [Console]::WriteLine([string]$cfg.publicUrl) } } catch {}" 2^>nul') do set "CUSTOMER_PUBLIC_URL=%%r"
+set "PUBLIC_URL_OK="
+if not "!TAILSCALE_URL_FOUND!"=="" (
+    echo [INFO] Verifying public URL with Node HTTPS...
+    node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
+    if not errorlevel 1 (
+        set "PUBLIC_URL_OK=1"
+        echo [OK] Public URL verification passed.
+        echo [%DATE% %TIME%] START verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+    ) else (
+        echo [WARN] Public URL verification failed.
+        type "%TEMP%\bos_public_check.txt"
+        echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+    )
+    del "%TEMP%\bos_public_check.txt" >nul 2>&1
+)
 
 echo.
 echo ========================================================================
@@ -297,6 +312,11 @@ if not "!CUSTOMER_PUBLIC_URL!"=="" (
     echo   Customer URL: !CUSTOMER_PUBLIC_URL!
 ) else (
     if not "!TAILSCALE_URL_FOUND!"=="" echo   Customer URL: !TAILSCALE_URL_FOUND!!CUSTOMER_PORTAL_PATH!
+)
+if defined PUBLIC_URL_OK (
+    echo   Public URL check: passed
+) else (
+    if not "!TAILSCALE_URL_FOUND!"=="" echo   Public URL check: warning - see log output above
 )
 echo.
 echo   Factory-reset default login: admin / admin
