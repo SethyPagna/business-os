@@ -129,16 +129,46 @@ runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and 
   assert.match(scriptSrc, /'wasm-unsafe-eval'/)
   assert.match(scriptSrc, /https:\/\/translate\.google\.com/)
   assert.match(scriptSrc, /https:\/\/translate\.googleapis\.com/)
+  assert.match(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
   assert.doesNotMatch(scriptSrc, /unsafe-inline/)
   assert.doesNotMatch(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
+  assert.match(csp, /connect-src .*https:\/\/translate-pa\.googleapis\.com/)
   assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
   assert.match(csp, /style-src-elem 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
-  assert.match(csp, /script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
+  assert.match(csp, /script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/translate-pa\.googleapis\.com https:\/\/www\.gstatic\.com/)
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
   const permissionsPolicy = headers.get('Permissions-Policy') || ''
   assert.equal(permissionsPolicy, 'geolocation=(), camera=(self), microphone=(), usb=(), payment=()')
+})
+
+runTest('setTunnelSecurityHeaders scopes Google Translate eval allowance to customer portal routes', () => {
+  const headers = new Map()
+  const res = {
+    setHeader(name, value) {
+      headers.set(String(name), String(value))
+    },
+  }
+  const req = {
+    path: '/public',
+    protocol: 'https',
+    headers: {
+      host: 'localhost:4000',
+      'x-forwarded-proto': 'https',
+    },
+  }
+
+  setTunnelSecurityHeaders(req, res)
+
+  const csp = headers.get('Content-Security-Policy') || ''
+  const scriptSrc = csp
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('script-src')) || ''
+  assert.match(scriptSrc, /^script-src\b/)
+  assert.match(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
+  assert.match(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
 })
 
 if (failed > 0) {

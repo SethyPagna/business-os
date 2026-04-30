@@ -202,7 +202,15 @@ function setHtmlNoCacheHeaders(res) {
   res.setHeader('Expires', '0')
 }
 
+function isCustomerPortalRoutePath(reqPath) {
+  const path = String(reqPath || '').split('?')[0].toLowerCase()
+  return path === '/public' || path.startsWith('/public/') || path === '/customer-portal' || path.startsWith('/customer-portal/')
+}
+
 function setTunnelSecurityHeaders(req, res) {
+  const allowPortalTranslateEval = isCustomerPortalRoutePath(req?.path)
+  const portalTranslateEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
+
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -226,10 +234,10 @@ function setTunnelSecurityHeaders(req, res) {
       "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
-      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://*.supabase.co",
+      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://*.supabase.co",
       "worker-src 'self' blob:",
-      "script-src 'self' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com",
-      "script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
+      `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com`,
+      "script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com",
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()
