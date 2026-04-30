@@ -17,8 +17,33 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
+const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
+
+function getDashboardFilterStorageKey(user) {
+  const userKey = user?.id || user?.username || user?.email || 'guest'
+  return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
+}
+
+function readDashboardFilterPrefs(storageKey) {
+  if (typeof window === 'undefined' || !storageKey) return null
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    return {
+      rangeId: typeof parsed.rangeId === 'string' ? parsed.rangeId : '30d',
+      customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
+      customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
+      granularity: ['day', 'week', 'month'].includes(parsed.granularity) ? parsed.granularity : 'day',
+    }
+  } catch {
+    return null
+  }
+}
+
 export default function Dashboard() {
-  const { t, fmtUSD, fmtKHR } = useApp()
+  const { t, fmtUSD, fmtKHR, user } = useApp()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -31,6 +56,8 @@ export default function Dashboard() {
   const refreshLabel = translateOr('refresh', 'Refresh', 'ស្រស់ថ្មី')
   const dayLabel = translateOr('day', 'Day', 'ថ្ងៃ')
   const priceCsv = useCallback((value) => formatPriceNumber(value || 0), [])
+  const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
+  const initialFilterPrefs = useMemo(() => readDashboardFilterPrefs(dashboardFilterStorageKey), [dashboardFilterStorageKey])
 
   // Range presets use t() for labels inside the component so t() is in scope.
   const RANGE_PRESETS = [
@@ -48,10 +75,10 @@ export default function Dashboard() {
   const [loading, setLoading]     = useState(true)
   const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
-  const [rangeId, setRangeId]     = useState('30d')
-  const [customStart, setCustomStart] = useState(offsetDate(-29))
-  const [customEnd, setCustomEnd]     = useState(todayStr())
-  const [granularity, setGranularity] = useState('day')
+  const [rangeId, setRangeId]     = useState(() => initialFilterPrefs?.rangeId || '30d')
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
+  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
+  const [granularity, setGranularity] = useState(() => initialFilterPrefs?.granularity || 'day')
   const [activeChart, setActiveChart] = useState('revenue')
   const [topMode, setTopMode]         = useState('revenue')
   const [showAllCustomers, setShowAllCustomers] = useState(false)
@@ -67,6 +94,7 @@ export default function Dashboard() {
   const analyticsRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
   const analyticsLoadingRef = useRef(true)
+  const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
 
   const setAnalyticsLoading = useCallback((value) => {
     analyticsLoadingRef.current = value
@@ -125,6 +153,30 @@ export default function Dashboard() {
       }
     }
   }, [customEnd, customStart, granularity, rangeId, setAnalyticsLoading]) // eslint-disable-line
+
+  useEffect(() => {
+    if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
+    filterStorageKeyRef.current = dashboardFilterStorageKey
+    const nextPrefs = readDashboardFilterPrefs(dashboardFilterStorageKey)
+    setRangeId(nextPrefs?.rangeId || '30d')
+    setCustomStart(nextPrefs?.customStart || offsetDate(-29))
+    setCustomEnd(nextPrefs?.customEnd || todayStr())
+    setGranularity(nextPrefs?.granularity || 'day')
+  }, [dashboardFilterStorageKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
+    try {
+      window.localStorage.setItem(dashboardFilterStorageKey, JSON.stringify({
+        rangeId,
+        customStart,
+        customEnd,
+        granularity,
+      }))
+    } catch {
+      // Ignore persistence failures and keep the dashboard usable.
+    }
+  }, [customEnd, customStart, dashboardFilterStorageKey, granularity, rangeId])
 
   useEffect(() => {
     if (!isActive) {

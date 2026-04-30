@@ -8,6 +8,7 @@ import { useApp, useSync } from '../../AppContext'
 import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
 import UserDetailSheet from './UserDetailSheet'
 import UserProfileModal from './UserProfileModal'
+import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
 import {
@@ -69,8 +70,9 @@ function formatContactValue(value) {
 }
 
 export default function Users() {
-  const { t, notify, hasPermission, user: currentUser, page } = useApp()
+  const { t, notify, hasPermission, user: currentUser } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('users')
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
@@ -202,20 +204,21 @@ export default function Users() {
   }, [canManage, notify, tr])
 
   useEffect(() => {
-    if (page !== 'users') {
+    if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      setLoading(false)
       return
     }
     load({ silent: loadedOnceRef.current })
-  }, [canManage, load, page])
+  }, [canManage, isActive, load])
   useEffect(() => {
-    if (page !== 'users' || !syncChannelName) return
+    if (!isActive || !syncChannelName) return
     if (syncChannelName === 'users' || syncChannelName === 'roles') {
       load({ silent: true })
     }
-  }, [load, page, syncChannelName, syncTimestamp])
+  }, [isActive, load, syncChannelName, syncTimestamp])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)

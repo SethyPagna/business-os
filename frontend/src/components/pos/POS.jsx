@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { ChevronDown, ChevronRight, ImageOff, Info, X } from 'lucide-react'
+import { ImageOff, Info, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Receipt from '../receipt/Receipt'
 import {
@@ -232,7 +232,6 @@ export default function POS() {
   const [membershipLoading, setMembershipLoading] = useState(false)
   const [membershipError,  setMembershipError]  = useState('')
   const [imageLightbox, setImageLightbox] = useState(null)
-  const [expandedGroupIds, setExpandedGroupIds] = useState(() => new Set())
 
   // Completed receipts shown as overlay modals (queue so multiple can stack)
   const [receiptQueue, setReceiptQueue] = useState([])
@@ -653,16 +652,6 @@ export default function POS() {
 
   const hasVariantChoices = useCallback((product) => getVariantChoices(product).length > 0, [getVariantChoices])
 
-  const toggleExpandedGroup = useCallback((productId) => {
-    const numericId = Number(productId)
-    if (!Number.isFinite(numericId)) return
-    setExpandedGroupIds((current) => {
-      const next = new Set(current)
-      if (next.has(numericId)) next.delete(numericId)
-      else next.add(numericId)
-      return next
-    })
-  }, [])
 
   const getBranchStockQty = useCallback((product, branchId) => {
     const id = parseInt(branchId, 10)
@@ -699,6 +688,19 @@ export default function POS() {
 
     return Number(product.stock_quantity || 0)
   }, [branchFilter, getBranchStockQty])
+
+  const openProductCard = useCallback((product, { groupProduct = false, inStock = false } = {}) => {
+    if (!product) return
+    if (groupProduct) {
+      setDetailProduct(product)
+      return
+    }
+    if (inStock) {
+      addToCart(product, 'selling')
+      return
+    }
+    setDetailProduct(product)
+  }, [addToCart])
 
   /** Build a normalized image list for POS product lightbox (gallery + fallback image). */
   const getProductGallery = useCallback((product) => {
@@ -1116,16 +1118,27 @@ export default function POS() {
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
                 const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
-                const groupExpanded = expandedGroupIds.has(Number(p.id))
                 return (
-                  <div key={p.id} className={`card relative p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}>
+                  <div
+                    key={p.id}
+                    role="button"
+                    tabIndex={0}
+                    className={`card relative cursor-pointer p-3 text-left transition-all ${inStock ? 'hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600' : 'opacity-60'}`}
+                    onClick={() => openProductCard(p, { groupProduct, inStock })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        openProductCard(p, { groupProduct, inStock })
+                      }
+                    }}
+                  >
                     <button className="absolute top-1.5 right-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-500 shadow-sm hover:text-blue-600 dark:bg-gray-900/70" onClick={e => { e.stopPropagation(); setDetailProduct(p) }} title="Details">
                       <Info className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
                       className="w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
-                      onClick={() => openImageLightbox(p, 0)}
+                      onClick={(event) => { event.stopPropagation(); openImageLightbox(p, 0) }}
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
@@ -1133,14 +1146,12 @@ export default function POS() {
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.__displayName || p.name}</p>
                       {groupProduct ? (
-                        <button
-                          type="button"
-                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
-                          onClick={() => toggleExpandedGroup(p.id)}
+                        <span
+                          className="inline-flex flex-shrink-0 items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                          aria-label={`${variants.length} ${choiceLabel}`}
                         >
-                          {groupExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                           {variants.length}
-                        </button>
+                        </span>
                       ) : null}
                     </div>
                     <p className="text-sm font-bold text-blue-600">
@@ -1159,56 +1170,13 @@ export default function POS() {
                       <p className="text-[11px] text-gray-400">{groupMeta.stockTotal} {posCopy('total in stock', 'total in stock')}</p>
                     ) : null}
                     {!inStock ? <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span> : null}
-                    {groupProduct ? (
-                      <div className="mt-2 space-y-2">
-                        <button
-                          type="button"
-                          className="btn-secondary w-full text-xs"
-                          onClick={() => toggleExpandedGroup(p.id)}
-                        >
-                          {groupExpanded ? posCopy('Hide options', 'Hide options') : posCopy('Choose option', 'Choose option')}
-                        </button>
-                          {groupExpanded ? (
-                            <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
-                              {variants.map((variant) => {
-                                const variantStock = getDisplayStock(variant)
-                                const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
-                                return (
-                                  <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
-                                  <div className="truncate text-xs font-semibold text-gray-900 dark:text-white">{variant.name}</div>
-                                  <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-gray-500 dark:text-gray-400">
-                                    <span>{variantStock} {variant.unit}</span>
-                                    {variant.sku ? <span>• {variant.sku}</span> : null}
-                                    {variant.supplier ? <span>• {variant.supplier}</span> : null}
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap gap-1.5">
-                                    <button type="button" className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => addToCart(variant, 'selling')}>
-                                      {fmtUSD(variant.selling_price_usd || 0)}
-                                    </button>
-                                    {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
-                                      <button type="button" className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => addToCart(variant, 'special')}>
-                                        {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button type="button" className="btn-primary flex-1 text-xs" onClick={() => inStock && addToCart(p, 'selling')} disabled={!inStock}>
-                          + {t('add_to_cart')}
-                        </button>
-                        {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                          <button type="button" className="btn-secondary flex-1 text-xs" onClick={() => inStock && addToCart(p, 'special')} disabled={!inStock}>
-                            {posCopy('Special', 'Special')}
-                          </button>
-                        ) : null}
-                      </div>
-                    )}
+                    <p className="mt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                      {groupProduct
+                        ? posCopy('Tap to view choices', 'Tap to view choices')
+                        : inStock
+                          ? posCopy('Tap to add instantly', 'Tap to add instantly')
+                          : posCopy('Tap to view details', 'Tap to view details')}
+                    </p>
                   </div>
                 )
               })}
@@ -1670,12 +1638,8 @@ export default function POS() {
                   </div>
                 ) : null}
               </div>
-              <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                {groupProduct ? (
-                  <button className="btn-secondary w-full" onClick={() => { toggleExpandedGroup(p.id); setDetailProduct(null) }}>
-                    {posCopy('Choose option', 'Choose option')}
-                  </button>
-                ) : (
+              {!groupProduct ? (
+                <div className="border-t border-gray-200 p-4 dark:border-gray-700">
                   <div className="flex gap-2">
                     <button className="btn-primary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
                       {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `+ ${t('add_to_cart')}`}
@@ -1686,8 +1650,8 @@ export default function POS() {
                       </button>
                     ) : null}
                   </div>
-                )}
-              </div>
+                </div>
+              ) : null}
             </div>
           </div>
         )
@@ -1727,4 +1691,3 @@ export default function POS() {
     </div>
   )
 }
-

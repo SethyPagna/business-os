@@ -12,6 +12,7 @@ import SaleDetailModal from './SaleDetailModal'
 import ExportModal from './ExportModal'
 import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
+import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
@@ -34,8 +35,9 @@ function getSaleBranchLabel(sale) {
 }
 
 export default function Sales() {
-  const { t, settings, fmtUSD, fmtKHR, notify, user, page } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -117,20 +119,21 @@ export default function Sales() {
   }, [translateOr])
 
   useEffect(() => {
-    if (page !== 'sales') {
+    if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      setLoading(false)
       return
     }
     aliveRef.current = true
     loadSales(loadedOnceRef.current)
-  }, [loadSales, page])
+  }, [isActive, loadSales])
 
   useEffect(() => {
-    if (page !== 'sales' || !syncChannel?.channel) return
+    if (!isActive || !syncChannel?.channel) return
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
-  }, [loadSales, page, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, loadSales, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => () => {
     aliveRef.current = false
     window.clearTimeout(loadWatchdogRef.current)

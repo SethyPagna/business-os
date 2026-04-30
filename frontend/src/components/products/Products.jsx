@@ -21,6 +21,7 @@ import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
@@ -89,8 +90,9 @@ function scrollNodeWithOffset(node, offset = PRODUCT_JUMP_OFFSET) {
 // ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 export default function Products() {
-  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, page } = useApp()
+  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('products')
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelReason = String(syncChannel?.reason || '')
   const syncChannelSource = String(syncChannel?.source || '')
@@ -202,23 +204,24 @@ export default function Products() {
   }, [notify, t, tr])
 
   useEffect(() => {
-    if (page !== 'products') {
+    if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      setLoading(false)
       return
     }
     const silent = loadedOnceRef.current
     load(silent)
-  }, [load, page])
+  }, [isActive, load])
   useEffect(() => {
-    if (page !== 'products' || !syncChannelTs) return
+    if (!isActive || !syncChannelTs) return
     if (syncChannelReason === 'cache-refresh') {
       const sourceTable = syncChannelSource.split(':')[0]
       if (['products', 'categories', 'units', 'branches'].includes(sourceTable)) return
     }
     if (['products', 'categories', 'units', 'branches'].includes(syncChannelName)) load(true)
-  }, [load, page, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
+  }, [isActive, load, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)

@@ -4,6 +4,7 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import { useIsPageActive } from '../shared/pageActivity'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -147,7 +148,8 @@ function DetailRow({ label, value, mono }) {
 }
 
 export default function AuditLog() {
-  const { t, page } = useApp()
+  const { t } = useApp()
+  const isActive = useIsPageActive('audit_log')
   const [logs, setLogs] = useState([])
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
@@ -259,9 +261,14 @@ export default function AuditLog() {
   }, [])
 
   useEffect(() => {
-    if (page !== 'audit_log') {
+    if (!isActive) {
       pageLoadRequestedRef.current = false
       invalidateTrackedRequest(loadRequestRef)
+      if (loadWatchdogRef.current) {
+        window.clearTimeout(loadWatchdogRef.current)
+        loadWatchdogRef.current = null
+      }
+      setLoading(false)
       return
     }
     aliveRef.current = true
@@ -271,7 +278,7 @@ export default function AuditLog() {
     }
     pageLoadRequestedRef.current = true
     load(false)
-  }, [load, page])
+  }, [isActive, load])
 
   useEffect(() => () => {
     aliveRef.current = false

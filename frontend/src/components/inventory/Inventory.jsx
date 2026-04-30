@@ -16,6 +16,7 @@ import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
 import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
+import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
@@ -41,8 +42,9 @@ function priceCsv(value) {
 }
 
 export default function Inventory() {
-  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol, page } = useApp()
+  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('inventory')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -171,19 +173,20 @@ export default function Inventory() {
   }, [branchFilter, tr])
 
   useEffect(() => {
-    if (page !== 'inventory') {
+    if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      setLoading(false)
       return
     }
-    load()
-  }, [load, page])
+    load(loadedOnceRef.current)
+  }, [isActive, load])
   useEffect(() => {
-    if (page !== 'inventory' || !syncChannel?.channel) return
+    if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
-  }, [load, page, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
