@@ -516,9 +516,9 @@ function CatalogAiSection(props) {
       title={previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
       subtitle={previewConfig.aiIntro || copy('assistantNotice', 'AI generated, for reference only.')}
       action={(
-        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
           <Bot className="h-3.5 w-3.5" />
-          AI query
+          {copy('aiQuery', 'AI query', 'សំណួរ AI')}
         </span>
       )}
     >
@@ -527,40 +527,47 @@ function CatalogAiSection(props) {
           <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand')}</label>
-                <select className="input mt-1" value={assistantProfile.brand} onChange={(event) => setAssistantProfile((current) => ({ ...current, brand: event.target.value }))}>
+                <label htmlFor="portal-assistant-brand" className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
+                <select id="portal-assistant-brand" name="portal_assistant_brand" className="input mt-1" value={assistantProfile.brand} onChange={(event) => setAssistantProfile((current) => ({ ...current, brand: event.target.value }))}>
                   <option value="">{copy('all', 'All')}</option>
                   {brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantSkinType', 'Skin type')}</label>
-                <select className="input mt-1" value={assistantProfile.skinType} onChange={(event) => setAssistantProfile((current) => ({ ...current, skinType: event.target.value }))}>
+                <label htmlFor="portal-assistant-skin-type" className="block text-sm font-medium text-slate-700">{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
+                <select id="portal-assistant-skin-type" name="portal_assistant_skin_type" className="input mt-1" value={assistantProfile.skinType} onChange={(event) => setAssistantProfile((current) => ({ ...current, skinType: event.target.value }))}>
                   <option value="">{copy('all', 'All')}</option>
-                  {['Dry', 'Oily', 'Combination', 'Sensitive', 'Normal', 'Acne-prone'].map((item) => <option key={item} value={item}>{item}</option>)}
+                  {[
+                    ['Dry', copy('skinDry', 'Dry', 'ស្ងួត')],
+                    ['Oily', copy('skinOily', 'Oily', 'ខ្លាញ់')],
+                    ['Combination', copy('skinCombination', 'Combination', 'ចម្រុះ')],
+                    ['Sensitive', copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម')],
+                    ['Normal', copy('skinNormal', 'Normal', 'ធម្មតា')],
+                    ['Acne-prone', copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន')],
+                  ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantShoppingFor', 'Shopping for')}</label>
-                <select className="input mt-1" value={assistantProfile.shoppingFor} onChange={(event) => setAssistantProfile((current) => ({ ...current, shoppingFor: event.target.value }))}>
+                <label htmlFor="portal-assistant-shopping-for" className="block text-sm font-medium text-slate-700">{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
+                <select id="portal-assistant-shopping-for" name="portal_assistant_shopping_for" className="input mt-1" value={assistantProfile.shoppingFor} onChange={(event) => setAssistantProfile((current) => ({ ...current, shoppingFor: event.target.value }))}>
                   <option value="">{copy('all', 'All')}</option>
                   {assistantCategoryOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">{copy('assistantGoal', 'Goal / use case')}</label>
-                <input className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder="Daily use, brightening, long wear..." />
+                <label htmlFor="portal-assistant-goal" className="block text-sm font-medium text-slate-700">{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
+                <input id="portal-assistant-goal" name="portal_assistant_goal" autoComplete="off" className="input mt-1" maxLength={180} value={assistantProfile.goal} onChange={(event) => setAssistantProfile((current) => ({ ...current, goal: event.target.value }))} placeholder={copy('assistantGoalPlaceholder', 'Daily use, brightening, long wear...', 'ប្រើរាល់ថ្ងៃ បំប៉នឲ្យភ្លឺ ឬជាប់បានយូរ...')} />
               </div>
             </div>
 
             <div className="mt-3">
-              <label className="block text-sm font-medium text-slate-700">{copy('assistantConcerns', 'Skin concerns')}</label>
-              <input className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder="Acne, sensitivity, dark spots, dryness..." />
+              <label htmlFor="portal-assistant-concerns" className="block text-sm font-medium text-slate-700">{copy('assistantConcerns', 'Skin concerns', 'បញ្ហាស្បែក')}</label>
+              <input id="portal-assistant-concerns" name="portal_assistant_concerns" autoComplete="off" className="input mt-1" maxLength={220} value={assistantProfile.concerns} onChange={(event) => setAssistantProfile((current) => ({ ...current, concerns: event.target.value }))} placeholder={copy('assistantConcernsPlaceholder', 'Acne, sensitivity, dark spots, dryness...', 'មុន ស្បែកងាយប្រតិកម្ម ស្នាមខ្មៅ ឬស្បែកស្ងួត...')} />
             </div>
 
             <div className="mt-3">
-              <label className="block text-sm font-medium text-slate-700">{copy('assistantQuestion', 'What would you like help finding?')}</label>
-              <textarea className="input mt-1 resize-none" rows={5} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.')} />
+              <label htmlFor="portal-assistant-question" className="block text-sm font-medium text-slate-700">{copy('assistantQuestion', 'What would you like help finding?', 'តើអ្នកចង់ឲ្យជួយរកអ្វី?')}</label>
+              <textarea id="portal-assistant-question" name="portal_assistant_question" autoComplete="off" className="input mt-1 resize-none" rows={5} maxLength={questionCharLimit} value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} placeholder={copy('assistantQuestionPlaceholder', 'Example: I have oily acne-prone skin and want a gentle daily sunscreen.', 'ឧទាហរណ៍៖ ខ្ញុំមានស្បែកខ្លាញ់ងាយកើតមុន ហើយចង់បានឡេការពារកម្ដៅថ្ងៃប្រើរាល់ថ្ងៃដែលទន់ភ្លន់។')} />
               <div className="mt-1 text-right text-xs text-slate-500">{assistantQuestion.length}/{questionCharLimit}</div>
             </div>
 
@@ -628,9 +635,9 @@ function CatalogAiSection(props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.name}</div>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-200">{item.brand || 'No brand'}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-200">{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.category || 'No category'} | {previewConfig.priceDisplay === 'KHR' ? `${item.selling_price_khr || 0} KHR` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | {previewConfig.priceDisplay === 'KHR' ? `${item.selling_price_khr || 0} KHR` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
                       {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">{item.reason}</div> : null}
                     </div>
                     <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-slate-800 dark:text-slate-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
@@ -648,7 +655,7 @@ function CatalogAiSection(props) {
                           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                             {item.online_references.map((reference, index) => (
                               <li key={`${item.product_id}-${index}`}>
-                                {reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline">{reference.title || reference.url}</a> : (reference.title || reference.snippet || 'Reference')}
+                                {reference.url ? <a href={reference.url} target="_blank" rel="noreferrer" className="text-cyan-700 underline dark:text-cyan-300">{reference.title || reference.url}</a> : (reference.title || reference.snippet || copy('reference', 'Reference', 'ឯកសារយោង'))}
                                 {reference.snippet ? <span className="text-slate-500 dark:text-slate-400"> - {reference.snippet}</span> : null}
                               </li>
                             ))}

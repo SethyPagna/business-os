@@ -139,6 +139,135 @@ body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-
   color: rgb(51 65 85);
 }
 
+.portal-image-checker {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, rgba(148, 163, 184, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148, 163, 184, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.08) 75%);
+  background-size: 22px 22px;
+  background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+}
+
+.dark [data-portal-root='true'],
+[data-portal-root='true'].dark,
+.dark [data-portal-root='true'] section {
+  color-scheme: dark;
+}
+
+.dark [data-portal-root='true'] .bg-white,
+.dark [data-portal-root='true'] .bg-slate-50,
+.dark [data-portal-root='true'] .bg-slate-100,
+[data-portal-root='true'].dark .bg-white,
+[data-portal-root='true'].dark .bg-slate-50,
+[data-portal-root='true'].dark .bg-slate-100 {
+  background-color: rgba(15, 23, 42, 0.92) !important;
+}
+
+.dark [data-portal-root='true'] .bg-white,
+.dark [data-portal-root='true'] .bg-slate-50,
+.dark [data-portal-root='true'] .bg-slate-100,
+[data-portal-root='true'].dark .bg-white,
+[data-portal-root='true'].dark .bg-slate-50,
+[data-portal-root='true'].dark .bg-slate-100 {
+  background-color: rgba(15, 23, 42, 0.92) !important;
+}
+
+.dark [data-portal-root='true'] .bg-cyan-50,
+.dark [data-portal-root='true'] .bg-blue-50,
+.dark [data-portal-root='true'] .bg-sky-50,
+[data-portal-root='true'].dark .bg-cyan-50,
+[data-portal-root='true'].dark .bg-blue-50,
+[data-portal-root='true'].dark .bg-sky-50 {
+  background-color: rgba(30, 64, 175, 0.22) !important;
+}
+
+.dark [data-portal-root='true'] .bg-amber-50,
+.dark [data-portal-root='true'] .bg-orange-50,
+[data-portal-root='true'].dark .bg-amber-50,
+[data-portal-root='true'].dark .bg-orange-50 {
+  background-color: rgba(120, 53, 15, 0.28) !important;
+}
+
+.dark [data-portal-root='true'] .bg-emerald-50,
+.dark [data-portal-root='true'] .bg-green-50,
+[data-portal-root='true'].dark .bg-emerald-50,
+[data-portal-root='true'].dark .bg-green-50 {
+  background-color: rgba(6, 78, 59, 0.26) !important;
+}
+
+.dark [data-portal-root='true'] .text-slate-900,
+.dark [data-portal-root='true'] .text-gray-900,
+[data-portal-root='true'].dark .text-slate-900,
+[data-portal-root='true'].dark .text-gray-900 {
+  color: #f8fafc !important;
+}
+
+.dark [data-portal-root='true'] .text-slate-800,
+.dark [data-portal-root='true'] .text-slate-700,
+.dark [data-portal-root='true'] .text-gray-700,
+[data-portal-root='true'].dark .text-slate-800,
+[data-portal-root='true'].dark .text-slate-700,
+[data-portal-root='true'].dark .text-gray-700 {
+  color: #dbeafe !important;
+}
+
+.dark [data-portal-root='true'] .text-slate-600,
+.dark [data-portal-root='true'] .text-gray-600,
+[data-portal-root='true'].dark .text-slate-600,
+[data-portal-root='true'].dark .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark [data-portal-root='true'] .text-slate-500,
+.dark [data-portal-root='true'] .text-gray-500,
+[data-portal-root='true'].dark .text-slate-500,
+[data-portal-root='true'].dark .text-gray-500 {
+  color: #94a3b8 !important;
+}
+
+.dark [data-portal-root='true'] .border-slate-100,
+.dark [data-portal-root='true'] .border-slate-200,
+.dark [data-portal-root='true'] .border-slate-300,
+[data-portal-root='true'].dark .border-slate-100,
+[data-portal-root='true'].dark .border-slate-200,
+[data-portal-root='true'].dark .border-slate-300 {
+  border-color: rgba(51, 65, 85, 0.95) !important;
+}
+
+.dark [data-portal-root='true'] .from-white,
+.dark [data-portal-root='true'] .from-slate-50,
+[data-portal-root='true'].dark .from-white,
+[data-portal-root='true'].dark .from-slate-50 {
+  --tw-gradient-from: #0f172a var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark [data-portal-root='true'] .to-white,
+.dark [data-portal-root='true'] .to-slate-50,
+[data-portal-root='true'].dark .to-white,
+[data-portal-root='true'].dark .to-slate-50 {
+  --tw-gradient-to: #1e293b var(--tw-gradient-to-position) !important;
+}
+
+.dark [data-portal-root='true'] .portal-image-checker,
+[data-portal-root='true'].dark .portal-image-checker {
+  background-color: #0f172a;
+  background-image:
+    linear-gradient(45deg, rgba(148, 163, 184, 0.13) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148, 163, 184, 0.13) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.13) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.13) 75%);
+}
+
+.dark body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-widget .goog-te-combo {
+  border-color: rgba(51, 65, 85, 0.95);
+  background: #0f172a;
+  color: #f8fafc;
+}
+
 /* ── Page background override ──────────────────────────────── */
 body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; }
 /* Applied directly via JS below when variable is set */

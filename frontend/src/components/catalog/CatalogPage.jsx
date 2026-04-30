@@ -668,7 +668,7 @@ Object.assign(PORTAL_KM_FALLBACKS, {
     recommendedProducts: 'ផលិតផលណែនាំ',
     recommendedProductsHint: 'ជ្រើសផលិតផលដែលហាងចង់បន្លិចថា ណែនាំ នៅលើទំព័រសាធារណៈ។',
     noRecommendedProducts: 'មិនទាន់មានផលិតផលសម្រាប់ជ្រើសទេ។ សូមរក្សាទុកផលិតផលសិន។',
-    topSellerBadge: 'លក់ដាច់លេខ {value}',
+    topSellerBadge: 'លក់ដាច់បំផុតលេខ {value}',
     topProductBadge: 'ផលិតផលលេចធ្លោលេខ {value}',
     recommendedBadge: 'ណែនាំ',
     promotionBadge: 'ប្រូម៉ូសិន',
@@ -1322,17 +1322,11 @@ function ImageField({
       {value ? (
         <button
           type="button"
-          className="block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300"
+          className="block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/90"
           onClick={onPreview}
         >
           <div
-            className="flex h-40 items-center justify-center rounded-2xl p-4"
-            style={{
-              backgroundColor: '#ffffff',
-              backgroundImage: 'linear-gradient(45deg, rgba(148,163,184,0.08) 25%, transparent 25%), linear-gradient(-45deg, rgba(148,163,184,0.08) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(148,163,184,0.08) 75%), linear-gradient(-45deg, transparent 75%, rgba(148,163,184,0.08) 75%)',
-              backgroundSize: '22px 22px',
-              backgroundPosition: '0 0, 0 11px, 11px -11px, -11px 0px',
-            }}
+            className="portal-image-checker flex h-40 items-center justify-center rounded-2xl p-4"
           >
             <img src={value} alt={label} className="max-h-full max-w-full object-contain" />
           </div>
@@ -3725,6 +3719,7 @@ export default function CatalogPage({ publicView = false }) {
   if (loading) {
     return (
     <div
+      data-portal-root="true"
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
         ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
@@ -3748,6 +3743,7 @@ export default function CatalogPage({ publicView = false }) {
 
   return (
     <div
+      data-portal-root="true"
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
         ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
@@ -4085,7 +4081,7 @@ export default function CatalogPage({ publicView = false }) {
                   type="button"
                   className="rounded-full border border-white/15 bg-black/55 p-2 text-white transition hover:bg-black/70"
                   onClick={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
-                  aria-label="Close"
+                  aria-label={copy('close', 'Close')}
                 >
                   ✕
                 </button>

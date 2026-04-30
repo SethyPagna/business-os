@@ -59,6 +59,12 @@ if errorlevel 1 exit /b 1
 echo [OK] Frontend i18n verification passed
 echo.
 
+echo [4b/5] Verifying frontend UI coverage...
+call npm.cmd run verify:ui
+if errorlevel 1 exit /b 1
+echo [OK] Frontend UI coverage verification passed
+echo.
+
 cd /d "%ROOT%\backend"
 echo [5/5] Running backend utility/security/core tests...
 call npm.cmd run test:utils
