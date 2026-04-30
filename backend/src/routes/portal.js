@@ -97,6 +97,20 @@ function normalizeFaqItems(value) {
     .slice(0, 24)
 }
 
+function normalizeProductIdList(value) {
+  const input = Array.isArray(value) ? value : tryParse(value, [])
+  if (!Array.isArray(input)) return []
+  const seen = new Set()
+  const ids = []
+  input.forEach((entry) => {
+    const id = Number(entry)
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
+    seen.add(id)
+    ids.push(id)
+  })
+  return ids
+}
+
 /** Load global settings table into key/value map for fast lookup. */
 function loadSettingsMap() {
   const rows = db.prepare('SELECT key, value FROM settings').all()
@@ -124,6 +138,7 @@ function buildPortalConfig() {
   const redeemPoints = Math.max(1, Math.floor(toNumber(settings.customer_portal_redeem_points, 100)))
   const redeemValueUsd = normalizeRedeemValueUsd(settings.customer_portal_redeem_value_usd, 1)
   const redeemValueKhr = normalizeRedeemValueKhr(settings.customer_portal_redeem_value_khr, exchangeRate)
+  const recommendedProductIds = normalizeProductIdList(settings.customer_portal_recommended_product_ids || '[]')
 
   return {
     businessName: settings.business_name || 'Business OS',
@@ -194,6 +209,13 @@ function buildPortalConfig() {
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     priceDisplay: settings.customer_portal_price_display || settings.display_currency || 'USD',
+    showTopSellerBadge: normalizeBoolean(settings.customer_portal_show_top_seller_badge, true),
+    showTopProductBadge: normalizeBoolean(settings.customer_portal_show_top_product_badge, true),
+    showRecommendedBadge: normalizeBoolean(settings.customer_portal_show_recommended_badge, true),
+    showPromotionBadge: normalizeBoolean(settings.customer_portal_show_promotion_badge, true),
+    showNewArrivalBadge: normalizeBoolean(settings.customer_portal_show_new_arrival_badge, false),
+    highlightRankLimit: Math.max(1, Math.min(10, Math.round(toNumber(settings.customer_portal_highlight_rank_limit, 3)))),
+    recommendedProductIds,
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(settings.customer_portal_refresh_seconds, 20)))),
     stockThresholdMode: settings.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(settings.customer_portal_low_stock_threshold, 10)),
@@ -220,6 +242,122 @@ function buildPortalConfig() {
       slug: organization.slug,
       public_id: organization.public_id,
     } : null,
+  }
+}
+
+function buildRankMap(rows, scoreKey) {
+  const ranked = rows
+    .map((row) => ({
+      productId: Number(row?.product_id || 0),
+      score: Number(row?.[scoreKey] || 0),
+    }))
+    .filter((row) => row.productId > 0 && row.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return a.productId - b.productId
+    })
+
+  const rankMap = new Map()
+  ranked.forEach((row, index) => {
+    rankMap.set(row.productId, index + 1)
+  })
+  return rankMap
+}
+
+function getPortalProductSignals(config) {
+  const completedStatuses = "('cancelled','awaiting_payment')"
+  const saleRows = db.prepare(`
+    SELECT
+      si.product_id,
+      COALESCE(SUM(si.quantity), 0) AS sold_quantity,
+      COALESCE(SUM(si.total_usd), 0) AS revenue_usd,
+      COALESCE(SUM(si.total_khr), 0) AS revenue_khr
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE si.product_id IS NOT NULL
+      AND COALESCE(s.sale_status, 'completed') NOT IN ${completedStatuses}
+    GROUP BY si.product_id
+  `).all()
+
+  const returnRows = db.prepare(`
+    SELECT
+      ri.product_id,
+      COALESCE(SUM(ri.quantity), 0) AS returned_quantity,
+      COALESCE(SUM(ri.total_usd), 0) AS refunded_usd,
+      COALESCE(SUM(ri.total_khr), 0) AS refunded_khr
+    FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE ri.product_id IS NOT NULL
+      AND COALESCE(r.status, 'completed') != 'cancelled'
+      AND COALESCE(r.return_scope, 'customer') = 'customer'
+    GROUP BY ri.product_id
+  `).all()
+
+  const metrics = new Map()
+  saleRows.forEach((row) => {
+    const productId = Number(row.product_id || 0)
+    if (!productId) return
+    metrics.set(productId, {
+      product_id: productId,
+      sold_quantity: Number(row.sold_quantity || 0),
+      revenue_usd: Number(row.revenue_usd || 0),
+      revenue_khr: Number(row.revenue_khr || 0),
+      returned_quantity: 0,
+      refunded_usd: 0,
+      refunded_khr: 0,
+    })
+  })
+
+  returnRows.forEach((row) => {
+    const productId = Number(row.product_id || 0)
+    if (!productId) return
+    const current = metrics.get(productId) || {
+      product_id: productId,
+      sold_quantity: 0,
+      revenue_usd: 0,
+      revenue_khr: 0,
+      returned_quantity: 0,
+      refunded_usd: 0,
+      refunded_khr: 0,
+    }
+    current.returned_quantity = Number(row.returned_quantity || 0)
+    current.refunded_usd = Number(row.refunded_usd || 0)
+    current.refunded_khr = Number(row.refunded_khr || 0)
+    metrics.set(productId, current)
+  })
+
+  const rankedRows = Array.from(metrics.values()).map((row) => ({
+    product_id: row.product_id,
+    net_quantity: Math.max(0, row.sold_quantity - row.returned_quantity),
+    net_revenue_usd: Math.max(0, row.revenue_usd - row.refunded_usd),
+    net_revenue_khr: Math.max(0, row.revenue_khr - row.refunded_khr),
+  }))
+
+  const topSellerRank = buildRankMap(rankedRows, 'net_quantity')
+  const topProductRank = buildRankMap(rankedRows, 'net_revenue_usd')
+
+  const newArrivalRank = new Map()
+  db.prepare(`
+    SELECT id
+    FROM products
+    WHERE is_active = 1
+    ORDER BY datetime(COALESCE(created_at, updated_at)) DESC, id DESC
+  `).all().forEach((row, index) => {
+    const productId = Number(row.id || 0)
+    if (!productId) return
+    newArrivalRank.set(productId, index + 1)
+  })
+
+  const recommendedRank = new Map()
+  normalizeProductIdList(config?.recommendedProductIds || []).forEach((productId, index) => {
+    recommendedRank.set(productId, index + 1)
+  })
+
+  return {
+    topSellerRank,
+    topProductRank,
+    newArrivalRank,
+    recommendedRank,
   }
 }
 
@@ -274,7 +412,8 @@ function summarizePoints(sales, returns, submissions, config) {
 }
 
 /** Return customer-facing product payload including branch stock and image gallery. */
-function getPortalProducts() {
+function getPortalProducts(config = buildPortalConfig()) {
+  const signals = getPortalProductSignals(config)
   const products = db.prepare(`
     SELECT
       p.id,
@@ -285,10 +424,13 @@ function getPortalProducts() {
       p.description,
       p.selling_price_usd,
       p.selling_price_khr,
+      p.special_price_usd,
+      p.special_price_khr,
       p.stock_quantity,
       p.low_stock_threshold,
       p.out_of_stock_threshold,
       p.image_path,
+      p.created_at,
       COALESCE(json_group_array(json_object(
         'branch_id', b.id,
         'branch_name', b.name,
@@ -326,6 +468,11 @@ function getPortalProducts() {
       image_path: gallery[0] || null,
       image_gallery: gallery,
       branch_stock: tryParse(product.branch_stock_json, []),
+      top_seller_rank: signals.topSellerRank.get(product.id) || 0,
+      top_product_rank: signals.topProductRank.get(product.id) || 0,
+      new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
+      portal_recommended: signals.recommendedRank.has(product.id),
+      recommended_rank: signals.recommendedRank.get(product.id) || 0,
       branch_stock_json: undefined,
     }
   })
@@ -450,10 +597,11 @@ router.get('/config', (_req, res) => {
 })
 
 router.get('/bootstrap', (_req, res) => {
+  const config = buildPortalConfig()
   res.json({
-    config: buildPortalConfig(),
+    config,
     meta: getPortalCatalogMeta(),
-    products: getPortalProducts(),
+    products: getPortalProducts(config),
   })
 })
 
@@ -462,7 +610,8 @@ router.get('/catalog/meta', (_req, res) => {
 })
 
 router.get('/catalog/products', (_req, res) => {
-  res.json(getPortalProducts())
+  const config = buildPortalConfig()
+  res.json(getPortalProducts(config))
 })
 
 router.get('/ai/status', (_req, res) => {

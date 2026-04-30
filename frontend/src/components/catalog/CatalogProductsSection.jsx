@@ -2,6 +2,7 @@ import React from 'react'
 import { Search, ShoppingBag } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
 import { SectionShell, StatusPill } from './catalogUi'
+import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
 
 /**
  * Product-facing portal catalog view. Kept separate so the editor shell can
@@ -31,7 +32,6 @@ export default function CatalogProductsSection(props) {
     toggleFilterValue,
     previewConfig,
     portalError,
-    mobileGridColumns,
     productGridClass,
     compactTwoColumnMobile,
     compactCatalogCards,
@@ -154,12 +154,16 @@ export default function CatalogProductsSection(props) {
         </div>
       ) : null}
 
-      <div className={`grid gap-3 ${mobileGridColumns === 1 ? 'grid-cols-1' : 'grid-cols-2'} ${productGridClass}`}>
+      <div className={`grid gap-3 ${productGridClass}`}>
         {filteredProducts.map((product) => {
           const qty = getBranchQty(product, selectedStockBranch)
           const status = getStockStatus(product, qty, previewConfig)
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
+          const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy)
+          const pricePresentation = previewConfig.showPrices
+            ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice)
+            : null
 
           return (
             <article key={product.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/90">
@@ -179,6 +183,28 @@ export default function CatalogProductsSection(props) {
                 <div className="absolute left-4 top-4">
                   <StatusPill copy={copy} status={status} />
                 </div>
+                {highlightBadges.length ? (
+                  <div className="absolute right-3 top-3 flex max-w-[78%] flex-col items-end gap-1.5">
+                    {highlightBadges.map((badge) => (
+                      <span
+                        key={badge.key}
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] shadow-sm backdrop-blur ${
+                          badge.tone === 'violet'
+                            ? 'bg-violet-600/90 text-white'
+                            : badge.tone === 'rose'
+                              ? 'bg-rose-600/90 text-white'
+                              : badge.tone === 'amber'
+                                ? 'bg-amber-400/95 text-slate-950'
+                                : badge.tone === 'emerald'
+                                  ? 'bg-emerald-500/90 text-white'
+                                  : 'bg-sky-600/90 text-white'
+                        }`}
+                      >
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 {gallery.length > 1 ? (
                   <button
                     type="button"
@@ -206,11 +232,22 @@ export default function CatalogProductsSection(props) {
                 <div className={`flex items-center justify-between rounded-2xl bg-slate-50 dark:bg-slate-800/80 ${compactCatalogCards ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('price', 'Price')}</div>
-                    <div className={`mt-1 font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
-                      {previewConfig.showPrices
-                        ? formatPortalPrice(product.selling_price_usd, product.selling_price_khr, previewConfig)
-                        : copy('priceHidden', 'Price hidden')}
-                    </div>
+                    {previewConfig.showPrices ? (
+                      <div className="mt-1 space-y-0.5">
+                        <div className={`font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                          {pricePresentation?.primaryText}
+                        </div>
+                        {pricePresentation?.originalText ? (
+                          <div className="text-[11px] text-slate-400 line-through dark:text-slate-500">
+                            {pricePresentation.originalText}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className={`mt-1 font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                        {copy('priceHidden', 'Price hidden')}
+                      </div>
+                    )}
                   </div>
                   {!compactCatalogCards ? <span className="text-xs text-slate-500 dark:text-slate-400">{copy('readOnly', 'Read-only for customers')}</span> : null}
                 </div>

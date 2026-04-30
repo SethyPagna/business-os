@@ -45,6 +45,12 @@ import {
   normalizeGoogleMapsEmbed,
   serializeAboutBlocks,
 } from './portalEditorUtils.mjs'
+import {
+  getPortalGridClass,
+  getPortalMobileGridClass,
+  normalizeRecommendedProductIds,
+  productMatchesPortalBranches,
+} from './portalCatalogDisplay.mjs'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import { ProductImg } from '../products/primitives'
 
@@ -114,6 +120,23 @@ const PORTAL_TEXT = {
     showPrices: 'Show selling prices',
     showOutOfStockProducts: 'Show out-of-stock products',
     priceDisplay: 'Price display',
+    portalHighlights: 'Product highlights',
+    portalHighlightsHint: 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.',
+    showTopSellerBadge: 'Show top seller badges',
+    showTopProductBadge: 'Show top product badges',
+    showRecommendedBadge: 'Show recommended badges',
+    showPromotionBadge: 'Show promotion badges',
+    showNewArrivalBadge: 'Show new arrival badges',
+    highlightRankLimit: 'Ranking badge limit',
+    recommendedProducts: 'Recommended products',
+    recommendedProductsHint: 'Select store-picked products that should always receive a recommended badge on the public portal.',
+    noRecommendedProducts: 'No products loaded yet. Save products first, then come back here.',
+    topSellerBadge: 'Top {value} Seller',
+    topProductBadge: 'Top {value} Product',
+    recommendedBadge: 'Recommended',
+    promotionBadge: 'Promo',
+    promotionBadgePercent: '-{value}%',
+    newArrivalBadge: 'New',
     points: 'Points settings',
     pointsPerUsd: 'Points per USD',
     pointsPerKhr: 'Points per KHR',
@@ -509,6 +532,13 @@ const DEFAULT_CONFIG = {
   showPrices: true,
   showOutOfStockProducts: true,
   priceDisplay: 'USD',
+  showTopSellerBadge: true,
+  showTopProductBadge: true,
+  showRecommendedBadge: true,
+  showPromotionBadge: true,
+  showNewArrivalBadge: false,
+  highlightRankLimit: 3,
+  recommendedProductIds: [],
   refreshSeconds: 20,
   stockThresholdMode: 'product',
   lowStockThreshold: 10,
@@ -624,10 +654,27 @@ Object.assign(PORTAL_KM_FALLBACKS, {
   showCatalog: 'បង្ហាញកាតាឡុកផលិតផល',
   showMembership: 'បង្ហាញការស្វែងរកសមាជិកភាព',
   showAbout: 'បង្ហាញផ្នែកអំពី',
-  showPrices: 'បង្ហាញតម្លៃលក់',
-  showOutOfStockProducts: 'បង្ហាញផលិតផលអស់ស្តុក',
-  priceDisplay: 'ការបង្ហាញតម្លៃ',
-  refreshSeconds: 'ចន្លោះពេលផ្ទុកឡើងវិញសាធារណៈ (វិនាទី)',
+    showPrices: 'បង្ហាញតម្លៃលក់',
+    showOutOfStockProducts: 'បង្ហាញផលិតផលអស់ស្តុក',
+    priceDisplay: 'ការបង្ហាញតម្លៃ',
+    portalHighlights: 'ស្លាកបន្លិចផលិតផល',
+    portalHighlightsHint: 'ប្រើស្លាកតូចៗដើម្បីបង្ហាញផលិតផលពេញនិយម ផលិតផលណែនាំ ឬប្រូម៉ូសិន ដោយមិនធ្វើឱ្យកាតរញ៉េរញ៉ៃ។',
+    showTopSellerBadge: 'បង្ហាញស្លាកលក់ដាច់បំផុត',
+    showTopProductBadge: 'បង្ហាញស្លាកផលិតផលលេចធ្លោ',
+    showRecommendedBadge: 'បង្ហាញស្លាកណែនាំ',
+    showPromotionBadge: 'បង្ហាញស្លាកប្រូម៉ូសិន',
+    showNewArrivalBadge: 'បង្ហាញស្លាកមកថ្មី',
+    highlightRankLimit: 'ចំនួនចំណាត់ថ្នាក់ស្លាក',
+    recommendedProducts: 'ផលិតផលណែនាំ',
+    recommendedProductsHint: 'ជ្រើសផលិតផលដែលហាងចង់បន្លិចថា ណែនាំ នៅលើទំព័រសាធារណៈ។',
+    noRecommendedProducts: 'មិនទាន់មានផលិតផលសម្រាប់ជ្រើសទេ។ សូមរក្សាទុកផលិតផលសិន។',
+    topSellerBadge: 'លក់ដាច់លេខ {value}',
+    topProductBadge: 'ផលិតផលលេចធ្លោលេខ {value}',
+    recommendedBadge: 'ណែនាំ',
+    promotionBadge: 'ប្រូម៉ូសិន',
+    promotionBadgePercent: '-{value}%',
+    newArrivalBadge: 'មកថ្មី',
+    refreshSeconds: 'ចន្លោះពេលផ្ទុកឡើងវិញសាធារណៈ (វិនាទី)',
   gridColumnsMobile: 'ចំនួនជួរឈរទូរស័ព្ទ',
   gridColumnsDesktop: 'ចំនួនជួរឈរកុំព្យូទ័រ',
   syncSpeedHint: 'តម្លៃតូចនឹងផ្ទុកឡើងវិញលឿនជាង ប៉ុន្តែបង្កើនចំនួនសំណើ។ ការមើលជាមុនខាងក្នុងនៅតែឆ្លើយតបភ្លាមៗទៅនឹងសមកាលកម្ម។',
@@ -1024,6 +1071,13 @@ function buildDraft(config) {
     customer_portal_show_prices: !!config.showPrices,
     customer_portal_show_out_of_stock_products: !!config.showOutOfStockProducts,
     customer_portal_price_display: config.priceDisplay || 'USD',
+    customer_portal_show_top_seller_badge: !!config.showTopSellerBadge,
+    customer_portal_show_top_product_badge: !!config.showTopProductBadge,
+    customer_portal_show_recommended_badge: !!config.showRecommendedBadge,
+    customer_portal_show_promotion_badge: !!config.showPromotionBadge,
+    customer_portal_show_new_arrival_badge: !!config.showNewArrivalBadge,
+    customer_portal_highlight_rank_limit: String(config.highlightRankLimit ?? 3),
+    customer_portal_recommended_product_ids: JSON.stringify(normalizeRecommendedProductIds(config.recommendedProductIds || [])),
     customer_portal_refresh_seconds: String(config.refreshSeconds ?? 20),
     customer_portal_stock_threshold_mode: config.stockThresholdMode || 'product',
     customer_portal_low_stock_threshold: String(config.lowStockThreshold ?? 10),
@@ -1137,6 +1191,13 @@ function applyDraft(config, draft) {
     showPrices: toBoolean(draft.customer_portal_show_prices, config.showPrices),
     showOutOfStockProducts: toBoolean(draft.customer_portal_show_out_of_stock_products, config.showOutOfStockProducts ?? true),
     priceDisplay: normalizePriceDisplay(draft.customer_portal_price_display || config.priceDisplay),
+    showTopSellerBadge: toBoolean(draft.customer_portal_show_top_seller_badge, config.showTopSellerBadge ?? true),
+    showTopProductBadge: toBoolean(draft.customer_portal_show_top_product_badge, config.showTopProductBadge ?? true),
+    showRecommendedBadge: toBoolean(draft.customer_portal_show_recommended_badge, config.showRecommendedBadge ?? true),
+    showPromotionBadge: toBoolean(draft.customer_portal_show_promotion_badge, config.showPromotionBadge ?? true),
+    showNewArrivalBadge: toBoolean(draft.customer_portal_show_new_arrival_badge, config.showNewArrivalBadge ?? false),
+    highlightRankLimit: Math.max(1, Math.min(10, Math.round(toNumber(draft.customer_portal_highlight_rank_limit, config.highlightRankLimit || 3)))),
+    recommendedProductIds: normalizeRecommendedProductIds(draft.customer_portal_recommended_product_ids || config.recommendedProductIds || []),
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(draft.customer_portal_refresh_seconds, config.refreshSeconds)))),
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
@@ -1491,6 +1552,14 @@ export default function CatalogPage({ publicView = false }) {
   const previewConfig = useMemo(
     () => (canEdit ? applyDraft(config, editorDraft) : config),
     [canEdit, config, editorDraft]
+  )
+  const recommendedProductIds = useMemo(
+    () => normalizeRecommendedProductIds(
+      editorDraft.customer_portal_recommended_product_ids
+      || previewConfig.recommendedProductIds
+      || []
+    ),
+    [editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
   const language = previewConfig.language === 'km' ? 'km' : 'en'
   const editorLanguage = appLanguage === 'km' ? 'km' : 'en'
@@ -1993,10 +2062,7 @@ export default function CatalogPage({ publicView = false }) {
       if (categoryFilter.length && !categoryFilter.includes(product.category || '')) return false
       if (brandFilter.length && !brandFilter.includes(product.brand || '')) return false
 
-      if (branchFilter.length) {
-        const hasStockInSelectedBranch = branchFilter.some((branchId) => getBranchQty(product, branchId) > 0)
-        if (!hasStockInSelectedBranch) return false
-      }
+      if (!productMatchesPortalBranches(product, branchFilter)) return false
 
       const statusBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
       const qty = getBranchQty(product, statusBranch)
@@ -2026,6 +2092,15 @@ export default function CatalogPage({ publicView = false }) {
   function setDraft(key, value) {
     setEditorDirty(true)
     setEditorDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  function toggleRecommendedProduct(productId) {
+    const id = Number(productId)
+    if (!Number.isFinite(id) || id <= 0) return
+    const nextIds = recommendedProductIds.includes(id)
+      ? recommendedProductIds.filter((entry) => entry !== id)
+      : [...recommendedProductIds, id]
+    setDraft('customer_portal_recommended_product_ids', JSON.stringify(nextIds))
   }
 
   function openPortalImage(title, images, index = 0) {
@@ -2206,6 +2281,7 @@ export default function CatalogPage({ publicView = false }) {
       const sanitizedOutOfStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_out_of_stock_threshold, 0))
       const sanitizedGridMobile = Math.min(3, Math.max(1, Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1))))
       const sanitizedGridDesktop = Math.min(8, Math.max(2, Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4))))
+      const sanitizedHighlightRankLimit = Math.max(1, Math.min(10, Math.round(toNumber(editorDraft.customer_portal_highlight_rank_limit, 3))))
       const sanitizedLogoSize = Math.min(144, Math.max(48, Math.round(toNumber(editorDraft.customer_portal_logo_size, 80))))
       const sanitizedLogoZoom = Math.min(180, Math.max(80, Math.round(toNumber(editorDraft.customer_portal_logo_zoom, 100))))
       const sanitizedLogoPositionX = Math.min(100, Math.max(0, Math.round(toNumber(editorDraft.customer_portal_logo_position_x, 50))))
@@ -2282,7 +2358,15 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_show_catalog: editorDraft.customer_portal_show_catalog ? 'true' : 'false',
         customer_portal_show_membership: editorDraft.customer_portal_show_membership ? 'true' : 'false',
         customer_portal_show_prices: editorDraft.customer_portal_show_prices ? 'true' : 'false',
+        customer_portal_show_out_of_stock_products: editorDraft.customer_portal_show_out_of_stock_products ? 'true' : 'false',
         customer_portal_price_display: editorDraft.customer_portal_price_display || 'USD',
+        customer_portal_show_top_seller_badge: editorDraft.customer_portal_show_top_seller_badge ? 'true' : 'false',
+        customer_portal_show_top_product_badge: editorDraft.customer_portal_show_top_product_badge ? 'true' : 'false',
+        customer_portal_show_recommended_badge: editorDraft.customer_portal_show_recommended_badge ? 'true' : 'false',
+        customer_portal_show_promotion_badge: editorDraft.customer_portal_show_promotion_badge ? 'true' : 'false',
+        customer_portal_show_new_arrival_badge: editorDraft.customer_portal_show_new_arrival_badge ? 'true' : 'false',
+        customer_portal_highlight_rank_limit: String(sanitizedHighlightRankLimit),
+        customer_portal_recommended_product_ids: JSON.stringify(recommendedProductIds),
         customer_portal_refresh_seconds: String(sanitizedRefreshSeconds),
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
@@ -2555,18 +2639,21 @@ export default function CatalogPage({ publicView = false }) {
   const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(previewConfig.gridColumnsMobile, 1))))
   const desktopGridColumns = Math.min(8, Math.max(2, Math.round(toNumber(previewConfig.gridColumnsDesktop, 4))))
   const compactTwoColumnMobile = mobileGridColumns === 2
-  const productGridClass = desktopGridColumns === 2
-    ? 'lg:grid-cols-2'
-    : desktopGridColumns === 3
-      ? 'lg:grid-cols-2 xl:grid-cols-3'
-      : desktopGridColumns === 4
-        ? 'lg:grid-cols-2 xl:grid-cols-4'
-        : desktopGridColumns === 5
-          ? 'lg:grid-cols-3 xl:grid-cols-5'
-          : 'lg:grid-cols-3 xl:grid-cols-6'
+  const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
+  const recommendedProductOptions = useMemo(() => (
+    [...products]
+      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
+      .map((product) => ({
+        id: Number(product.id),
+        name: String(product.name || '').trim() || `#${product.id}`,
+        subtitle: [product.brand, product.category].filter(Boolean).join(' • '),
+        image: normalizeProductGallery(product)[0] || '',
+      }))
+      .filter((product) => product.id > 0)
+  ), [products])
 
   const catalogTabProps = {
     copy,
@@ -2591,7 +2678,6 @@ export default function CatalogPage({ publicView = false }) {
     toggleFilterValue,
     previewConfig,
     portalError,
-    mobileGridColumns,
     productGridClass,
     compactTwoColumnMobile,
     compactCatalogCards,
@@ -2809,6 +2895,78 @@ export default function CatalogPage({ publicView = false }) {
                   value={editorDraft.customer_portal_grid_columns_desktop || '4'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}
                 />
+              </div>
+            </div>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-semibold text-slate-900">{copy('portalHighlights', 'Product highlights')}</div>
+                <p className="text-xs text-slate-500">{copy('portalHighlightsHint', 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.')}</p>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-700">{copy('showTopSellerBadge', 'Show top seller badges')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_top_seller_badge} onChange={(event) => setDraft('customer_portal_show_top_seller_badge', event.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-700">{copy('showTopProductBadge', 'Show top product badges')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_top_product_badge} onChange={(event) => setDraft('customer_portal_show_top_product_badge', event.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-700">{copy('showRecommendedBadge', 'Show recommended badges')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_recommended_badge} onChange={(event) => setDraft('customer_portal_show_recommended_badge', event.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm font-medium text-slate-700">{copy('showPromotionBadge', 'Show promotion badges')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_promotion_badge} onChange={(event) => setDraft('customer_portal_show_promotion_badge', event.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
+                  <span className="text-sm font-medium text-slate-700">{copy('showNewArrivalBadge', 'Show new arrival badges')}</span>
+                  <input type="checkbox" checked={!!editorDraft.customer_portal_show_new_arrival_badge} onChange={(event) => setDraft('customer_portal_show_new_arrival_badge', event.target.checked)} />
+                </label>
+                <div className="md:col-span-2">
+                  <label htmlFor="portal-highlight-rank-limit" className="block text-sm font-medium text-slate-700">{copy('highlightRankLimit', 'Ranking badge limit')}</label>
+                  <input
+                    id="portal-highlight-rank-limit"
+                    name="customer_portal_highlight_rank_limit"
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={editorDraft.customer_portal_highlight_rank_limit || '3'}
+                    onChange={(event) => setDraft('customer_portal_highlight_rank_limit', event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="block text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</label>
+                  <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')}</p>
+                {recommendedProductOptions.length ? (
+                  <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                    {recommendedProductOptions.map((product) => {
+                      const checked = recommendedProductIds.includes(product.id)
+                      return (
+                        <label key={product.id} className={`flex items-center gap-3 rounded-2xl border px-3 py-2 transition ${checked ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50'}`}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleRecommendedProduct(product.id)} />
+                          <div className="h-11 w-11 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800">
+                            {product.image ? <ProductImg src={product.image} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
+                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">{product.subtitle || `#${product.id}`}</div>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+                    {copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
+                  </div>
+                )}
               </div>
             </div>
             <p className="mt-2 text-xs text-slate-500">{copy('syncSpeedHint', 'Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.')}</p>
