@@ -1,4 +1,4 @@
-import { normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { buildProductGroups } from '../../utils/productGrouping.mjs'
 
 export function buildProductsById(products = []) {
@@ -49,6 +49,21 @@ export function resolveCartPriceValues(product, priceMode = 'selling', exchangeR
   const usdToKhr = typeof converters.usdToKhr === 'function'
     ? converters.usdToKhr
     : ((value, rate) => normalizePriceValue((Number(value || 0) * Number(rate || 0)), 0))
+  const usePromotion = priceMode === 'promotion'
+  if (usePromotion) {
+    const promotion = calculateProductDiscount(product, exchangeRate)
+    if (promotion.active) {
+      return {
+        applied_price_usd: promotion.applied_price_usd,
+        applied_price_khr: promotion.applied_price_khr,
+        price_mode: 'promotion',
+        product_discount_type: product?.discount_type || 'percent',
+        product_discount_label: product?.discount_label || '',
+        product_discount_usd: promotion.discount_amount_usd,
+        product_discount_khr: promotion.discount_amount_khr,
+      }
+    }
+  }
   const useSpecial = priceMode === 'special' && ((product?.special_price_usd || 0) > 0 || (product?.special_price_khr || 0) > 0)
   if (useSpecial) {
     const appliedUsd = normalizePriceValue(product?.special_price_usd ?? product?.selling_price_usd ?? 0, 0)

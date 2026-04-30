@@ -851,6 +851,14 @@ export { getSyncServerUrl, getAuthSessionToken }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
+export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
+
+export const getActionHistory = (scope = 'global', limit = 3) =>
+  route(`actionHistory:get:${scope}:${limit}`, () => apiFetch('GET', `/api/action-history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit)}`), () => ({ items: [] }))
+export const createActionHistory = payload =>
+  route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+export const updateActionHistory = (id, payload) =>
+  route('actionHistory:update', () => apiFetch('PATCH', `/api/action-history/${id}`, { ...getDeviceInfo(), ...(payload || {}) }), null, true)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
 
@@ -1128,6 +1136,8 @@ export function downloadImportTemplate(type) {
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',
     'special_price_usd','special_price_khr',
+    'discount_enabled','discount_type','discount_percent','discount_amount_usd','discount_amount_khr',
+    'discount_label','discount_badge_color','discount_starts_at','discount_ends_at',
     'purchase_price_usd','purchase_price_khr',
     'stock_quantity','low_stock_threshold',
     'branch','supplier',

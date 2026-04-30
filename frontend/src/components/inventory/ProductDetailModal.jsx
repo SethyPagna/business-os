@@ -1,7 +1,8 @@
 // ProductDetailModal (Inventory)
 // Shows full stock details for a product across all branches.
+import { calculateProductDiscount } from '../../utils/pricing.js'
 
-export default function ProductDetailModal({ product: p, onClose, onAdjust, fmtUSD, fmtKHR, t }) {
+export default function ProductDetailModal({ product: p, onClose, onAdjust, onMove, fmtUSD, fmtKHR, t }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
   if (!p) return null
 
@@ -14,6 +15,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, fmtU
       ? 'text-yellow-600'
       : 'text-green-600'
   const profit = Math.max(0, p.revenue_usd || 0) - Math.max(0, p.cogs_usd || 0)
+  const promotion = calculateProductDiscount(p)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
@@ -61,6 +63,13 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, fmtU
                 <div className="mb-1 text-xs font-semibold text-blue-600 dark:text-blue-400">{T('special_price', 'Special Price')}</div>
                 <div className="font-bold text-blue-700 dark:text-blue-300">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</div>
                 {(p.special_price_khr || p.selling_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</div> : null}
+              </div>
+            ) : null}
+            {promotion.active ? (
+              <div className="col-span-2 rounded-xl bg-rose-50 p-3 dark:bg-rose-950/30">
+                <div className="mb-1 text-xs font-semibold text-rose-600 dark:text-rose-300">{T('product_discount', 'Promotion')}</div>
+                <div className="font-bold text-rose-700 dark:text-rose-200">{fmtUSD(promotion.applied_price_usd || 0)}</div>
+                {(promotion.applied_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr || 0)}</div> : null}
               </div>
             ) : null}
           </div>
@@ -113,8 +122,9 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, fmtU
           ) : null}
         </div>
 
-        <div className="flex-shrink-0 border-t border-gray-200 p-4 dark:border-gray-700">
-          <button type="button" onClick={() => { onClose(); onAdjust(p) }} className="btn-primary w-full text-sm">{T('adjust_stock', 'Adjust Stock')}</button>
+        <div className="grid flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-2">
+          <button type="button" onClick={() => { onClose(); onAdjust(p) }} className="btn-primary w-full py-3 text-sm">{T('adjust_stock', 'Adjust Stock')}</button>
+          <button type="button" onClick={() => { onClose(); onMove?.(p) }} className="btn-secondary w-full py-3 text-sm">{T('move_stock', 'Move Stock')}</button>
         </div>
       </div>
     </div>

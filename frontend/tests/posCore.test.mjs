@@ -108,6 +108,28 @@ await runTest('special price mode prefers special prices and falls back to selli
   assert.equal(selling.applied_price_usd, 12)
 })
 
+await runTest('promotion price mode applies active product discounts and preserves metadata', () => {
+  const promotion = resolveCartPriceValues(
+    {
+      selling_price_usd: 20,
+      selling_price_khr: 82000,
+      discount_enabled: 1,
+      discount_type: 'percent',
+      discount_percent: 10,
+      discount_label: 'Launch deal',
+    },
+    'promotion',
+    4100,
+  )
+
+  assert.equal(promotion.price_mode, 'promotion')
+  assert.equal(promotion.applied_price_usd, 18)
+  assert.equal(promotion.applied_price_khr, 73800)
+  assert.equal(promotion.product_discount_type, 'percent')
+  assert.equal(promotion.product_discount_label, 'Launch deal')
+  assert.equal(promotion.product_discount_usd, 2)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

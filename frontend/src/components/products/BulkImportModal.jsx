@@ -361,7 +361,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
             <p className="mb-1 font-semibold">{T('csv_columns_header', 'Columns')}</p>
             <p className="font-mono text-xs leading-relaxed">
-              {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, purchase_price_usd, purchase_price_khr, stock_quantity, low_stock_threshold, supplier, branch, parent_id, is_group, image_filename_1..5, image_filenames, image_conflict_mode')}
+              {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, purchase_price_usd, purchase_price_khr, stock_quantity, low_stock_threshold, supplier, branch, parent_id, is_group, image_filename_1..5, image_filenames, image_conflict_mode')}
             </p>
           </div>
           <div className="flex gap-3">
@@ -455,6 +455,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     ['selling_price_khr', 'Sell KHR'],
                     ['special_price_usd', 'Special USD'],
                     ['special_price_khr', 'Special KHR'],
+                    ['discount_enabled', 'Discount enabled'],
+                    ['discount_type', 'Discount type'],
+                    ['discount_percent', 'Discount %'],
+                    ['discount_amount_usd', 'Discount USD'],
+                    ['discount_amount_khr', 'Discount KHR'],
+                    ['discount_label', 'Discount label'],
+                    ['discount_badge_color', 'Badge color'],
+                    ['discount_starts_at', 'Discount start'],
+                    ['discount_ends_at', 'Discount end'],
                     ['purchase_price_usd', 'Buy USD'],
                     ['purchase_price_khr', 'Buy KHR'],
                     ['low_stock_threshold', 'Threshold'],

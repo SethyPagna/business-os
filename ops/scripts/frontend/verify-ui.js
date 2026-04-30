@@ -18,6 +18,8 @@ const REQUIRED_KM_VALUES = {
   cogs_header: 'តម្លៃទំនិញដែលបានលក់',
   custom_role: 'កំណត់',
   range_custom: 'កំណត់',
+  best_seller: 'លក់ដាច់បំផុត',
+  top_seller: 'លក់ដាច់បំផុត',
   'common.invalidPublicPath': 'សូមប្រើផ្លូវស្អាតដូចជា /portal ឬ /customers។',
   'common.portalVisibilityRequired': 'សូមបើកយ៉ាងហោចណាស់ផ្នែកមួយដែលអតិថិជនអាចមើលបាន មុនពេលបោះផ្សាយ។',
   'common.restore': 'ស្តារឡើងវិញ',

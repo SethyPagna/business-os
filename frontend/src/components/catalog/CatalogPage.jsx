@@ -2786,7 +2786,7 @@ export default function CatalogPage({ publicView = false }) {
 
   const editorPanel = canEdit ? (
     <aside id="portal-editor-top" className="space-y-5">
-      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
+      <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-wrap lg:overflow-visible lg:pb-0">
             {editorSections.map(([sectionId, sectionKey, label]) => (
@@ -2795,8 +2795,8 @@ export default function CatalogPage({ publicView = false }) {
                 type="button"
                 className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${
                   activeEditorSection === sectionKey
-                    ? 'bg-slate-950 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                 }`}
                 onClick={() => setActiveEditorSection(sectionKey)}
               >

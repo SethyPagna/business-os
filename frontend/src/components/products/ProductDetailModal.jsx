@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
 import { getContrastingTextColor } from '../../utils/color.js'
+import { calculateProductDiscount } from '../../utils/pricing.js'
 
 export default function ProductDetailModal({
   p,
@@ -19,6 +20,7 @@ export default function ProductDetailModal({
   const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
   const specialUsd = p.special_price_usd || 0
   const specialKhr = p.special_price_khr || 0
+  const promotion = calculateProductDiscount(p)
   const marginUsd = p.selling_price_usd - purchaseUsd
   const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
@@ -112,6 +114,15 @@ export default function ProductDetailModal({
               <Row label={T('special_price', 'Special Price')}>
                 <span className="text-blue-600">{fmtUSD(specialUsd || p.selling_price_usd || 0)}</span>
                 {(specialKhr > 0 || p.selling_price_khr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || p.selling_price_khr || 0)}</span> : null}
+              </Row>
+            ) : null}
+            {promotion.active ? (
+              <Row label={T('product_discount', 'Promotion')}>
+                <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
+                {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
+                <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
+                  {p.discount_label || `${promotion.percent_off || 0}%`}
+                </span>
               </Row>
             ) : null}
             <Row label={T('label_margin', 'Margin')}>

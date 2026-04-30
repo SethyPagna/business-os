@@ -6,7 +6,7 @@ import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
 import { getPreferredScannerMode, scanBarcodeWithScanbot } from './scanbotScanner.mjs'
-import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -100,6 +100,15 @@ export default function ProductForm({
       selling_price_khr: 0,
       special_price_usd: 0,
       special_price_khr: 0,
+      discount_enabled: 0,
+      discount_type: 'percent',
+      discount_percent: 0,
+      discount_amount_usd: 0,
+      discount_amount_khr: 0,
+      discount_label: '',
+      discount_badge_color: '#e11d48',
+      discount_starts_at: '',
+      discount_ends_at: '',
       cost_price_usd: 0,
       cost_price_khr: 0,
       stock_quantity: 0,
@@ -150,6 +159,15 @@ export default function ProductForm({
       selling_price_khr: editablePrice(initialForm.selling_price_khr),
       special_price_usd: editablePrice(initialForm.special_price_usd ?? initialForm.selling_price_usd),
       special_price_khr: editablePrice(initialForm.special_price_khr ?? initialForm.selling_price_khr),
+      discount_enabled: Number(initialForm.discount_enabled || 0),
+      discount_type: initialForm.discount_type || 'percent',
+      discount_percent: editablePrice(initialForm.discount_percent || 0),
+      discount_amount_usd: editablePrice(initialForm.discount_amount_usd || 0),
+      discount_amount_khr: editablePrice(initialForm.discount_amount_khr || 0),
+      discount_label: initialForm.discount_label || '',
+      discount_badge_color: initialForm.discount_badge_color || '#e11d48',
+      discount_starts_at: initialForm.discount_starts_at || '',
+      discount_ends_at: initialForm.discount_ends_at || '',
       cost_price_usd: editablePrice(initialForm.cost_price_usd),
       cost_price_khr: editablePrice(initialForm.cost_price_khr),
       parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
@@ -261,6 +279,15 @@ export default function ProductForm({
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
       special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
       special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+      discount_enabled: form.discount_enabled ? 1 : 0,
+      discount_type: form.discount_type === 'fixed' ? 'fixed' : 'percent',
+      discount_percent: normalizePriceValue(parseNumericInput(form.discount_percent)),
+      discount_amount_usd: normalizePriceValue(parseNumericInput(form.discount_amount_usd)),
+      discount_amount_khr: normalizePriceValue(parseNumericInput(form.discount_amount_khr)),
+      discount_label: String(form.discount_label || '').trim(),
+      discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? form.discount_badge_color : '#e11d48',
+      discount_starts_at: form.discount_starts_at || null,
+      discount_ends_at: form.discount_ends_at || null,
       cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd)),
       cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr ?? form.purchase_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
@@ -621,7 +648,7 @@ export default function ProductForm({
           <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/10">
             <div className="mb-3">
               <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
-              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Optional alternate selling price for promotions, VIP pricing, or quick POS selection.', 'តម្លៃលក់ជម្រើស សម្រាប់ប្រូម៉ូសិន VIP ឬជ្រើសរហ័សនៅ POS។')}</p>
+              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
             </div>
             <DualPriceInput
               labelUsd={tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
@@ -641,6 +668,122 @@ export default function ProductForm({
               exchangeRate={exchangeRate}
               t={t}
             />
+          </div>
+
+          <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950/20">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Promotion / Discount', 'ប្រូម៉ូសិន / បញ្ចុះតម្លៃ')}</p>
+                <p className="text-xs text-rose-600 dark:text-rose-300">{tr('product_discount_hint', 'Customer-facing promotion price shown in POS and the public portal.', 'តម្លៃប្រូម៉ូសិនសម្រាប់អតិថិជន ដែលបង្ហាញក្នុង POS និងផតថលសាធារណៈ។')}</p>
+              </div>
+              <label className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm dark:bg-rose-950/50 dark:text-rose-200">
+                <input
+                  type="checkbox"
+                  checked={!!form.discount_enabled}
+                  onChange={(event) => setField('discount_enabled', event.target.checked ? 1 : 0)}
+                />
+                {tr('enabled', 'Enabled', 'បើក')}
+              </label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_type', 'Discount type', 'ប្រភេទបញ្ចុះតម្លៃ')}</span>
+                <select
+                  className="input"
+                  value={form.discount_type || 'percent'}
+                  onChange={(event) => setField('discount_type', event.target.value)}
+                >
+                  <option value="percent">{tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</option>
+                  <option value="fixed">{tr('discount_fixed', 'Fixed amount', 'បញ្ចុះជាចំនួនថេរ')}</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_label', 'Badge label', 'ស្លាកប្រូម៉ូសិន')}</span>
+                <input
+                  className="input"
+                  value={form.discount_label || ''}
+                  onChange={(event) => setField('discount_label', event.target.value)}
+                  placeholder={tr('discount_label_placeholder', 'Promo, Discount, Top deal', 'ប្រូម៉ូសិន បញ្ចុះតម្លៃ ឬកិច្ចព្រមព្រៀងពិសេស')}
+                  autoComplete="off"
+                />
+              </label>
+              {form.discount_type === 'fixed' ? (
+                <>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_amount_usd', 'Discount amount (USD)', 'ចំនួនបញ្ចុះតម្លៃ (USD)')}</span>
+                    <input
+                      className="input"
+                      type="text"
+                      inputMode="decimal"
+                      value={form.discount_amount_usd ?? ''}
+                      onChange={(event) => {
+                        setNumericField('discount_amount_usd', event.target.value)
+                        if (!String(form.discount_amount_khr ?? '').trim()) {
+                          const converted = parseNumericInput(event.target.value) * exchangeRate
+                          setField('discount_amount_khr', event.target.value === '' ? '' : formatPriceNumber(converted))
+                        }
+                      }}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_amount_khr', 'Discount amount (KHR)', 'ចំនួនបញ្ចុះតម្លៃ (KHR)')}</span>
+                    <input
+                      className="input"
+                      type="text"
+                      inputMode="decimal"
+                      value={form.discount_amount_khr ?? ''}
+                      onChange={(event) => setNumericField('discount_amount_khr', event.target.value)}
+                      autoComplete="off"
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</span>
+                  <input
+                    className="input"
+                    type="text"
+                    inputMode="decimal"
+                    value={form.discount_percent ?? ''}
+                    onChange={(event) => setNumericField('discount_percent', event.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
+              )}
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('badge_color', 'Badge color', 'ពណ៌ស្លាក')}</span>
+                <input
+                  className="h-10 w-full rounded-lg border border-rose-200 bg-white p-1 dark:border-rose-800 dark:bg-slate-950"
+                  type="color"
+                  value={form.discount_badge_color || '#e11d48'}
+                  onChange={(event) => setField('discount_badge_color', event.target.value)}
+                  aria-label={tr('badge_color', 'Badge color', 'ពណ៌ស្លាក')}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('starts_at', 'Starts at', 'ចាប់ផ្តើម')}</span>
+                <input className="input" type="date" value={form.discount_starts_at || ''} onChange={(event) => setField('discount_starts_at', event.target.value)} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('ends_at', 'Ends at', 'បញ្ចប់')}</span>
+                <input className="input" type="date" value={form.discount_ends_at || ''} onChange={(event) => setField('discount_ends_at', event.target.value)} />
+              </label>
+            </div>
+            {form.discount_enabled ? (
+              <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-100">
+                {(() => {
+                  const preview = calculateProductDiscount({
+                    ...form,
+                    selling_price_usd: parseNumericInput(form.selling_price_usd),
+                    selling_price_khr: parseNumericInput(form.selling_price_khr),
+                  }, exchangeRate)
+                  return preview.active
+                    ? `${tr('promotion_price', 'Promotion price', 'តម្លៃប្រូម៉ូសិន')}: ${usdSymbol}${formatPriceNumber(preview.applied_price_usd)} / ${khrSymbol}${formatPriceNumber(preview.applied_price_khr)}`
+                    : tr('discount_needs_value', 'Enter a discount value to activate the promotion price.', 'សូមបញ្ចូលតម្លៃបញ្ចុះ ដើម្បីបើកតម្លៃប្រូម៉ូសិន។')
+                })()}
+              </div>
+            ) : null}
           </div>
 
           {Number(form.selling_price_usd || 0) > 0 && Number(form.purchase_price_usd || 0) > 0 ? (

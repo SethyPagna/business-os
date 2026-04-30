@@ -1,5 +1,5 @@
 import React from 'react'
-import { Search, ShoppingBag } from 'lucide-react'
+import { BadgePercent, Search, ShoppingBag, Sparkles } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
@@ -188,11 +188,12 @@ export default function CatalogProductsSection(props) {
                     {highlightBadges.map((badge) => (
                       <span
                         key={badge.key}
-                        className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] shadow-sm backdrop-blur ${
+                        style={badge.color ? { backgroundColor: badge.color, color: '#fff' } : undefined}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] shadow-sm backdrop-blur ${
                           badge.tone === 'violet'
                             ? 'bg-violet-600/90 text-white'
-                            : badge.tone === 'rose'
-                              ? 'bg-rose-600/90 text-white'
+                            : badge.tone === 'custom'
+                              ? ''
                               : badge.tone === 'amber'
                                 ? 'bg-amber-400/95 text-slate-950'
                                 : badge.tone === 'emerald'
@@ -200,6 +201,7 @@ export default function CatalogProductsSection(props) {
                                   : 'bg-sky-600/90 text-white'
                         }`}
                       >
+                        {badge.key === 'promotion' ? <BadgePercent className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
                         {badge.label}
                       </span>
                     ))}

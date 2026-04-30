@@ -5,7 +5,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'rea
 import { ChevronDown, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
-import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
@@ -137,7 +137,7 @@ export default function Products() {
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
   const initializedCollapsedGroupKeysRef = useRef(new Set())
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'products' })
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -626,6 +626,15 @@ export default function Products() {
       Created_At: p.created_at || '',
       Selling_Price_USD: priceCsv(p.selling_price_usd), Selling_Price_KHR: priceCsv(p.selling_price_khr),
       Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0), Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
+      Discount_Enabled: p.discount_enabled ? 'Yes' : 'No',
+      Discount_Type: p.discount_type || 'percent',
+      Discount_Percent: priceCsv(p.discount_percent || 0),
+      Discount_Amount_USD: priceCsv(p.discount_amount_usd || 0),
+      Discount_Amount_KHR: priceCsv(p.discount_amount_khr || 0),
+      Discount_Label: p.discount_label || '',
+      Discount_Badge_Color: p.discount_badge_color || '',
+      Discount_Starts_At: p.discount_starts_at || '',
+      Discount_Ends_At: p.discount_ends_at || '',
       Purchase_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0), Purchase_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
       Cost_Price_USD: priceCsv(p.cost_price_usd || p.purchase_price_usd || 0), Cost_Price_KHR: priceCsv(p.cost_price_khr || p.purchase_price_khr || 0),
       Stock_Quantity: p.stock_quantity || 0,
@@ -1294,6 +1303,7 @@ export default function Products() {
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
     const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
+    const promotion = calculateProductDiscount(p, exchangeRate)
     const marginUsd = p.selling_price_usd - purchaseUsd
     const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
     return (
@@ -1346,6 +1356,11 @@ export default function Products() {
               {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
             </div>
           ) : null}
+          {promotion.active ? (
+            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
+              {p.discount_label || tr('promotion', 'Promotion', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+            </div>
+          ) : null}
         </td>
         <td className="px-3 py-2 text-right hidden lg:table-cell">
           {purchaseUsd > 0 && p.selling_price_usd > 0
@@ -1369,13 +1384,14 @@ export default function Products() {
         </td>
       </tr>
     )
-  }, [branchFilter, catMap, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip])
+  }, [branchFilter, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
     const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
     const isOut = qty <= (p.out_of_stock_threshold || 0)
     const isLow = !isOut && qty <= (p.low_stock_threshold || 10)
+    const promotion = calculateProductDiscount(p, exchangeRate)
     const mobileStatusLabel = isOut
       ? (t('out_of_stock') || 'Out')
       : isLow
@@ -1431,6 +1447,12 @@ export default function Products() {
                   <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(p.special_price_usd || 0)}</span>
                 </>
               ) : null}
+              {promotion.active ? (
+                <>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className="whitespace-nowrap text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
+                </>
+              ) : null}
               <span className="text-gray-300 dark:text-gray-600">|</span>
               <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
             </div>
@@ -1446,7 +1468,7 @@ export default function Products() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, fmtUSD, getBranchQty, getProductGallery, handleDelete, isProductSelected, openLightbox, renderUnitChip, t])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getProductGallery, handleDelete, isProductSelected, openLightbox, renderUnitChip, t])
 
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">

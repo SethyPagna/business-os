@@ -3,6 +3,8 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { normalizePriceValue } = require('../money')
+const { normalizeProductDiscount } = require('../productDiscounts')
 
 const router = express.Router()
 
@@ -12,6 +14,21 @@ function normalizeImportedTimestamp(value) {
   const parsed = new Date(raw)
   if (Number.isNaN(parsed.getTime())) return null
   return parsed.toISOString()
+}
+
+function recalcProductStock(productId) {
+  db.prepare(`
+    UPDATE products SET
+      stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).run(productId, productId)
+}
+
+function cleanMoveReason(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return 'Stock moved to another product row'
+  return raw.replace(/\?+/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // POST /api/inventory/adjust
@@ -165,6 +182,187 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
     ok(res, {})
   } catch (e) {
     err(res, e.message || 'Stock adjustment failed')
+  }
+})
+
+// POST /api/inventory/move-row
+router.post('/move-row', authToken, requirePermission('inventory'), (req, res) => {
+  const t0 = Date.now()
+  const body = req.body || {}
+  const actor = getAuditActor(req, body)
+  const sourceProductId = parseInt(body.sourceProductId ?? body.source_product_id, 10)
+  let destinationProductId = parseInt(body.destinationProductId ?? body.destination_product_id, 10)
+  const quantity = parseFloat(body.quantity)
+  const requestedBranchId = body.branchId || body.branch_id ? parseInt(body.branchId ?? body.branch_id, 10) : null
+  const reason = cleanMoveReason(body.reason)
+  const note = String(body.note || '').trim() || null
+  const destinationDraft = body.destinationProduct || body.destination_product || null
+
+  if (!sourceProductId) return err(res, 'Source product is required')
+  if (!Number.isFinite(quantity) || quantity <= 0) return err(res, 'Quantity must be a positive number')
+
+  try {
+    const result = db.transaction(() => {
+      const source = db.prepare('SELECT * FROM products WHERE id = ?').get(sourceProductId)
+      if (!source) throw new Error('Source product not found')
+
+      const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
+      if (!activeBranches.length) throw new Error('An active branch is required before stock can be moved')
+
+      let branch = requestedBranchId
+        ? activeBranches.find((entry) => Number(entry.id) === Number(requestedBranchId))
+        : null
+      if (!branch) {
+        const branchRows = db.prepare(`
+          SELECT bs.branch_id, bs.quantity, b.name, b.is_default
+          FROM branch_stock bs
+          JOIN branches b ON b.id = bs.branch_id
+          WHERE bs.product_id = ? AND b.is_active = 1 AND bs.quantity > 0
+          ORDER BY bs.quantity DESC, b.is_default DESC, b.id ASC
+        `).all(sourceProductId)
+        branch = branchRows[0]
+          ? { id: branchRows[0].branch_id, name: branchRows[0].name, is_default: branchRows[0].is_default }
+          : activeBranches.find((entry) => entry.is_default) || activeBranches[0]
+      }
+      if (!branch) throw new Error('Selected branch is no longer active')
+
+      const available = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?')
+        .get(sourceProductId, branch.id)?.quantity || 0
+      if (quantity > available) throw new Error(`Cannot move ${quantity} - only ${available} available in ${branch.name}`)
+
+      if (!destinationProductId && destinationDraft) {
+        const name = String(destinationDraft.name || '').trim()
+        if (!name) throw new Error('Destination product name is required')
+        const duplicate = db.prepare('SELECT id FROM products WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1').get(name)
+        if (duplicate) {
+          destinationProductId = duplicate.id
+        } else {
+          const discount = normalizeProductDiscount(destinationDraft, source)
+          const rootParentId = source.parent_id || source.id
+          db.prepare('UPDATE products SET is_group = 1, updated_at = datetime(\'now\') WHERE id = ?').run(rootParentId)
+          const inserted = db.prepare(`
+            INSERT INTO products (
+              name, sku, barcode, category, brand, unit, description,
+              selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+              discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
+              discount_label, discount_badge_color, discount_starts_at, discount_ends_at,
+              purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
+              stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active,
+              supplier, custom_fields, is_group, parent_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            name,
+            destinationDraft.sku || null,
+            destinationDraft.barcode || null,
+            destinationDraft.category || source.category || null,
+            destinationDraft.brand || source.brand || null,
+            destinationDraft.unit || source.unit || 'pcs',
+            destinationDraft.description || `${source.name} - ${reason}`,
+            normalizePriceValue(destinationDraft.selling_price_usd ?? source.selling_price_usd ?? 0),
+            normalizePriceValue(destinationDraft.selling_price_khr ?? source.selling_price_khr ?? 0),
+            normalizePriceValue(destinationDraft.special_price_usd ?? source.special_price_usd ?? source.selling_price_usd ?? 0),
+            normalizePriceValue(destinationDraft.special_price_khr ?? source.special_price_khr ?? source.selling_price_khr ?? 0),
+            discount.discount_enabled,
+            discount.discount_type,
+            discount.discount_percent,
+            discount.discount_amount_usd,
+            discount.discount_amount_khr,
+            discount.discount_label || null,
+            discount.discount_badge_color,
+            discount.discount_starts_at || null,
+            discount.discount_ends_at || null,
+            normalizePriceValue(destinationDraft.purchase_price_usd ?? source.purchase_price_usd ?? 0),
+            normalizePriceValue(destinationDraft.purchase_price_khr ?? source.purchase_price_khr ?? 0),
+            normalizePriceValue(destinationDraft.cost_price_usd ?? source.cost_price_usd ?? source.purchase_price_usd ?? 0),
+            normalizePriceValue(destinationDraft.cost_price_khr ?? source.cost_price_khr ?? source.purchase_price_khr ?? 0),
+            0,
+            destinationDraft.low_stock_threshold ?? source.low_stock_threshold ?? 10,
+            destinationDraft.out_of_stock_threshold ?? source.out_of_stock_threshold ?? 0,
+            destinationDraft.image_path || source.image_path || null,
+            destinationDraft.is_active ?? 1,
+            destinationDraft.supplier || source.supplier || null,
+            JSON.stringify(destinationDraft.custom_fields || {}),
+            0,
+            rootParentId,
+          )
+          destinationProductId = inserted.lastInsertRowid
+        }
+      }
+
+      if (!destinationProductId) throw new Error('Destination product is required')
+      if (Number(destinationProductId) === Number(sourceProductId)) throw new Error('Choose a different destination row')
+      const destination = db.prepare('SELECT * FROM products WHERE id = ?').get(destinationProductId)
+      if (!destination) throw new Error('Destination product not found')
+
+      db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(sourceProductId, branch.id)
+      db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(destinationProductId, branch.id)
+      db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?').run(quantity, sourceProductId, branch.id)
+      db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?').run(quantity, destinationProductId, branch.id)
+
+      const moveId = db.prepare(`
+        INSERT INTO stock_row_moves (
+          source_product_id, source_product_name, destination_product_id, destination_product_name,
+          branch_id, branch_name, quantity, reason, note, user_id, user_name
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        sourceProductId,
+        source.name,
+        destinationProductId,
+        destination.name,
+        branch.id,
+        branch.name,
+        quantity,
+        reason,
+        note,
+        actor.userId,
+        actor.userName,
+      ).lastInsertRowid
+
+      const insertMovement = db.prepare(`
+        INSERT INTO inventory_movements
+          (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
+      insertMovement.run(
+        sourceProductId, source.name, branch.id, branch.name, 'row_move_out', quantity,
+        source.cost_price_usd || source.purchase_price_usd || 0,
+        source.cost_price_khr || source.purchase_price_khr || 0,
+        quantity * (source.cost_price_usd || source.purchase_price_usd || 0),
+        quantity * (source.cost_price_khr || source.purchase_price_khr || 0),
+        reason, moveId, actor.userId, actor.userName,
+      )
+      insertMovement.run(
+        destinationProductId, destination.name, branch.id, branch.name, 'row_move_in', quantity,
+        destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0,
+        destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0,
+        quantity * (destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0),
+        quantity * (destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0),
+        reason, moveId, actor.userId, actor.userName,
+      )
+
+      recalcProductStock(sourceProductId)
+      recalcProductStock(destinationProductId)
+      audit(actor.userId, actor.userName, 'stock_row_move', 'product', sourceProductId, {
+        destinationProductId,
+        branchId: branch.id,
+        quantity,
+        reason,
+        note,
+      }, {
+        deviceName: body.deviceName || null,
+        deviceTz: body.deviceTz || null,
+        clientTime: body.clientTime || null,
+      })
+      return { moveId, sourceProductId, destinationProductId, branchId: branch.id }
+    })()
+
+    logOp('inventory:moveRow', Date.now() - t0)
+    broadcast('products')
+    broadcast('inventory')
+    ok(res, result)
+  } catch (e) {
+    err(res, e.message || 'Stock move failed')
   }
 })
 

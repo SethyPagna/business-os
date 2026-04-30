@@ -59,6 +59,8 @@ export default function Inventory() {
   const [branchFilter,  setBranchFilter]  = useState('all')
   const [adjustModal,   setAdjustModal]   = useState(null)
   const [adjustForm,    setAdjustForm]    = useState({ type:'add', quantity:1, unit_cost_usd:0, unit_cost_khr:0, reason:'', branch_id:'' })
+  const [moveModal,     setMoveModal]     = useState(null)
+  const [moveForm,      setMoveForm]      = useState({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
   const [search,        setSearch]        = useState('')
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
@@ -75,6 +77,7 @@ export default function Inventory() {
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
+  const [moveSaving,    setMoveSaving]    = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
   const movementSelectAllRef = useRef(null)
@@ -82,7 +85,7 @@ export default function Inventory() {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'inventory' })
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
@@ -269,6 +272,92 @@ export default function Inventory() {
     setAdjustForm({ type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
   }
 
+  const openMove = (p) => {
+    setMoveModal(p)
+    const defaultBranchId = branchFilter !== 'all'
+      ? String(branchFilter)
+      : branches.find(branch => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
+    setMoveForm({
+      mode: 'existing',
+      destination_product_id: '',
+      destination_name: `${p.name} - ${tr('damaged', 'Damaged', 'ខូច')}`,
+      quantity: 1,
+      branch_id: defaultBranchId,
+      reason: 'broken',
+      note: '',
+      selling_price_usd: p.selling_price_usd || '',
+      special_price_usd: p.special_price_usd || '',
+      discount_enabled: false,
+      discount_type: 'percent',
+      discount_percent: '',
+      discount_amount_usd: '',
+    })
+  }
+
+  const handleMoveStock = async () => {
+    if (moveSaving || !moveModal) return
+    const qty = parseFloat(moveForm.quantity)
+    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'), 'error')
+    const request = {
+      sourceProductId: moveModal.id,
+      destinationProductId: moveForm.mode === 'existing' ? Number(moveForm.destination_product_id || 0) : null,
+      destinationProduct: moveForm.mode === 'new'
+        ? {
+            name: moveForm.destination_name,
+            selling_price_usd: moveForm.selling_price_usd,
+            special_price_usd: moveForm.special_price_usd,
+            discount_enabled: moveForm.discount_enabled ? 1 : 0,
+            discount_type: moveForm.discount_type,
+            discount_percent: moveForm.discount_percent,
+            discount_amount_usd: moveForm.discount_amount_usd,
+          }
+        : null,
+      branchId: moveForm.branch_id || null,
+      quantity: qty,
+      reason: moveForm.reason || 'stock move',
+      note: moveForm.note || '',
+      userId: user?.id,
+      userName: user?.name || user?.username,
+    }
+    if (moveForm.mode === 'existing' && !request.destinationProductId) {
+      return notify(tr('choose_destination_product', 'Choose a destination product row.', 'សូមជ្រើសរើសជួរផលិតផលគោលដៅ។'), 'error')
+    }
+    if (moveForm.mode === 'new' && !String(moveForm.destination_name || '').trim()) {
+      return notify(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'), 'error')
+    }
+    setMoveSaving(true)
+    try {
+      const result = await window.api.moveStockRow(request)
+      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
+      actionHistory.pushAction({
+        label: `${tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}: ${moveModal.name}`,
+        undo: async () => {
+          const undoResult = await window.api.moveStockRow({
+            sourceProductId: result.destinationProductId || request.destinationProductId,
+            destinationProductId: request.sourceProductId,
+            branchId: request.branchId,
+            quantity: qty,
+            reason: `Undo: ${request.reason}`,
+          })
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo បានបរាជ័យ'))
+          await load(true)
+        },
+        redo: async () => {
+          const redoResult = await window.api.moveStockRow(request)
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo បានបរាជ័យ'))
+          await load(true)
+        },
+      })
+      notify(tr('stock_moved', 'Stock moved', 'បានផ្លាស់ទីស្តុក'))
+      setMoveModal(null)
+      await load(true)
+    } catch (error) {
+      notify(error?.message || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'), 'error')
+    } finally {
+      setMoveSaving(false)
+    }
+  }
+
   const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
 
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
@@ -403,6 +492,8 @@ export default function Inventory() {
     set:             'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
     writeoff:        'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200',
     transfer:        'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    row_move_in:     'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300',
+    row_move_out:    'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
   }
 
   // Stats ??backend SQL already nets out returned quantities and revenue
@@ -879,6 +970,15 @@ export default function Inventory() {
       Selling_Price_KHR: priceCsv(p.selling_price_khr || 0),
       Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0),
       Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
+      Discount_Enabled: p.discount_enabled ? 'yes' : 'no',
+      Discount_Type: p.discount_type || '',
+      Discount_Percent: priceCsv(p.discount_percent || 0),
+      Discount_Amount_USD: priceCsv(p.discount_amount_usd || 0),
+      Discount_Amount_KHR: priceCsv(p.discount_amount_khr || 0),
+      Discount_Label: p.discount_label || '',
+      Discount_Badge_Color: p.discount_badge_color || '',
+      Discount_Starts_At: p.discount_starts_at || '',
+      Discount_Ends_At: p.discount_ends_at || '',
       Cost_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0),
       Cost_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
       Stock_Qty: getStockQty(p),
@@ -945,10 +1045,10 @@ export default function Inventory() {
       summaryCards: [
         { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
         { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
-        { label: 'Stock Value', value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
-        { label: 'Revenue', value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'ថ្លៃដើម')} ${fmtUSD(totalCOGS)}` },
-        { label: 'Low Stock', value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
-        { label: 'Returns', value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
+        { label: tr('stock_value', 'Stock Value', 'តម្លៃស្តុក'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
+        { label: tr('revenue', 'Revenue', 'ចំណូល'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'តម្លៃទំនិញដែលបានលក់')} ${fmtUSD(totalCOGS)}` },
+        { label: tr('low_stock', 'Low Stock', 'ស្តុកទាប'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
+        { label: tr('returns_count', 'Returns', 'ការប្រគល់មកវិញ'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
       ],
       metadataGroups: [
         {
@@ -1632,7 +1732,7 @@ export default function Inventory() {
                     {(p.special_price_usd || 0) > 0 ? (
                       <>
                         <span className="text-gray-300 dark:text-gray-600">|</span>
-                        <span>Special {fmtUSD(p.special_price_usd || 0)}</span>
+                        <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
                       </>
                     ) : null}
                     <span className="text-gray-300 dark:text-gray-600">|</span>
@@ -1706,7 +1806,7 @@ export default function Inventory() {
                           <DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
                           {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
                             <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-                              Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                              {t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
                               {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
                             </div>
                           ) : null}
@@ -1743,8 +1843,8 @@ export default function Inventory() {
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">Grouped movement history</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Related stock changes are bundled into a single activity so sales, returns, imports, and transfers are easier to review.</div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('grouped_movement_history', 'Grouped movement history', 'ប្រវត្តិចលនាដែលបានដាក់ជាក្រុម')}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', 'ការផ្លាស់ប្តូរស្តុកដែលពាក់ព័ន្ធ ត្រូវបានដាក់ជាសកម្មភាពតែមួយ ដើម្បីងាយពិនិត្យការលក់ ការត្រឡប់ ការនាំចូល និងការផ្ទេរ។')}</div>
               </div>
               <div className="flex items-center gap-2">
                 <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups</div>
@@ -1832,7 +1932,7 @@ export default function Inventory() {
                                 </div>
                                 <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
                                 <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                                  <span>{group.items.length} records</span>
+                                  <span>{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
                                   {group.branchSummary ? <span>{group.branchSummary}</span> : null}
                                   {group.userSummary ? <span>{group.userSummary}</span> : null}
                                 </div>
@@ -1997,7 +2097,7 @@ export default function Inventory() {
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
                                         {group.movementLabel}
                                       </span>
-                                      <span className="text-[10px] text-gray-400">{group.items.length} records</span>
+                                      <span className="text-[10px] text-gray-400">{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
                                     </div>
                                     {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
                                   </td>
@@ -2188,6 +2288,109 @@ export default function Inventory() {
         </div>
       )}
 
+      {moveModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setMoveModal(null)}>
+          <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">{moveModal.name} - {getStockQty(moveModal)} {moveModal.unit}</div>
+              </div>
+              <button type="button" onClick={() => setMoveModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="modal-scroll space-y-3 p-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
+                  onClick={() => setMoveForm((current) => ({ ...current, mode: 'existing' }))}
+                >
+                  {tr('existing_row', 'Existing row', 'ជួរដែលមានស្រាប់')}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
+                  onClick={() => setMoveForm((current) => ({ ...current, mode: 'new' }))}
+                >
+                  {tr('quick_create_row', 'Quick-create row', 'បង្កើតជួររហ័ស')}
+                </button>
+              </div>
+
+              {moveForm.mode === 'existing' ? (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', 'ជួរផលិតផលគោលដៅ')}</span>
+                  <select className="input text-sm" value={moveForm.destination_product_id} onChange={(event) => setMoveForm((current) => ({ ...current, destination_product_id: event.target.value }))}>
+                    <option value="">{tr('choose_destination_product', 'Choose a destination product row', 'ជ្រើសរើសជួរផលិតផលគោលដៅ')}</option>
+                    {summary.filter((product) => Number(product.id) !== Number(moveModal.id)).map((product) => (
+                      <option key={product.id} value={product.id}>{product.name}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('name') || 'Name'}</span>
+                    <input className="input text-sm" value={moveForm.destination_name} onChange={(event) => setMoveForm((current) => ({ ...current, destination_name: event.target.value }))} autoComplete="off" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)', 'តម្លៃលក់ (USD)')}</span>
+                    <input className="input text-sm" type="number" step="any" min="0" value={moveForm.selling_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, selling_price_usd: event.target.value }))} autoComplete="off" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}</span>
+                    <input className="input text-sm" type="number" step="any" min="0" value={moveForm.special_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, special_price_usd: event.target.value }))} autoComplete="off" />
+                  </label>
+                  <label className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-200">
+                    <input type="checkbox" checked={!!moveForm.discount_enabled} onChange={(event) => setMoveForm((current) => ({ ...current, discount_enabled: event.target.checked }))} />
+                    {tr('product_discount', 'Promotion / Discount', 'ប្រូម៉ូសិន / បញ្ចុះតម្លៃ')}
+                  </label>
+                  {moveForm.discount_enabled ? (
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)', 'ចំនួនបញ្ចុះតម្លៃ (USD)') : tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</span>
+                      <input className="input text-sm" type="number" step="any" min="0" value={moveForm.discount_type === 'fixed' ? moveForm.discount_amount_usd : moveForm.discount_percent} onChange={(event) => setMoveForm((current) => current.discount_type === 'fixed' ? { ...current, discount_amount_usd: event.target.value } : { ...current, discount_percent: event.target.value })} autoComplete="off" />
+                    </label>
+                  ) : null}
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
+                  <input className="input text-sm" type="number" step="any" min="0" value={moveForm.quantity} onChange={(event) => setMoveForm((current) => ({ ...current, quantity: event.target.value }))} autoComplete="off" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
+                  <select className="input text-sm" value={moveForm.branch_id} onChange={(event) => setMoveForm((current) => ({ ...current, branch_id: event.target.value }))}>
+                    {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
+                <select className="input text-sm" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))}>
+                  <option value="broken">{tr('reason_broken', 'Broken', 'ខូច')}</option>
+                  <option value="open">{tr('reason_opened', 'Opened', 'បានបើក')}</option>
+                  <option value="loose">{tr('reason_loose', 'Loose', 'រាយ')}</option>
+                  <option value="discount">{tr('reason_discount', 'Discount / promotion', 'បញ្ចុះតម្លៃ / ប្រូម៉ូសិន')}</option>
+                  <option value="special_price">{tr('reason_special_price', 'Special price', 'តម្លៃពិសេស')}</option>
+                  <option value="other">{t('other') || 'Other'}</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
+                <textarea className="input min-h-[76px] text-sm" value={moveForm.note} onChange={(event) => setMoveForm((current) => ({ ...current, note: event.target.value }))} />
+              </label>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</button>
+                <button type="button" onClick={() => setMoveModal(null)} className="btn-secondary text-sm" disabled={moveSaving}>{t('cancel') || 'Cancel'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showImport ? (
         <InventoryImportModal
           onClose={() => setShowImport(false)}
@@ -2203,6 +2406,7 @@ export default function Inventory() {
           product={detailProduct}
           onClose={() => setDetailProduct(null)}
           onAdjust={openAdjust}
+          onMove={openMove}
           fmtUSD={fmtUSD}
           fmtKHR={fmtKHR}
           usdSymbol={usdSymbol}

@@ -1,3 +1,5 @@
+import { calculateProductDiscount } from '../../utils/pricing.js'
+
 export function normalizeRecommendedProductIds(value) {
   const source = Array.isArray(value)
     ? value
@@ -48,29 +50,23 @@ export function productMatchesPortalBranches(product, branchFilter) {
 }
 
 export function getPortalPromotionDetails(product) {
-  const sellingUsd = Number(product?.selling_price_usd || 0)
-  const sellingKhr = Number(product?.selling_price_khr || 0)
-  const specialUsd = Number(product?.special_price_usd || 0)
-  const specialKhr = Number(product?.special_price_khr || 0)
-  const usdPromo = specialUsd > 0 && sellingUsd > 0 && specialUsd < sellingUsd
-  const khrPromo = specialKhr > 0 && sellingKhr > 0 && specialKhr < sellingKhr
-  const active = usdPromo || khrPromo
-  let percentOff = 0
-  if (usdPromo) {
-    percentOff = Math.round(((sellingUsd - specialUsd) / sellingUsd) * 100)
-  } else if (khrPromo) {
-    percentOff = Math.round(((sellingKhr - specialKhr) / sellingKhr) * 100)
-  }
+  const promotion = calculateProductDiscount(product)
+  const active = promotion.active
   return {
     active,
-    percentOff: Math.max(0, percentOff),
+    percentOff: Math.max(0, promotion.percent_off || 0),
+    label: product?.discount_label || '',
+    badgeColor: product?.discount_badge_color || '#e11d48',
+    discountAmountUsd: promotion.discount_amount_usd || 0,
+    discountAmountKhr: promotion.discount_amount_khr || 0,
   }
 }
 
 export function buildPortalPricePresentation(product, config, formatPortalPrice) {
   const promotion = getPortalPromotionDetails(product)
-  const activeUsd = promotion.active ? Number(product?.special_price_usd || 0) : Number(product?.selling_price_usd || 0)
-  const activeKhr = promotion.active ? Number(product?.special_price_khr || 0) : Number(product?.selling_price_khr || 0)
+  const discounted = calculateProductDiscount(product)
+  const activeUsd = promotion.active ? discounted.applied_price_usd : Number(product?.selling_price_usd || 0)
+  const activeKhr = promotion.active ? discounted.applied_price_khr : Number(product?.selling_price_khr || 0)
   return {
     primaryText: formatPortalPrice(activeUsd, activeKhr, config),
     originalText: promotion.active
@@ -96,10 +92,11 @@ export function buildPortalHighlightBadges(product, config, copy) {
   if (config?.showPromotionBadge && promotion.active) {
     badges.push({
       key: 'promotion',
-      tone: 'rose',
+      tone: 'custom',
+      color: promotion.badgeColor,
       label: promotion.percentOff >= 5
         ? replaceRankVars(copy('promotionBadgePercent', '-{value}%'), promotion.percentOff)
-        : copy('promotionBadge', 'Promo'),
+        : promotion.label || copy('promotionBadge', 'Promo'),
     })
   }
 

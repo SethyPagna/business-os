@@ -1250,20 +1250,20 @@ export default function Settings() {
         {isAdmin ? (
           <SettingsSection
             title={t('notifications') || 'Notifications'}
-            description="Choose which business alerts appear in the top-bar notification center."
+            description={t('notification_settings_desc') || 'Choose which business alerts appear in the top-bar notification center.'}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               {[
-                ['notifications_inventory_enabled', 'Inventory alerts', 'Low stock and out of stock warnings'],
-                ['notifications_sales_enabled', 'Sales alerts', 'Awaiting payment and delivery follow-up'],
-                ['notifications_loyalty_enabled', 'Loyalty alerts', 'Customers who reached your points target'],
-                ['notifications_portal_enabled', 'Customer portal alerts', 'Pending public submissions and review items'],
-                ['notifications_system_enabled', 'System alerts', 'Only actionable system reminders'],
-              ].map(([key, label, desc]) => (
+                ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
+                ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
+                ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
+                ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Pending public submissions and review items'],
+                ['notifications_system_enabled', 'notification_system_alerts', 'System alerts', 'notification_system_alerts_desc', 'Only actionable system reminders'],
+              ].map(([key, labelKey, fallbackLabel, descKey, fallbackDesc]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
-                    <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{label}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{desc}</div>
+                    <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t(labelKey) || fallbackLabel}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{t(descKey) || fallbackDesc}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -1274,7 +1274,7 @@ export default function Settings() {
               ))}
               <div className="sm:col-span-2">
                 <label htmlFor="settings-notifications-loyalty-threshold" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Loyalty points threshold
+                  {t('notification_loyalty_threshold') || 'Loyalty points threshold'}
                 </label>
                 <input
                   id="settings-notifications-loyalty-threshold"

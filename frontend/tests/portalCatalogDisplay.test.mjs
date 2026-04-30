@@ -50,12 +50,16 @@ runTest('branch matching uses branch presence instead of positive stock only', (
   assert.equal(productMatchesPortalBranches(product, ['9']), false)
 })
 
-runTest('promotion helpers prefer special price when it is lower than selling price', () => {
+runTest('promotion helpers use explicit product discount, not internal special price', () => {
   const product = {
     selling_price_usd: 12,
     selling_price_khr: 49200,
-    special_price_usd: 9,
-    special_price_khr: 36900,
+    special_price_usd: 7,
+    special_price_khr: 28700,
+    discount_enabled: 1,
+    discount_type: 'percent',
+    discount_percent: 25,
+    discount_label: 'Promo',
   }
   const promotion = getPortalPromotionDetails(product)
   assert.equal(promotion.active, true)
@@ -73,9 +77,11 @@ runTest('highlight badges stay compact and follow ranking priority', () => {
     top_product_rank: 2,
     new_arrival_rank: 1,
     selling_price_usd: 20,
-    special_price_usd: 15,
     selling_price_khr: 82000,
-    special_price_khr: 61500,
+    discount_enabled: 1,
+    discount_type: 'fixed',
+    discount_amount_usd: 5,
+    discount_label: 'Deal',
   }
   const badges = buildPortalHighlightBadges(product, {
     showRecommendedBadge: true,

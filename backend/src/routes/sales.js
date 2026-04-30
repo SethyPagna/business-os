@@ -301,8 +301,9 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
       const insertItem = db.prepare(`
         INSERT INTO sale_items
           (sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
+           price_mode, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
            cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
 
       // Pre-fetch all product data for cost price defaults
@@ -326,6 +327,11 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         insertItem.run(
           sid, productId || null, item.name || null, item.quantity,
           item.applied_price_usd || 0, item.applied_price_khr || 0,
+          item.price_mode || 'selling',
+          item.product_discount_type || item.discount_type || null,
+          item.product_discount_label || item.discount_label || null,
+          item.product_discount_usd || item.discount_amount_usd || 0,
+          item.product_discount_khr || item.discount_amount_khr || 0,
           unitCostUsd, unitCostKhr,
           totalUsd, totalKhr, item.branch_id || null,
         )
@@ -963,6 +969,8 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     cost_out:             saleCostOut.cost_out - returnedCost.cost_out,
     cost_out_khr:         saleCostOut.cost_out_khr - returnedCost.cost_out_khr,
     product_count:        db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active = 1').get().n,
+    stock_value_usd:      db.prepare('SELECT COALESCE(SUM(stock_quantity * COALESCE(NULLIF(purchase_price_usd,0), cost_price_usd, 0)),0) AS n FROM products WHERE is_active = 1').get().n,
+    stock_value_khr:      db.prepare('SELECT COALESCE(SUM(stock_quantity * COALESCE(NULLIF(purchase_price_khr,0), cost_price_khr, 0)),0) AS n FROM products WHERE is_active = 1').get().n,
     low_stock:            db.prepare('SELECT id, name, category, unit, stock_quantity, low_stock_threshold FROM products WHERE is_active = 1 AND stock_quantity <= low_stock_threshold ORDER BY stock_quantity ASC LIMIT 20').all(),
     recent_sales:         db.prepare('SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status FROM sales s ORDER BY s.created_at DESC LIMIT 10').all(),
   })

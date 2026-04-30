@@ -12,6 +12,7 @@ const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWrit
 const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
+const { normalizeProductDiscount } = require('../productDiscounts')
 const {
   hasImportValue,
   normalizeFieldRule,
@@ -160,6 +161,25 @@ function markParentProductAsGroup(parentId) {
   db.prepare("UPDATE products SET is_group = 1, updated_at = datetime('now') WHERE id = ?").run(parentId)
 }
 
+function discountInsertColumns() {
+  return 'discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at'
+}
+
+function discountValues(source = {}, fallback = {}) {
+  const discount = normalizeProductDiscount(source, fallback)
+  return [
+    discount.discount_enabled,
+    discount.discount_type,
+    discount.discount_percent,
+    discount.discount_amount_usd,
+    discount.discount_amount_khr,
+    discount.discount_label || null,
+    discount.discount_badge_color,
+    discount.discount_starts_at || null,
+    discount.discount_ends_at || null,
+  ]
+}
+
 // ?? GET /api/products ?????????????????????????????????????????????????????????
 router.get('/', authToken, (req, res) => {
   // Fetch all products with branch stock in a single optimized query (avoids O(n簡) filtering)
@@ -214,13 +234,15 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
     )
     const primaryImage = imageGallery[0] || null
     markParentProductAsGroup(d.parent_id)
+    const productDiscountValues = discountValues(d, {})
     const r = db.prepare(`
       INSERT INTO products
         (name, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+         ${discountInsertColumns()},
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
          stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active,
          supplier, custom_fields, is_group, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), d.sku || null, d.barcode || null,
       d.category || parent.category || null,
@@ -228,6 +250,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       d.unit || parent.unit || 'pcs', d.description || null,
       normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
       normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
+      ...productDiscountValues,
       normalizePriceValue(d.purchase_price_usd || 0), normalizePriceValue(d.purchase_price_khr || 0),
       normalizePriceValue(d.cost_price_usd || d.purchase_price_usd || 0),
       normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
@@ -274,17 +297,20 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     const normalizedParentId = parentRecord?.id || null
     if (!openingBranchId) return err(res, 'A branch is required for new products')
     assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
+    const productDiscountValues = discountValues(d, {})
 
     const r = db.prepare(`
       INSERT INTO products
         (name, client_request_id, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+         ${discountInsertColumns()},
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
          stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active, supplier, custom_fields, is_group, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), clientRequestId, d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
       normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
       normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
+      ...productDiscountValues,
       normalizePriceValue(d.purchase_price_usd || 0), normalizePriceValue(d.purchase_price_khr || 0),
       normalizePriceValue(d.cost_price_usd || d.purchase_price_usd || 0),
       normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
@@ -345,6 +371,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         selling_price_khr: pickField(d, 'selling_price_khr', prev.selling_price_khr),
         special_price_usd: pickField(d, 'special_price_usd', prev.special_price_usd),
         special_price_khr: pickField(d, 'special_price_khr', prev.special_price_khr),
+        ...normalizeProductDiscount(d, prev),
         purchase_price_usd: pickField(d, 'purchase_price_usd', prev.purchase_price_usd),
         purchase_price_khr: pickField(d, 'purchase_price_khr', prev.purchase_price_khr),
         cost_price_usd: pickField(d, 'cost_price_usd', prev.cost_price_usd),
@@ -380,6 +407,8 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           name=?, sku=?, barcode=?, category=?, brand=?, unit=?, description=?,
           selling_price_usd=?, selling_price_khr=?,
           special_price_usd=?, special_price_khr=?,
+          discount_enabled=?, discount_type=?, discount_percent=?, discount_amount_usd=?, discount_amount_khr=?,
+          discount_label=?, discount_badge_color=?, discount_starts_at=?, discount_ends_at=?,
           purchase_price_usd=?, purchase_price_khr=?,
           cost_price_usd=?, cost_price_khr=?,
           stock_quantity=?, low_stock_threshold=?, out_of_stock_threshold=?,
@@ -397,6 +426,15 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         normalizePriceValue(merged.selling_price_khr || 0),
         normalizePriceValue(merged.special_price_usd ?? merged.selling_price_usd ?? 0),
         normalizePriceValue(merged.special_price_khr ?? merged.selling_price_khr ?? 0),
+        merged.discount_enabled ? 1 : 0,
+        merged.discount_type || 'percent',
+        normalizePriceValue(merged.discount_percent || 0),
+        normalizePriceValue(merged.discount_amount_usd || 0),
+        normalizePriceValue(merged.discount_amount_khr || 0),
+        merged.discount_label || null,
+        merged.discount_badge_color || '#e11d48',
+        merged.discount_starts_at || null,
+        merged.discount_ends_at || null,
         normalizePriceValue(merged.purchase_price_usd || 0),
         normalizePriceValue(merged.purchase_price_khr || 0),
         normalizePriceValue(merged.cost_price_usd || merged.purchase_price_usd || 0),
@@ -830,6 +868,17 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         const sellKhr = normalizePriceValue(parseImportNumber(p, 'selling_price_khr', 0))
         const specialUsd = normalizePriceValue(parseImportNumber(p, 'special_price_usd', sellUsd))
         const specialKhr = normalizePriceValue(parseImportNumber(p, 'special_price_khr', sellKhr))
+        const importDiscount = normalizeProductDiscount({
+          discount_enabled: p.discount_enabled ?? p.promotion_enabled ?? p.on_promotion,
+          discount_type: p.discount_type || (hasImportValue(p, 'discount_percent') ? 'percent' : 'fixed'),
+          discount_percent: parseImportNumber(p, 'discount_percent', 0),
+          discount_amount_usd: parseImportNumber(p, 'discount_amount_usd', 0),
+          discount_amount_khr: parseImportNumber(p, 'discount_amount_khr', 0),
+          discount_label: p.discount_label || p.promotion_label || '',
+          discount_badge_color: p.discount_badge_color || '',
+          discount_starts_at: p.discount_starts_at || p.promotion_starts_at || '',
+          discount_ends_at: p.discount_ends_at || p.promotion_ends_at || '',
+        })
         const buyUsd  = normalizePriceValue(parseImportNumber(p, 'purchase_price_usd', 0))
         const buyKhr  = normalizePriceValue(parseImportNumber(p, 'purchase_price_khr', 0))
         const thresh  = parseImportNumber(p, 'low_stock_threshold', 10)
@@ -862,14 +911,21 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               (name, sku, barcode, category, unit, description,
               brand,
               selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+              discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
+              discount_label, discount_badge_color, discount_starts_at, discount_ends_at,
               purchase_price_usd, purchase_price_khr,
               cost_price_usd, cost_price_khr,
               stock_quantity, low_stock_threshold,
               is_active, supplier, image_path, is_group, parent_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
             p.name.trim(), p.sku || null, p.barcode || null, normalizedCategory, normalizedUnit,
-            p.description || null, normalizedBrand, sellUsd, sellKhr, specialUsd, specialKhr, buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
+            p.description || null, normalizedBrand, sellUsd, sellKhr, specialUsd, specialKhr,
+            importDiscount.discount_enabled, importDiscount.discount_type, importDiscount.discount_percent,
+            importDiscount.discount_amount_usd, importDiscount.discount_amount_khr,
+            importDiscount.discount_label || null, importDiscount.discount_badge_color,
+            importDiscount.discount_starts_at || null, importDiscount.discount_ends_at || null,
+            buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
             (p.is_active !== undefined ? p.is_active : 1), normalizedSupplier, newPrimaryImage, normalizedParentId ? 0 : isGroup, normalizedParentId
           )
           const pid = r.lastInsertRowid
@@ -879,7 +935,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           const branch = determineBranch(p.branch)
           if (qty > 0) {
             logMove.run(pid, p.name.trim(), branch?.id || null, branch?.name || null, 'purchase', qty, buyUsd, buyKhr, qty * buyUsd, qty * buyKhr,
-              'CSV Import ??new product', actor.userId, actor.userName)
+              'CSV import - new product', actor.userId, actor.userName)
           }
           handleBranch(pid, p.branch, qty, true)
           imported++
@@ -900,6 +956,17 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           const resolvedSellKhr = resolveImportValue(ep.selling_price_khr, sellKhr, hasImportValue(p, 'selling_price_khr'), fieldRules.selling_price_khr, defaultFieldRule)
           const resolvedSpecialUsd = resolveImportValue(ep.special_price_usd, specialUsd, hasImportValue(p, 'special_price_usd'), fieldRules.special_price_usd, defaultFieldRule)
           const resolvedSpecialKhr = resolveImportValue(ep.special_price_khr, specialKhr, hasImportValue(p, 'special_price_khr'), fieldRules.special_price_khr, defaultFieldRule)
+          const resolvedDiscount = normalizeProductDiscount({
+            discount_enabled: resolveImportValue(ep.discount_enabled, importDiscount.discount_enabled, hasImportValue(p, 'discount_enabled') || hasImportValue(p, 'promotion_enabled') || hasImportValue(p, 'on_promotion'), fieldRules.discount_enabled, defaultFieldRule),
+            discount_type: resolveImportValue(ep.discount_type, importDiscount.discount_type, hasImportValue(p, 'discount_type'), fieldRules.discount_type, defaultFieldRule),
+            discount_percent: resolveImportValue(ep.discount_percent, importDiscount.discount_percent, hasImportValue(p, 'discount_percent'), fieldRules.discount_percent, defaultFieldRule),
+            discount_amount_usd: resolveImportValue(ep.discount_amount_usd, importDiscount.discount_amount_usd, hasImportValue(p, 'discount_amount_usd'), fieldRules.discount_amount_usd, defaultFieldRule),
+            discount_amount_khr: resolveImportValue(ep.discount_amount_khr, importDiscount.discount_amount_khr, hasImportValue(p, 'discount_amount_khr'), fieldRules.discount_amount_khr, defaultFieldRule),
+            discount_label: resolveImportValue(ep.discount_label, importDiscount.discount_label, hasImportValue(p, 'discount_label') || hasImportValue(p, 'promotion_label'), fieldRules.discount_label, defaultFieldRule),
+            discount_badge_color: resolveImportValue(ep.discount_badge_color, importDiscount.discount_badge_color, hasImportValue(p, 'discount_badge_color'), fieldRules.discount_badge_color, defaultFieldRule),
+            discount_starts_at: resolveImportValue(ep.discount_starts_at, importDiscount.discount_starts_at, hasImportValue(p, 'discount_starts_at') || hasImportValue(p, 'promotion_starts_at'), fieldRules.discount_starts_at, defaultFieldRule),
+            discount_ends_at: resolveImportValue(ep.discount_ends_at, importDiscount.discount_ends_at, hasImportValue(p, 'discount_ends_at') || hasImportValue(p, 'promotion_ends_at'), fieldRules.discount_ends_at, defaultFieldRule),
+          }, ep)
           const resolvedBuyUsd = resolveImportValue(ep.purchase_price_usd, buyUsd, hasImportValue(p, 'purchase_price_usd'), fieldRules.purchase_price_usd, defaultFieldRule)
           const resolvedBuyKhr = resolveImportValue(ep.purchase_price_khr, buyKhr, hasImportValue(p, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultFieldRule)
           const resolvedThreshold = resolveImportValue(ep.low_stock_threshold, thresh, hasImportValue(p, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultFieldRule)
@@ -929,6 +996,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               || resolvedSellKhr !== ep.selling_price_khr
               || resolvedSpecialUsd !== ep.special_price_usd
               || resolvedSpecialKhr !== ep.special_price_khr
+              || Number(resolvedDiscount.discount_enabled || 0) !== Number(ep.discount_enabled || 0)
+              || resolvedDiscount.discount_type !== (ep.discount_type || 'percent')
+              || Number(resolvedDiscount.discount_percent || 0) !== Number(ep.discount_percent || 0)
+              || Number(resolvedDiscount.discount_amount_usd || 0) !== Number(ep.discount_amount_usd || 0)
+              || Number(resolvedDiscount.discount_amount_khr || 0) !== Number(ep.discount_amount_khr || 0)
+              || (resolvedDiscount.discount_label || '') !== (ep.discount_label || '')
+              || (resolvedDiscount.discount_badge_color || '#e11d48') !== (ep.discount_badge_color || '#e11d48')
+              || (resolvedDiscount.discount_starts_at || '') !== (ep.discount_starts_at || '')
+              || (resolvedDiscount.discount_ends_at || '') !== (ep.discount_ends_at || '')
               || resolvedBuyUsd !== ep.purchase_price_usd
               || resolvedBuyKhr !== ep.purchase_price_khr
               || resolvedThreshold !== ep.low_stock_threshold
@@ -941,6 +1017,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                   category=?, unit=?, brand=?, description=?, supplier=?,
                   selling_price_usd=?, selling_price_khr=?,
                   special_price_usd=?, special_price_khr=?,
+                  discount_enabled=?, discount_type=?, discount_percent=?, discount_amount_usd=?, discount_amount_khr=?,
+                  discount_label=?, discount_badge_color=?, discount_starts_at=?, discount_ends_at=?,
                   purchase_price_usd=?, purchase_price_khr=?,
                   cost_price_usd=?, cost_price_khr=?,
                   low_stock_threshold=?, is_group=?, parent_id=?,
@@ -956,6 +1034,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 normalizePriceValue(resolvedSellKhr || 0),
                 normalizePriceValue(resolvedSpecialUsd ?? resolvedSellUsd ?? 0),
                 normalizePriceValue(resolvedSpecialKhr ?? resolvedSellKhr ?? 0),
+                resolvedDiscount.discount_enabled,
+                resolvedDiscount.discount_type,
+                resolvedDiscount.discount_percent,
+                resolvedDiscount.discount_amount_usd,
+                resolvedDiscount.discount_amount_khr,
+                resolvedDiscount.discount_label || null,
+                resolvedDiscount.discount_badge_color,
+                resolvedDiscount.discount_starts_at || null,
+                resolvedDiscount.discount_ends_at || null,
                 normalizePriceValue(resolvedBuyUsd || 0),
                 normalizePriceValue(resolvedBuyKhr || 0),
                 normalizePriceValue(resolvedBuyUsd || 0),
@@ -970,7 +1057,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             if (qty > 0) {
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, 'add', qty, ep.purchase_price_usd, ep.purchase_price_khr,
-                qty * ep.purchase_price_usd, qty * ep.purchase_price_khr, 'CSV Import ??merge (add stock)', actor.userId, actor.userName)
+                qty * ep.purchase_price_usd, qty * ep.purchase_price_khr, 'CSV import - merge add stock', actor.userId, actor.userName)
               handleBranch(pid, p.branch, qty, false)
             }
             if (JSON.stringify(nextGallery) !== JSON.stringify(currentGallery)) {
@@ -983,6 +1070,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 category=?, unit=?, brand=?, description=?, supplier=?,
                 selling_price_usd=?, selling_price_khr=?,
                 special_price_usd=?, special_price_khr=?,
+                discount_enabled=?, discount_type=?, discount_percent=?, discount_amount_usd=?, discount_amount_khr=?,
+                discount_label=?, discount_badge_color=?, discount_starts_at=?, discount_ends_at=?,
                 purchase_price_usd=?, purchase_price_khr=?,
                 cost_price_usd=?, cost_price_khr=?,
                 low_stock_threshold=?, is_group=?, parent_id=?,
@@ -997,6 +1086,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               normalizePriceValue(resolvedSellKhr || 0),
               normalizePriceValue(resolvedSpecialUsd ?? resolvedSellUsd ?? 0),
               normalizePriceValue(resolvedSpecialKhr ?? resolvedSellKhr ?? 0),
+              resolvedDiscount.discount_enabled,
+              resolvedDiscount.discount_type,
+              resolvedDiscount.discount_percent,
+              resolvedDiscount.discount_amount_usd,
+              resolvedDiscount.discount_amount_khr,
+              resolvedDiscount.discount_label || null,
+              resolvedDiscount.discount_badge_color,
+              resolvedDiscount.discount_starts_at || null,
+              resolvedDiscount.discount_ends_at || null,
               normalizePriceValue(resolvedBuyUsd || 0),
               normalizePriceValue(resolvedBuyKhr || 0),
               normalizePriceValue(resolvedBuyUsd || 0),
@@ -1015,7 +1113,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             }
             if (qty > 0) {
               const movType = replaceStock ? 'adjustment' : 'add'
-              const movReason = replaceStock ? 'CSV Import ??override replace (set stock)' : 'CSV Import ??override add (add stock)'
+              const movReason = replaceStock ? 'CSV import - override replace stock' : 'CSV import - override add stock'
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, movType, qty,
                 buyUsd || ep.purchase_price_usd, buyKhr || ep.purchase_price_khr,

@@ -13,14 +13,17 @@ export default function CartItem({
         <div className="mr-2 min-w-0 flex-1">
           <p className="leading-snug text-sm font-semibold text-gray-900 dark:text-white">{item.name}</p>
           {item.price_mode === 'special' ? (
-            <div className="mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Special price</div>
+            <div className="mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{t ? t('special_price') : 'Special price'}</div>
+          ) : null}
+          {item.price_mode === 'promotion' ? (
+            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">{item.product_discount_label || (t ? t('promotion_price') : 'Promotion price')}</div>
           ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={onShowDetails}
-            className="rounded px-1.5 py-0.5 text-xs text-gray-300 hover:text-blue-500"
+            className="flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 px-2 text-base font-bold leading-none text-gray-500 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300"
             title={t ? t('details') : 'Details'}
           >
             ...
@@ -29,6 +32,8 @@ export default function CartItem({
             type="button"
             onClick={() => onRemove(lineId)}
             className="px-1 text-base leading-none text-red-400 hover:text-red-600"
+            title={t ? t('remove') : 'Remove'}
+            aria-label={t ? t('remove') : 'Remove'}
           >
             x
           </button>

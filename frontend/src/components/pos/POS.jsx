@@ -50,7 +50,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
-import { normalizePriceValue } from '../../utils/pricing.js'
+import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 
 // ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -716,7 +716,9 @@ export default function POS() {
 
   const openProductCard = useCallback((product, { groupProduct = false, inStock = false } = {}) => {
     if (!product) return
-    if (groupProduct) {
+    const hasSpecial = ((product.special_price_usd || 0) > 0 || (product.special_price_khr || 0) > 0)
+    const hasPromotion = calculateProductDiscount(product, exchangeRate).active
+    if (groupProduct || hasSpecial || hasPromotion) {
       setDetailProduct(product)
       return
     }
@@ -725,7 +727,7 @@ export default function POS() {
       return
     }
     setDetailProduct(product)
-  }, [addToCart])
+  }, [addToCart, exchangeRate])
 
   /** Build a normalized image list for POS product lightbox (gallery + fallback image). */
   const getProductGallery = useCallback((product) => {
@@ -981,6 +983,11 @@ export default function POS() {
         price_khr:         i.applied_price_khr,
         applied_price_usd: i.applied_price_usd,
         applied_price_khr: i.applied_price_khr,
+        price_mode:        i.price_mode || 'selling',
+        product_discount_type: i.product_discount_type || null,
+        product_discount_label: i.product_discount_label || null,
+        product_discount_usd: i.product_discount_usd || 0,
+        product_discount_khr: i.product_discount_khr || 0,
         cost_price_usd:    i.cost_price_usd    || i.purchase_price_usd    || 0,
         cost_price_khr:    i.cost_price_khr    || i.purchase_price_khr    || 0,
         purchase_price_usd: i.purchase_price_usd || 0,
@@ -1143,6 +1150,7 @@ export default function POS() {
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
                 const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
+                const promotion = calculateProductDiscount(p, exchangeRate)
                 return (
                   <div
                     key={p.id}
@@ -1186,7 +1194,12 @@ export default function POS() {
                     </p>
                     {p.selling_price_khr > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p> : null}
                     {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                      <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                      <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                    ) : null}
+                    {promotion.active ? (
+                      <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                        {p.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+                      </p>
                     ) : null}
                     <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>
                       {groupProduct ? `${variants.length} ${choiceLabel}` : `${stock} ${p.unit}`}
@@ -1598,6 +1611,7 @@ export default function POS() {
         const variants = getVariantChoices(p)
         const groupProduct = hasVariantChoices(p)
         const groupMeta = p.__groupMeta || null
+        const promotion = calculateProductDiscount(p, exchangeRate)
         const choiceLabel = groupMeta?.groupKind === 'variant'
           ? posCopy('Variants', 'Variants')
           : posCopy('Options', 'Options')
@@ -1634,6 +1648,9 @@ export default function POS() {
                 {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
                   <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</span>{(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</span>}</div></div>
                 ) : null}
+                {promotion.active ? (
+                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Promotion', 'ប្រូម៉ូសិន')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
+                ) : null}
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
                 {groupProduct ? (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
@@ -1642,6 +1659,7 @@ export default function POS() {
                       {variants.map((variant) => {
                         const variantStock = getDisplayStock(variant)
                         const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
+                        const variantPromotion = calculateProductDiscount(variant, exchangeRate)
                         return (
                           <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
                             <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
@@ -1652,7 +1670,12 @@ export default function POS() {
                               </button>
                               {(variant.special_price_usd || 0) > 0 || (variant.special_price_khr || 0) > 0 ? (
                                 <button className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'special'); setDetailProduct(null) }}>
-                                  {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
+                                  {posCopy('Special', 'ពិសេស')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
+                                </button>
+                              ) : null}
+                              {variantPromotion.active ? (
+                                <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'promotion'); setDetailProduct(null) }}>
+                                  {variant.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(variantPromotion.applied_price_usd)}
                                 </button>
                               ) : null}
                             </div>
@@ -1665,13 +1688,18 @@ export default function POS() {
               </div>
               {!groupProduct ? (
                 <div className="border-t border-gray-200 p-4 dark:border-gray-700">
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <button className="btn-primary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
-                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `+ ${t('add_to_cart')}`}
+                      {stock <= (p.out_of_stock_threshold || 0) ? t('out_of_stock') : `${posCopy('Regular', 'ធម្មតា')} ${fmtUSD(p.selling_price_usd || 0)}`}
                     </button>
+                    {promotion.active ? (
+                      <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
+                        {p.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+                      </button>
+                    ) : null}
                     {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (
                       <button className="btn-secondary flex-1" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
-                        {posCopy('Special', 'Special')}
+                        {posCopy('Special', 'ពិសេស')} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
                       </button>
                     ) : null}
                   </div>

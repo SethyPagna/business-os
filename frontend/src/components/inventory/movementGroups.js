@@ -26,6 +26,12 @@ function buildGroupKey(movement) {
 
 function describeMovementType(type) {
   const key = String(type || '').toLowerCase()
+  const labels = {
+    row_move_in: 'row move in',
+    row_move_out: 'row move out',
+    csv_import: 'CSV import',
+  }
+  if (labels[key]) return labels[key]
   return key.replace(/_/g, ' ')
 }
 

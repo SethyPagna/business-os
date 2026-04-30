@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { formatPriceNumber, normalizePriceValue } from '../src/utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../src/utils/pricing.js'
 import {
   CONTACT_OPTION_LIMIT,
   parseContactOptionsFromImportRow,
@@ -28,6 +28,23 @@ await runTest('normalizePriceValue always rounds up to two decimals', () => {
   assert.equal(formatPriceNumber(1), '1.00')
   assert.equal(formatPriceNumber(3), '3.00')
   assert.equal(formatPriceNumber(1.001), '1.01')
+})
+
+await runTest('calculateProductDiscount keeps promotion pricing separate from special price', () => {
+  const product = {
+    selling_price_usd: 10,
+    selling_price_khr: 41000,
+    special_price_usd: 6,
+    special_price_khr: 24600,
+    discount_enabled: 1,
+    discount_type: 'fixed',
+    discount_amount_usd: 1.005,
+    discount_label: 'Promo',
+  }
+  const discount = calculateProductDiscount(product, 4100)
+  assert.equal(discount.active, true)
+  assert.equal(discount.discount_amount_usd, 1.01)
+  assert.equal(discount.applied_price_usd, 8.99)
 })
 
 await runTest('parseContactOptionsFromImportRow limits imported contact options to three', () => {

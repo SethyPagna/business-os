@@ -250,9 +250,9 @@ export default function Dashboard() {
   const aGrossSales = analytics?.totals?.gross_sales_usd || 0
   const aDiscounts = analytics?.totals?.discount_usd || 0
   const aStoreDiscounts = analytics?.totals?.store_discount_usd || 0
-  const aMembershipDiscounts = analytics?.totals?.membership_discount_usd || 0
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
+  const aStockValue = summary?.stock_value_usd || 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -286,11 +286,22 @@ export default function Dashboard() {
       id: 'products',
       label: t('products_total'),
       value: summary?.product_count || 0,
-      sub: `${summary?.low_stock?.length || 0} ${t('low_stock')} - all-time`,
+      sub: `${summary?.low_stock?.length || 0} ${t('low_stock')}`,
       details: [
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('low_stock') || 'Low stock', value: summary?.low_stock?.length || 0 },
         { label: t('out_of_stock') || 'Out of stock', value: summary?.out_of_stock_count || 0 },
+      ],
+    },
+    {
+      id: 'stock-value',
+      label: t('stock_value') || 'Stock value',
+      value: fmtUSD(aStockValue),
+      color: 'text-cyan-600',
+      details: [
+        { label: t('stock_value') || 'Stock value', value: fmtUSD(aStockValue) },
+        { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
+        { label: t('formula') || 'Formula', value: 'Stock value = quantity on hand x unit cost' },
       ],
     },
     {
@@ -315,15 +326,13 @@ export default function Dashboard() {
     },
     {
       id: 'discounts',
-      label: t('discounts') || 'Discounts',
-      value: fmtUSD(aDiscounts),
-      sub: `${fmtUSD(aStoreDiscounts)} store - ${fmtUSD(aMembershipDiscounts)} member`,
-      color: aDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
+      label: t('store_discounts') || 'Store discounts',
+      value: fmtUSD(aStoreDiscounts),
+      sub: aStoreDiscounts > 0 ? (t('promotion') || 'Promotion') : '',
+      color: aStoreDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
       details: [
-        { label: t('discounts') || 'Discounts', value: fmtUSD(aDiscounts) },
         { label: t('store_discounts') || 'Store discounts', value: fmtUSD(aStoreDiscounts) },
-        { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(aMembershipDiscounts) },
-        { label: t('formula') || 'Formula', value: 'Total discounts = Store + Membership' },
+        { label: t('formula') || 'Formula', value: 'Store discounts are the cashier-entered sale discounts and product promotions.' },
       ],
     },
     {
@@ -387,9 +396,10 @@ export default function Dashboard() {
     { Section:'KPI', Metric:'Revenue (USD)', Value: priceCsv(aRevenue), Period: rangeLabel },
     { Section:'KPI', Metric:'Discounts (USD)', Value: priceCsv(aDiscounts), Period: rangeLabel },
     { Section:'KPI', Metric:'Store Discounts (USD)', Value: priceCsv(aStoreDiscounts), Period: rangeLabel },
-    { Section:'KPI', Metric:'Membership Discounts (USD)', Value: priceCsv(aMembershipDiscounts), Period: rangeLabel },
     { Section:'KPI', Metric:'Tax (USD)', Value: priceCsv(aTax), Period: rangeLabel },
     { Section:'KPI', Metric:'Delivery (USD)', Value: priceCsv(aDelivery), Period: rangeLabel },
+    { Section:'KPI', Metric:'Products', Value: summary?.product_count || 0, Period:'current inventory' },
+    { Section:'KPI', Metric:'Stock Value (USD)', Value: priceCsv(aStockValue), Period:'current inventory' },
     { Section:'KPI', Metric:'COGS (USD)', Value: priceCsv(aCost), Period: rangeLabel },
     { Section:'KPI', Metric:'Est. Profit (USD)', Value: priceCsv(aProfit), Period: rangeLabel },
     { Section:'KPI', Metric:'Transactions', Value: aTxCount, Period: rangeLabel },
@@ -405,11 +415,11 @@ export default function Dashboard() {
     aDelivery,
     aDiscounts,
     aGrossSales,
-    aMembershipDiscounts,
     aProfit,
     aRefundUsd,
     aReturns,
     aRevenue,
+    aStockValue,
     aStoreDiscounts,
     aSupplierLossUsd,
     aSupplierReturns,
@@ -418,6 +428,7 @@ export default function Dashboard() {
     periodShort,
     priceCsv,
     rangeLabel,
+    summary?.product_count,
     summary?.low_stock?.length,
   ])
 

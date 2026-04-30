@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { CornerDownLeft, CornerDownRight, History } from 'lucide-react'
+import { useApp } from '../../AppContext.jsx'
 
 function formatHistoryList(items = []) {
   return items.map((item) => item?.label).filter(Boolean).slice(-3).reverse()
@@ -8,42 +10,93 @@ export default function ActionHistoryBar({
   history,
   align = 'left',
   className = '',
+  t,
 }) {
+  const app = useApp()
+  const [open, setOpen] = useState(false)
   if (!history) return null
+
+  const T = (key, fallback) => {
+    if (typeof t === 'function') return t(key) || fallback
+    if (typeof app?.t === 'function') return app.t(key) || fallback
+    return fallback
+  }
   const undoItems = formatHistoryList(history.undoItems)
   const redoItems = formatHistoryList(history.redoItems)
   const wrapperAlign = align === 'right' ? 'justify-end' : 'justify-start'
+  const hasItems = !!((history.undoItems || []).length || (history.redoItems || []).length)
 
   return (
-    <div className={`flex flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
+    <div className={`relative flex flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
       <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
-        <History className="h-3.5 w-3.5 text-slate-400" />
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          onClick={() => setOpen((current) => !current)}
+          title={T('history', 'History')}
+          aria-expanded={open}
+        >
+          <History className="h-3.5 w-3.5 text-slate-400" />
+          <span>{T('history', 'History')}</span>
+        </button>
         <div className="hidden min-w-0 items-center gap-2 md:flex">
-          {undoItems.length ? <span className="truncate text-slate-500">Undo: {undoItems.join(' · ')}</span> : null}
-          {redoItems.length ? <span className="truncate text-slate-400">Redo: {redoItems.join(' · ')}</span> : null}
-          {!undoItems.length && !redoItems.length ? <span>No recent actions</span> : null}
+          {undoItems.length ? <span className="truncate text-slate-500">{T('undo', 'Undo')}: {undoItems.join(' / ')}</span> : null}
+          {redoItems.length ? <span className="truncate text-slate-400">{T('redo', 'Redo')}: {redoItems.join(' / ')}</span> : null}
+          {!undoItems.length && !redoItems.length ? <span>{T('no_recent_actions', 'No recent actions')}</span> : null}
         </div>
         <button
           type="button"
           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-          onClick={history.undo}
+          onClick={() => history.undo()}
           disabled={!history.canUndo}
-          title={history.lastUndoLabel ? `Undo ${history.lastUndoLabel}` : 'Undo'}
+          title={history.lastUndoLabel ? `${T('undo', 'Undo')} ${history.lastUndoLabel}` : T('undo', 'Undo')}
         >
           <CornerDownLeft className="h-3.5 w-3.5" />
-          <span>Undo</span>
+          <span>{T('undo', 'Undo')}</span>
         </button>
         <button
           type="button"
           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-          onClick={history.redo}
+          onClick={() => history.redo()}
           disabled={!history.canRedo}
-          title={history.lastRedoLabel ? `Redo ${history.lastRedoLabel}` : 'Redo'}
+          title={history.lastRedoLabel ? `${T('redo', 'Redo')} ${history.lastRedoLabel}` : T('redo', 'Redo')}
         >
           <CornerDownRight className="h-3.5 w-3.5" />
-          <span>Redo</span>
+          <span>{T('redo', 'Redo')}</span>
         </button>
       </div>
+
+      {open ? (
+        <div className="absolute top-full z-40 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          {!hasItems ? (
+            <div className="px-3 py-2 text-slate-500 dark:text-slate-400">{T('no_recent_actions', 'No recent actions')}</div>
+          ) : null}
+          {(history.undoItems || []).slice(-3).reverse().map((item) => (
+            <button
+              key={`undo-${item.id}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+              disabled={!!history.busy}
+              onClick={() => { setOpen(false); history.undo(item.id) }}
+            >
+              <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{item.label}</span>
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{T('undo', 'Undo')}</span>
+            </button>
+          ))}
+          {(history.redoItems || []).slice(-3).reverse().map((item) => (
+            <button
+              key={`redo-${item.id}`}
+              type="button"
+              className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+              disabled={!!history.busy}
+              onClick={() => { setOpen(false); history.redo(item.id) }}
+            >
+              <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{item.label}</span>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">{T('redo', 'Redo')}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

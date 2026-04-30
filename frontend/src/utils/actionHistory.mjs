@@ -6,10 +6,14 @@ function normalizeEntry(entry = {}, index = 0) {
     label: String(entry.label || 'Recent action'),
     undo: entry.undo,
     redo: entry.redo,
+    serverId: entry.serverId || entry.server_id || null,
+    scope: entry.scope || 'global',
+    entity: entry.entity || null,
+    entity_id: entry.entity_id || entry.entityId || null,
   }
 }
 
-export function useActionHistory({ limit = 3, notify } = {}) {
+export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])
   const [busy, setBusy] = useState('')
@@ -18,12 +22,29 @@ export function useActionHistory({ limit = 3, notify } = {}) {
     const nextEntry = normalizeEntry(entry)
     setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), nextEntry])
     setRedoStack([])
+    if (typeof window !== 'undefined' && window.api?.createActionHistory) {
+      window.api.createActionHistory({
+        scope: entry.scope || scope,
+        entity: entry.entity || null,
+        entity_id: entry.entity_id || entry.entityId || null,
+        label: nextEntry.label,
+        undo_label: entry.undoLabel || `Undo ${nextEntry.label}`,
+        redo_label: entry.redoLabel || `Redo ${nextEntry.label}`,
+        reversible: typeof nextEntry.undo === 'function' && typeof nextEntry.redo === 'function',
+        undo_payload: entry.undo_payload || {},
+        redo_payload: entry.redo_payload || {},
+      }).then((result) => {
+        const serverId = result?.id
+        if (!serverId) return
+        setUndoStack((current) => current.map((item) => item.id === nextEntry.id ? { ...item, serverId } : item))
+      }).catch(() => {})
+    }
     return nextEntry
-  }, [limit])
+  }, [limit, scope])
 
-  const runEntry = useCallback(async (direction) => {
+  const runEntry = useCallback(async (direction, entryId = null) => {
     const source = direction === 'undo' ? undoStack : redoStack
-    const entry = source[source.length - 1]
+    const entry = entryId ? source.find((item) => item.id === entryId) : source[source.length - 1]
     if (!entry || busy) return false
     const action = direction === 'undo' ? entry.undo : entry.redo
     if (typeof action !== 'function') return false
@@ -31,14 +52,17 @@ export function useActionHistory({ limit = 3, notify } = {}) {
     try {
       await Promise.resolve(action())
       if (direction === 'undo') {
-        setUndoStack((current) => current.slice(0, -1))
+        setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
+        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).catch(() => {})
       } else {
-        setRedoStack((current) => current.slice(0, -1))
+        setRedoStack((current) => current.filter((item) => item.id !== entry.id))
         setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
+        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).catch(() => {})
       }
       return true
     } catch (error) {
+      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'failed', last_error: error?.message || String(error || '') }).catch(() => {})
       notify?.(error?.message || `Unable to ${direction} that action right now.`, 'error')
       return false
     } finally {
@@ -46,8 +70,8 @@ export function useActionHistory({ limit = 3, notify } = {}) {
     }
   }, [busy, limit, notify, redoStack, undoStack])
 
-  const undo = useCallback(() => runEntry('undo'), [runEntry])
-  const redo = useCallback(() => runEntry('redo'), [runEntry])
+  const undo = useCallback((entryId = null) => runEntry('undo', entryId), [runEntry])
+  const redo = useCallback((entryId = null) => runEntry('redo', entryId), [runEntry])
 
   return useMemo(() => ({
     busy,
