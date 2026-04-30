@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRightLeft, Building2, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
@@ -9,7 +9,13 @@ import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
-import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
+import {
+  beginTrackedRequest,
+  getFirstLoaderError,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  settleLoaderMap,
+} from '../../utils/loaders.mjs'
 
 /**
  * 1. Branches Page
@@ -57,34 +63,86 @@ export default function Branches() {
   const [branchStocks, setBranchStocks] = useState({})
   const [expandedBranch, setExpandedBranch] = useState(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+  const loadedOnceRef = useRef(false)
+  const loadRequestRef = useRef(0)
+  const loadWatchdogRef = useRef(null)
+  const loadPromiseRef = useRef(null)
   const actionHistory = useActionHistory({ limit: 3, notify })
 
   /**
    * 3. Data Loading
    * 3.1 Fetch branches + transfer history.
    */
-  const load = async () => {
-    try {
-      const result = await settleLoaderMap({
-        branches: () => window.api.getBranches(),
-        transfers: () => window.api.getTransfers({}),
-      })
-
-      if (Array.isArray(result.values.branches)) setBranches(result.values.branches)
-      if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers)
-
-      if (!result.hasAnySuccess) {
-        throw new Error(getFirstLoaderError(result.errors, t('failed_to_load_data') || 'Failed to load data'))
+  const load = useCallback(async (silent = loadedOnceRef.current) => {
+    if (loadPromiseRef.current) return loadPromiseRef.current
+    const requestId = beginTrackedRequest(loadRequestRef)
+    const promise = (async () => {
+      window.clearTimeout(loadWatchdogRef.current)
+      if (!silent || !loadedOnceRef.current) {
+        setLoading(true)
+        setLoadError(null)
+        loadWatchdogRef.current = window.setTimeout(() => {
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setLoading(false)
+          setLoadError(t('branches_load_slow') || 'Branches are taking longer than expected. Tap Retry or revisit in a moment.')
+        }, 10_000)
       }
-    } catch (error) {
-      notify(error?.message || (t('failed_to_load_data') || 'Failed to load data'), 'error')
-    }
-  }
+
+      try {
+        const result = await settleLoaderMap({
+          branches: () => window.api.getBranches(),
+          transfers: () => window.api.getTransfers({}),
+        })
+
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
+        if (Array.isArray(result.values.branches)) setBranches(result.values.branches)
+        if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers)
+
+        if (!result.hasAnySuccess) {
+          throw new Error(getFirstLoaderError(result.errors, t('failed_to_load_data') || 'Failed to load data'))
+        }
+
+        loadedOnceRef.current = true
+        setLoadError(null)
+        return result
+      } catch (error) {
+        if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
+        const message = error?.message || (t('failed_to_load_data') || 'Failed to load data')
+        if (!silent && !loadedOnceRef.current) {
+          setLoadError(message)
+          loadedOnceRef.current = true
+        } else if (!silent) {
+          notify(message, 'warning')
+        }
+        return null
+      } finally {
+        window.clearTimeout(loadWatchdogRef.current)
+        if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
+          setLoading(false)
+        }
+      }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (loadPromiseRef.current === wrappedPromise) {
+        loadPromiseRef.current = null
+      }
+    })
+    loadPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [notify, t])
 
   useEffect(() => {
-    if (!isActive) return
-    void load()
-  }, [isActive]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isActive) {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      setLoading(false)
+      return
+    }
+    void load(loadedOnceRef.current)
+  }, [isActive, load])
 
   /**
    * 3.2 Sync refresh hooks.
@@ -92,10 +150,16 @@ export default function Branches() {
    * - Product changes (stock movement can affect branch views).
    */
   useEffect(() => {
-    if (!isActive || !syncChannel) return
+    if (!isActive || !syncChannel?.channel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products') void load()
-  }, [isActive, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (channel === 'branches' || channel === 'products') void load(true)
+  }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
+
+  useEffect(() => () => {
+    window.clearTimeout(loadWatchdogRef.current)
+    invalidateTrackedRequest(loadRequestRef)
+    loadPromiseRef.current = null
+  }, [])
 
   /**
    * 4. Derived State
@@ -340,6 +404,20 @@ export default function Branches() {
 
       <ActionHistoryBar history={actionHistory} className="mb-4" />
 
+      {loadError && !loading && !branches.length && !transfers.length ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="font-semibold">{t('page_load_warning') || 'Page could not finish loading'}</div>
+          <div className="mt-1">{loadError}</div>
+          <button
+            type="button"
+            className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+            onClick={() => load(false)}
+          >
+            {t('retry') || 'Retry'}
+          </button>
+        </div>
+      ) : null}
+
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[
           ['branches', t('branches') || 'Branches'],
@@ -361,7 +439,13 @@ export default function Branches() {
 
       {tab === 'branches' ? (
         <div className="space-y-3">
-          {branches.length > 0 ? (
+          {loading && !branches.length ? (
+            <div className="py-12 text-center text-gray-400">
+              <p>{t('loading') || 'Loading...'}</p>
+            </div>
+          ) : null}
+
+          {!loading && branches.length > 0 ? (
             <div className="flex items-center gap-3 px-2">
               <input
                 id="branches-select-all"
@@ -385,7 +469,7 @@ export default function Branches() {
             </div>
           ) : null}
 
-          {branches.length === 0 ? (
+          {!loading && branches.length === 0 ? (
             <div className="py-12 text-center text-gray-400">
               <p>{t('no_data') || 'No data'}</p>
             </div>
@@ -507,7 +591,9 @@ export default function Branches() {
       {tab === 'transfers' ? (
         <>
           <div className="space-y-2 sm:hidden">
-            {transfers.length === 0 ? (
+            {loading && !transfers.length ? (
+              <div className="card py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
+            ) : transfers.length === 0 ? (
               <div className="card py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>
             ) : transfers.map((transfer) => (
               <div key={transfer.id} className="card p-3">
@@ -548,7 +634,9 @@ export default function Branches() {
                 </tr>
               </thead>
               <tbody>
-                {transfers.length === 0 ? (
+                {loading && !transfers.length ? (
+                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+                ) : transfers.length === 0 ? (
                   <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
                 ) : transfers.map((transfer) => (
                   <tr key={transfer.id} className="table-row">

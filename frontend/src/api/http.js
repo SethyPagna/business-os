@@ -72,7 +72,7 @@ const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt = {}
 const CACHE_TTL   = 20_000   // 20 seconds
-const INFLIGHT_REUSE_WINDOW_MS = 900
+const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 
 export function cacheGet(key) {
   const e = _cache[key]
@@ -88,9 +88,20 @@ export function cacheClearAll() {
   Object.keys(_inflightStartedAt).forEach(k => delete _inflightStartedAt[k])
 }
 
-// Invalidate cache on any sync update so stale reads never survive a broadcast
+// Invalidate only the affected cache group on real sync updates. Cache-refresh
+// events are emitted after a background read has already stored fresh data; if
+// we clear that cache immediately, pages can fall into refresh churn.
 if (typeof window !== 'undefined') {
-  window.addEventListener('sync:update', cacheClearAll)
+  window.addEventListener('sync:update', (event) => {
+    const detail = event?.detail || {}
+    if (detail.reason === 'cache-refresh') return
+    const channel = getChannelRefreshKey(detail.channel || '')
+    if (!channel || channel === 'all' || channel === 'runtime') {
+      cacheClearAll()
+      return
+    }
+    cacheInvalidate(channel)
+  })
 }
 
 // ??? Logging ring buffer ??????????????????????????????????????????????????????

@@ -171,7 +171,7 @@ echo [INFO] Checking Tailscale for remote access...
 if defined TAILSCALE_CMD (
     echo [INFO] Using Tailscale CLI: !TAILSCALE_CMD!
     echo [INFO] Starting Tailscale Funnel on port %PORT%...
-    call "!TAILSCALE_CMD!" funnel --bg %PORT% >nul 2>&1
+    call "!TAILSCALE_CMD!" funnel --bg --yes http://127.0.0.1:%PORT% >nul 2>&1
     if not errorlevel 1 (
         for /l %%N in (1,1,6) do (
             if "!TAILSCALE_URL_FOUND!"=="" (
@@ -295,7 +295,24 @@ if not "!TAILSCALE_URL_FOUND!"=="" (
     ) else (
         echo [WARN] Public URL verification failed.
         type "%TEMP%\bos_public_check.txt"
-        echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        echo [INFO] Resetting stale Tailscale Serve/Funnel config and retrying...
+        if defined TAILSCALE_CMD (
+            call "!TAILSCALE_CMD!" serve reset >nul 2>&1
+            call "!TAILSCALE_CMD!" funnel --bg --yes http://127.0.0.1:%PORT% >nul 2>&1
+            node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
+            if not errorlevel 1 (
+                set "PUBLIC_URL_OK=1"
+                echo [OK] Public URL verification passed after Tailscale reset.
+                echo [%DATE% %TIME%] START repaired and verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+            ) else (
+                echo [WARN] Public URL verification still failed after Tailscale reset.
+                type "%TEMP%\bos_public_check_retry.txt"
+                echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+            )
+            del "%TEMP%\bos_public_check_retry.txt" >nul 2>&1
+        ) else (
+            echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        )
     )
     del "%TEMP%\bos_public_check.txt" >nul 2>&1
 )

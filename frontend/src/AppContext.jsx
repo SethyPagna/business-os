@@ -10,6 +10,7 @@ import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRun
 import { isWSConnected } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { normalizePriceValue } from './utils/pricing.js'
+import { withLoaderTimeout } from './utils/loaders.mjs'
 
 /**
  * Global application context.
@@ -734,12 +735,23 @@ export function AppProvider({ children }) {
 
           if (hasStoredSession && typeof window.api?.getAppBootstrap === 'function') {
             setAuthReady(false)
-            window.api.getAppBootstrap()
+            let settled = false
+            const authReadyWatchdog = window.setTimeout(() => {
+              if (settled) return
+              console.warn('[AppContext] App bootstrap is taking too long; showing the shell with stored session data.')
+              setAuthReady(true)
+              loadSettings().catch(() => {})
+            }, 10_000)
+            withLoaderTimeout(() => window.api.getAppBootstrap(), 'App bootstrap', 9000)
               .then(async (bootstrap) => {
                 if (bootstrap) await applyBootstrapPayload(bootstrap)
               })
               .catch(() => {})
-              .finally(() => setAuthReady(true))
+              .finally(() => {
+                settled = true
+                window.clearTimeout(authReadyWatchdog)
+                setAuthReady(true)
+              })
           }
 
           fetch(`${effectiveUrl}/health`, { signal: AbortSignal.timeout?.(6000) })

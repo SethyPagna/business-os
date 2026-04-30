@@ -98,6 +98,10 @@ TAILSCALE_URL=$(grep -E '^TAILSCALE_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-
 CUSTOMER_PORTAL_PATH=$(node -e "fetch('http://127.0.0.1:' + process.argv[1] + '/api/portal/config').then(r => r.ok ? r.json() : null).then(cfg => { const path = String(cfg?.publicPath || '/customer-portal'); process.stdout.write(path.startsWith('/') ? path : '/' + path); }).catch(() => process.stdout.write('/customer-portal'))" "$PORT")
 echo "  Local URL: http://localhost:${PORT}"
 echo "  Local Portal: http://localhost:${PORT}${CUSTOMER_PORTAL_PATH}"
+if command -v tailscale &>/dev/null; then
+  info "Ensuring Tailscale Funnel targets the local backend..."
+  tailscale funnel --bg --yes "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || warn "Tailscale Funnel command failed"
+fi
 if [ -n "${TAILSCALE_URL:-}" ] && [ -f "$PUBLIC_CHECK_SCRIPT" ]; then
   info "Verifying public URL with Node HTTPS..."
   if node "$PUBLIC_CHECK_SCRIPT" "$TAILSCALE_URL" "$CUSTOMER_PORTAL_PATH"; then
@@ -106,6 +110,18 @@ if [ -n "${TAILSCALE_URL:-}" ] && [ -f "$PUBLIC_CHECK_SCRIPT" ]; then
     echo "  Customer URL: ${TAILSCALE_URL%/}${CUSTOMER_PORTAL_PATH}"
   else
     warn "Public URL verification failed"
+    if command -v tailscale &>/dev/null; then
+      info "Resetting stale Tailscale Serve/Funnel config and retrying..."
+      tailscale serve reset >/dev/null 2>&1 || true
+      tailscale funnel --bg --yes "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || true
+      if node "$PUBLIC_CHECK_SCRIPT" "$TAILSCALE_URL" "$CUSTOMER_PORTAL_PATH"; then
+        ok "Public URL verification passed after Tailscale reset"
+        echo "  Remote Admin: ${TAILSCALE_URL}"
+        echo "  Customer URL: ${TAILSCALE_URL%/}${CUSTOMER_PORTAL_PATH}"
+      else
+        warn "Public URL verification still failed after Tailscale reset"
+      fi
+    fi
   fi
 fi
 echo ""
