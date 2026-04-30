@@ -331,6 +331,51 @@ function getPortalProducts() {
   })
 }
 
+function getPortalCatalogMeta() {
+  const categories = db.prepare(`
+    SELECT id, name
+    FROM categories
+    ORDER BY name COLLATE NOCASE ASC
+  `).all()
+
+  const productBrands = db.prepare(`
+    SELECT DISTINCT brand
+    FROM products
+    WHERE is_active = 1
+      AND brand IS NOT NULL
+      AND trim(brand) != ''
+    ORDER BY brand COLLATE NOCASE ASC
+  `).all().map((row) => row.brand)
+
+  let libraryBrands = []
+  try {
+    const rawValue = db.prepare(`
+      SELECT value
+      FROM settings
+      WHERE key = 'product_brand_options'
+      LIMIT 1
+    `).get()?.value
+    const parsed = JSON.parse(rawValue || '[]')
+    if (Array.isArray(parsed)) {
+      libraryBrands = parsed
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+    }
+  } catch (_) {}
+
+  const brands = Array.from(new Set([...productBrands, ...libraryBrands]))
+    .sort((a, b) => a.localeCompare(b))
+
+  const branches = db.prepare(`
+    SELECT id, name, is_default
+    FROM branches
+    WHERE is_active = 1
+    ORDER BY is_default DESC, name COLLATE NOCASE ASC
+  `).all()
+
+  return { categories, brands, branches }
+}
+
 /** Resolve active customer by membership number (case-insensitive). */
 function findCustomerByMembership(membershipNumber) {
   return db.prepare(`
@@ -404,49 +449,16 @@ router.get('/config', (_req, res) => {
   res.json(buildPortalConfig())
 })
 
+router.get('/bootstrap', (_req, res) => {
+  res.json({
+    config: buildPortalConfig(),
+    meta: getPortalCatalogMeta(),
+    products: getPortalProducts(),
+  })
+})
+
 router.get('/catalog/meta', (_req, res) => {
-  const categories = db.prepare(`
-    SELECT id, name
-    FROM categories
-    ORDER BY name COLLATE NOCASE ASC
-  `).all()
-
-  const productBrands = db.prepare(`
-    SELECT DISTINCT brand
-    FROM products
-    WHERE is_active = 1
-      AND brand IS NOT NULL
-      AND trim(brand) != ''
-    ORDER BY brand COLLATE NOCASE ASC
-  `).all().map((row) => row.brand)
-
-  let libraryBrands = []
-  try {
-    const rawValue = db.prepare(`
-      SELECT value
-      FROM settings
-      WHERE key = 'product_brand_options'
-      LIMIT 1
-    `).get()?.value
-    const parsed = JSON.parse(rawValue || '[]')
-    if (Array.isArray(parsed)) {
-      libraryBrands = parsed
-        .map((entry) => String(entry || '').trim())
-        .filter(Boolean)
-    }
-  } catch (_) {}
-
-  const brands = Array.from(new Set([...productBrands, ...libraryBrands]))
-    .sort((a, b) => a.localeCompare(b))
-
-  const branches = db.prepare(`
-    SELECT id, name, is_default
-    FROM branches
-    WHERE is_active = 1
-    ORDER BY is_default DESC, name COLLATE NOCASE ASC
-  `).all()
-
-  res.json({ categories, brands, branches })
+  res.json(getPortalCatalogMeta())
 })
 
 router.get('/catalog/products', (_req, res) => {

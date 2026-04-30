@@ -556,6 +556,14 @@ export async function getPortalConfig() {
   if (!res.ok) throw new Error(`Portal config failed: ${res.status}`)
   return res.json()
 }
+export async function getPortalBootstrap() {
+  const base = getPortalBaseUrl()
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/bootstrap`, {
+    headers: { 'bypass-tunnel-reminder': 'true' },
+  })
+  if (!res.ok) throw new Error(`Portal bootstrap failed: ${res.status}`)
+  return res.json()
+}
 export async function getPortalCatalogMeta() {
   const base = getPortalBaseUrl()
   const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/meta`, {

@@ -131,6 +131,8 @@ runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and 
   assert.match(scriptSrc, /https:\/\/translate\.googleapis\.com/)
   assert.doesNotMatch(scriptSrc, /unsafe-inline/)
   assert.doesNotMatch(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
+  assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
+  assert.match(csp, /style-src-elem 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')

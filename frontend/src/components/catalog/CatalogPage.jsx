@@ -1406,6 +1406,11 @@ function readStoredTranslateTarget(sourceLang) {
   return 'original'
 }
 
+function isDocumentVisible() {
+  if (typeof document === 'undefined') return true
+  return document.visibilityState !== 'hidden'
+}
+
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }) {
   const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp()
@@ -1621,17 +1626,12 @@ export default function CatalogPage({ publicView = false }) {
   function changeTranslateTarget(nextTarget) {
     setTranslateTarget(nextTarget)
     if (!publicView || !previewConfig.translateWidgetEnabled) return
+    if (!translateReady) return
     const applied = applyGoogleTranslateSelection(language, nextTarget)
-    if (!applied && typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        const retryApplied = applyGoogleTranslateSelection(language, nextTarget)
-        if (!retryApplied) window.location.reload()
-      }, 180)
-      return
-    }
-    if (typeof window !== 'undefined') {
-      window.setTimeout(() => window.location.reload(), 140)
-    }
+    if (!applied || typeof window === 'undefined') return
+    window.setTimeout(() => {
+      applyGoogleTranslateSelection(language, nextTarget)
+    }, 120)
   }
 
   function isPortalLoadCurrent(requestId) {
@@ -1699,24 +1699,13 @@ export default function CatalogPage({ publicView = false }) {
   async function loadPortal() {
     if (!isPageActive) return
     const requestId = beginTrackedRequest(loadRequestRef)
-    const [portalConfigResult, metaResult, productsResult] = await Promise.allSettled([
-      window.api.getPortalConfig(),
-      window.api.getPortalCatalogMeta(),
-      window.api.getPortalCatalogProducts(),
-    ])
+    const bootstrapResult = await window.api.getPortalBootstrap()
     if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
-    const portalConfig = portalConfigResult.status === 'fulfilled' ? portalConfigResult.value : null
-    const meta = metaResult.status === 'fulfilled' ? metaResult.value : null
-    const portalProducts = productsResult.status === 'fulfilled' ? productsResult.value : null
-    if (!portalConfig && !meta && !portalProducts) {
-      throw new Error(
-        portalConfigResult.reason?.message
-        || metaResult.reason?.message
-        || productsResult.reason?.message
-        || 'Failed to load customer portal',
-      )
-    }
+    const portalConfig = bootstrapResult?.config || null
+    const meta = bootstrapResult?.meta || null
+    const portalProducts = bootstrapResult?.products || null
+    if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load customer portal')
 
     const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
     const nextMeta = {
@@ -1770,6 +1759,7 @@ export default function CatalogPage({ publicView = false }) {
     }
 
     const timer = window.setInterval(() => {
+      if (!isDocumentVisible()) return
       refreshPortalView({ showSpinner: false }).catch(() => {})
     }, Math.max(5, Number(previewConfig.refreshSeconds || 20)) * 1000)
 
@@ -3577,7 +3567,7 @@ export default function CatalogPage({ publicView = false }) {
   if (loading) {
     return (
     <div
-      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
         ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
         background: portalBackground,
@@ -3600,7 +3590,7 @@ export default function CatalogPage({ publicView = false }) {
 
   return (
     <div
-      className={`${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+      className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
         ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
         background: portalBackground,

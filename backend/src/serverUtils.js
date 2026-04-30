@@ -222,12 +222,14 @@ function setTunnelSecurityHeaders(req, res) {
       "img-src 'self' data: blob: https:",
       "media-src 'self' data: blob: https:",
       "manifest-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
+      "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
       "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://*.supabase.co",
       "worker-src 'self' blob:",
       "script-src 'self' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com",
+      "script-src-elem 'self' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()
