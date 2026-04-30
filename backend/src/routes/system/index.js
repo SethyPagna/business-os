@@ -523,7 +523,7 @@ router.get('/config', authToken, (req, res) => {
 })
 
 // ?€?€ Backup export ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-router.get('/drive-sync/status', authToken, (req, res) => {
+router.get('/drive-sync/status', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   ok(res, {
     item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
   })
@@ -637,7 +637,7 @@ router.post('/drive-sync/forget-credentials', authToken, requirePermission('sett
   }
 })
 
-router.post('/drive-sync/sync-now', authToken, async (req, res) => {
+router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
   try {
     const summary = await runDriveSync('manual')
     ok(res, {
@@ -677,7 +677,7 @@ router.get('/backup/export', authToken, requirePermission('backup'), (req, res) 
   res.send(JSON.stringify(backup, null, 2))
 })
 
-router.post('/backup/export-folder', authToken, async (req, res) => {
+router.post('/backup/export-folder', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_export_folder', max: 12, windowMs: 10 * 60 * 1000 })) return
   const destinationDir = String(req.body?.destinationDir || '').trim()
   if (!destinationDir) return err(res, 'destinationDir is required')
@@ -933,7 +933,7 @@ router.post('/repair-integrity', authToken, requireAnyPermission(['backup', 'set
  * GET /api/system/data-path
  * Returns the current data folder path and whether data-location.json exists.
  */
-router.get('/data-path', authToken, (req, res) => {
+router.get('/data-path', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
   const hasOverride = fs.existsSync(DATA_LOCATION_FILE)
   const organization = getDefaultOrganization()
   const organizationStorage = organization ? ensureOrganizationFilesystemLayout(organization) : null
@@ -1023,7 +1023,7 @@ router.post('/data-path', authToken, requireAnyPermission(['backup', 'settings']
  * DELETE /api/system/data-path
  * Removes data-location.json ??reverts to the default business-os-data folder.
  */
-router.delete('/data-path', authToken, async (req, res) => {
+router.delete('/data-path', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:data_path_delete', max: 20, windowMs: 10 * 60 * 1000 })) return
   try {
     const migration = isSamePath(STORAGE_ROOT, DEFAULT_STORAGE_ROOT)

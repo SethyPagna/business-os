@@ -3,7 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { ok, err, audit } = require('../helpers')
-const { authToken, getAuditActor } = require('../middleware')
+const { authToken, getAuditActor, hasPermission } = require('../middleware')
 
 const router = express.Router()
 
@@ -22,9 +22,28 @@ function normalizeLimit(value) {
   return Math.min(20, Math.max(1, Number.isFinite(num) ? num : 3))
 }
 
+function normalizeText(value, fallback, maxLength) {
+  const text = String(value || fallback || '').trim()
+  return text.slice(0, Math.max(1, Number(maxLength || 120)))
+}
+
 function serializePayload(value) {
   if (!value || typeof value !== 'object') return '{}'
-  return JSON.stringify(value)
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 20_000) {
+    throw new Error('Action history payload is too large')
+  }
+  return serialized
+}
+
+function canReadAllHistory(user, requestedAll = false) {
+  return !!requestedAll && (hasPermission(user, 'settings') || hasPermission(user, 'backup'))
+}
+
+function getOwnedHistoryRow(req, id) {
+  const actionId = Number(id || 0)
+  if (!Number.isInteger(actionId) || actionId <= 0) return null
+  return db.prepare('SELECT * FROM action_history WHERE id = ? AND created_by_id = ?').get(actionId, req.user?.id || 0)
 }
 
 function mapRow(row) {
@@ -38,15 +57,24 @@ function mapRow(row) {
 
 router.get('/', authToken, (req, res) => {
   try {
-    const scope = String(req.query.scope || 'global').trim() || 'global'
+    const scope = normalizeText(req.query.scope, 'global', 80) || 'global'
     const limit = normalizeLimit(req.query.limit)
-    const rows = db.prepare(`
-      SELECT *
-      FROM action_history
-      WHERE scope = ?
-      ORDER BY datetime(updated_at) DESC, id DESC
-      LIMIT ?
-    `).all(scope, limit)
+    const includeAll = ['1', 'true', 'yes'].includes(String(req.query.all || '').trim().toLowerCase())
+    const rows = canReadAllHistory(req.user, includeAll)
+      ? db.prepare(`
+        SELECT *
+        FROM action_history
+        WHERE scope = ?
+        ORDER BY datetime(updated_at) DESC, id DESC
+        LIMIT ?
+      `).all(scope, limit)
+      : db.prepare(`
+        SELECT *
+        FROM action_history
+        WHERE scope = ? AND created_by_id = ?
+        ORDER BY datetime(updated_at) DESC, id DESC
+        LIMIT ?
+      `).all(scope, req.user?.id || 0, limit)
     ok(res, { items: rows.map(mapRow) })
   } catch (error) {
     err(res, error.message || 'Failed to load action history')
@@ -57,7 +85,7 @@ router.post('/', authToken, (req, res) => {
   const body = req.body || {}
   const actor = getAuditActor(req, body)
   try {
-    const label = String(body.label || '').trim()
+    const label = normalizeText(body.label, '', 200)
     if (!label) return err(res, 'Action label required')
     const result = db.prepare(`
       INSERT INTO action_history (
@@ -65,12 +93,12 @@ router.post('/', authToken, (req, res) => {
         undo_payload, redo_payload, created_by_id, created_by_name
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      String(body.scope || 'global').trim() || 'global',
-      body.entity ? String(body.entity).trim() : null,
-      body.entity_id != null ? String(body.entity_id) : null,
+      normalizeText(body.scope, 'global', 80) || 'global',
+      body.entity ? normalizeText(body.entity, '', 80) : null,
+      body.entity_id != null ? normalizeText(body.entity_id, '', 120) : null,
       label,
-      body.undo_label ? String(body.undo_label).trim() : null,
-      body.redo_label ? String(body.redo_label).trim() : null,
+      body.undo_label ? normalizeText(body.undo_label, '', 200) : null,
+      body.redo_label ? normalizeText(body.redo_label, '', 200) : null,
       body.reversible === false ? 0 : 1,
       body.reversible === false ? 'recorded' : 'undoable',
       serializePayload(body.undo_payload),
@@ -90,7 +118,8 @@ router.patch('/:id', authToken, (req, res) => {
   if (!['undoable', 'redoable', 'recorded', 'failed'].includes(status)) return err(res, 'Invalid action history status')
   const actor = getAuditActor(req, body)
   try {
-    const existing = db.prepare('SELECT * FROM action_history WHERE id = ?').get(req.params.id)
+    const existing = getOwnedHistoryRow(req, req.params.id)
+    if (!existing) return err(res, 'Action history item not found', 404)
     db.prepare(`
       UPDATE action_history
       SET status = ?, last_error = ?, updated_at = datetime('now')
