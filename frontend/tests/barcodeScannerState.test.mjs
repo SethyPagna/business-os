@@ -38,6 +38,13 @@ await runTest('deriveScannerPresentation distinguishes scanning and blocked stat
   assert.equal(blocked.emptyStateMessage, 'Blocked')
 })
 
+await runTest('deriveScannerPresentation hides retry when the document itself blocks camera access', () => {
+  const blockedByDocument = deriveScannerPresentation({ status: 'blocked', permissionState: 'blocked', labels, promptDismissedMessage: 'Dismissed' })
+  assert.equal(blockedByDocument.stateKind, 'blocked')
+  assert.equal(blockedByDocument.showCameraAction, false)
+  assert.equal(blockedByDocument.emptyStateMessage, 'Blocked')
+})
+
 await runTest('deriveScannerPresentation keeps dismissed prompts distinct from hard-denied permissions', () => {
   const dismissed = deriveScannerPresentation({ status: 'dismissed', permissionState: 'prompt', labels, promptDismissedMessage: 'Dismissed' })
   assert.equal(dismissed.stateKind, 'dismissed')

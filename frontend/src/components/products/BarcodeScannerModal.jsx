@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Camera, CheckCircle2, Keyboard, ScanLine, ShieldAlert } from 'lucide-react'
 import Modal from '../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.mjs'
+import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.mjs'
 
 const KNOWN_FORMATS = [
   'aztec',
@@ -91,6 +92,7 @@ export default function BarcodeScannerModal({
     detectedValue: tr('detected_value', 'Detected value', 'តម្លៃដែលបានរកឃើញ'),
     useValue: tr('use_value', 'Use value', 'ប្រើតម្លៃនេះ'),
     scanning: tr('scanning', 'Scanning...', 'កំពុងស្កេន...'),
+    cameraDocumentBlocked: tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular phone browser to scan, or use manual entry below.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតានៅលើទូរស័ព្ទរបស់អ្នក ដើម្បីស្កេន ឬបញ្ចូលដោយដៃខាងក្រោម។'),
   }), [tr])
 
   const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
@@ -154,6 +156,13 @@ export default function BarcodeScannerModal({
       setPermissionState('unsupported')
       setStatus('manual')
       setError(labels.scanUnsupported)
+      return
+    }
+
+    if (isCameraBlockedByDocumentPolicy()) {
+      setPermissionState('blocked')
+      setStatus('blocked')
+      setError(labels.cameraDocumentBlocked)
       return
     }
 
@@ -228,14 +237,17 @@ export default function BarcodeScannerModal({
     } catch (scanError) {
       const message = String(scanError?.message || '')
       const name = String(scanError?.name || '')
+      const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(`${name} ${message}`)
       const denied = /denied|permission|notallowed/i.test(`${name} ${message}`)
-      const blocked = denied && nextPermissionState === 'denied'
+      const blocked = documentBlocked || (denied && nextPermissionState === 'denied')
       const dismissed = denied && !blocked
-      setPermissionState(blocked ? 'denied' : nextPermissionState)
+      setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
       setStatus(blocked ? 'blocked' : (dismissed ? 'dismissed' : 'manual'))
       setError(
-        blocked
-          ? labels.cameraPermissionBlocked
+        documentBlocked
+          ? labels.cameraDocumentBlocked
+          : blocked
+            ? labels.cameraPermissionBlocked
           : dismissed
             ? tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
             : (denied ? labels.scanPermissionDenied : labels.scanFailed),
@@ -243,6 +255,7 @@ export default function BarcodeScannerModal({
     }
   }, [
     cleanup,
+    labels.cameraDocumentBlocked,
     labels.cameraPermissionBlocked,
     labels.scanFailed,
     labels.scanPermissionDenied,
@@ -266,11 +279,18 @@ export default function BarcodeScannerModal({
       return
     }
 
+    if (isCameraBlockedByDocumentPolicy()) {
+      setPermissionState('blocked')
+      setStatus('blocked')
+      setError(labels.cameraDocumentBlocked)
+      return
+    }
+
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
 
     startCamera({ preserveManualValue: true })
-  }, [cleanup, labels.cameraPermissionBlocked, labels.scanUnsupported, startCamera])
+  }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported, startCamera])
 
   useEffect(() => {
     if (!open) return undefined
@@ -288,6 +308,13 @@ export default function BarcodeScannerModal({
     let cancelled = false
     void watchCameraPermission((nextState) => {
       if (cancelled) return
+      if (isCameraBlockedByDocumentPolicy()) {
+        cleanup()
+        setPermissionState('blocked')
+        setStatus('blocked')
+        setError(labels.cameraDocumentBlocked)
+        return
+      }
       setPermissionState(nextState)
       if (nextState === 'granted' && status !== 'scanning' && status !== 'starting') {
         startCamera({ preserveManualValue: true })
@@ -309,7 +336,7 @@ export default function BarcodeScannerModal({
       permissionCleanupRef.current?.()
       permissionCleanupRef.current = () => {}
     }
-  }, [cleanup, labels.cameraPermissionBlocked, open, startCamera, status])
+  }, [cleanup, labels.cameraDocumentBlocked, labels.cameraPermissionBlocked, open, startCamera, status])
 
   if (!open) return null
 

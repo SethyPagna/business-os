@@ -14,7 +14,7 @@ function getScanbotGlobal() {
   return globalThis?.ScanbotSDK || globalThis?.window?.ScanbotSDK || null
 }
 
-function isCameraBlockedByDocumentPolicy() {
+export function isCameraBlockedByDocumentPolicy() {
   try {
     const policy = globalThis?.document?.permissionsPolicy || globalThis?.document?.featurePolicy
     if (!policy?.allowsFeature) return false

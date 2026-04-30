@@ -24,7 +24,7 @@ export function deriveScannerPresentation({
         )
 
   const emptyStateMessage = labels.error || (
-    permissionState === 'denied' || status === 'blocked'
+    permissionState === 'denied' || permissionState === 'blocked' || status === 'blocked'
       ? labels.cameraPermissionBlocked
       : status === 'dismissed'
         ? promptDismissedMessage
@@ -35,14 +35,14 @@ export function deriveScannerPresentation({
     ? 'scanning'
     : status === 'starting'
       ? 'starting'
-      : permissionState === 'denied' || status === 'blocked'
+      : permissionState === 'denied' || permissionState === 'blocked' || status === 'blocked'
         ? 'blocked'
         : status === 'dismissed'
           ? 'dismissed'
           : 'manual'
 
   return {
-    showCameraAction: permissionState !== 'unsupported' && status !== 'scanning',
+    showCameraAction: permissionState !== 'unsupported' && permissionState !== 'blocked' && status !== 'scanning',
     requestCameraLabel,
     statusMessage,
     emptyStateMessage,
