@@ -3,8 +3,10 @@ import { ArrowRightLeft, Building2, Pencil, Plus, Trash2, Warehouse } from 'luci
 import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 /**
@@ -52,6 +54,7 @@ export default function Branches() {
   const [branchStocks, setBranchStocks] = useState({})
   const [expandedBranch, setExpandedBranch] = useState(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   /**
    * 3. Data Loading
@@ -156,12 +159,55 @@ export default function Branches() {
     }
     if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) return
 
+    const deletedSnapshots = toDelete.map((branch) => ({ ...branch }))
+
     const results = await Promise.allSettled(
       toDelete.map((branch) => window.api.deleteBranch(branch.id, user?.id, user?.name)),
     )
-    const failed = results.filter((result) => result.status === 'rejected' || result.value?.success === false).length
-    setSelectedIds(new Set())
+    const failedIds = results.flatMap((result, index) => (
+      result.status === 'rejected' || result.value?.success === false
+        ? [Number(toDelete[index]?.id || 0)]
+        : []
+    )).filter((id) => Number.isFinite(id) && id > 0)
+    const failed = failedIds.length
+    setSelectedIds(new Set(failedIds))
     await load()
+    const restoredSnapshots = deletedSnapshots.filter((branch) => !failedIds.includes(Number(branch?.id || 0)))
+    if (restoredSnapshots.length) {
+      let restoredEntries = []
+      actionHistory.pushAction({
+        label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
+        undo: async () => {
+          restoredEntries = []
+          for (const snapshot of restoredSnapshots) {
+            const result = await window.api.createBranch({
+              name: snapshot.name || '',
+              location: snapshot.location || '',
+              phone: snapshot.phone || '',
+              manager: snapshot.manager || '',
+              notes: snapshot.notes || '',
+              is_default: snapshot.is_default ? 1 : 0,
+              is_active: snapshot.is_active ?? 1,
+              userId: user?.id,
+              userName: user?.name,
+            })
+            if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+            restoredEntries.push({ originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) })
+          }
+          await load()
+        },
+        redo: async () => {
+          const idsToDelete = restoredEntries.length
+            ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
+            : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+          for (const branchId of idsToDelete) {
+            const result = await window.api.deleteBranch(branchId, user?.id, user?.name)
+            if (!result?.success) throw new Error(result?.error || 'Failed to re-delete branch')
+          }
+          await load()
+        },
+      })
+    }
     if (failed > 0) {
       notify((t('bulk_delete_partial_fail') || '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
       return
@@ -221,6 +267,8 @@ export default function Branches() {
       <p className="mb-4 max-w-4xl text-sm text-gray-500 dark:text-gray-400">
         {t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
       </p>
+
+      <ActionHistoryBar history={actionHistory} className="mb-4" />
 
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[

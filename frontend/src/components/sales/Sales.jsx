@@ -6,11 +6,13 @@ import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import SaleDetailModal from './SaleDetailModal'
 import ExportModal from './ExportModal'
 import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -58,6 +60,7 @@ export default function Sales() {
   const statusActionRef = useRef(new Set())
   const membershipActionRef = useRef(new Set())
   const aliveRef = useRef(true)
+  const actionHistory = useActionHistory({ limit: 3, notify })
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
@@ -323,23 +326,62 @@ export default function Sales() {
     notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
   }
 
+  const applySaleStatusEntries = useCallback(async (entries = [], notes = '') => {
+    const failedIds = []
+    const updatedIds = []
+
+    for (const entry of entries) {
+      const saleId = Number(entry?.id || 0)
+      const nextStatus = String(entry?.status || '').trim()
+      if (!saleId || !nextStatus) {
+        failedIds.push(saleId)
+        continue
+      }
+      try {
+        await window.api.updateSaleStatus(saleId, nextStatus, notes)
+        updatedIds.push(saleId)
+      } catch {
+        failedIds.push(saleId)
+      }
+    }
+
+    await loadSales(true)
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+    window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+
+    return {
+      done: updatedIds.length,
+      failed: failedIds.length,
+      failedIds,
+      updatedIds,
+    }
+  }, [loadSales])
+
   const handleBulkStatusUpdate = async (nextStatus) => {
     if (!selectedSales.length || bulkStatusSaving) return
+    const previousStatuses = selectedSales.map((sale) => ({
+      id: Number(sale.id),
+      status: sale.sale_status || 'completed',
+    }))
     setBulkStatusSaving(nextStatus)
-    let updated = 0
-    let failed = 0
     try {
-      for (const sale of selectedSales) {
-        const ok = await handleStatusChange(sale.id, nextStatus, '')
-        if (ok) updated += 1
-        else failed += 1
+      const nextEntries = previousStatuses.map((entry) => ({ id: entry.id, status: nextStatus }))
+      const { done, failed, failedIds, updatedIds } = await applySaleStatusEntries(nextEntries, '')
+      setSelectedIds(new Set(failedIds))
+      const undoEntries = previousStatuses.filter((entry) => updatedIds.includes(entry.id))
+      if (done > 0 && undoEntries.length) {
+        actionHistory.pushAction({
+          label: `Update ${done} sale${done === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}`,
+          undo: () => applySaleStatusEntries(undoEntries, 'Undo bulk sale status update'),
+          redo: () => applySaleStatusEntries(undoEntries.map((entry) => ({ id: entry.id, status: nextStatus })), 'Redo bulk sale status update'),
+        })
       }
-      await loadSales()
-      if (!failed) setSelectedIds(new Set())
       notify(
         failed
-          ? `Updated ${updated} sales, ${failed} failed.`
-          : `Updated ${updated} sale${updated === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}.`,
+          ? `Updated ${done} sales, ${failed} failed.`
+          : `Updated ${done} sale${done === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}.`,
         failed ? 'warning' : 'success',
       )
     } finally {
@@ -502,6 +544,8 @@ export default function Sales() {
           compact
         />
       </div>
+
+      <ActionHistoryBar history={actionHistory} className="mb-3" />
 
       {selectedSales.length > 0 ? (
         <div className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/95 px-2.5 py-2 text-sm shadow-sm backdrop-blur dark:border-blue-900/40 dark:bg-blue-900/30">

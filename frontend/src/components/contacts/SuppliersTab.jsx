@@ -7,10 +7,12 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -157,6 +159,7 @@ function SuppliersTab({ t, notify }) {
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   const filteredBySearch = suppliers.filter((supplier) => {
     const query = search.toLowerCase().trim()
@@ -360,6 +363,7 @@ function SuppliersTab({ t, notify }) {
     if (!selectedIds.size || bulkActionBusy) return
     if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) return
     const ids = [...selectedIds]
+    const snapshots = suppliers.filter((supplier) => ids.includes(Number(supplier?.id || 0))).map((supplier) => JSON.parse(JSON.stringify(supplier)))
     const failedIds = []
     let deletedCount = 0
     setBulkActionBusy(true)
@@ -374,6 +378,38 @@ function SuppliersTab({ t, notify }) {
       }
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Suppliers refresh after delete' })
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (deletedCount > 0 && deletedSnapshots.length) {
+        let restoredEntries = []
+        actionHistory.pushAction({
+          label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
+          undo: async () => {
+            restoredEntries = []
+            for (const snapshot of deletedSnapshots) {
+              const result = await window.api.createSupplier({
+                name: snapshot.name || '',
+                phone: snapshot.phone || '',
+                email: snapshot.email || '',
+                company: snapshot.company || '',
+                contact_person: snapshot.contact_person || '',
+                address: snapshot.address || '',
+                notes: snapshot.notes || '',
+                userId: user?.id,
+                userName: user?.name,
+              })
+              restoredEntries.push({ restoredId: Number(result?.id || result?.data?.id || 0) })
+            }
+            await load({ silent: true, label: 'Suppliers restore deleted' })
+          },
+          redo: async () => {
+            const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
+            for (const id of idsToDelete) {
+              await window.api.deleteSupplier(id)
+            }
+            await load({ silent: true, label: 'Suppliers redo delete' })
+          },
+        })
+      }
       if (failedIds.length) {
         notify(`Deleted ${deletedCount} supplier(s), ${failedIds.length} failed`, 'warning')
       } else {
@@ -386,6 +422,7 @@ function SuppliersTab({ t, notify }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <ActionHistoryBar history={actionHistory} />
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex flex-1 min-w-0 items-center gap-2">
           <input

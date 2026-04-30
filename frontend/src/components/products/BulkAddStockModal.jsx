@@ -1,6 +1,5 @@
 // ── BulkAddStockModal ────────────────────────────────────────────────────────
 import { useState } from 'react'
-import Modal from '../shared/Modal'
 
 export default
 function BulkAddStockModal({ productIds, products, branches, user, onClose, onDone, t }) {
@@ -15,6 +14,9 @@ function BulkAddStockModal({ productIds, products, branches, user, onClose, onDo
     if (!amount || amount <= 0) { setMsg('Enter a valid quantity'); return }
     setSaving(true); setMsg(null)
     let done = 0
+    let failed = 0
+    const updatedIds = []
+    const failedIds = []
     for (const p of selectedProducts) {
       try {
         await window.api.adjustStock({
@@ -26,10 +28,14 @@ function BulkAddStockModal({ productIds, products, branches, user, onClose, onDo
           userId: user?.id, userName: user?.name,
         })
         done++
-      } catch {}
+        updatedIds.push(Number(p.id))
+      } catch {
+        failed++
+        failedIds.push(Number(p.id))
+      }
     }
     setSaving(false)
-    if (done) onDone()
+    if (done) onDone({ quantity: amount, branchId, done, failed, updatedIds, failedIds })
     else setMsg('Failed to add stock')
   }
 
@@ -64,4 +70,3 @@ function BulkAddStockModal({ productIds, products, branches, user, onClose, onDo
     </div>
   )
 }
-

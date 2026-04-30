@@ -7,10 +7,12 @@ import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -215,6 +217,7 @@ function DeliveryTab({ t, notify }) {
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   const filteredBySearch = contacts.filter(c => {
     const q = search.toLowerCase()
@@ -393,6 +396,7 @@ function DeliveryTab({ t, notify }) {
     if (!selectedIds.size || bulkActionBusy) return
     if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) return
     const ids = [...selectedIds]
+    const snapshots = contacts.filter((contact) => ids.includes(Number(contact?.id || 0))).map((contact) => JSON.parse(JSON.stringify(contact)))
     const failedIds = []
     let deletedCount = 0
     setBulkActionBusy(true)
@@ -407,6 +411,36 @@ function DeliveryTab({ t, notify }) {
       }
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Delivery contacts refresh after delete' })
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (deletedCount > 0 && deletedSnapshots.length) {
+        let restoredEntries = []
+        actionHistory.pushAction({
+          label: `Delete ${deletedCount} delivery contact${deletedCount === 1 ? '' : 's'}`,
+          undo: async () => {
+            restoredEntries = []
+            for (const snapshot of deletedSnapshots) {
+              const result = await window.api.createDeliveryContact({
+                name: snapshot.name || '',
+                phone: snapshot.phone || '',
+                area: snapshot.area || '',
+                address: snapshot.address || '',
+                notes: snapshot.notes || '',
+                userId: user?.id,
+                userName: user?.name,
+              })
+              restoredEntries.push({ restoredId: Number(result?.id || result?.data?.id || 0) })
+            }
+            await load({ silent: true, label: 'Delivery contacts restore deleted' })
+          },
+          redo: async () => {
+            const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
+            for (const id of idsToDelete) {
+              await window.api.deleteDeliveryContact(id)
+            }
+            await load({ silent: true, label: 'Delivery contacts redo delete' })
+          },
+        })
+      }
       if (failedIds.length) {
         notify(`Deleted ${deletedCount} delivery contact(s), ${failedIds.length} failed`, 'warning')
       } else {
@@ -419,6 +453,7 @@ function DeliveryTab({ t, notify }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <ActionHistoryBar history={actionHistory} />
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex gap-2 items-center flex-1 min-w-0">
           <label htmlFor="delivery-search" className="sr-only">{t('search_delivery_placeholder')||'Search delivery contacts'}</label>

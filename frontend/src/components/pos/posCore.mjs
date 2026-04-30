@@ -1,4 +1,5 @@
 import { normalizePriceValue } from '../../utils/pricing.js'
+import { buildProductGroups } from '../../utils/productGrouping.mjs'
 
 export function buildProductsById(products = []) {
   return new Map((Array.isArray(products) ? products : []).map((product) => [Number(product?.id), product]))
@@ -24,19 +25,22 @@ export function getVariantRootProduct(product, productsById = new Map()) {
 }
 
 export function buildVisibleProductCards(filteredProducts = [], productsById = new Map()) {
-  const cards = []
-  const seen = new Set()
-  ;(Array.isArray(filteredProducts) ? filteredProducts : []).forEach((product) => {
-    const root = getVariantRootProduct(product, productsById)
-    const rootId = Number(root?.id || product?.id)
-    if (!Number.isFinite(rootId) || seen.has(rootId)) return
-    seen.add(rootId)
-    cards.push(root)
-  })
-  return cards
+  return buildProductGroups(filteredProducts, productsById).map((group) => {
+    const leadProduct = group.leadProduct || group.items?.[0] || null
+    return {
+      ...leadProduct,
+      __displayName: group.name || leadProduct?.name || '',
+      __groupKey: group.key,
+      __groupMeta: group,
+      __groupChoices: group.hasMultipleItems ? group.sellableItems : [],
+    }
+  }).filter(Boolean)
 }
 
 export function getVariantChoices(product, variantChildrenByParentId = new Map()) {
+  if (Array.isArray(product?.__groupChoices) && product.__groupChoices.length) {
+    return product.__groupChoices
+  }
   const rootId = Number(product?.id || 0)
   return variantChildrenByParentId.get(rootId) || []
 }

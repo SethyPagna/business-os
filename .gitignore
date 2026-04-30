@@ -37,3 +37,9 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Local SDK unpack folders
+scanbot-web-sdk-*/
+
+# Browser verification artifacts
+.playwright-cli/

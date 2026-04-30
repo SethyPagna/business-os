@@ -78,10 +78,10 @@ export default function BarcodeScannerModal({
   const labels = useMemo(() => ({
     scanReady: tr('scan_ready', 'Point the camera at a barcode or SKU label.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ ឬស្លាក SKU។'),
     scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
-    scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow camera access or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតកាមេរ៉ា ឬបញ្ចូលកូដដោយដៃ។'),
+    scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
     cameraPermissionNeeded: tr('camera_permission_needed', 'We need camera access to scan barcodes. Tap below and allow camera permission when your browser asks.', 'យើងត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។ ចុចខាងក្រោម ហើយអនុញ្ញាតកាមេរ៉ា នៅពេលកម្មវិធីរុករកស្នើសុំ។'),
-    cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked in this browser. Allow it in browser settings, then try again or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទនៅក្នុងកម្មវិធីរុករកនេះ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត ឬបញ្ចូលកូដដោយដៃ។'),
-    cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Open the camera permission from the lock icon in your browser address bar, switch it back to Allow, then try again.', 'សូមបើកសិទ្ធិកាមេរ៉ាតាមរូបសោនៅលើរបារអាសយដ្ឋាន ប្ដូរទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
+    cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked here. Allow it in browser settings or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទនៅទីនេះ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
+    cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
     requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
     requestingCamera: tr('requesting_camera', 'Requesting camera access...', 'កំពុងស្នើសុំការអនុញ្ញាតកាមេរ៉ា...'),
@@ -269,13 +269,14 @@ export default function BarcodeScannerModal({
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
 
-    if (nextPermissionState === 'granted') {
-      startCamera({ preserveManualValue: true })
+    if (nextPermissionState === 'denied') {
+      setStatus('blocked')
+      setError(labels.cameraPermissionBlocked)
       return
     }
 
-    setStatus('manual')
-  }, [cleanup, labels.scanUnsupported, startCamera])
+    startCamera({ preserveManualValue: true })
+  }, [cleanup, labels.cameraPermissionBlocked, labels.scanUnsupported, startCamera])
 
   useEffect(() => {
     if (!open) return undefined

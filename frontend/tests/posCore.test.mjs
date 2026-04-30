@@ -38,6 +38,33 @@ await runTest('grouped products resolve to their parent card and sorted variant 
   assert.deepEqual(visible.map((item) => item.id), [1])
 })
 
+await runTest('same-name standalone products collapse into one POS card with distinct choices', () => {
+  const products = [
+    { id: 21, name: 'Velvet Tint', parent_id: null, selling_price_usd: 7.5 },
+    { id: 22, name: ' Velvet  Tint ', parent_id: null, selling_price_usd: 8.25 },
+  ]
+  const productsById = buildProductsById(products)
+  const visible = buildVisibleProductCards(products, productsById)
+
+  assert.equal(visible.length, 1)
+  assert.equal(visible[0].__displayName, 'Velvet Tint')
+  assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [22, 21])
+})
+
+await runTest('same-name grouped families and standalone items share one POS option card', () => {
+  const products = [
+    { id: 30, name: 'Glow Serum', is_group: 1 },
+    { id: 31, name: 'Glow Serum Large', parent_id: 30, selling_price_usd: 21 },
+    { id: 32, name: 'Glow Serum', selling_price_usd: 18 },
+  ]
+  const productsById = buildProductsById(products)
+  const visible = buildVisibleProductCards(products, productsById)
+
+  assert.equal(visible.length, 1)
+  assert.equal(visible[0].__groupMeta.groupKind, 'option')
+  assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [31, 32])
+})
+
 await runTest('cart line identity includes product, mode, and branch so modes do not merge', () => {
   const cart = [
     { id: 10, price_mode: 'selling', branch_id: 1, cart_line_id: 'selling-line' },

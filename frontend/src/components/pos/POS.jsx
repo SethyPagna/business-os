@@ -1090,6 +1090,10 @@ export default function POS() {
               {visibleProductCards.map(p => {
                 const variants = getVariantChoices(p)
                 const groupProduct = hasVariantChoices(p)
+                const groupMeta = p.__groupMeta || null
+                const choiceLabel = groupMeta?.groupKind === 'variant'
+                  ? posCopy('variants', 'variants')
+                  : posCopy('options', 'options')
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
                 const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
@@ -1105,10 +1109,10 @@ export default function POS() {
                       onClick={() => openImageLightbox(p, 0)}
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
-                      {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
+                      {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
                     </button>
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.name}</p>
+                      <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.__displayName || p.name}</p>
                       {groupProduct ? (
                         <button
                           type="button"
@@ -1120,14 +1124,21 @@ export default function POS() {
                         </button>
                       ) : null}
                     </div>
-                    <p className="text-sm font-bold text-blue-600">{fmtUSD(p.selling_price_usd)}</p>
-                    {p.selling_price_khr > 0 && <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p>}
+                    <p className="text-sm font-bold text-blue-600">
+                      {groupProduct && groupMeta?.minSellingPriceUsd !== groupMeta?.maxSellingPriceUsd
+                        ? `${fmtUSD(groupMeta?.minSellingPriceUsd || 0)} - ${fmtUSD(groupMeta?.maxSellingPriceUsd || 0)}`
+                        : fmtUSD(p.selling_price_usd)}
+                    </p>
+                    {p.selling_price_khr > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</p> : null}
                     {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
                       <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
                     ) : null}
                     <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>
-                      {groupProduct ? `${variants.length} ${posCopy('variants', 'variants')}` : `${stock} ${p.unit}`}
+                      {groupProduct ? `${variants.length} ${choiceLabel}` : `${stock} ${p.unit}`}
                     </p>
+                    {groupProduct && groupMeta?.stockTotal ? (
+                      <p className="text-[11px] text-gray-400">{groupMeta.stockTotal} {posCopy('total in stock', 'total in stock')}</p>
+                    ) : null}
                     {!inStock ? <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span> : null}
                     {groupProduct ? (
                       <div className="mt-2 space-y-2">
@@ -1136,17 +1147,21 @@ export default function POS() {
                           className="btn-secondary w-full text-xs"
                           onClick={() => toggleExpandedGroup(p.id)}
                         >
-                          {groupExpanded ? posCopy('Hide variants', 'Hide variants') : posCopy('Choose variant', 'Choose variant')}
+                          {groupExpanded ? posCopy('Hide options', 'Hide options') : posCopy('Choose option', 'Choose option')}
                         </button>
-                        {groupExpanded ? (
-                          <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
-                            {variants.map((variant) => {
-                              const variantStock = getDisplayStock(variant)
-                              const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
-                              return (
-                                <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
+                          {groupExpanded ? (
+                            <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
+                              {variants.map((variant) => {
+                                const variantStock = getDisplayStock(variant)
+                                const variantInStockNow = variantStock > (variant.out_of_stock_threshold || 0)
+                                return (
+                                  <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
                                   <div className="truncate text-xs font-semibold text-gray-900 dark:text-white">{variant.name}</div>
-                                  <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{variantStock} {variant.unit}</div>
+                                  <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                    <span>{variantStock} {variant.unit}</span>
+                                    {variant.sku ? <span>• {variant.sku}</span> : null}
+                                    {variant.supplier ? <span>• {variant.supplier}</span> : null}
+                                  </div>
                                   <div className="mt-1 flex flex-wrap gap-1.5">
                                     <button type="button" className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => addToCart(variant, 'selling')}>
                                       {fmtUSD(variant.selling_price_usd || 0)}
@@ -1570,6 +1585,10 @@ export default function POS() {
         const stock = getDisplayStock(p)
         const variants = getVariantChoices(p)
         const groupProduct = hasVariantChoices(p)
+        const groupMeta = p.__groupMeta || null
+        const choiceLabel = groupMeta?.groupKind === 'variant'
+          ? posCopy('Variants', 'Variants')
+          : posCopy('Options', 'Options')
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailProduct(null)}>
             <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1581,9 +1600,9 @@ export default function POS() {
                     onClick={() => openImageLightbox(p, 0)}
                       aria-label={posCopy('Preview product images')}
                   >
-                    {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-400" />}
+                    {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-400" />}
                   </button>
-                  <div className="min-w-0"><div className="font-bold text-gray-900 dark:text-white truncate">{p.name}</div>{p.sku && <div className="text-xs text-gray-400 font-mono">{p.sku}</div>}</div>
+                  <div className="min-w-0"><div className="font-bold text-gray-900 dark:text-white truncate">{p.__displayName || p.name}</div>{p.sku && <div className="text-xs text-gray-400 font-mono">{p.sku}</div>}</div>
                 </div>
                 <button onClick={() => setDetailProduct(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
                   <X className="h-4 w-4" />
@@ -1606,7 +1625,7 @@ export default function POS() {
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
                 {groupProduct ? (
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{posCopy('Variants', 'Variants')}</div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{choiceLabel}</div>
                     <div className="space-y-2">
                       {variants.map((variant) => {
                         const variantStock = getDisplayStock(variant)
@@ -1635,7 +1654,7 @@ export default function POS() {
               <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                 {groupProduct ? (
                   <button className="btn-secondary w-full" onClick={() => { toggleExpandedGroup(p.id); setDetailProduct(null) }}>
-                    {posCopy('Choose variant', 'Choose variant')}
+                    {posCopy('Choose option', 'Choose option')}
                   </button>
                 ) : (
                   <div className="flex gap-2">

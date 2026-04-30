@@ -5,6 +5,7 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
+import { getPreferredScannerMode, scanBarcodeWithScanbot } from './scanbotScanner.mjs'
 import { formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import {
   beginTrackedRequest,
@@ -119,6 +120,7 @@ export default function ProductForm({
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState('')
+  const [scannerLaunchingField, setScannerLaunchingField] = useState('')
   const [saving, setSaving] = useState(false)
   const supplierRequestRef = useRef(0)
   const aliveRef = useRef(true)
@@ -270,8 +272,26 @@ export default function ProductForm({
     }
   }
 
-  function openScanner(field) {
-    setScannerField(field)
+  async function openScanner(field) {
+    if (saving || scannerLaunchingField) return
+    const preferredScanner = await getPreferredScannerMode()
+    if (preferredScanner.mode !== 'scanbot') {
+      setScannerField(field)
+      return
+    }
+    setScannerLaunchingField(field)
+    try {
+      const value = await scanBarcodeWithScanbot({ allowArOverlay: true })
+      if (!String(value || '').trim()) return
+      setField(field, String(value || '').trim())
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn('[ProductForm] Scanbot launch failed, using fallback scanner:', error)
+      }
+      setScannerField(field)
+    } finally {
+      setScannerLaunchingField('')
+    }
   }
 
   function closeScanner() {
@@ -286,6 +306,7 @@ export default function ProductForm({
   }
 
   const scanLabel = tr('scan_code', 'Scan', 'ស្កេន')
+  const scanningLabel = tr('scanner_state_starting', 'Opening camera...', 'កំពុងបើកកាមេរ៉ា...')
   const scanSkuLabel = tr('scan_sku', 'Scan SKU', 'ស្កេន SKU')
   const scanBarcodeLabel = tr('scan_barcode', 'Scan barcode', 'ស្កេនបាកូដ')
 
@@ -375,9 +396,15 @@ export default function ProductForm({
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('sku')} aria-label={scanSkuLabel} disabled={saving}>
+                <button
+                  type="button"
+                  className="btn-secondary inline-flex items-center gap-1.5 px-3"
+                  onClick={() => openScanner('sku')}
+                  aria-label={scanSkuLabel}
+                  disabled={saving || !!scannerLaunchingField}
+                >
                   <ScanLine className="h-4 w-4" />
-                  <span className="hidden sm:inline">{scanLabel}</span>
+                  <span className="hidden sm:inline">{scannerLaunchingField === 'sku' ? scanningLabel : scanLabel}</span>
                 </button>
               </div>
             </div>
@@ -394,9 +421,15 @@ export default function ProductForm({
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3" onClick={() => openScanner('barcode')} aria-label={scanBarcodeLabel} disabled={saving}>
+                <button
+                  type="button"
+                  className="btn-secondary inline-flex items-center gap-1.5 px-3"
+                  onClick={() => openScanner('barcode')}
+                  aria-label={scanBarcodeLabel}
+                  disabled={saving || !!scannerLaunchingField}
+                >
                   <ScanLine className="h-4 w-4" />
-                  <span className="hidden sm:inline">{scanLabel}</span>
+                  <span className="hidden sm:inline">{scannerLaunchingField === 'barcode' ? scanningLabel : scanLabel}</span>
                 </button>
               </div>
             </div>

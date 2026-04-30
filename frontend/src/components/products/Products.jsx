@@ -20,7 +20,10 @@ import VariantFormModal      from './VariantFormModal'
 import ProductForm           from './ProductForm'
 import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -122,12 +125,15 @@ export default function Products() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
+  const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
+  const initializedCollapsedGroupKeysRef = useRef(new Set())
+  const actionHistory = useActionHistory({ limit: 3, notify })
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -311,6 +317,7 @@ export default function Products() {
   const handleBulkDelete = async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
+    const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     const failedIds = []
     let failed = 0
@@ -328,6 +335,26 @@ export default function Products() {
       }
       setSelectedIds(new Set(failedIds))
       await load(true)
+      const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (done > 0 && deletedSnapshots.length) {
+        let restoredEntries = []
+        actionHistory.pushAction({
+          label: `Delete ${done} product${done === 1 ? '' : 's'}`,
+          undo: async () => {
+            restoredEntries = await restoreDeletedProducts(deletedSnapshots, 'Undo product delete')
+          },
+          redo: async () => {
+            const idsToDelete = restoredEntries.length
+              ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
+              : deletedSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+            for (const id of idsToDelete) {
+              const result = await window.api.deleteProduct(id)
+              if (result?.success === false) throw new Error(result.error || 'Failed to re-delete product')
+            }
+            await load(true)
+          },
+        })
+      }
       if (failed) notify(`Deleted ${done}, ${failed} failed`, 'warning')
       else notify(`${done} product${done > 1 ? 's' : ''} deleted`)
     } finally {
@@ -338,23 +365,35 @@ export default function Products() {
   const handleBulkOutOfStock = async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
+    const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     const failedIds = []
     let done = 0
     let failed = 0
     try {
+      const idsToClear = []
       for (const id of selectedVisibleIds) {
         try {
-          const result = await window.api.updateProduct(id, { stock_quantity: 0, userId: user.id, userName: user.name })
-          if (result?.success === false) throw new Error(result.error || 'Failed to update product')
+          idsToClear.push(Number(id))
           done++
         } catch {
           failed++
           failedIds.push(Number(id))
         }
       }
+      if (idsToClear.length) {
+        await clearProductStockByIds(idsToClear, 'Bulk set out of stock')
+      }
       setSelectedIds(new Set(failedIds))
-      await load(true)
+      const affectedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (done > 0 && affectedSnapshots.length) {
+        const affectedIds = affectedSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
+        actionHistory.pushAction({
+          label: `Set ${done} product${done === 1 ? '' : 's'} out of stock`,
+          undo: () => restoreProductSnapshots(affectedSnapshots, 'Undo out-of-stock action'),
+          redo: () => clearProductStockByIds(affectedIds, 'Redo out-of-stock action'),
+        })
+      }
       notify(
         failed
           ? `${done} product(s) set to out-of-stock, ${failed} failed`
@@ -371,39 +410,19 @@ export default function Products() {
     const branch = branches.find(b => String(b.id) === String(branchId))
     if (!branch) return
     if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
+    const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
-    const failedIds = []
-    let done = 0
-    let failed = 0
     try {
-      for (const id of selectedVisibleIds) {
-        const p = products.find(x => x.id === id)
-        if (!p) continue
-        try {
-          const currentBranch = (p.branch_stock||[]).find(bs => (bs?.quantity ?? 0) > 0)
-          if (currentBranch && currentBranch.branch_id !== parseInt(branchId) && (currentBranch?.quantity ?? 0) > 0) {
-            await window.api.transferStock({
-              fromBranchId: currentBranch.branch_id,
-              toBranchId: parseInt(branchId),
-              productId: id, productName: p.name,
-              quantity: currentBranch.quantity,
-              note: 'Bulk branch change',
-              userId: user.id, userName: user.name,
-            })
-          } else if (!currentBranch) {
-            await window.api.adjustStock({
-              productId: id, productName: p.name, type: 'add', quantity: 0,
-              branchId: parseInt(branchId), userId: user.id, userName: user.name,
-            })
-          }
-          done++
-        } catch {
-          failed++
-          failedIds.push(Number(id))
-        }
-      }
+      const { done, failed, failedIds, updatedIds } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
       setSelectedIds(new Set(failedIds))
-      await load(true)
+      const restoredSnapshots = snapshots.filter((snapshot) => updatedIds.includes(Number(snapshot?.id || 0)))
+      if (done > 0 && restoredSnapshots.length) {
+        actionHistory.pushAction({
+          label: `Move ${done} product${done === 1 ? '' : 's'} to ${branch.name}`,
+          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo branch move'),
+          redo: () => moveProductsToBranch(updatedIds, branchId, 'Redo bulk branch change'),
+        })
+      }
       notify(
         failed
           ? `${done} product(s) moved to "${branch.name}", ${failed} failed`
@@ -418,7 +437,10 @@ export default function Products() {
   const [bulkAddModal, setBulkAddModal] = useState(null)
   const handleBulkAddStock = () => {
     if (!selectedVisibleIds.length) return
-    setBulkAddModal({ ids: [...selectedVisibleIds] })
+    setBulkAddModal({
+      ids: [...selectedVisibleIds],
+      snapshots: snapshotProductsByIds(selectedVisibleIds),
+    })
   }
 
   const toggleSelect = (id) => setSelectedIds((prev) => {
@@ -463,11 +485,6 @@ export default function Products() {
     () => getAvailableYears(products, (product) => product?.created_at),
     [products],
   )
-  const productTimeMode = useMemo(
-    () => getTimeGroupingMode(createdYearFilter, createdMonthFilter),
-    [createdMonthFilter, createdYearFilter],
-  )
-
   const resolveImageUrl = (src) => {
     const raw = String(src || '').trim()
     if (!raw) return ''
@@ -588,24 +605,18 @@ export default function Products() {
     downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, rows)
   }, [filtered])
 
-  const productSections = useMemo(() => buildTimeActionSections(filtered, {
-    getDate: (product) => product?.created_at,
-    getItemId: (product) => Number(product?.id),
-    getActionKey: () => 'products',
-    getActionLabel: () => 'Products',
-    year: createdYearFilter,
-    month: createdMonthFilter,
-    timeMode: productTimeMode,
-    groupMode: 'time',
-    sortDirection: productSortDirection,
-  }).map((section) => ({
-    ...section,
-    items: [...section.groups.flatMap((group) => group.items)].sort((left, right) => {
-      const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
-      if (nameDelta !== 0) return nameDelta
-      return Number(left?.id || 0) - Number(right?.id || 0)
+  const productsById = useMemo(
+    () => new Map(products.map((product) => [Number(product?.id || 0), product])),
+    [products],
+  )
+
+  const productSections = useMemo(
+    () => buildProductGroupSections(filtered, {
+      productsById,
+      sortDirection: productSortDirection,
     }),
-  })), [createdMonthFilter, createdYearFilter, filtered, productSortDirection, productTimeMode])
+    [filtered, productSortDirection, productsById],
+  )
 
   const visibleProducts = useMemo(
     () => productSections.flatMap((section) => section.items),
@@ -636,11 +647,9 @@ export default function Products() {
     const targets = new Map()
     productSections.forEach((section) => {
       if (collapsedProductSections.has(section.id)) return
-      section.items.forEach((product) => {
-        const letter = String(product?.name || '').trim().charAt(0).toUpperCase()
-        if (!/[A-Z]/.test(letter) || targets.has(letter)) return
-        targets.set(letter, Number(product.id))
-      })
+      const firstGroup = section.groups[0]
+      if (!firstGroup) return
+      targets.set(section.label, Number(firstGroup.anchorId || firstGroup.leadProduct?.id || firstGroup.items?.[0]?.id || 0))
     })
     return targets
   }, [collapsedProductSections, productSections])
@@ -655,6 +664,29 @@ export default function Products() {
       const validIds = new Set(productSections.map((section) => section.id))
       const next = new Set([...current].filter((id) => validIds.has(id)))
       return next.size === current.size ? current : next
+    })
+  }, [productSections])
+
+  useEffect(() => {
+    setCollapsedProductGroups((current) => {
+      const validIds = new Set(productSections.flatMap((section) => section.groups.map((group) => group.key)))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      let changed = next.size !== current.size
+      initializedCollapsedGroupKeysRef.current = new Set(
+        [...initializedCollapsedGroupKeysRef.current].filter((id) => validIds.has(id)),
+      )
+
+      productSections.forEach((section) => {
+        section.groups.forEach((group) => {
+          if (!group?.hasMultipleItems) return
+          if (initializedCollapsedGroupKeysRef.current.has(group.key)) return
+          initializedCollapsedGroupKeysRef.current.add(group.key)
+          next.add(group.key)
+          changed = true
+        })
+      })
+
+      return changed ? next : current
     })
   }, [productSections])
 
@@ -731,6 +763,15 @@ export default function Products() {
     })
   }, [])
 
+  const toggleProductGroup = useCallback((groupKey) => {
+    setCollapsedProductGroups((current) => {
+      const next = new Set(current)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }, [])
+
   const jumpToLetter = useCallback((letter) => {
     const targetId = jumpTargetIdsByLetter.get(String(letter || '').toUpperCase())
     if (!targetId) return
@@ -738,6 +779,254 @@ export default function Products() {
     const node = nodes.find((entry) => entry.getClientRects().length > 0) || nodes[0]
     scrollNodeWithOffset(node)
   }, [jumpTargetIdsByLetter])
+
+  const getGroupPriceLabel = useCallback((group) => {
+    const min = Number(group?.minSellingPriceUsd || 0)
+    const max = Number(group?.maxSellingPriceUsd || 0)
+    if (group?.hasMultipleItems && min !== max) return `${fmtUSD(min)} - ${fmtUSD(max)}`
+    return fmtUSD(max || min || 0)
+  }, [fmtUSD])
+
+  const getGroupSummaryParts = useCallback((group) => {
+    const parts = [
+      `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}`,
+      `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
+      getGroupPriceLabel(group),
+    ]
+    return parts.filter(Boolean)
+  }, [getGroupPriceLabel, t])
+
+  const snapshotProductsByIds = useCallback((ids = []) => (
+    products
+      .filter((product) => ids.includes(Number(product?.id || 0)))
+      .map((product) => JSON.parse(JSON.stringify(product)))
+  ), [products])
+
+  const buildProductWritePayload = useCallback((snapshot = {}) => {
+    const gallery = normalizeGallery(snapshot.image_gallery, snapshot.image_path || null)
+    return {
+      name: snapshot.name || '',
+      sku: snapshot.sku || '',
+      barcode: snapshot.barcode || '',
+      category: snapshot.category || '',
+      brand: snapshot.brand || '',
+      unit: snapshot.unit || 'pcs',
+      description: snapshot.description || '',
+      selling_price_usd: normalizePriceValue(snapshot.selling_price_usd || 0),
+      selling_price_khr: normalizePriceValue(snapshot.selling_price_khr || 0),
+      special_price_usd: normalizePriceValue(snapshot.special_price_usd ?? snapshot.selling_price_usd ?? 0),
+      special_price_khr: normalizePriceValue(snapshot.special_price_khr ?? snapshot.selling_price_khr ?? 0),
+      purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
+      purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
+      cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
+      cost_price_khr: normalizePriceValue(snapshot.cost_price_khr || snapshot.purchase_price_khr || 0),
+      low_stock_threshold: Number(snapshot.low_stock_threshold || 0),
+      out_of_stock_threshold: Number(snapshot.out_of_stock_threshold || 0),
+      supplier: snapshot.supplier || '',
+      custom_fields: snapshot.custom_fields || {},
+      image_gallery: gallery,
+      image_path: gallery[0] || null,
+      is_active: snapshot.is_active ? 1 : 0,
+      is_group: snapshot.parent_id ? 0 : (snapshot.is_group ? 1 : 0),
+      parent_id: snapshot.parent_id ? Number(snapshot.parent_id) : null,
+      userId: user.id,
+      userName: user.name,
+    }
+  }, [user.id, user.name])
+
+  const restoreProductBranchStock = useCallback(async (productId, snapshot, currentProduct, reason) => {
+    const targetMap = new Map((snapshot?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
+    const currentMap = new Map((currentProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
+    const branchIds = new Set([...targetMap.keys(), ...currentMap.keys()].filter((id) => Number.isFinite(id) && id > 0))
+
+    for (const branchId of branchIds) {
+      const targetQty = Number(targetMap.get(branchId) || 0)
+      const currentQty = Number(currentMap.get(branchId) || 0)
+      if (targetQty === currentQty) continue
+      const delta = Math.abs(targetQty - currentQty)
+      await window.api.adjustStock({
+        productId,
+        productName: snapshot?.name || currentProduct?.name || '',
+        type: targetQty > currentQty ? 'add' : 'remove',
+        quantity: delta,
+        branchId,
+        unitCostUsd: snapshot?.purchase_price_usd || snapshot?.cost_price_usd || 0,
+        unitCostKhr: snapshot?.purchase_price_khr || snapshot?.cost_price_khr || 0,
+        reason,
+        userId: user.id,
+        userName: user.name,
+      })
+    }
+  }, [user.id, user.name])
+
+  const restoreProductSnapshots = useCallback(async (snapshots = [], reason = 'Restore products') => {
+    if (!snapshots.length) return
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    for (const snapshot of snapshots) {
+      const productId = Number(snapshot?.id || 0)
+      const currentProduct = latestMap.get(productId)
+      if (!currentProduct) continue
+      await window.api.updateProduct(productId, buildProductWritePayload(snapshot))
+      await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
+    }
+    await load(true)
+  }, [buildProductWritePayload, load, restoreProductBranchStock])
+
+  const restoreDeletedProducts = useCallback(async (snapshots = [], reason = 'Restore deleted products') => {
+    if (!snapshots.length) return []
+    const defaultBranchId = Number(branches.find((branch) => branch.is_default)?.id || branches[0]?.id || 0)
+    const restored = []
+    for (const snapshot of snapshots) {
+      const preferredBranchId = Number((snapshot?.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)?.branch_id || defaultBranchId || 0)
+      const createPayload = {
+        ...buildProductWritePayload(snapshot),
+        branch_id: preferredBranchId || defaultBranchId || '',
+        stock_quantity: 0,
+      }
+      const result = await window.api.createProduct(createPayload)
+      const restoredId = Number(result?.id || result?.data?.id || 0)
+      if (!restoredId) throw new Error(result?.error || 'Failed to restore deleted product')
+      restored.push({ snapshot, restoredId })
+    }
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    for (const entry of restored) {
+      const currentProduct = latestMap.get(entry.restoredId)
+      await restoreProductBranchStock(entry.restoredId, entry.snapshot, currentProduct || { branch_stock: [] }, reason)
+    }
+    await load(true)
+    return restored
+  }, [branches, buildProductWritePayload, load, restoreProductBranchStock])
+
+  const clearProductStockByIds = useCallback(async (productIds = [], reason = 'Set products out of stock') => {
+    if (!productIds.length) return
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    for (const productId of productIds) {
+      const currentProduct = latestMap.get(Number(productId))
+      if (!currentProduct) continue
+      const branchRows = (currentProduct.branch_stock || []).filter((entry) => Number(entry?.quantity || 0) > 0)
+      for (const entry of branchRows) {
+        await window.api.adjustStock({
+          productId: Number(productId),
+          productName: currentProduct.name || '',
+          type: 'remove',
+          quantity: Number(entry.quantity || 0),
+          branchId: Number(entry.branch_id || 0),
+          unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
+          unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
+          reason,
+          userId: user.id,
+          userName: user.name,
+        })
+      }
+    }
+    await load(true)
+  }, [load, user.id, user.name])
+
+  const addStockToProducts = useCallback(async (productIds = [], quantity, branchId, reason = 'Bulk add stock') => {
+    const amount = Number(quantity || 0)
+    const numericBranchId = Number(branchId || 0)
+    if (!productIds.length || !Number.isFinite(amount) || amount <= 0) {
+      return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
+    }
+
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    const failedIds = []
+    const updatedIds = []
+
+    for (const productId of productIds) {
+      const currentProduct = latestMap.get(Number(productId))
+      if (!currentProduct) {
+        failedIds.push(Number(productId))
+        continue
+      }
+      try {
+        await window.api.adjustStock({
+          productId: Number(productId),
+          productName: currentProduct.name || '',
+          type: 'add',
+          quantity: amount,
+          branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
+          unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
+          unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
+          reason,
+          userId: user.id,
+          userName: user.name,
+        })
+        updatedIds.push(Number(productId))
+      } catch {
+        failedIds.push(Number(productId))
+      }
+    }
+
+    await load(true)
+    return {
+      done: updatedIds.length,
+      failed: failedIds.length,
+      failedIds,
+      updatedIds,
+    }
+  }, [load, user.id, user.name])
+
+  const moveProductsToBranch = useCallback(async (productIds = [], branchId, reason = 'Bulk branch change') => {
+    const numericBranchId = Number(branchId || 0)
+    if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
+      return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
+    }
+
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    const failedIds = []
+    const updatedIds = []
+
+    for (const productId of productIds) {
+      const product = latestMap.get(Number(productId))
+      if (!product) {
+        failedIds.push(Number(productId))
+        continue
+      }
+      try {
+        const currentBranch = (product.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)
+        if (currentBranch && Number(currentBranch.branch_id) !== numericBranchId && Number(currentBranch.quantity || 0) > 0) {
+          await window.api.transferStock({
+            fromBranchId: Number(currentBranch.branch_id),
+            toBranchId: numericBranchId,
+            productId: Number(productId),
+            productName: product.name || '',
+            quantity: Number(currentBranch.quantity || 0),
+            note: reason,
+            userId: user.id,
+            userName: user.name,
+          })
+        } else if (!currentBranch) {
+          await window.api.adjustStock({
+            productId: Number(productId),
+            productName: product.name || '',
+            type: 'add',
+            quantity: 0,
+            branchId: numericBranchId,
+            reason,
+            userId: user.id,
+            userName: user.name,
+          })
+        }
+        updatedIds.push(Number(productId))
+      } catch {
+        failedIds.push(Number(productId))
+      }
+    }
+
+    await load(true)
+    return {
+      done: updatedIds.length,
+      failed: failedIds.length,
+      failedIds,
+      updatedIds,
+    }
+  }, [load, user.id, user.name])
 
   const runBulkProductUpdates = useCallback(async (updates) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -748,6 +1037,7 @@ export default function Products() {
       notify('No changes specified', 'warning')
       return
     }
+    const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     const failedIds = []
     let done = 0
@@ -767,6 +1057,20 @@ export default function Products() {
       setBulkEditMode(null)
       setBulkEditForm({})
       await load(true)
+      const restoredSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (done > 0 && restoredSnapshots.length) {
+        actionHistory.pushAction({
+          label: `Update ${done} product${done === 1 ? '' : 's'}`,
+          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
+          redo: async () => {
+            for (const snapshot of restoredSnapshots) {
+              const result = await window.api.updateProduct(snapshot.id, { ...nextUpdates, userId: user.id, userName: user.name })
+              if (result?.success === false) throw new Error(result.error || 'Failed to reapply product update')
+            }
+            await load(true)
+          },
+        })
+      }
       notify(
         failed
           ? `Updated ${done} products, ${failed} failed`
@@ -776,7 +1080,7 @@ export default function Products() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [bulkActionBusy, load, notify, selectedVisibleIds, user.id, user.name])
+  }, [actionHistory, bulkActionBusy, load, notify, restoreProductSnapshots, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
 
   const productFilterSections = useMemo(() => ([
     {
@@ -881,6 +1185,163 @@ export default function Products() {
     },
   ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
+  const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
+    const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
+    const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
+    const marginUsd = p.selling_price_usd - purchaseUsd
+    const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
+    return (
+      <tr
+        key={p.id}
+        data-product-jump-id={p.id}
+        className={`table-row cursor-pointer ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+        onClick={() => setDetailProduct(p)}
+      >
+        <td className={`px-3 py-2 w-8 ${indented ? 'pl-6' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(p.id) }}>
+          <input type="checkbox" className="rounded" checked={isProductSelected(p.id)} onChange={() => toggleSelect(p.id)} />
+        </td>
+        <td className="px-3 py-2">
+          {getProductGallery(p).length
+            ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
+            : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
+            {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
+            {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
+          </div>
+          {p.supplier && <div className="text-xs text-gray-400 truncate max-w-32">{p.supplier}</div>}
+        </td>
+        <td className="px-3 py-2 text-gray-400 font-mono text-xs hidden lg:table-cell">{p.sku || 'N/A'}</td>
+        <td className="px-3 py-2 hidden md:table-cell">
+          {p.category ? (
+            <span
+              className="rounded-full px-2 py-0.5 text-xs"
+              style={{
+                background: catMap[p.category]?.color || '#6b7280',
+                color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+              }}
+            >
+              {p.category}
+            </span>
+          ) : 'N/A'}
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-red">
+          <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(purchaseUsd)}</div>
+          {purchaseKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(purchaseKhr)}</div>}
+        </td>
+        <td className="px-3 py-2 text-right col-highlight-green">
+          <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(p.selling_price_usd)}</div>
+          {p.selling_price_khr > 0 && <div className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</div>}
+          {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+            <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+              Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+              {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
+            </div>
+          ) : null}
+        </td>
+        <td className="px-3 py-2 text-right hidden lg:table-cell">
+          {purchaseUsd > 0 && p.selling_price_usd > 0
+            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-gray-400">{marginPct.toFixed(1)}%</div></div>
+            : <span className="text-gray-300">N/A</span>}
+        </td>
+        <td className="px-3 py-2 text-right">
+          <div className="font-bold text-gray-900 dark:text-white">
+            {branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity}
+            {renderUnitChip(p.unit)}
+          </div>
+        </td>
+        <td className="px-3 py-2 text-center">{getStockBadge(p)}</td>
+        <td className="px-2 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+          <ThreeDot
+            onDetails={() => setDetailProduct(p)}
+            onEdit={() => { setSelected(p); setModal('form') }}
+            onDelete={() => handleDelete(p)}
+            onAddVariant={!p.parent_id ? () => setVariantModal(p) : undefined}
+          />
+        </td>
+      </tr>
+    )
+  }, [branchFilter, catMap, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip])
+
+  const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
+    const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
+    const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
+    const isOut = qty <= (p.out_of_stock_threshold || 0)
+    const isLow = !isOut && qty <= (p.low_stock_threshold || 10)
+    const mobileStatusLabel = isOut
+      ? (t('out_of_stock') || 'Out')
+      : isLow
+        ? (t('low_stock') || 'Low')
+        : (t('in_stock') || 'In Stock')
+    const mobileStatusClass = isOut
+      ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300'
+      : isLow
+        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+
+    return (
+      <div
+        key={p.id}
+        data-product-jump-id={p.id}
+        className={`card cursor-pointer px-3 py-2.5 ${isProductSelected(p.id) ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-900/20' : ''} ${indented ? 'ml-3 border-l-4 border-l-slate-200 dark:border-l-slate-700' : ''}`}
+        onClick={() => setDetailProduct(p)}
+      >
+        <div className="flex items-start gap-3">
+          <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(p.id) }} onClick={(e) => e.stopPropagation()} />
+          <div className="flex-shrink-0">
+            {getProductGallery(p).length
+              ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
+              : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="max-w-[9.75rem] truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+              </div>
+              <span className={`flex-shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
+                {mobileStatusLabel}
+              </span>
+            </div>
+            {p.category && (
+              <span
+                className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[10px]"
+                style={{
+                  background: catMap[p.category]?.color || '#6b7280',
+                  color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+                }}
+              >
+                {p.category}
+              </span>
+            )}
+            <div className="mt-1 flex flex-nowrap items-center gap-2 overflow-hidden text-[11px]">
+              <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
+              {(p.special_price_usd || 0) > 0 ? (
+                <>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(p.special_price_usd || 0)}</span>
+                </>
+              ) : null}
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
+            </div>
+          </div>
+          <div onClick={(e) => e.stopPropagation()}>
+            <ThreeDot
+              onDetails={() => setDetailProduct(p)}
+              onEdit={() => { setSelected(p); setModal('form') }}
+              onDelete={() => handleDelete(p)}
+              onAddVariant={!p.parent_id ? () => setVariantModal(p) : undefined}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }, [branchFilter, catMap, fmtUSD, getBranchQty, getProductGallery, handleDelete, isProductSelected, openLightbox, renderUnitChip, t])
+
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
       <div className="text-4xl">!</div>
@@ -940,6 +1401,8 @@ export default function Products() {
           />
         </div>
       </div>
+
+      <ActionHistoryBar history={actionHistory} className="mb-3" />
 
       {/* Bulk action bar */}
       {hasSelected && (
@@ -1149,84 +1612,51 @@ export default function Products() {
                       </div>
                     </td>
                   </tr>
-                  {!isCollapsed ? section.items.map(p => {
-                const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
-                const purchaseKhr = p.purchase_price_khr || p.cost_price_khr || 0
-                const marginUsd   = p.selling_price_usd - purchaseUsd
-                const marginPct   = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
-                return (
-                  <tr
-                    key={p.id}
-                    data-product-jump-id={p.id}
-                    className={`table-row cursor-pointer ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-                    onClick={()=>setDetailProduct(p)}
-                  >
-                    <td className="px-3 py-2 w-8" onClick={e=>{e.stopPropagation();toggleSelect(p.id)}}>
-                      <input type="checkbox" className="rounded" checked={isProductSelected(p.id)} onChange={()=>toggleSelect(p.id)} />
-                    </td>
-                    <td className="px-3 py-2">
-                      {getProductGallery(p).length
-                        ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-10 h-10 rounded-lg object-cover cursor-zoom-in hover:ring-2 hover:ring-blue-400" onClick={e=>{e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name)}} />
-                        : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1.5">
-                        <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
-                        {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
-                        {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
-                      </div>
-                      {p.supplier && <div className="text-xs text-gray-400 truncate max-w-32">{p.supplier}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-gray-400 font-mono text-xs hidden lg:table-cell">{p.sku||'N/A'}</td>
-                    <td className="px-3 py-2 hidden md:table-cell">
-                      {p.category ? (
-                        <span
-                          className="rounded-full px-2 py-0.5 text-xs"
-                          style={{
-                            background: catMap[p.category]?.color || '#6b7280',
-                            color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
-                          }}
-                        >
-                          {p.category}
-                        </span>
-                      ) : 'N/A'}
-                    </td>
-                    <td className="px-3 py-2 text-right col-highlight-red">
-                      <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(purchaseUsd)}</div>
-                      {purchaseKhr>0 && <div className="text-xs text-gray-400">{fmtKHR(purchaseKhr)}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-right col-highlight-green">
-                      <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(p.selling_price_usd)}</div>
-                      {p.selling_price_khr>0 && <div className="text-xs text-gray-400">{fmtKHR(p.selling_price_khr)}</div>}
-                      {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                        <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-                          Special {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
-                          {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2 text-right hidden lg:table-cell">
-                      {purchaseUsd>0 && p.selling_price_usd>0
-                        ? <div><div className={`font-medium text-xs ${marginUsd>=0?'text-blue-600':'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-gray-400">{marginPct.toFixed(1)}%</div></div>
-                        : <span className="text-gray-300">N/A</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="font-bold text-gray-900 dark:text-white">
-                        {branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity}
-                        {renderUnitChip(p.unit)}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-center">{getStockBadge(p)}</td>
-                    <td className="px-2 py-2 text-right" onClick={e=>e.stopPropagation()}>
-                      <ThreeDot
-                        onDetails={()=>setDetailProduct(p)}
-                        onEdit={()=>{setSelected(p);setModal('form')}}
-                        onDelete={()=>handleDelete(p)}
-                        onAddVariant={!p.parent_id ? ()=>setVariantModal(p) : undefined}
-                      />
-                    </td>
-                  </tr>
-                )
+                  {!isCollapsed ? section.groups.map((group) => {
+                    const groupCollapsed = collapsedProductGroups.has(group.key)
+                    const showGroupRow = group.hasMultipleItems
+                    return (
+                      <Fragment key={group.key}>
+                        {showGroupRow ? (
+                          <tr
+                            className="bg-white/80 dark:bg-slate-900/45"
+                            data-product-jump-id={group.anchorId}
+                          >
+                            <td colSpan={11} className="px-4 py-2.5">
+                              <div className="flex items-center justify-between gap-3">
+                                <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-100">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded"
+                                    checked={isSelectionScopeFullySelected(group.ids)}
+                                    ref={(node) => {
+                                      if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                    }}
+                                    onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                    aria-label={`Select ${group.name}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-w-0 items-center gap-2 text-left"
+                                    onClick={() => toggleProductGroup(group.key)}
+                                  >
+                                    {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                    <span className="truncate">{group.name}</span>
+                                  </button>
+                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
+                                </label>
+                                <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
+                                  {getGroupSummaryParts(group).map((part) => (
+                                    <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                        {!groupCollapsed || !showGroupRow ? group.items.map((product) => renderDesktopProductRow(product, { indented: showGroupRow })) : null}
+                      </Fragment>
+                    )
                   }) : null}
                 </Fragment>
               )})}
@@ -1293,78 +1723,54 @@ export default function Products() {
                 </button>
               </div>
             </div>
-            {!isCollapsed ? section.items.map(p => {
-          const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
-          const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
-          const isOut = qty <= (p.out_of_stock_threshold || 0)
-          const isLow = !isOut && qty <= (p.low_stock_threshold || 10)
-          const mobileStatusLabel = isOut
-            ? (t('out_of_stock') || 'Out of Stock')
-            : isLow
-              ? (t('low_stock') || 'Low Stock')
-              : (t('in_stock') || 'In Stock')
-          const mobileStatusClass = isOut
-            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-            : isLow
-              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-          return (
-            <div
-              key={p.id}
-              data-product-jump-id={p.id}
-              className={`card flex gap-2.5 p-2.5 cursor-pointer active:bg-blue-50 dark:active:bg-blue-900/10 ${isProductSelected(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-              onClick={()=>setDetailProduct(p)}
-            >
-              <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={e=>{e.stopPropagation();toggleSelect(p.id)}} onClick={e=>e.stopPropagation()} />
-              <div className="flex-shrink-0">
-                {getProductGallery(p).length
-                  ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={e=>{e.stopPropagation();openLightbox(getProductGallery(p),0,p.name)}} />
-                  : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="max-w-[10.75rem] truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
-                  </div>
-                  <span className={`flex-shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
-                    {mobileStatusLabel}
-                  </span>
-                </div>
-                {p.category && (
-                  <span
-                    className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[10px]"
-                    style={{
-                      background: catMap[p.category]?.color || '#6b7280',
-                      color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
-                    }}
-                  >
-                    {p.category}
-                  </span>
-                )}
-                <div className="mt-1 flex flex-nowrap items-center gap-2.5 overflow-hidden text-[11px]">
-                  <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
-                  {(p.special_price_usd || 0) > 0 ? (
-                    <>
-                      <span className="text-gray-300 dark:text-gray-600">|</span>
-                      <span className="whitespace-nowrap text-blue-700 dark:text-blue-400">{fmtUSD(p.special_price_usd || 0)}</span>
-                    </>
+            {!isCollapsed ? section.groups.map((group) => {
+              const groupCollapsed = collapsedProductGroups.has(group.key)
+              const showGroupRow = group.hasMultipleItems
+              return (
+                <div key={group.key} className="space-y-2">
+                  {showGroupRow ? (
+                    <div
+                      className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/80"
+                      data-product-jump-id={group.anchorId}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <label className="flex min-w-0 items-start gap-2">
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(group.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                            aria-label={`Select ${group.name}`}
+                          />
+                          <button type="button" className="min-w-0 text-left" onClick={() => toggleProductGroup(group.key)}>
+                            <div className="flex items-center gap-1.5">
+                              {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                              <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
+                              {getGroupSummaryParts(group).map((part) => (
+                                <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
+                              ))}
+                            </div>
+                          </button>
+                        </label>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:text-slate-300"
+                          onClick={() => toggleProductGroup(group.key)}
+                        >
+                          {groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
+                  {!groupCollapsed || !showGroupRow ? group.items.map((product) => renderMobileProductCard(product, { indented: showGroupRow })) : null}
                 </div>
-              </div>
-              <div onClick={e=>e.stopPropagation()}>
-                <ThreeDot
-                  onDetails={()=>setDetailProduct(p)}
-                  onEdit={()=>{setSelected(p);setModal('form')}}
-                  onDelete={()=>handleDelete(p)}
-                  onAddVariant={!p.parent_id ? ()=>setVariantModal(p) : undefined}
-                />
-              </div>
-            </div>
-          )
+              )
             }) : null}
           </div>
         )})}
@@ -1442,7 +1848,26 @@ export default function Products() {
           branches={branches}
           user={user}
           onClose={() => setBulkAddModal(null)}
-          onDone={() => { setBulkAddModal(null); setSelectedIds(new Set()); load() }}
+          onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 } = {}) => {
+            const numericQuantity = Number(quantity || 0)
+            const successfulIds = updatedIds.filter((id) => Number.isFinite(Number(id)))
+            const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
+            setBulkAddModal(null)
+            setSelectedIds(new Set(failedIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))))
+            if (done > 0 && restoredSnapshots.length && numericQuantity > 0) {
+              actionHistory.pushAction({
+                label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
+                undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo bulk add stock'),
+                redo: () => addStockToProducts(successfulIds, numericQuantity, branchId, 'Redo bulk add stock'),
+              })
+            }
+            notify(
+              failed
+                ? `Added stock to ${done} product(s), ${failed} failed`
+                : `Added stock to ${done} product${done === 1 ? '' : 's'}`,
+              failed ? 'warning' : 'success',
+            )
+          }}
           t={t}
         />
       )}
