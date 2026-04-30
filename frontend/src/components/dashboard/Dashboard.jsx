@@ -29,6 +29,7 @@ export default function Dashboard() {
   }
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
   const refreshLabel = translateOr('refresh', 'Refresh', 'ស្រស់ថ្មី')
+  const dayLabel = translateOr('day', 'Day', 'ថ្ងៃ')
   const priceCsv = useCallback((value) => formatPriceNumber(value || 0), [])
 
   // Range presets use t() for labels inside the component so t() is in scope.
@@ -222,7 +223,6 @@ export default function Dashboard() {
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('low_stock') || 'Low stock', value: summary?.low_stock?.length || 0 },
         { label: t('out_of_stock') || 'Out of stock', value: summary?.out_of_stock_count || 0 },
-        { label: t('period_label') || 'Range', value: periodShort },
       ],
     },
     {
@@ -262,11 +262,9 @@ export default function Dashboard() {
       id: 'cogs',
       label: t('cogs'),
       value: fmtUSD(aCost),
-      sub: periodShort,
       color: 'text-red-600',
       details: [
         { label: t('cogs') || 'COGS', value: fmtUSD(aCost) },
-        { label: t('period_label') || 'Range', value: periodShort },
         { label: t('formula') || 'Formula', value: 'COGS excludes quantities restored by restocked returns' },
       ],
     },
@@ -275,7 +273,7 @@ export default function Dashboard() {
       label: t('est_profit'),
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
-      sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${t('profit_margin')} - ${periodShort}` : periodShort,
+      sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${t('profit_margin')}` : '',
       details: [
         { label: t('est_profit') || 'Est. profit', value: fmtUSD(aProfit) },
         { label: t('revenue') || 'Revenue', value: fmtUSD(aRevenue) },
@@ -288,12 +286,11 @@ export default function Dashboard() {
       id: 'transactions',
       label: t('transactions'),
       value: aTxCount,
-      sub: `avg ${fmtUSD(aAvgOrder)} / ${t('sale')} - ${periodShort}`,
+      sub: `avg ${fmtUSD(aAvgOrder)} / ${t('sale')}`,
       trend: calcTrend(aTxCount, aPrevTxCount),
       details: [
         { label: t('transactions') || 'Transactions', value: aTxCount },
         { label: t('avg_order_value') || 'Avg order', value: fmtUSD(aAvgOrder) },
-        { label: t('period_label') || 'Range', value: periodShort },
         { label: t('formula') || 'Formula', value: 'Average order = Net revenue / transaction count' },
       ],
     },
@@ -302,7 +299,7 @@ export default function Dashboard() {
       label: t('returns_count'),
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
-      sub: aReturns > 0 ? `${fmtUSD(aRefundUsd)} ${t('refunded')} - ${aItemsRet} ${t('items')}` : `${t('no_returns')} - ${periodShort}`,
+      sub: aReturns > 0 ? `${fmtUSD(aRefundUsd)} ${t('refunded')} - ${aItemsRet} ${t('items')}` : (t('no_returns') || 'No returns'),
       details: [
         { label: t('returns_count') || 'Returns', value: aReturns },
         { label: t('total_refunded') || 'Refunded', value: fmtUSD(aRefundUsd) },
@@ -795,7 +792,7 @@ export default function Dashboard() {
                 value={granularity}
                 onChange={e => setGranularity(e.target.value)}
               >
-                <option value="day">{t('today')}</option>
+                <option value="day">{dayLabel}</option>
                 <option value="week">{t('this_week')}</option>
                 <option value="month">{t('this_month')}</option>
               </select>
