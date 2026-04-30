@@ -45,20 +45,12 @@ const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 const WARMUP_PAGE_IDS = [
   'dashboard',
   'products',
+  'inventory',
+  'contacts',
   'sales',
   'returns',
-  'inventory',
   'catalog',
   'pos',
-  'branches',
-  'contacts',
-  'users',
-  'settings',
-  'receipt_settings',
-  'backup',
-  'files',
-  'server',
-  'audit_log',
 ]
 
 const ADMIN_PAGE_SEQUENCE = [
@@ -219,17 +211,24 @@ const PAGE_COMPONENTS = {
 }
 
 function getWarmupImporters() {
-  // Warm up the most failure-prone admin pages first, then the rest of the
-  // shell, so cold starts are less likely to show up only when a user reaches
-  // the later settings stack.
-  const orderedIds = [...ADMIN_PAGE_SEQUENCE, ...WARMUP_PAGE_IDS.filter((pageId) => !ADMIN_PAGE_SEQUENCE.includes(pageId))]
-  return orderedIds
+  // Keep the initial warmup focused on the primary day-to-day flow. The admin
+  // stack warms separately when a user actually enters it.
+  return WARMUP_PAGE_IDS
     .map((pageId) => {
       const importer = PAGE_IMPORTERS[pageId]
       if (!importer) return null
       return () => importWithTimeout(importer, pageId).catch(() => null)
     })
     .filter(Boolean)
+}
+
+function shouldSkipBackgroundWarmup() {
+  if (typeof window === 'undefined') return true
+  if (document.visibilityState === 'hidden') return true
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  if (!connection) return false
+  if (connection.saveData) return true
+  return ['slow-2g', '2g', '3g'].includes(String(connection.effectiveType || '').toLowerCase())
 }
 
 function getDataWarmupLoaders(canAccessPage) {
@@ -339,6 +338,7 @@ function useChunkWarmup(user) {
   // Only warm chunks after a user exists so public routes stay lightweight.
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
+    if (shouldSkipBackgroundWarmup()) return undefined
 
     let cancelled = false
     let idleId = null
@@ -348,17 +348,17 @@ function useChunkWarmup(user) {
     const importers = getWarmupImporters()
 
     const runWarmup = async () => {
-      if (cancelled || started) return
+      if (cancelled || started || shouldSkipBackgroundWarmup()) return
       started = true
-      await runWarmupBatches(importers, 2)
+      await runWarmupBatches(importers, 1)
     }
 
-    timeoutId = window.setTimeout(runWarmup, 120)
+    timeoutId = window.setTimeout(runWarmup, 1400)
 
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 1500 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: 3200 })
     } else {
-      followupId = window.setTimeout(runWarmup, 900)
+      followupId = window.setTimeout(runWarmup, 2400)
     }
 
     return () => {

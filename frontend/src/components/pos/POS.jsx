@@ -15,7 +15,7 @@
  * Layout (mobile  < md):   Tab bar toggles between Products and Cart views.
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
 import { ImageOff, Info, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Receipt from '../receipt/Receipt'
@@ -562,12 +562,30 @@ export default function POS() {
   }
 
   // ?�?� Product filter ??comma-separated terms, AND/OR mode (same as Products page) ?�
-  const searchTerms = search.trim()
-    ? search.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
-    : []
+  const deferredSearch = useDeferredValue(search)
+  const searchTerms = useMemo(() => (
+    deferredSearch.trim()
+      ? deferredSearch.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
+      : []
+  ), [deferredSearch])
+  const normalizedBrandFilter = useMemo(
+    () => (brandFilter === 'all' ? 'all' : brandFilter.toLowerCase()),
+    [brandFilter],
+  )
+  const normalizedSupplierFilter = useMemo(
+    () => (supplierFilter === 'all' ? 'all' : supplierFilter.toLowerCase()),
+    [supplierFilter],
+  )
+  const branchFilterId = useMemo(
+    () => (branchFilter === 'all' ? null : parseInt(branchFilter, 10)),
+    [branchFilter],
+  )
 
   // Derived filter lists from products
-  const posSuppliers = [...new Set(products.map((p) => p.supplier).filter(Boolean))].sort()
+  const posSuppliers = useMemo(
+    () => [...new Set(products.map((p) => p.supplier).filter(Boolean))].sort(),
+    [products],
+  )
   const posBrands = useMemo(() => {
     const fromProducts = products.map((p) => String(p.brand || '').trim()).filter(Boolean)
     let fromSettings = []
@@ -581,16 +599,14 @@ export default function POS() {
   }, [products, settings?.product_brand_options])
 
   // ?�?� Foolproof product filter ??products NOT matching ALL active filters are 100% hidden ?�?�
-  const filteredProducts = (() => {
-    const terms = searchTerms  // already computed above
-
-    return products.filter(p => {
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
       // ??Search
-      if (terms.length > 0) {
+      if (searchTerms.length > 0) {
         const hay = `${p.name} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
         const hit = searchMode === 'AND'
-          ? terms.every(t => hay.includes(t))
-          : terms.some(t => hay.includes(t))
+          ? searchTerms.every(t => hay.includes(t))
+          : searchTerms.some(t => hay.includes(t))
         if (!hit) return false
       }
 
@@ -598,21 +614,21 @@ export default function POS() {
       if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
 
       // ??Brand ??exact match (case-insensitive), hide all others
-      if (brandFilter !== 'all' && (p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
+      if (normalizedBrandFilter !== 'all' && (p.brand || '').toLowerCase() !== normalizedBrandFilter) return false
 
       // ??Supplier ??exact match (case-insensitive), hide all others
-      if (supplierFilter !== 'all' && (p.supplier||'').toLowerCase() !== supplierFilter.toLowerCase()) return false
+      if (normalizedSupplierFilter !== 'all' && (p.supplier||'').toLowerCase() !== normalizedSupplierFilter) return false
 
       // ??Branch ??require a branch_stock entry for the selected branch; hide if absent
-      if (branchFilter !== 'all') {
-        const bs = (p.branch_stock||[]).find(b => b.branch_id === parseInt(branchFilter))
+      if (branchFilterId != null) {
+        const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
         if (!bs) return false
       }
 
       // ??Compute effective quantity for this product in the active context
       const qty = (() => {
-        if (branchFilter !== 'all') {
-          const bs = (p.branch_stock||[]).find(b => b.branch_id === parseInt(branchFilter))
+        if (branchFilterId != null) {
+          const bs = (p.branch_stock||[]).find(b => b.branch_id === branchFilterId)
           return bs ? bs.quantity : 0
         }
         // When no explicit branch filter is selected, show the product's
@@ -632,7 +648,16 @@ export default function POS() {
 
       return true
     })
-  })()
+  }, [
+    branchFilterId,
+    categoryFilter,
+    normalizedBrandFilter,
+    normalizedSupplierFilter,
+    products,
+    searchMode,
+    searchTerms,
+    stockFilter,
+  ])
 
   const productsById = useMemo(() => buildProductsById(products), [products])
 
