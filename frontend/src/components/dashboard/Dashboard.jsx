@@ -18,25 +18,32 @@ import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
+const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 
 function getDashboardFilterStorageKey(user) {
   const userKey = user?.id || user?.username || user?.email || 'guest'
   return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
 }
 
-function readDashboardFilterPrefs(storageKey) {
-  if (typeof window === 'undefined' || !storageKey) return null
+function readDashboardFilterPrefs(storageKeys) {
+  if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(storageKey)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    return {
-      rangeId: typeof parsed.rangeId === 'string' ? parsed.rangeId : '30d',
-      customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
-      customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
-      granularity: ['day', 'week', 'month'].includes(parsed.granularity) ? parsed.granularity : 'day',
+    const keys = Array.isArray(storageKeys)
+      ? storageKeys.filter(Boolean)
+      : [storageKeys].filter(Boolean)
+    for (const key of keys) {
+      const raw = window.localStorage.getItem(key)
+      if (!raw) continue
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') continue
+      return {
+        rangeId: typeof parsed.rangeId === 'string' ? parsed.rangeId : '30d',
+        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
+        customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
+        granularity: ['day', 'week', 'month'].includes(parsed.granularity) ? parsed.granularity : 'day',
+      }
     }
+    return null
   } catch {
     return null
   }
@@ -57,7 +64,14 @@ export default function Dashboard() {
   const dayLabel = translateOr('day', 'Day', 'ថ្ងៃ')
   const priceCsv = useCallback((value) => formatPriceNumber(value || 0), [])
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
-  const initialFilterPrefs = useMemo(() => readDashboardFilterPrefs(dashboardFilterStorageKey), [dashboardFilterStorageKey])
+  const dashboardFilterStorageKeys = useMemo(
+    () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
+    [dashboardFilterStorageKey],
+  )
+  const initialFilterPrefs = useMemo(
+    () => readDashboardFilterPrefs(dashboardFilterStorageKeys),
+    [dashboardFilterStorageKeys],
+  )
 
   // Range presets use t() for labels inside the component so t() is in scope.
   const RANGE_PRESETS = [
@@ -157,7 +171,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
     filterStorageKeyRef.current = dashboardFilterStorageKey
-    const nextPrefs = readDashboardFilterPrefs(dashboardFilterStorageKey)
+    const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
     setRangeId(nextPrefs?.rangeId || '30d')
     setCustomStart(nextPrefs?.customStart || offsetDate(-29))
     setCustomEnd(nextPrefs?.customEnd || todayStr())
@@ -167,12 +181,14 @@ export default function Dashboard() {
   useEffect(() => {
     if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
     try {
-      window.localStorage.setItem(dashboardFilterStorageKey, JSON.stringify({
+      const serialized = JSON.stringify({
         rangeId,
         customStart,
         customEnd,
         granularity,
-      }))
+      })
+      window.localStorage.setItem(dashboardFilterStorageKey, serialized)
+      window.localStorage.setItem(DASHBOARD_FILTER_STORAGE_FALLBACK_KEY, serialized)
     } catch {
       // Ignore persistence failures and keep the dashboard usable.
     }

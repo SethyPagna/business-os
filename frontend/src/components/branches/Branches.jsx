@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRightLeft, Building2, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'

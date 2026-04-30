@@ -229,7 +229,7 @@ function setTunnelSecurityHeaders(req, res) {
       "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://*.supabase.co",
       "worker-src 'self' blob:",
       "script-src 'self' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com",
-      "script-src-elem 'self' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
+      "script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()
