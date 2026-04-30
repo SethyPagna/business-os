@@ -42,6 +42,7 @@ Last updated: 2026-04-30
 - Drive sync status and manual sync now require `backup` or `settings`.
 - Folder backup export now requires `backup`.
 - Data-path read/reset now require `backup` or `settings`.
+- Start/setup scripts no longer attempt global PM2 installation automatically; they use the tracked app runtime and fall back to Node/background mode unless PM2 is already installed.
 
 ## Remaining Reports To Fill
 

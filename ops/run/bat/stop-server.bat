@@ -96,7 +96,7 @@ timeout /t 2 /nobreak >nul
 if defined TAILSCALE_CMD (
     echo.
     echo [INFO] Stopping Tailscale Funnel...
-    call "!TAILSCALE_CMD!" funnel --bg 0 >nul 2>&1
+    powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg 0" >nul 2>&1
     echo [OK] Tailscale Funnel stopped.
 )
 

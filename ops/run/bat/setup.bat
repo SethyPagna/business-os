@@ -255,13 +255,8 @@ echo.
 echo [INFO] Checking PM2...
 where pm2 >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Installing PM2 globally...
-    call npm install -g pm2 --loglevel=warn
-    if errorlevel 1 (
-        echo [WARN] PM2 install failed - server will run in foreground mode.
-    ) else (
-        echo [OK] PM2 installed
-    )
+    echo [INFO] PM2 is not installed. This is optional.
+    echo [INFO] start-server.bat will use background node mode unless you install PM2 manually.
 ) else (
     echo [OK] PM2 already installed
 )

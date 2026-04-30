@@ -71,8 +71,8 @@ echo "[OK] Frontend built"
 echo ""
 echo "[INFO] Checking PM2..."
 if ! command -v pm2 &>/dev/null; then
-  echo "[INFO] Installing PM2 globally..."
-  npm install -g pm2 --loglevel=warn && echo "[OK] PM2 installed" || echo "[WARN] PM2 install failed - server will run in foreground mode"
+  echo "[INFO] PM2 is not installed. This is optional."
+  echo "[INFO] start-server.sh will run with Node.js directly unless you install PM2 manually."
 else
   echo "[OK] PM2 already installed"
 fi

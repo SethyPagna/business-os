@@ -115,21 +115,9 @@ for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
 )
 
 if not defined PM2_CMD (
-    echo [INFO] Installing PM2 globally...
-    call npm install -g pm2 --loglevel=warn
-    if errorlevel 1 (
-        echo [WARN] PM2 install failed. Using background node mode.
-        goto :background_start
-    )
-    for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
-        if not defined PM2_CMD (
-            for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined PM2_CMD set "PM2_CMD=%%p"
-        )
-    )
-)
-
-if not defined PM2_CMD (
-    echo [WARN] PM2 is still not available. Using background node mode.
+    echo [WARN] PM2 is not installed. Using background node mode.
+    echo [INFO] start-server.bat does not install global packages automatically.
+    if "!SERVER_ALREADY_RUNNING!"=="1" goto :after_pm2_start
     goto :background_start
 )
 
@@ -171,7 +159,7 @@ echo [INFO] Checking Tailscale for remote access...
 if defined TAILSCALE_CMD (
     echo [INFO] Using Tailscale CLI: !TAILSCALE_CMD!
     echo [INFO] Starting Tailscale Funnel on port %PORT%...
-    call "!TAILSCALE_CMD!" funnel --bg --yes http://127.0.0.1:%PORT% >nul 2>&1
+    powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
     if not errorlevel 1 (
         for /l %%N in (1,1,6) do (
             if "!TAILSCALE_URL_FOUND!"=="" (
@@ -297,8 +285,8 @@ if not "!TAILSCALE_URL_FOUND!"=="" (
         type "%TEMP%\bos_public_check.txt"
         echo [INFO] Resetting stale Tailscale Serve/Funnel config and retrying...
         if defined TAILSCALE_CMD (
-            call "!TAILSCALE_CMD!" serve reset >nul 2>&1
-            call "!TAILSCALE_CMD!" funnel --bg --yes http://127.0.0.1:%PORT% >nul 2>&1
+            powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
+            powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
             node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
             if not errorlevel 1 (
                 set "PUBLIC_URL_OK=1"

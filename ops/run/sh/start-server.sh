@@ -72,8 +72,10 @@ if [[ "${1:-}" == "--node" ]]; then
 fi
 
 if ! command -v pm2 &>/dev/null; then
-  warn "PM2 not found - installing globally..."
-  npm install -g pm2
+  warn "PM2 not found - running with Node.js directly"
+  warn "start-server.sh does not install global packages automatically"
+  cd "$ROOT"
+  exec node "$BACKEND_DIR/server.js"
 fi
 
 if [ ! -f "$ECOSYSTEM" ]; then
