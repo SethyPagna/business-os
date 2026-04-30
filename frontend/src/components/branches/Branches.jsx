@@ -4,6 +4,7 @@ import { useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
@@ -40,6 +41,7 @@ function formatTransferDate(rawValue) {
 export default function Branches() {
   const { t, user, notify, fmtUSD } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('branches')
 
   /**
    * 2. Page State
@@ -78,7 +80,10 @@ export default function Branches() {
     }
   }
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!isActive) return
+    void load()
+  }, [isActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * 3.2 Sync refresh hooks.
@@ -86,10 +91,10 @@ export default function Branches() {
    * - Product changes (stock movement can affect branch views).
    */
   useEffect(() => {
-    if (!syncChannel) return
+    if (!isActive || !syncChannel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products') load()
-  }, [syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (channel === 'branches' || channel === 'products') void load()
+  }, [isActive, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * 4. Derived State

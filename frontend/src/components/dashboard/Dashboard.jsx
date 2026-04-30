@@ -13,12 +13,14 @@ import { formatPriceNumber } from '../../utils/pricing.js'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
 import PortalMenu from '../shared/PortalMenu'
+import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
 export default function Dashboard() {
   const { t, fmtUSD, fmtKHR } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const translateOr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -124,15 +126,34 @@ export default function Dashboard() {
   }, [customEnd, customStart, granularity, rangeId, setAnalyticsLoading]) // eslint-disable-line
 
   useEffect(() => {
-    loadSummary({ clearOnError: true, markLoading: true })
-  }, [loadSummary])
+    if (!isActive) {
+      invalidateTrackedRequest(summaryRequestRef)
+      invalidateTrackedRequest(refreshRequestRef)
+      setLoading(false)
+      setSilentRefresh(false)
+      return
+    }
+
+    void loadSummary({
+      clearOnError: true,
+      markLoading: summary == null,
+    })
+  }, [isActive, loadSummary])
 
   useEffect(() => {
-    loadAnalytics()
-  }, [loadAnalytics])
+    if (!isActive) {
+      invalidateTrackedRequest(analyticsRequestRef)
+      setAnalyticsLoading(false)
+      return
+    }
+
+    void loadAnalytics({
+      silent: summary != null,
+    })
+  }, [isActive, loadAnalytics, setAnalyticsLoading])
 
   useEffect(() => {
-    if (!syncChannel?.channel) return
+    if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
     if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory') {
       const refreshId = beginTrackedRequest(refreshRequestRef)
@@ -146,7 +167,7 @@ export default function Dashboard() {
         }
       })
     }
-  }, [loadAnalytics, loadSummary, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, loadAnalytics, loadSummary, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
     invalidateTrackedRequest(summaryRequestRef)

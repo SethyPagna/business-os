@@ -206,7 +206,7 @@ function CustomerForm({ customer, onSave, onClose, t }) {
   )
 }
 
-function CustomersTab({ t, notify }) {
+function CustomersTab({ t, notify, active = true }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -384,16 +384,24 @@ function CustomersTab({ t, notify }) {
   }, [notify, t])
 
   useEffect(() => {
+    if (!active) {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      setLoading(false)
+      return undefined
+    }
     load({ silent: loadedOnceRef.current })
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [load])
+  }, [active, load])
   useEffect(() => {
-    if (syncChannelName === 'customers') load({ silent: true, label: 'Customers refresh' })
-  }, [load, syncChannelName, syncChannelTs])
+    if (!active || syncChannelName !== 'customers') return
+    load({ silent: true, label: 'Customers refresh' })
+  }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) {

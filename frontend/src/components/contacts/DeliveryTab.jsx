@@ -191,7 +191,7 @@ function OptionsBadge({ raw }) {
 }
 
 // ?? DeliveryTab ????????????????????????????????????????????????????????????????
-function DeliveryTab({ t, notify }) {
+function DeliveryTab({ t, notify, active = true }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -360,16 +360,24 @@ function DeliveryTab({ t, notify }) {
     return wrappedPromise
   }, [notify, t, tr])
   useEffect(() => {
+    if (!active) {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      setLoading(false)
+      return undefined
+    }
     load({ silent: loadedOnceRef.current })
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [load])
+  }, [active, load])
   useEffect(() => {
-    if (syncChannelName === 'deliveryContacts') load({ silent: true, label: 'Delivery contacts refresh' })
-  }, [load, syncChannelName, syncChannelTs])
+    if (!active || syncChannelName !== 'deliveryContacts') return
+    load({ silent: true, label: 'Delivery contacts refresh' })
+  }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim() && !String(form.phone || '').trim()) {

@@ -133,7 +133,7 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
   )
 }
 
-function SuppliersTab({ t, notify }) {
+function SuppliersTab({ t, notify, active = true }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -315,16 +315,24 @@ function SuppliersTab({ t, notify }) {
   }, [notify, t, tr])
 
   useEffect(() => {
+    if (!active) {
+      window.clearTimeout(loadWatchdogRef.current)
+      invalidateTrackedRequest(loadRequestRef)
+      loadPromiseRef.current = null
+      setLoading(false)
+      return undefined
+    }
     load({ silent: loadedOnceRef.current })
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
     }
-  }, [load])
+  }, [active, load])
   useEffect(() => {
-    if (syncChannelName === 'suppliers') load({ silent: true, label: 'Suppliers refresh' })
-  }, [load, syncChannelName, syncChannelTs])
+    if (!active || syncChannelName !== 'suppliers') return
+    load({ silent: true, label: 'Suppliers refresh' })
+  }, [active, load, syncChannelName, syncChannelTs])
 
   const handleSave = async (form) => {
     if (!String(form.name || '').trim()) return notify(t('name_required') || 'Name required', 'error')

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
+import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -47,7 +48,7 @@ function StatusRow({ label, value, mono = false, extra = null }) {
   )
 }
 
-function InfoTab({ syncUrl, syncConnected }) {
+function InfoTab({ syncUrl, syncConnected, active = true }) {
   const { settings, t, formatDateTime, displayTimezone, deviceTimezone } = useApp()
   const copy = useLocalCopy()
   const [clientTime, setClientTime] = useState(new Date())
@@ -59,12 +60,13 @@ function InfoTab({ syncUrl, syncConnected }) {
   const fetchRequestRef = useRef(0)
 
   useEffect(() => {
+    if (!active) return undefined
     const timer = setInterval(() => setClientTime(new Date()), 1000)
     return () => clearInterval(timer)
-  }, [])
+  }, [active])
 
   const fetchServerTime = useCallback(async () => {
-    if (!syncUrl) return
+    if (!active || !syncUrl) return
     const requestId = beginTrackedRequest(fetchRequestRef)
     setFetching(true)
     setServerErr(null)
@@ -97,13 +99,18 @@ function InfoTab({ syncUrl, syncConnected }) {
     if (!isTrackedRequestCurrent(fetchRequestRef, requestId)) return
     setLastFetch(new Date())
     setFetching(false)
-  }, [syncUrl])
+  }, [active, syncUrl])
 
   useEffect(() => {
+    if (!active) {
+      invalidateTrackedRequest(fetchRequestRef)
+      setFetching(false)
+      return undefined
+    }
     fetchServerTime()
     const timer = setInterval(fetchServerTime, 15000)
     return () => clearInterval(timer)
-  }, [fetchServerTime])
+  }, [active, fetchServerTime])
   useEffect(() => () => invalidateTrackedRequest(fetchRequestRef), [])
 
   const fmt = (value) => formatDateTime(value)
@@ -192,7 +199,7 @@ function InfoTab({ syncUrl, syncConnected }) {
   )
 }
 
-function DiagnosticsPanel({ syncUrl, syncConnected }) {
+function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
   const copy = useLocalCopy()
   const [clientLog, setClientLog] = useState([])
   const [serverLog, setServerLog] = useState([])
@@ -207,6 +214,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
   const serverLogRequestRef = useRef(0)
 
   const loadQueueState = useCallback(async () => {
+    if (!active) return
     const requestId = beginTrackedRequest(queueRequestRef)
     try {
       const state = await withLoaderTimeout(
@@ -217,9 +225,15 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
         setPendingSync(state)
       }
     } catch (_) {}
-  }, [])
+  }, [active])
 
   useEffect(() => {
+    if (!active) {
+      mounted.current = false
+      invalidateTrackedRequest(queueRequestRef)
+      invalidateTrackedRequest(serverLogRequestRef)
+      return undefined
+    }
     mounted.current = true
     if (window.api?.getCallLog) setClientLog(window.api.getCallLog())
     loadQueueState()
@@ -241,10 +255,10 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
       window.removeEventListener('sync:write-blocked', onErr)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
-  }, [loadQueueState])
+  }, [active, loadQueueState])
 
   const fetchServerLog = useCallback(async () => {
-    if (!syncUrl) return
+    if (!active || !syncUrl) return
     const requestId = beginTrackedRequest(serverLogRequestRef)
     try {
       const data = await withLoaderTimeout(() => window.api.getSystemDebugLog(), 'Server diagnostics')
@@ -255,14 +269,14 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
     } catch {
       // keep previous diagnostics visible if the authenticated fetch fails once
     }
-  }, [syncUrl])
+  }, [active, syncUrl])
 
   useEffect(() => {
-    if (!syncUrl || !autoRefresh) return
+    if (!active || !syncUrl || !autoRefresh) return
     fetchServerLog()
     const timer = setInterval(fetchServerLog, 3000)
     return () => clearInterval(timer)
-  }, [syncUrl, autoRefresh, fetchServerLog])
+  }, [active, syncUrl, autoRefresh, fetchServerLog])
 
   const badge = {
     server: 'bg-blue-100 text-blue-700',
@@ -417,7 +431,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
           </div>
         ) : null}
 
-        {tab === 'info' ? <InfoTab syncUrl={syncUrl} syncConnected={syncConnected} /> : null}
+        {tab === 'info' ? <InfoTab syncUrl={syncUrl} syncConnected={syncConnected} active={active} /> : null}
       </div>
     </div>
   )
@@ -425,6 +439,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected }) {
 
 export default function ServerPage() {
   const { t, notify, syncConnected, syncUrl, updateSyncUrl } = useApp()
+  const isActive = useIsPageActive('server')
   const [urlInput, setUrlInput] = useState('')
   const [securityConfig, setSecurityConfig] = useState(null)
   const [testing, setTesting] = useState(false)
@@ -442,9 +457,9 @@ export default function ServerPage() {
   }, [syncUrl])
 
   useEffect(() => {
-    if (!syncUrl) {
+    if (!isActive || !syncUrl) {
+      if (!isActive) invalidateTrackedRequest(onlineCheckRequestRef)
       setOnlineCount(null)
-      invalidateTrackedRequest(onlineCheckRequestRef)
       return
     }
 
@@ -466,10 +481,14 @@ export default function ServerPage() {
     check()
     const timer = setInterval(check, 10000)
     return () => clearInterval(timer)
-  }, [syncUrl, syncConnected])
+  }, [isActive, syncUrl, syncConnected])
   useEffect(() => () => invalidateTrackedRequest(onlineCheckRequestRef), [])
 
   useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(securityConfigRequestRef)
+      return
+    }
     const loadSecurityConfig = async () => {
       const requestId = beginTrackedRequest(securityConfigRequestRef)
       try {
@@ -479,7 +498,7 @@ export default function ServerPage() {
       } catch (_) {}
     }
     loadSecurityConfig()
-  }, [syncUrl, syncConnected])
+  }, [isActive, syncUrl, syncConnected])
   useEffect(() => () => invalidateTrackedRequest(securityConfigRequestRef), [])
 
   async function handleTest() {
@@ -674,7 +693,7 @@ export default function ServerPage() {
           Reads can fall back to local IndexedDB when the server is unreachable, but changes are blocked and treated as invalid until the live server reconnects.
         </div>
 
-        <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} />
+        <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} active={isActive} />
       </div>
     </div>
   )

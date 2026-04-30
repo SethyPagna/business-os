@@ -32,6 +32,7 @@ import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
+import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,
   buildVariantChildrenByParentId,
@@ -63,6 +64,7 @@ function allTermsMatch(text, terms) {
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('pos')
   const posCopy = useCallback((en, km) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
 
   // ?�?� Remote data (shared across all orders) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -347,17 +349,26 @@ export default function POS() {
 
   // ?�?� Initial data load ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(catalogRequestRef)
+      invalidateTrackedRequest(customerRequestRef)
+      invalidateTrackedRequest(deliveryRequestRef)
+      invalidateTrackedRequest(membershipRequestRef)
+      setMembershipLoading(false)
+      return
+    }
+
     void Promise.allSettled([
       loadCatalogData('POS initial catalog'),
       loadCustomers('POS initial customers'),
       loadDeliveryContacts('POS initial delivery contacts'),
     ])
     searchRef.current?.focus()
-  }, [loadCatalogData, loadCustomers, loadDeliveryContacts])
+  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts])
 
   // ?�?� Sync-push: reload when another device changes data ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
-    if (!syncChannel) return
+    if (!isActive || !syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
       void loadCatalogData('POS sync catalog')
@@ -368,7 +379,7 @@ export default function POS() {
     if (channel === 'deliveryContacts') {
       void loadDeliveryContacts('POS sync delivery contacts')
     }
-  }, [loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
+  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
 
   useEffect(() => () => {
     invalidateTrackedRequest(catalogRequestRef)
@@ -404,6 +415,14 @@ export default function POS() {
   }, [active?.deliverySearch, deliveryContacts])
 
   useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(membershipRequestRef)
+      setMembershipInfo(null)
+      setMembershipError('')
+      setMembershipLoading(false)
+      return
+    }
+
     const membershipNumber = String(active?.customer?.membership_number || '').trim()
 
     if (!membershipNumber) {
@@ -415,7 +434,7 @@ export default function POS() {
     }
 
     void loadMembershipInfo(membershipNumber, 'POS membership lookup')
-  }, [active?.customer?.membership_number, loadMembershipInfo, syncChannel?.ts])
+  }, [active?.customer?.membership_number, isActive, loadMembershipInfo, syncChannel?.ts])
 
   // ?�?� Customer actions ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   const selectCustomer = (c) => {

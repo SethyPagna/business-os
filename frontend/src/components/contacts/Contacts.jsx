@@ -11,6 +11,7 @@ import { DeliveryTab } from './DeliveryTab'
 import { ImportModal } from './shared'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
+import { useIsPageActive } from '../shared/pageActivity'
 import { getFirstLoaderError, settleLoaderMap } from '../../utils/loaders.mjs'
 
 const TABS = (t) => [
@@ -61,6 +62,7 @@ function ImportTypePicker({ onSelect, onClose, t }) {
 
 export default function Contacts() {
   const { t, notify } = useApp()
+  const isActive = useIsPageActive('contacts')
   const [tab, setTab] = useState('customers')
   const [modal, setModal] = useState(null)
   const [importType, setImportType] = useState(null)
@@ -205,9 +207,9 @@ export default function Contacts() {
         ))}
       </div>
 
-      {tab === 'customers' && <CustomersTab key={`c-${reloadKey}`} t={t} notify={notify} />}
-      {tab === 'suppliers' && <SuppliersTab key={`s-${reloadKey}`} t={t} notify={notify} />}
-      {tab === 'delivery' && <DeliveryTab key={`d-${reloadKey}`} t={t} notify={notify} />}
+      {tab === 'customers' && <CustomersTab key={`c-${reloadKey}`} t={t} notify={notify} active={isActive} />}
+      {tab === 'suppliers' && <SuppliersTab key={`s-${reloadKey}`} t={t} notify={notify} active={isActive} />}
+      {tab === 'delivery' && <DeliveryTab key={`d-${reloadKey}`} t={t} notify={notify} active={isActive} />}
 
       {modal === 'pickImportType' ? (
         <ImportTypePicker onSelect={handleTypeSelected} onClose={() => setModal(null)} t={t} />

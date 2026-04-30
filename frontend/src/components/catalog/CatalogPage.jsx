@@ -30,6 +30,7 @@ import {
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
+import { useIsPageActive } from '../shared/pageActivity'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import {
   beginTrackedRequest,
@@ -1407,6 +1408,8 @@ function readStoredTranslateTarget(sourceLang) {
 export default function CatalogPage({ publicView = false }) {
   const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp()
   const { syncChannel } = useSync()
+  const editorPageActive = useIsPageActive('catalog')
+  const isPageActive = publicView || editorPageActive
   const cachedPortalRef = useRef(readPortalCache())
   const cachedPortal = cachedPortalRef.current
   const [config, setConfig] = useState(() => ({
@@ -1663,6 +1666,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   async function refreshPortalView({ showSpinner = true, reportError = true } = {}) {
+    if (!isPageActive) return
     const requestId = beginTrackedRequest(portalBootstrapRequestRef)
     try {
       const hasCachedData = !!(
@@ -1691,6 +1695,7 @@ export default function CatalogPage({ publicView = false }) {
 
   /** Fetch all portal data needed by current mode (public/editor). */
   async function loadPortal() {
+    if (!isPageActive) return
     const requestId = beginTrackedRequest(loadRequestRef)
     const [portalConfigResult, metaResult, productsResult] = await Promise.allSettled([
       window.api.getPortalConfig(),
@@ -1740,6 +1745,19 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => {
     aliveRef.current = true
+    if (!isPageActive) {
+      invalidateTrackedRequest(portalBootstrapRequestRef)
+      invalidateTrackedRequest(loadRequestRef)
+      if (syncReloadTimerRef.current) {
+        window.clearTimeout(syncReloadTimerRef.current)
+        syncReloadTimerRef.current = null
+      }
+      setLoading(false)
+      return () => {
+        invalidateTrackedRequest(portalBootstrapRequestRef)
+        invalidateTrackedRequest(loadRequestRef)
+      }
+    }
     refreshPortalView()
 
     if (!publicView) {
@@ -1758,7 +1776,7 @@ export default function CatalogPage({ publicView = false }) {
       invalidateTrackedRequest(loadRequestRef)
       window.clearInterval(timer)
     }
-  }, [publicView, previewConfig.refreshSeconds])
+  }, [isPageActive, publicView, previewConfig.refreshSeconds])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -1929,7 +1947,7 @@ export default function CatalogPage({ publicView = false }) {
   }, [language, previewConfig.translateWidgetEnabled, publicView])
 
   useEffect(() => {
-    if (!syncChannel) return undefined
+    if (!isPageActive || !syncChannel) return undefined
     if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories'].includes(syncChannel.channel)) {
       return undefined
     }
@@ -1945,7 +1963,7 @@ export default function CatalogPage({ publicView = false }) {
         syncReloadTimerRef.current = null
       }
     }
-  }, [syncChannel])
+  }, [isPageActive, syncChannel])
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || !translateReady) return undefined

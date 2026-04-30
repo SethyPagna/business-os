@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
+import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -121,6 +122,7 @@ function formatLookupValue(number) {
 
 export default function LoyaltyPointsPage() {
   const { settings, saveSettings, notify, t, language, fmtUSD, fmtKHR } = useApp()
+  const isActive = useIsPageActive('loyalty_points')
   const isKhmer = language === 'km'
   const copy = (key, fallback) => {
     const translated = t?.(key)
@@ -177,12 +179,20 @@ export default function LoyaltyPointsPage() {
   }, [])
 
   useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(customerPointsRequestRef)
+      invalidateTrackedRequest(lookupRequestRef)
+      setCustomerPointsLoading(false)
+      setLookupLoading(false)
+      return undefined
+    }
+
     void loadCustomerPoints()
     return () => {
       invalidateTrackedRequest(customerPointsRequestRef)
       invalidateTrackedRequest(lookupRequestRef)
     }
-  }, [loadCustomerPoints])
+  }, [isActive, loadCustomerPoints])
 
   const basis = form.customer_portal_points_basis === 'khr' ? 'khr' : 'usd'
   const redeemPoints = sanitizeInteger(form.customer_portal_redeem_points, 100, 1)

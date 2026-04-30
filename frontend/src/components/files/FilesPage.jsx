@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import PageHeader from '../shared/PageHeader'
+import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -90,8 +91,9 @@ function compactTabLabel(label) {
 }
 
 export default function FilesPage() {
-  const { notify, user, t, page } = useApp()
+  const { notify, user, t } = useApp()
   const { syncChannel } = useSync()
+  const isActive = useIsPageActive('files')
   const [activeTab, setActiveTab] = useState('assets')
 
   const [files, setFiles] = useState([])
@@ -112,6 +114,8 @@ export default function FilesPage() {
   const [loadingResponses, setLoadingResponses] = useState(false)
   const [expandedResponseId, setExpandedResponseId] = useState(null)
   const fileLoadRequestRef = useRef(0)
+  const providerLoadRequestRef = useRef(0)
+  const responseLoadRequestRef = useRef(0)
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallback, fallbackKm = fallback) => {
@@ -162,33 +166,6 @@ export default function FilesPage() {
   }, [mediaType, notify, search])
 
   useEffect(() => {
-    loadFiles()
-    loadProviders()
-    loadResponses()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (page !== 'files') return
-    if (!files.length && !loadingFiles) loadFiles()
-    if (!providers.length && !loadingProviders) loadProviders()
-    if (!responses.length && !loadingResponses) loadResponses()
-  }, [files.length, loadingFiles, loadingProviders, loadingResponses, loadFiles, page, providers.length, responses.length])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { loadFiles() }, 180)
-    return () => window.clearTimeout(timer)
-  }, [loadFiles])
-
-  useEffect(() => {
-    if (!syncChannel) return
-    const channel = String(syncChannel.channel || '')
-    if (channel === 'files') loadFiles()
-    if (channel === 'files' || channel === 'settings') loadProviders()
-  }, [loadFiles, syncChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => () => invalidateTrackedRequest(fileLoadRequestRef), [])
-
-  useEffect(() => {
     if (!selectedProviderMeta) return
     setProviderForm((current) => {
       const nextType = selectedProviderMeta.supportedTypes?.includes(current.provider_type)
@@ -209,30 +186,85 @@ export default function FilesPage() {
     })
   }, [selectedProviderMeta])
 
-  async function loadProviders() {
+  const loadProviders = useCallback(async (label = 'AI providers') => {
+    const requestId = beginTrackedRequest(providerLoadRequestRef)
     setLoadingProviders(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getAiProviders(), 'AI providers')
+      const result = await withLoaderTimeout(() => window.api.getAiProviders(), label)
+      if (!isTrackedRequestCurrent(providerLoadRequestRef, requestId)) return null
       setProviders(Array.isArray(result?.items) ? result.items : [])
       setProviderMeta(result?.providerMeta || {})
+      return result
     } catch (error) {
+      if (!isTrackedRequestCurrent(providerLoadRequestRef, requestId)) return null
       notify(error?.message || 'Failed to load AI providers', 'error')
+      return null
     } finally {
-      setLoadingProviders(false)
+      if (isTrackedRequestCurrent(providerLoadRequestRef, requestId)) {
+        setLoadingProviders(false)
+      }
     }
-  }
+  }, [notify])
 
-  async function loadResponses() {
+  const loadResponses = useCallback(async (label = 'AI responses') => {
+    const requestId = beginTrackedRequest(responseLoadRequestRef)
     setLoadingResponses(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getAiResponses(80), 'AI responses')
+      const result = await withLoaderTimeout(() => window.api.getAiResponses(80), label)
+      if (!isTrackedRequestCurrent(responseLoadRequestRef, requestId)) return null
       setResponses(Array.isArray(result?.items) ? result.items : [])
+      return result
     } catch (error) {
+      if (!isTrackedRequestCurrent(responseLoadRequestRef, requestId)) return null
       notify(error?.message || 'Failed to load AI responses', 'error')
+      return null
     } finally {
-      setLoadingResponses(false)
+      if (isTrackedRequestCurrent(responseLoadRequestRef, requestId)) {
+        setLoadingResponses(false)
+      }
     }
-  }
+  }, [notify])
+
+  useEffect(() => {
+    if (!isActive) {
+      invalidateTrackedRequest(fileLoadRequestRef)
+      invalidateTrackedRequest(providerLoadRequestRef)
+      invalidateTrackedRequest(responseLoadRequestRef)
+      setLoadingFiles(false)
+      setLoadingProviders(false)
+      setLoadingResponses(false)
+      return undefined
+    }
+
+    void loadProviders()
+    void loadResponses()
+    return undefined
+  }, [isActive, loadProviders, loadResponses])
+
+  useEffect(() => {
+    if (!isActive) return undefined
+    const timer = window.setTimeout(() => { void loadFiles() }, 180)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loadFiles])
+
+  useEffect(() => {
+    if (!isActive || !syncChannel) return undefined
+    const channel = String(syncChannel.channel || '')
+    if (channel === 'files') {
+      void loadFiles()
+      void loadResponses('AI responses refresh')
+    }
+    if (channel === 'files' || channel === 'settings') {
+      void loadProviders('AI providers refresh')
+    }
+    return undefined
+  }, [isActive, loadFiles, loadProviders, loadResponses, syncChannel?.channel, syncChannel?.ts])
+
+  useEffect(() => () => {
+    invalidateTrackedRequest(fileLoadRequestRef)
+    invalidateTrackedRequest(providerLoadRequestRef)
+    invalidateTrackedRequest(responseLoadRequestRef)
+  }, [])
 
   async function handleUpload(event) {
     const file = event.target.files?.[0]
