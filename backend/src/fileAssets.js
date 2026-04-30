@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { spawnSync } = require('child_process')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
@@ -37,6 +38,7 @@ const MIME_TO_EXT = {
 }
 
 const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
+let cachedFfmpegPath = undefined
 
 const ASSET_EXT_TO_MIME = Object.entries(MIME_TO_EXT).reduce((map, [mime, ext]) => {
   map[ext] = mime
@@ -152,6 +154,80 @@ async function readImageDimensions(filePath) {
     }
   } catch (_) {
     return { width: null, height: null }
+  }
+}
+
+function getFfmpegPath() {
+  if (cachedFfmpegPath !== undefined) return cachedFfmpegPath
+  const candidate = String(process.env.FFMPEG_PATH || 'ffmpeg').trim()
+  const result = spawnSync(candidate, ['-version'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+  cachedFfmpegPath = result.status === 0 ? candidate : null
+  return cachedFfmpegPath
+}
+
+function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
+  const originalSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : null
+  const baseResult = {
+    original_byte_size: originalSize,
+    optimized_byte_size: originalSize,
+    optimization_status: 'not_optimized',
+    optimization_note: '',
+    duration_seconds: null,
+  }
+  const ext = String(path.extname(String(fileName || filePath)).toLowerCase())
+  if (getMediaType({ mimeType, fileName }) !== 'video') return { ...baseResult, optimization_status: 'not_applicable' }
+  if (ext !== '.mp4') return { ...baseResult, optimization_status: 'not_applicable', optimization_note: 'Video format is stored without recompression' }
+  const ffmpeg = getFfmpegPath()
+  if (!ffmpeg) return { ...baseResult, optimization_note: 'ffmpeg unavailable' }
+
+  const tempPath = `${filePath}.optimized-${Date.now()}.mp4`
+  try {
+    const result = spawnSync(ffmpeg, [
+      '-y',
+      '-i', filePath,
+      '-map', '0:v:0?',
+      '-map', '0:a?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      tempPath,
+    ], { encoding: 'utf8', timeout: 120000, windowsHide: true })
+    if (result.status !== 0 || !fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath) } catch (_) {}
+      return {
+        ...baseResult,
+        optimization_status: 'failed',
+        optimization_note: String(result.stderr || result.error?.message || 'ffmpeg video optimization failed').slice(0, 500),
+      }
+    }
+    const optimizedSize = fs.statSync(tempPath).size
+    if (!originalSize || optimizedSize >= originalSize) {
+      try { fs.unlinkSync(tempPath) } catch (_) {}
+      return {
+        ...baseResult,
+        optimization_status: 'kept_original',
+        optimization_note: 'Optimized output was not smaller',
+      }
+    }
+    fs.copyFileSync(tempPath, filePath)
+    fs.unlinkSync(tempPath)
+    return {
+      original_byte_size: originalSize,
+      optimized_byte_size: optimizedSize,
+      optimization_status: 'optimized',
+      optimization_note: '',
+      duration_seconds: null,
+    }
+  } catch (error) {
+    try { fs.unlinkSync(tempPath) } catch (_) {}
+    return {
+      ...baseResult,
+      optimization_status: 'failed',
+      optimization_note: error?.message || 'Video optimization failed',
+    }
   }
 }
 
@@ -321,8 +397,12 @@ async function registerStoredAsset({
 }) {
   const publicPath = `/uploads/${storedName}`
   const absPath = path.join(UPLOADS_PATH, storedName)
-  const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const mediaType = getMediaType({ mimeType, fileName: storedName })
+  const videoOptimization = mediaType === 'video' && !optimization
+    ? optimizeStoredVideo(absPath, { mimeType, fileName: storedName })
+    : null
+  const effectiveOptimization = optimization || videoOptimization
+  const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const dimensions = mediaType === 'image' ? await readImageDimensions(absPath) : { width: null, height: null }
   return serializeAssetRow(createFileAssetRecord({
     original_name: preserveOriginalDisplayName(originalName || storedName),
@@ -331,11 +411,11 @@ async function registerStoredAsset({
     mime_type: mimeType || getMimeTypeFromName(storedName),
     media_type: mediaType,
     byte_size: stats?.size || null,
-    original_byte_size: optimization?.original_byte_size || stats?.size || null,
-    optimized_byte_size: optimization?.optimized_byte_size || stats?.size || null,
-    optimization_status: optimization?.optimization_status || (mediaType === 'image' ? 'not_optimized' : 'not_applicable'),
-    optimization_note: optimization?.optimization_note || null,
-    duration_seconds: optimization?.duration_seconds || null,
+    original_byte_size: effectiveOptimization?.original_byte_size || stats?.size || null,
+    optimized_byte_size: effectiveOptimization?.optimized_byte_size || stats?.size || null,
+    optimization_status: effectiveOptimization?.optimization_status || (mediaType === 'image' ? 'not_optimized' : 'not_applicable'),
+    optimization_note: effectiveOptimization?.optimization_note || null,
+    duration_seconds: effectiveOptimization?.duration_seconds || null,
     width: dimensions.width,
     height: dimensions.height,
     source,
