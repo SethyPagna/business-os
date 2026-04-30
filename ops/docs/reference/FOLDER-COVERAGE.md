@@ -4,13 +4,13 @@ Auto-generated folder-level documentation coverage for all first-party project f
 
 ## 1. Coverage Summary
 
-Total folders documented: **53**
+Total folders documented: **59**
 
 ## 2. Folder Matrix
 
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
-| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 15 | 4 |
+| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 16 | 7 |
 | 2 | `backend` | Backend project root | 5 | 2 |
 | 3 | `backend/src` | Backend runtime core | 24 | 7 |
 | 4 | `backend/src/config` | Backend runtime core | 1 | 0 |
@@ -24,62 +24,71 @@ Total folders documented: **53**
 | 12 | `backend/src/storage` | Backend runtime core | 1 | 0 |
 | 13 | `backend/test` | Project folder | 16 | 0 |
 | 14 | `frontend` | Frontend project root | 7 | 3 |
-| 15 | `frontend/public` | Project folder | 4 | 0 |
-| 16 | `frontend/src` | Project folder | 6 | 7 |
-| 17 | `frontend/src/api` | Frontend API and sync transport | 5 | 0 |
-| 18 | `frontend/src/app` | Project folder | 1 | 0 |
-| 19 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
-| 20 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
-| 21 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 22 | `frontend/src/components/catalog` | UI pages/components domain | 5 | 0 |
-| 23 | `frontend/src/components/contacts` | UI pages/components domain | 6 | 0 |
-| 24 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
-| 25 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
-| 26 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 5 | 0 |
-| 27 | `frontend/src/components/files` | UI pages/components domain | 2 | 0 |
-| 28 | `frontend/src/components/inventory` | UI pages/components domain | 5 | 0 |
-| 29 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
-| 30 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
-| 31 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
-| 32 | `frontend/src/components/products` | UI pages/components domain | 14 | 0 |
-| 33 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
-| 34 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
-| 35 | `frontend/src/components/returns` | UI pages/components domain | 5 | 0 |
-| 36 | `frontend/src/components/sales` | UI pages/components domain | 5 | 0 |
-| 37 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
-| 38 | `frontend/src/components/shared` | UI pages/components domain | 13 | 0 |
-| 39 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
-| 40 | `frontend/src/components/utils-settings` | UI pages/components domain | 7 | 0 |
-| 41 | `frontend/src/lang` | Localization resources | 2 | 0 |
-| 42 | `frontend/src/platform` | Project folder | 0 | 2 |
-| 43 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
-| 44 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
-| 45 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 46 | `frontend/src/utils` | Project folder | 15 | 0 |
-| 47 | `frontend/tests` | Project folder | 11 | 0 |
-| 48 | `ops/scripts` | Project-level automation scripts | 5 | 5 |
-| 49 | `ops/scripts/backend` | Project folder | 1 | 0 |
-| 50 | `ops/scripts/frontend` | Project folder | 1 | 0 |
-| 51 | `ops/scripts/lib` | Project folder | 1 | 0 |
-| 52 | `ops/scripts/powershell` | Project folder | 1 | 0 |
-| 53 | `ops/scripts/windows` | Project folder | 6 | 0 |
+| 15 | `frontend/public` | Project folder | 4 | 1 |
+| 16 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
+| 17 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
+| 18 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
+| 19 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
+| 20 | `frontend/src` | Project folder | 6 | 7 |
+| 21 | `frontend/src/api` | Frontend API and sync transport | 5 | 0 |
+| 22 | `frontend/src/app` | Project folder | 1 | 0 |
+| 23 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
+| 24 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
+| 25 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
+| 26 | `frontend/src/components/catalog` | UI pages/components domain | 5 | 0 |
+| 27 | `frontend/src/components/contacts` | UI pages/components domain | 6 | 0 |
+| 28 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
+| 29 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
+| 30 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 5 | 0 |
+| 31 | `frontend/src/components/files` | UI pages/components domain | 2 | 0 |
+| 32 | `frontend/src/components/inventory` | UI pages/components domain | 5 | 0 |
+| 33 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
+| 34 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
+| 35 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
+| 36 | `frontend/src/components/products` | UI pages/components domain | 17 | 0 |
+| 37 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
+| 38 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
+| 39 | `frontend/src/components/returns` | UI pages/components domain | 5 | 0 |
+| 40 | `frontend/src/components/sales` | UI pages/components domain | 5 | 0 |
+| 41 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
+| 42 | `frontend/src/components/shared` | UI pages/components domain | 14 | 0 |
+| 43 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
+| 44 | `frontend/src/components/utils-settings` | UI pages/components domain | 7 | 0 |
+| 45 | `frontend/src/lang` | Localization resources | 2 | 0 |
+| 46 | `frontend/src/platform` | Project folder | 0 | 2 |
+| 47 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
+| 48 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
+| 49 | `frontend/src/styles` | Project folder | 1 | 0 |
+| 50 | `frontend/src/utils` | Project folder | 18 | 0 |
+| 51 | `frontend/tests` | Project folder | 16 | 0 |
+| 52 | `ops/run` | Project run-script home for bat and sh launchers | 0 | 2 |
+| 53 | `ops/run/bat` | Windows run/build/verify scripts | 6 | 0 |
+| 54 | `ops/run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
+| 55 | `ops/scripts` | Project-level automation scripts | 5 | 4 |
+| 56 | `ops/scripts/backend` | Project folder | 1 | 0 |
+| 57 | `ops/scripts/frontend` | Project folder | 1 | 0 |
+| 58 | `ops/scripts/lib` | Project folder | 1 | 0 |
+| 59 | `ops/scripts/powershell` | Project folder | 1 | 0 |
 
 ## 3. Detailed Folder Commentary
 
 ### 3.1 Folder: `.`
 
 - Purpose: Project root (run files, setup, packaging, top-level config)
-- Direct files: **15**
-- Direct subfolders: **4**
+- Direct files: **16**
+- Direct subfolders: **7**
 
 #### 3.1.1 Subfolders
 
 | No. | Name |
 |---:|---|
-| 1 | `backend` |
-| 2 | `frontend` |
-| 3 | `ops` |
-| 4 | `runtime` |
+| 1 | `.playwright-cli` |
+| 2 | `backend` |
+| 3 | `frontend` |
+| 4 | `ops` |
+| 5 | `output` |
+| 6 | `runtime` |
+| 7 | `scanbot-web-sdk-7.0.0` |
 
 #### 3.1.2 Files
 
@@ -89,17 +98,18 @@ Total folders documented: **53**
 | 2 | `build-release.bat` | Release build orchestration script |
 | 3 | `clean-generated.bat` | Project source/support file |
 | 4 | `clean-generated.ps1` | Project source/support file |
-| 5 | `README-build.md` | Project documentation entrypoint |
-| 6 | `README.md` | Project documentation entrypoint |
-| 7 | `setup.bat` | Environment setup script |
-| 8 | `setup.sh` | Environment setup script |
-| 9 | `start-server-release.bat` | Server lifecycle launcher script |
-| 10 | `start-server.bat` | Server lifecycle launcher script |
-| 11 | `start-server.sh` | Server lifecycle launcher script |
-| 12 | `stop-server-release.bat` | Server lifecycle launcher script |
-| 13 | `stop-server.bat` | Server lifecycle launcher script |
-| 14 | `stop-server.sh` | Server lifecycle launcher script |
-| 15 | `verify-local.bat` | Project source/support file |
+| 5 | `package.json` | Configuration/data manifest |
+| 6 | `README-build.md` | Project documentation entrypoint |
+| 7 | `README.md` | Project documentation entrypoint |
+| 8 | `setup.bat` | Environment setup script |
+| 9 | `setup.sh` | Environment setup script |
+| 10 | `start-server-release.bat` | Server lifecycle launcher script |
+| 11 | `start-server.bat` | Server lifecycle launcher script |
+| 12 | `start-server.sh` | Server lifecycle launcher script |
+| 13 | `stop-server-release.bat` | Server lifecycle launcher script |
+| 14 | `stop-server.bat` | Server lifecycle launcher script |
+| 15 | `stop-server.sh` | Server lifecycle launcher script |
+| 16 | `verify-local.bat` | Project source/support file |
 
 
 ### 3.2 Folder: `backend`
@@ -385,7 +395,13 @@ Total folders documented: **53**
 
 - Purpose: Project folder
 - Direct files: **4**
-- Direct subfolders: **0**
+- Direct subfolders: **1**
+
+#### 3.15.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `scanbot-web-sdk` |
 
 #### 3.15.2 Files
 
@@ -397,13 +413,79 @@ Total folders documented: **53**
 | 4 | `theme-bootstrap.js` | Project source/support file |
 
 
-### 3.16 Folder: `frontend/src`
+### 3.16 Folder: `frontend/public/scanbot-web-sdk`
+
+- Purpose: Project folder
+- Direct files: **0**
+- Direct subfolders: **1**
+
+#### 3.16.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `bundle` |
+
+
+### 3.17 Folder: `frontend/public/scanbot-web-sdk/bundle`
+
+- Purpose: Project folder
+- Direct files: **2**
+- Direct subfolders: **1**
+
+#### 3.17.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `bin` |
+
+#### 3.17.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `ScanbotSDK.ui2.min.js` | Project source/support file |
+| 2 | `ScanbotSDK.ui2.min.js.LICENSE.txt` | Project source/support file |
+
+
+### 3.18 Folder: `frontend/public/scanbot-web-sdk/bundle/bin`
+
+- Purpose: Project folder
+- Direct files: **0**
+- Direct subfolders: **1**
+
+#### 3.18.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `barcode-scanner` |
+
+
+### 3.19 Folder: `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner`
+
+- Purpose: Project folder
+- Direct files: **8**
+- Direct subfolders: **0**
+
+#### 3.19.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `ScanbotSDK.Asm-simd-threads.js` | Project source/support file |
+| 2 | `ScanbotSDK.Asm-simd-threads.wasm` | Project source/support file |
+| 3 | `ScanbotSDK.Asm-simd-threads.worker.js` | Project source/support file |
+| 4 | `ScanbotSDK.Asm-simd.wasm` | Project source/support file |
+| 5 | `ScanbotSDK.Asm.wasm` | Project source/support file |
+| 6 | `ScanbotSDK.Core-simd-threads.js` | Project source/support file |
+| 7 | `ScanbotSDK.Core-simd.js` | Project source/support file |
+| 8 | `ScanbotSDK.Core.js` | Project source/support file |
+
+
+### 3.20 Folder: `frontend/src`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **7**
 
-#### 3.16.1 Subfolders
+#### 3.20.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -415,7 +497,7 @@ Total folders documented: **53**
 | 6 | `styles` |
 | 7 | `utils` |
 
-#### 3.16.2 Files
+#### 3.20.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -427,13 +509,13 @@ Total folders documented: **53**
 | 6 | `web-api.js` | Project source/support file |
 
 
-### 3.17 Folder: `frontend/src/api`
+### 3.21 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.17.2 Files
+#### 3.21.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -444,26 +526,26 @@ Total folders documented: **53**
 | 5 | `websocket.js` | Frontend API/sync helper |
 
 
-### 3.18 Folder: `frontend/src/app`
+### 3.22 Folder: `frontend/src/app`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.18.2 Files
+#### 3.22.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `appShellUtils.mjs` | Project source/support file |
 
 
-### 3.19 Folder: `frontend/src/components`
+### 3.23 Folder: `frontend/src/components`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **20**
 
-#### 3.19.1 Subfolders
+#### 3.23.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -488,33 +570,33 @@ Total folders documented: **53**
 | 19 | `users` |
 | 20 | `utils-settings` |
 
-#### 3.19.2 Files
+#### 3.23.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `README.md` | UI component/page |
 
 
-### 3.20 Folder: `frontend/src/components/auth`
+### 3.24 Folder: `frontend/src/components/auth`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.20.2 Files
+#### 3.24.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Login.jsx` | UI component/page |
 
 
-### 3.21 Folder: `frontend/src/components/branches`
+### 3.25 Folder: `frontend/src/components/branches`
 
 - Purpose: UI pages/components domain
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.21.2 Files
+#### 3.25.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -523,13 +605,13 @@ Total folders documented: **53**
 | 3 | `TransferModal.jsx` | UI component/page |
 
 
-### 3.22 Folder: `frontend/src/components/catalog`
+### 3.26 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.22.2 Files
+#### 3.26.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -540,13 +622,13 @@ Total folders documented: **53**
 | 5 | `portalEditorUtils.mjs` | UI component/page |
 
 
-### 3.23 Folder: `frontend/src/components/contacts`
+### 3.27 Folder: `frontend/src/components/contacts`
 
 - Purpose: UI pages/components domain
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.23.2 Files
+#### 3.27.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -558,32 +640,32 @@ Total folders documented: **53**
 | 6 | `SuppliersTab.jsx` | UI component/page |
 
 
-### 3.24 Folder: `frontend/src/components/custom-tables`
+### 3.28 Folder: `frontend/src/components/custom-tables`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.24.2 Files
+#### 3.28.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `CustomTables.jsx` | UI component/page |
 
 
-### 3.25 Folder: `frontend/src/components/dashboard`
+### 3.29 Folder: `frontend/src/components/dashboard`
 
 - Purpose: UI pages/components domain
 - Direct files: **2**
 - Direct subfolders: **1**
 
-#### 3.25.1 Subfolders
+#### 3.29.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `charts` |
 
-#### 3.25.2 Files
+#### 3.29.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -591,13 +673,13 @@ Total folders documented: **53**
 | 2 | `MiniStat.jsx` | UI component/page |
 
 
-### 3.26 Folder: `frontend/src/components/dashboard/charts`
+### 3.30 Folder: `frontend/src/components/dashboard/charts`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.26.2 Files
+#### 3.30.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -608,13 +690,13 @@ Total folders documented: **53**
 | 5 | `NoData.jsx` | UI component/page |
 
 
-### 3.27 Folder: `frontend/src/components/files`
+### 3.31 Folder: `frontend/src/components/files`
 
 - Purpose: UI pages/components domain
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.27.2 Files
+#### 3.31.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -622,13 +704,13 @@ Total folders documented: **53**
 | 2 | `FilesPage.jsx` | UI component/page |
 
 
-### 3.28 Folder: `frontend/src/components/inventory`
+### 3.32 Folder: `frontend/src/components/inventory`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.28.2 Files
+#### 3.32.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -639,39 +721,39 @@ Total folders documented: **53**
 | 5 | `ProductDetailModal.jsx` | UI component/page |
 
 
-### 3.29 Folder: `frontend/src/components/loyalty-points`
+### 3.33 Folder: `frontend/src/components/loyalty-points`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.29.2 Files
+#### 3.33.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `LoyaltyPointsPage.jsx` | UI component/page |
 
 
-### 3.30 Folder: `frontend/src/components/navigation`
+### 3.34 Folder: `frontend/src/components/navigation`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.30.2 Files
+#### 3.34.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Sidebar.jsx` | UI component/page |
 
 
-### 3.31 Folder: `frontend/src/components/pos`
+### 3.35 Folder: `frontend/src/components/pos`
 
 - Purpose: UI pages/components domain
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.31.2 Files
+#### 3.35.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -683,52 +765,55 @@ Total folders documented: **53**
 | 6 | `QuickAddModal.jsx` | UI component/page |
 
 
-### 3.32 Folder: `frontend/src/components/products`
+### 3.36 Folder: `frontend/src/components/products`
 
 - Purpose: UI pages/components domain
-- Direct files: **14**
+- Direct files: **17**
 - Direct subfolders: **0**
 
-#### 3.32.2 Files
+#### 3.36.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `BarcodeScannerModal.jsx` | UI component/page |
-| 2 | `barcodeScannerState.mjs` | UI component/page |
-| 3 | `BranchStockAdjuster.jsx` | UI component/page |
-| 4 | `BulkAddStockModal.jsx` | UI component/page |
-| 5 | `BulkImportModal.jsx` | UI component/page |
-| 6 | `HeaderActions.jsx` | UI component/page |
-| 7 | `ManageBrandsModal.jsx` | UI component/page |
-| 8 | `ManageCategoriesModal.jsx` | UI component/page |
-| 9 | `ManageUnitsModal.jsx` | UI component/page |
-| 10 | `primitives.jsx` | UI component/page |
-| 11 | `ProductDetailModal.jsx` | UI component/page |
-| 12 | `ProductForm.jsx` | UI component/page |
-| 13 | `Products.jsx` | UI component/page |
-| 14 | `VariantFormModal.jsx` | UI component/page |
+| 1 | `barcodeImageScanner.mjs` | UI component/page |
+| 2 | `BarcodeScannerModal.jsx` | UI component/page |
+| 3 | `barcodeScannerState.mjs` | UI component/page |
+| 4 | `BranchStockAdjuster.jsx` | UI component/page |
+| 5 | `BulkAddStockModal.jsx` | UI component/page |
+| 6 | `BulkImportModal.jsx` | UI component/page |
+| 7 | `HeaderActions.jsx` | UI component/page |
+| 8 | `ManageBrandsModal.jsx` | UI component/page |
+| 9 | `ManageCategoriesModal.jsx` | UI component/page |
+| 10 | `ManageUnitsModal.jsx` | UI component/page |
+| 11 | `primitives.jsx` | UI component/page |
+| 12 | `ProductDetailModal.jsx` | UI component/page |
+| 13 | `ProductForm.jsx` | UI component/page |
+| 14 | `productHistoryHelpers.mjs` | UI component/page |
+| 15 | `Products.jsx` | UI component/page |
+| 16 | `scanbotScanner.mjs` | UI component/page |
+| 17 | `VariantFormModal.jsx` | UI component/page |
 
 
-### 3.33 Folder: `frontend/src/components/receipt`
+### 3.37 Folder: `frontend/src/components/receipt`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.33.2 Files
+#### 3.37.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Receipt.jsx` | UI component/page |
 
 
-### 3.34 Folder: `frontend/src/components/receipt-settings`
+### 3.38 Folder: `frontend/src/components/receipt-settings`
 
 - Purpose: UI pages/components domain
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.34.2 Files
+#### 3.38.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -742,13 +827,13 @@ Total folders documented: **53**
 | 8 | `template.js` | UI component/page |
 
 
-### 3.35 Folder: `frontend/src/components/returns`
+### 3.39 Folder: `frontend/src/components/returns`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.35.2 Files
+#### 3.39.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -759,13 +844,13 @@ Total folders documented: **53**
 | 5 | `Returns.jsx` | UI component/page |
 
 
-### 3.36 Folder: `frontend/src/components/sales`
+### 3.40 Folder: `frontend/src/components/sales`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.36.2 Files
+#### 3.40.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -776,51 +861,52 @@ Total folders documented: **53**
 | 5 | `StatusBadge.jsx` | UI component/page |
 
 
-### 3.37 Folder: `frontend/src/components/server`
+### 3.41 Folder: `frontend/src/components/server`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.37.2 Files
+#### 3.41.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ServerPage.jsx` | UI component/page |
 
 
-### 3.38 Folder: `frontend/src/components/shared`
+### 3.42 Folder: `frontend/src/components/shared`
 
 - Purpose: UI pages/components domain
-- Direct files: **13**
+- Direct files: **14**
 - Direct subfolders: **0**
 
-#### 3.38.2 Files
+#### 3.42.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ExportMenu.jsx` | UI component/page |
-| 2 | `FilterMenu.jsx` | UI component/page |
-| 3 | `ImageGalleryLightbox.jsx` | UI component/page |
-| 4 | `Modal.jsx` | UI component/page |
-| 5 | `navigationConfig.js` | UI component/page |
-| 6 | `NotificationCenter.jsx` | UI component/page |
-| 7 | `pageActivity.js` | UI component/page |
-| 8 | `PageHeader.jsx` | UI component/page |
-| 9 | `PageHelpButton.jsx` | UI component/page |
-| 10 | `pageHelpContent.js` | UI component/page |
-| 11 | `PortalMenu.jsx` | UI component/page |
-| 12 | `QuickPreferenceToggles.jsx` | UI component/page |
-| 13 | `WriteConflictModal.jsx` | UI component/page |
+| 1 | `ActionHistoryBar.jsx` | UI component/page |
+| 2 | `ExportMenu.jsx` | UI component/page |
+| 3 | `FilterMenu.jsx` | UI component/page |
+| 4 | `ImageGalleryLightbox.jsx` | UI component/page |
+| 5 | `Modal.jsx` | UI component/page |
+| 6 | `navigationConfig.js` | UI component/page |
+| 7 | `NotificationCenter.jsx` | UI component/page |
+| 8 | `pageActivity.js` | UI component/page |
+| 9 | `PageHeader.jsx` | UI component/page |
+| 10 | `PageHelpButton.jsx` | UI component/page |
+| 11 | `pageHelpContent.js` | UI component/page |
+| 12 | `PortalMenu.jsx` | UI component/page |
+| 13 | `QuickPreferenceToggles.jsx` | UI component/page |
+| 14 | `WriteConflictModal.jsx` | UI component/page |
 
 
-### 3.39 Folder: `frontend/src/components/users`
+### 3.43 Folder: `frontend/src/components/users`
 
 - Purpose: UI pages/components domain
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.39.2 Files
+#### 3.43.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -830,13 +916,13 @@ Total folders documented: **53**
 | 4 | `Users.jsx` | UI component/page |
 
 
-### 3.40 Folder: `frontend/src/components/utils-settings`
+### 3.44 Folder: `frontend/src/components/utils-settings`
 
 - Purpose: UI pages/components domain
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.40.2 Files
+#### 3.44.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -849,13 +935,13 @@ Total folders documented: **53**
 | 7 | `Settings.jsx` | UI component/page |
 
 
-### 3.41 Folder: `frontend/src/lang`
+### 3.45 Folder: `frontend/src/lang`
 
 - Purpose: Localization resources
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.41.2 Files
+#### 3.45.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -863,13 +949,13 @@ Total folders documented: **53**
 | 2 | `km.json` | Localization dictionary |
 
 
-### 3.42 Folder: `frontend/src/platform`
+### 3.46 Folder: `frontend/src/platform`
 
 - Purpose: Project folder
 - Direct files: **0**
 - Direct subfolders: **2**
 
-#### 3.42.1 Subfolders
+#### 3.46.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -877,123 +963,33 @@ Total folders documented: **53**
 | 2 | `storage` |
 
 
-### 3.43 Folder: `frontend/src/platform/runtime`
+### 3.47 Folder: `frontend/src/platform/runtime`
 
 - Purpose: Project folder
 - Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.43.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `clientRuntime.js` | Project source/support file |
-
-
-### 3.44 Folder: `frontend/src/platform/storage`
-
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.44.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `storagePolicy.mjs` | Project source/support file |
-
-
-### 3.45 Folder: `frontend/src/styles`
-
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.45.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `main.css` | Project source/support file |
-
-
-### 3.46 Folder: `frontend/src/utils`
-
-- Purpose: Project folder
-- Direct files: **15**
-- Direct subfolders: **0**
-
-#### 3.46.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `appRefresh.js` | Utility helper |
-| 2 | `color.js` | Utility helper |
-| 3 | `csv.js` | Utility helper |
-| 4 | `csvImport.js` | Utility helper |
-| 5 | `dateHelpers.js` | Utility helper |
-| 6 | `deviceInfo.js` | Utility helper |
-| 7 | `exportPackage.js` | Utility helper |
-| 8 | `exportReports.jsx` | Utility helper |
-| 9 | `favicon.js` | Utility helper |
-| 10 | `formatters.js` | Utility helper |
-| 11 | `groupedRecords.mjs` | Utility helper |
-| 12 | `index.js` | Utility helper |
-| 13 | `loaders.mjs` | Utility helper |
-| 14 | `pricing.js` | Utility helper |
-| 15 | `printReceipt.js` | Utility helper |
-
-
-### 3.47 Folder: `frontend/tests`
-
-- Purpose: Project folder
-- Direct files: **11**
 - Direct subfolders: **0**
 
 #### 3.47.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `appShellUtils.test.mjs` | Project source/support file |
-| 2 | `barcodeScannerState.test.mjs` | Project source/support file |
-| 3 | `csvImport.test.mjs` | Project source/support file |
-| 4 | `exportPackages.test.mjs` | Project source/support file |
-| 5 | `groupedRecords.test.mjs` | Project source/support file |
-| 6 | `loaders.test.mjs` | Project source/support file |
-| 7 | `portalEditorUtils.test.mjs` | Project source/support file |
-| 8 | `posCore.test.mjs` | Project source/support file |
-| 9 | `pricingContacts.test.mjs` | Project source/support file |
-| 10 | `receiptTemplate.test.mjs` | Project source/support file |
-| 11 | `storagePolicy.test.mjs` | Project source/support file |
+| 1 | `clientRuntime.js` | Project source/support file |
 
 
-### 3.48 Folder: `ops/scripts`
+### 3.48 Folder: `frontend/src/platform/storage`
 
-- Purpose: Project-level automation scripts
-- Direct files: **5**
-- Direct subfolders: **5**
-
-#### 3.48.1 Subfolders
-
-| No. | Name |
-|---:|---|
-| 1 | `backend` |
-| 2 | `frontend` |
-| 3 | `lib` |
-| 4 | `powershell` |
-| 5 | `windows` |
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
 
 #### 3.48.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `generate-doc-reference.js` | Project source/support file |
-| 2 | `generate-full-project-docs.js` | Project source/support file |
-| 3 | `performance-scan.js` | Project source/support file |
-| 4 | `sync-firebase-release-env.ps1` | Project source/support file |
-| 5 | `verify-runtime-deps.js` | Project source/support file |
+| 1 | `storagePolicy.mjs` | Project source/support file |
 
 
-### 3.49 Folder: `ops/scripts/backend`
+### 3.49 Folder: `frontend/src/styles`
 
 - Purpose: Project folder
 - Direct files: **1**
@@ -1003,51 +999,84 @@ Total folders documented: **53**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `verify-data-integrity.js` | Project source/support file |
+| 1 | `main.css` | Project source/support file |
 
 
-### 3.50 Folder: `ops/scripts/frontend`
+### 3.50 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **18**
 - Direct subfolders: **0**
 
 #### 3.50.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `verify-i18n.js` | Project source/support file |
+| 1 | `actionHistory.mjs` | Utility helper |
+| 2 | `appRefresh.js` | Utility helper |
+| 3 | `color.js` | Utility helper |
+| 4 | `csv.js` | Utility helper |
+| 5 | `csvImport.js` | Utility helper |
+| 6 | `dateHelpers.js` | Utility helper |
+| 7 | `deviceInfo.js` | Utility helper |
+| 8 | `exportPackage.js` | Utility helper |
+| 9 | `exportReports.jsx` | Utility helper |
+| 10 | `favicon.js` | Utility helper |
+| 11 | `formatters.js` | Utility helper |
+| 12 | `groupedRecords.mjs` | Utility helper |
+| 13 | `historyHelpers.mjs` | Utility helper |
+| 14 | `index.js` | Utility helper |
+| 15 | `loaders.mjs` | Utility helper |
+| 16 | `pricing.js` | Utility helper |
+| 17 | `printReceipt.js` | Utility helper |
+| 18 | `productGrouping.mjs` | Utility helper |
 
 
-### 3.51 Folder: `ops/scripts/lib`
+### 3.51 Folder: `frontend/tests`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **16**
 - Direct subfolders: **0**
 
 #### 3.51.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `fs-utils.js` | Project source/support file |
+| 1 | `appShellUtils.test.mjs` | Project source/support file |
+| 2 | `barcodeImageScanner.test.mjs` | Project source/support file |
+| 3 | `barcodeScannerState.test.mjs` | Project source/support file |
+| 4 | `csvImport.test.mjs` | Project source/support file |
+| 5 | `exportPackages.test.mjs` | Project source/support file |
+| 6 | `groupedRecords.test.mjs` | Project source/support file |
+| 7 | `historyHelpers.test.mjs` | Project source/support file |
+| 8 | `loaders.test.mjs` | Project source/support file |
+| 9 | `portalEditorUtils.test.mjs` | Project source/support file |
+| 10 | `posCore.test.mjs` | Project source/support file |
+| 11 | `pricingContacts.test.mjs` | Project source/support file |
+| 12 | `productGrouping.test.mjs` | Project source/support file |
+| 13 | `productHistoryHelpers.test.mjs` | Project source/support file |
+| 14 | `receiptTemplate.test.mjs` | Project source/support file |
+| 15 | `scanbotScanner.test.mjs` | Project source/support file |
+| 16 | `storagePolicy.test.mjs` | Project source/support file |
 
 
-### 3.52 Folder: `ops/scripts/powershell`
+### 3.52 Folder: `ops/run`
 
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
+- Purpose: Project run-script home for bat and sh launchers
+- Direct files: **0**
+- Direct subfolders: **2**
 
-#### 3.52.2 Files
+#### 3.52.1 Subfolders
 
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `clean-generated.ps1` | Project source/support file |
+| No. | Name |
+|---:|---|
+| 1 | `bat` |
+| 2 | `sh` |
 
 
-### 3.53 Folder: `ops/scripts/windows`
+### 3.53 Folder: `ops/run/bat`
 
-- Purpose: Project folder
+- Purpose: Windows run/build/verify scripts
 - Direct files: **6**
 - Direct subfolders: **0**
 
@@ -1061,5 +1090,98 @@ Total folders documented: **53**
 | 4 | `start-server.bat` | Project source/support file |
 | 5 | `stop-server.bat` | Project source/support file |
 | 6 | `verify-local.bat` | Project source/support file |
+
+
+### 3.54 Folder: `ops/run/sh`
+
+- Purpose: POSIX run/setup/stop scripts
+- Direct files: **3**
+- Direct subfolders: **0**
+
+#### 3.54.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `setup.sh` | Project source/support file |
+| 2 | `start-server.sh` | Project source/support file |
+| 3 | `stop-server.sh` | Project source/support file |
+
+
+### 3.55 Folder: `ops/scripts`
+
+- Purpose: Project-level automation scripts
+- Direct files: **5**
+- Direct subfolders: **4**
+
+#### 3.55.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `backend` |
+| 2 | `frontend` |
+| 3 | `lib` |
+| 4 | `powershell` |
+
+#### 3.55.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `generate-doc-reference.js` | Project source/support file |
+| 2 | `generate-full-project-docs.js` | Project source/support file |
+| 3 | `performance-scan.js` | Project source/support file |
+| 4 | `sync-firebase-release-env.ps1` | Project source/support file |
+| 5 | `verify-runtime-deps.js` | Project source/support file |
+
+
+### 3.56 Folder: `ops/scripts/backend`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.56.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `verify-data-integrity.js` | Project source/support file |
+
+
+### 3.57 Folder: `ops/scripts/frontend`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.57.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `verify-i18n.js` | Project source/support file |
+
+
+### 3.58 Folder: `ops/scripts/lib`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.58.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `fs-utils.js` | Project source/support file |
+
+
+### 3.59 Folder: `ops/scripts/powershell`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.59.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `clean-generated.ps1` | Project source/support file |
 
 

@@ -13,7 +13,7 @@ const VARIANT_ROOTS = fs.readdirSync(ROOT, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && /^business-os-v\d/i.test(entry.name))
   .map((entry) => entry.name)
   .sort((a, b) => a.localeCompare(b))
-const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts', ...VARIANT_ROOTS]
+const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts', 'ops/run', ...VARIANT_ROOTS]
 const EXCLUDED_DIRS = new Set([
   'node_modules',
   'dist',
@@ -134,6 +134,7 @@ function lineCount(text) {
 function fileCategory(filePath) {
   const p = rel(filePath)
   if (!p.includes('/')) return 'project-root'
+  if (p.startsWith('ops/run/')) return 'project-scripts'
   if (p.startsWith('ops/scripts/')) return 'project-scripts'
   if (p.startsWith('frontend/src/components/')) return 'frontend-ui'
   if (p.startsWith('frontend/src/api/')) return 'frontend-api'
@@ -339,6 +340,9 @@ function folderPurpose(folderPath) {
   if (p === 'frontend') return 'Frontend project root'
   if (p === 'backend') return 'Backend project root'
   if (p === 'scripts' || p === 'ops/scripts') return 'Project-level automation scripts'
+  if (p === 'ops/run') return 'Project run-script home for bat and sh launchers'
+  if (p === 'ops/run/bat') return 'Windows run/build/verify scripts'
+  if (p === 'ops/run/sh') return 'POSIX run/setup/stop scripts'
   if (p.startsWith('frontend/src/components')) return 'UI pages/components domain'
   if (p.startsWith('frontend/src/api')) return 'Frontend API and sync transport'
   if (p.startsWith('frontend/src/lang')) return 'Localization resources'

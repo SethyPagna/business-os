@@ -4,7 +4,7 @@ Auto-generated import/export and dependency-link coverage for frontend/backend c
 
 ## 1. Coverage Summary
 
-Code files documented: **216**
+Code files documented: **234**
 
 ## 2. Dependency Matrix
 
@@ -81,151 +81,169 @@ Code files documented: **216**
 | 69 | `backend/test/stockConsistency.test.js` | 7 | 0 | 0 | 0 |
 | 70 | `backend/test/uploadSecurity.test.js` | 3 | 0 | 2 | 0 |
 | 71 | `frontend/postcss.config.mjs` | 0 | 0 | 0 | 0 |
-| 72 | `frontend/public/sw.js` | 0 | 0 | 0 | 0 |
-| 73 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
-| 74 | `frontend/src/api/http.js` | 2 | 21 | 2 | 5 |
-| 75 | `frontend/src/api/localDb.js` | 1 | 10 | 0 | 3 |
-| 76 | `frontend/src/api/methods.js` | 5 | 146 | 5 | 1 |
-| 77 | `frontend/src/api/websocket.js` | 2 | 4 | 2 | 2 |
-| 78 | `frontend/src/App.jsx` | 28 | 1 | 27 | 1 |
-| 79 | `frontend/src/app/appShellUtils.mjs` | 0 | 5 | 0 | 2 |
-| 80 | `frontend/src/AppContext.jsx` | 10 | 6 | 9 | 50 |
-| 81 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
-| 82 | `frontend/src/components/branches/Branches.jsx` | 8 | 1 | 6 | 1 |
-| 83 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
-| 84 | `frontend/src/components/branches/TransferModal.jsx` | 2 | 1 | 1 | 1 |
-| 85 | `frontend/src/components/catalog/CatalogPage.jsx` | 10 | 1 | 9 | 1 |
-| 86 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 | 1 | 2 | 1 |
-| 87 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
-| 88 | `frontend/src/components/catalog/catalogUi.jsx` | 1 | 3 | 0 | 3 |
-| 89 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 | 6 | 0 | 0 |
-| 90 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 9 | 0 | 0 |
-| 91 | `frontend/src/components/contacts/Contacts.jsx` | 11 | 1 | 9 | 1 |
-| 92 | `frontend/src/components/contacts/CustomersTab.jsx` | 10 | 2 | 8 | 2 |
-| 93 | `frontend/src/components/contacts/DeliveryTab.jsx` | 10 | 2 | 8 | 1 |
-| 94 | `frontend/src/components/contacts/shared.jsx` | 6 | 5 | 4 | 4 |
-| 95 | `frontend/src/components/contacts/SuppliersTab.jsx` | 10 | 0 | 8 | 1 |
-| 96 | `frontend/src/components/custom-tables/CustomTables.jsx` | 2 | 1 | 1 | 0 |
-| 97 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
-| 98 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
-| 99 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
-| 100 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
-| 101 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
-| 102 | `frontend/src/components/dashboard/Dashboard.jsx` | 14 | 1 | 12 | 1 |
-| 103 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
-| 104 | `frontend/src/components/files/FilePickerModal.jsx` | 3 | 1 | 2 | 5 |
-| 105 | `frontend/src/components/files/FilesPage.jsx` | 3 | 1 | 2 | 1 |
-| 106 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
-| 107 | `frontend/src/components/inventory/Inventory.jsx` | 15 | 1 | 13 | 1 |
-| 108 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 4 | 1 | 3 | 1 |
-| 109 | `frontend/src/components/inventory/movementGroups.js` | 0 | 2 | 0 | 1 |
-| 110 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 0 | 1 | 0 | 1 |
-| 111 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 3 | 1 | 1 | 1 |
-| 112 | `frontend/src/components/navigation/Sidebar.jsx` | 6 | 1 | 5 | 1 |
-| 113 | `frontend/src/components/pos/CartItem.jsx` | 1 | 1 | 1 | 1 |
-| 114 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
-| 115 | `frontend/src/components/pos/POS.jsx` | 13 | 1 | 11 | 1 |
-| 116 | `frontend/src/components/pos/posCore.mjs` | 1 | 8 | 1 | 0 |
-| 117 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
-| 118 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
-| 119 | `frontend/src/components/products/BarcodeScannerModal.jsx` | 5 | 1 | 2 | 1 |
-| 120 | `frontend/src/components/products/barcodeScannerState.mjs` | 0 | 1 | 0 | 2 |
-| 121 | `frontend/src/components/products/BranchStockAdjuster.jsx` | 1 | 1 | 0 | 1 |
-| 122 | `frontend/src/components/products/BulkAddStockModal.jsx` | 2 | 1 | 1 | 1 |
-| 123 | `frontend/src/components/products/BulkImportModal.jsx` | 4 | 1 | 3 | 1 |
-| 124 | `frontend/src/components/products/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
-| 125 | `frontend/src/components/products/ManageBrandsModal.jsx` | 3 | 1 | 2 | 1 |
-| 126 | `frontend/src/components/products/ManageCategoriesModal.jsx` | 3 | 1 | 2 | 1 |
-| 127 | `frontend/src/components/products/ManageUnitsModal.jsx` | 3 | 1 | 2 | 1 |
-| 128 | `frontend/src/components/products/primitives.jsx` | 2 | 0 | 0 | 7 |
-| 129 | `frontend/src/components/products/ProductDetailModal.jsx` | 3 | 1 | 2 | 1 |
-| 130 | `frontend/src/components/products/ProductForm.jsx` | 8 | 1 | 6 | 1 |
-| 131 | `frontend/src/components/products/Products.jsx` | 21 | 1 | 19 | 1 |
-| 132 | `frontend/src/components/products/VariantFormModal.jsx` | 5 | 1 | 4 | 1 |
-| 133 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
-| 134 | `frontend/src/components/receipt-settings/constants.js` | 0 | 3 | 0 | 4 |
-| 135 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
-| 136 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
-| 137 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
-| 138 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 | 1 | 1 | 1 |
-| 139 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 11 | 1 | 9 | 1 |
-| 140 | `frontend/src/components/receipt-settings/template.js` | 1 | 2 | 1 | 3 |
-| 141 | `frontend/src/components/receipt/Receipt.jsx` | 6 | 1 | 4 | 3 |
-| 142 | `frontend/src/components/returns/EditReturnModal.jsx` | 2 | 1 | 1 | 1 |
-| 143 | `frontend/src/components/returns/NewReturnModal.jsx` | 3 | 1 | 2 | 1 |
-| 144 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 2 | 1 | 1 | 1 |
-| 145 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
-| 146 | `frontend/src/components/returns/Returns.jsx` | 12 | 1 | 10 | 1 |
-| 147 | `frontend/src/components/sales/ExportModal.jsx` | 4 | 1 | 2 | 1 |
-| 148 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
-| 149 | `frontend/src/components/sales/Sales.jsx` | 14 | 1 | 12 | 1 |
-| 150 | `frontend/src/components/sales/SalesImportModal.jsx` | 4 | 1 | 3 | 1 |
-| 151 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 5 |
-| 152 | `frontend/src/components/server/ServerPage.jsx` | 3 | 1 | 2 | 1 |
-| 153 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 6 |
-| 154 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
-| 155 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
-| 156 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 22 |
-| 157 | `frontend/src/components/shared/navigationConfig.js` | 0 | 4 | 0 | 2 |
-| 158 | `frontend/src/components/shared/NotificationCenter.jsx` | 3 | 1 | 1 | 2 |
-| 159 | `frontend/src/components/shared/pageActivity.js` | 2 | 1 | 1 | 1 |
-| 160 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
-| 161 | `frontend/src/components/shared/PageHelpButton.jsx` | 4 | 1 | 2 | 1 |
-| 162 | `frontend/src/components/shared/pageHelpContent.js` | 0 | 2 | 0 | 1 |
-| 163 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 8 |
-| 164 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
-| 165 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
-| 166 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 2 | 0 | 2 |
-| 167 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
-| 168 | `frontend/src/components/users/UserProfileModal.jsx` | 8 | 1 | 6 | 2 |
-| 169 | `frontend/src/components/users/Users.jsx` | 9 | 1 | 7 | 1 |
-| 170 | `frontend/src/components/utils-settings/AuditLog.jsx` | 7 | 1 | 5 | 1 |
-| 171 | `frontend/src/components/utils-settings/Backup.jsx` | 8 | 1 | 6 | 1 |
-| 172 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
-| 173 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
-| 174 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 | 1 | 1 | 2 |
-| 175 | `frontend/src/components/utils-settings/ResetData.jsx` | 4 | 0 | 2 | 1 |
-| 176 | `frontend/src/components/utils-settings/Settings.jsx` | 9 | 1 | 7 | 1 |
-| 177 | `frontend/src/constants.js` | 0 | 12 | 0 | 8 |
-| 178 | `frontend/src/index.jsx` | 5 | 0 | 3 | 0 |
-| 179 | `frontend/src/platform/runtime/clientRuntime.js` | 2 | 8 | 2 | 3 |
-| 180 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 8 | 0 | 0 |
-| 181 | `frontend/src/utils/appRefresh.js` | 0 | 1 | 0 | 2 |
-| 182 | `frontend/src/utils/color.js` | 0 | 1 | 0 | 2 |
-| 183 | `frontend/src/utils/csv.js` | 0 | 5 | 0 | 12 |
-| 184 | `frontend/src/utils/csvImport.js` | 0 | 4 | 0 | 3 |
-| 185 | `frontend/src/utils/dateHelpers.js` | 0 | 2 | 0 | 1 |
-| 186 | `frontend/src/utils/deviceInfo.js` | 0 | 2 | 0 | 6 |
-| 187 | `frontend/src/utils/exportPackage.js` | 1 | 2 | 1 | 3 |
-| 188 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
-| 189 | `frontend/src/utils/favicon.js` | 0 | 1 | 0 | 3 |
-| 190 | `frontend/src/utils/formatters.js` | 0 | 4 | 0 | 16 |
-| 191 | `frontend/src/utils/groupedRecords.mjs` | 0 | 6 | 0 | 9 |
-| 192 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
-| 193 | `frontend/src/utils/loaders.mjs` | 0 | 8 | 0 | 10 |
-| 194 | `frontend/src/utils/pricing.js` | 0 | 4 | 0 | 10 |
-| 195 | `frontend/src/utils/printReceipt.js` | 0 | 9 | 0 | 2 |
-| 196 | `frontend/src/web-api.js` | 6 | 0 | 6 | 1 |
-| 197 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
-| 198 | `frontend/tests/appShellUtils.test.mjs` | 2 | 0 | 1 | 0 |
-| 199 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
-| 200 | `frontend/tests/csvImport.test.mjs` | 2 | 0 | 1 | 0 |
-| 201 | `frontend/tests/exportPackages.test.mjs` | 3 | 0 | 2 | 0 |
-| 202 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
-| 203 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
-| 204 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
-| 205 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
-| 206 | `frontend/tests/pricingContacts.test.mjs` | 2 | 0 | 1 | 0 |
-| 207 | `frontend/tests/receiptTemplate.test.mjs` | 3 | 0 | 2 | 0 |
-| 208 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
-| 209 | `frontend/vite.config.mjs` | 2 | 1 | 0 | 0 |
-| 210 | `ops/scripts/backend/verify-data-integrity.js` | 4 | 0 | 3 | 0 |
-| 211 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
-| 212 | `ops/scripts/generate-doc-reference.js` | 3 | 0 | 1 | 0 |
-| 213 | `ops/scripts/generate-full-project-docs.js` | 3 | 1 | 1 | 0 |
-| 214 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 4 |
-| 215 | `ops/scripts/performance-scan.js` | 3 | 0 | 1 | 0 |
-| 216 | `ops/scripts/verify-runtime-deps.js` | 2 | 0 | 0 | 0 |
+| 72 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 | 0 | 0 | 0 |
+| 73 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 | 0 | 0 | 0 |
+| 74 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 | 0 | 0 | 0 |
+| 75 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 | 0 | 0 | 0 |
+| 76 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 | 0 | 0 | 0 |
+| 77 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 | 0 | 0 | 0 |
+| 78 | `frontend/public/sw.js` | 0 | 0 | 0 | 0 |
+| 79 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
+| 80 | `frontend/src/api/http.js` | 2 | 21 | 2 | 5 |
+| 81 | `frontend/src/api/localDb.js` | 1 | 10 | 0 | 3 |
+| 82 | `frontend/src/api/methods.js` | 5 | 146 | 5 | 1 |
+| 83 | `frontend/src/api/websocket.js` | 2 | 4 | 2 | 2 |
+| 84 | `frontend/src/App.jsx` | 28 | 1 | 27 | 1 |
+| 85 | `frontend/src/app/appShellUtils.mjs` | 0 | 5 | 0 | 2 |
+| 86 | `frontend/src/AppContext.jsx` | 10 | 6 | 9 | 50 |
+| 87 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
+| 88 | `frontend/src/components/branches/Branches.jsx` | 12 | 1 | 10 | 1 |
+| 89 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
+| 90 | `frontend/src/components/branches/TransferModal.jsx` | 2 | 1 | 1 | 1 |
+| 91 | `frontend/src/components/catalog/CatalogPage.jsx` | 11 | 1 | 10 | 1 |
+| 92 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 4 | 1 | 2 | 1 |
+| 93 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
+| 94 | `frontend/src/components/catalog/catalogUi.jsx` | 1 | 3 | 0 | 3 |
+| 95 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 | 6 | 0 | 0 |
+| 96 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 9 | 0 | 0 |
+| 97 | `frontend/src/components/contacts/Contacts.jsx` | 12 | 1 | 10 | 1 |
+| 98 | `frontend/src/components/contacts/CustomersTab.jsx` | 13 | 2 | 11 | 2 |
+| 99 | `frontend/src/components/contacts/DeliveryTab.jsx` | 13 | 2 | 11 | 1 |
+| 100 | `frontend/src/components/contacts/shared.jsx` | 6 | 5 | 4 | 4 |
+| 101 | `frontend/src/components/contacts/SuppliersTab.jsx` | 13 | 0 | 11 | 1 |
+| 102 | `frontend/src/components/custom-tables/CustomTables.jsx` | 5 | 1 | 4 | 0 |
+| 103 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
+| 104 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
+| 105 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
+| 106 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
+| 107 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
+| 108 | `frontend/src/components/dashboard/Dashboard.jsx` | 15 | 1 | 13 | 1 |
+| 109 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
+| 110 | `frontend/src/components/files/FilePickerModal.jsx` | 3 | 1 | 2 | 5 |
+| 111 | `frontend/src/components/files/FilesPage.jsx` | 7 | 1 | 6 | 1 |
+| 112 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
+| 113 | `frontend/src/components/inventory/Inventory.jsx` | 18 | 1 | 16 | 1 |
+| 114 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 4 | 1 | 3 | 1 |
+| 115 | `frontend/src/components/inventory/movementGroups.js` | 0 | 2 | 0 | 1 |
+| 116 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 0 | 1 | 0 | 1 |
+| 117 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 4 | 1 | 2 | 1 |
+| 118 | `frontend/src/components/navigation/Sidebar.jsx` | 6 | 1 | 5 | 1 |
+| 119 | `frontend/src/components/pos/CartItem.jsx` | 1 | 1 | 1 | 1 |
+| 120 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
+| 121 | `frontend/src/components/pos/POS.jsx` | 14 | 1 | 12 | 1 |
+| 122 | `frontend/src/components/pos/posCore.mjs` | 2 | 8 | 2 | 0 |
+| 123 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
+| 124 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
+| 125 | `frontend/src/components/products/barcodeImageScanner.mjs` | 1 | 1 | 0 | 2 |
+| 126 | `frontend/src/components/products/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
+| 127 | `frontend/src/components/products/barcodeScannerState.mjs` | 0 | 1 | 0 | 2 |
+| 128 | `frontend/src/components/products/BranchStockAdjuster.jsx` | 1 | 1 | 0 | 1 |
+| 129 | `frontend/src/components/products/BulkAddStockModal.jsx` | 1 | 1 | 0 | 1 |
+| 130 | `frontend/src/components/products/BulkImportModal.jsx` | 4 | 1 | 3 | 1 |
+| 131 | `frontend/src/components/products/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
+| 132 | `frontend/src/components/products/ManageBrandsModal.jsx` | 3 | 1 | 2 | 1 |
+| 133 | `frontend/src/components/products/ManageCategoriesModal.jsx` | 3 | 1 | 2 | 1 |
+| 134 | `frontend/src/components/products/ManageUnitsModal.jsx` | 3 | 1 | 2 | 1 |
+| 135 | `frontend/src/components/products/primitives.jsx` | 2 | 0 | 0 | 7 |
+| 136 | `frontend/src/components/products/ProductDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 137 | `frontend/src/components/products/ProductForm.jsx` | 9 | 1 | 7 | 1 |
+| 138 | `frontend/src/components/products/productHistoryHelpers.mjs` | 0 | 2 | 0 | 2 |
+| 139 | `frontend/src/components/products/Products.jsx` | 26 | 1 | 24 | 1 |
+| 140 | `frontend/src/components/products/scanbotScanner.mjs` | 0 | 3 | 0 | 3 |
+| 141 | `frontend/src/components/products/VariantFormModal.jsx` | 6 | 1 | 5 | 1 |
+| 142 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
+| 143 | `frontend/src/components/receipt-settings/constants.js` | 0 | 3 | 0 | 4 |
+| 144 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
+| 145 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
+| 146 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
+| 147 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 | 1 | 1 | 1 |
+| 148 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 11 | 1 | 9 | 1 |
+| 149 | `frontend/src/components/receipt-settings/template.js` | 1 | 2 | 1 | 3 |
+| 150 | `frontend/src/components/receipt/Receipt.jsx` | 6 | 1 | 4 | 3 |
+| 151 | `frontend/src/components/returns/EditReturnModal.jsx` | 2 | 1 | 1 | 1 |
+| 152 | `frontend/src/components/returns/NewReturnModal.jsx` | 3 | 1 | 2 | 1 |
+| 153 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 2 | 1 | 1 | 1 |
+| 154 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 155 | `frontend/src/components/returns/Returns.jsx` | 13 | 1 | 11 | 1 |
+| 156 | `frontend/src/components/sales/ExportModal.jsx` | 4 | 1 | 2 | 1 |
+| 157 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 158 | `frontend/src/components/sales/Sales.jsx` | 16 | 1 | 14 | 1 |
+| 159 | `frontend/src/components/sales/SalesImportModal.jsx` | 4 | 1 | 3 | 1 |
+| 160 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 5 |
+| 161 | `frontend/src/components/server/ServerPage.jsx` | 4 | 1 | 3 | 1 |
+| 162 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 1 | 1 | 0 | 10 |
+| 163 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 6 |
+| 164 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
+| 165 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
+| 166 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 21 |
+| 167 | `frontend/src/components/shared/navigationConfig.js` | 0 | 4 | 0 | 2 |
+| 168 | `frontend/src/components/shared/NotificationCenter.jsx` | 3 | 1 | 1 | 2 |
+| 169 | `frontend/src/components/shared/pageActivity.js` | 2 | 1 | 1 | 10 |
+| 170 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
+| 171 | `frontend/src/components/shared/PageHelpButton.jsx` | 4 | 1 | 2 | 1 |
+| 172 | `frontend/src/components/shared/pageHelpContent.js` | 0 | 2 | 0 | 1 |
+| 173 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 8 |
+| 174 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
+| 175 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
+| 176 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 2 | 0 | 2 |
+| 177 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
+| 178 | `frontend/src/components/users/UserProfileModal.jsx` | 8 | 1 | 6 | 2 |
+| 179 | `frontend/src/components/users/Users.jsx` | 12 | 1 | 10 | 1 |
+| 180 | `frontend/src/components/utils-settings/AuditLog.jsx` | 7 | 1 | 5 | 1 |
+| 181 | `frontend/src/components/utils-settings/Backup.jsx` | 8 | 1 | 6 | 1 |
+| 182 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
+| 183 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
+| 184 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 | 1 | 1 | 2 |
+| 185 | `frontend/src/components/utils-settings/ResetData.jsx` | 4 | 0 | 2 | 1 |
+| 186 | `frontend/src/components/utils-settings/Settings.jsx` | 9 | 1 | 7 | 1 |
+| 187 | `frontend/src/constants.js` | 0 | 12 | 0 | 8 |
+| 188 | `frontend/src/index.jsx` | 5 | 0 | 3 | 0 |
+| 189 | `frontend/src/platform/runtime/clientRuntime.js` | 2 | 8 | 2 | 3 |
+| 190 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 8 | 0 | 0 |
+| 191 | `frontend/src/utils/actionHistory.mjs` | 1 | 1 | 0 | 10 |
+| 192 | `frontend/src/utils/appRefresh.js` | 0 | 1 | 0 | 2 |
+| 193 | `frontend/src/utils/color.js` | 0 | 1 | 0 | 2 |
+| 194 | `frontend/src/utils/csv.js` | 0 | 5 | 0 | 12 |
+| 195 | `frontend/src/utils/csvImport.js` | 0 | 4 | 0 | 3 |
+| 196 | `frontend/src/utils/dateHelpers.js` | 0 | 2 | 0 | 1 |
+| 197 | `frontend/src/utils/deviceInfo.js` | 0 | 2 | 0 | 6 |
+| 198 | `frontend/src/utils/exportPackage.js` | 1 | 2 | 1 | 3 |
+| 199 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
+| 200 | `frontend/src/utils/favicon.js` | 0 | 1 | 0 | 3 |
+| 201 | `frontend/src/utils/formatters.js` | 0 | 4 | 0 | 16 |
+| 202 | `frontend/src/utils/groupedRecords.mjs` | 0 | 6 | 0 | 9 |
+| 203 | `frontend/src/utils/historyHelpers.mjs` | 0 | 3 | 0 | 10 |
+| 204 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
+| 205 | `frontend/src/utils/loaders.mjs` | 0 | 8 | 0 | 10 |
+| 206 | `frontend/src/utils/pricing.js` | 0 | 4 | 0 | 10 |
+| 207 | `frontend/src/utils/printReceipt.js` | 0 | 9 | 0 | 2 |
+| 208 | `frontend/src/utils/productGrouping.mjs` | 0 | 3 | 0 | 3 |
+| 209 | `frontend/src/web-api.js` | 6 | 0 | 6 | 1 |
+| 210 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
+| 211 | `frontend/tests/appShellUtils.test.mjs` | 2 | 0 | 1 | 0 |
+| 212 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 213 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
+| 214 | `frontend/tests/csvImport.test.mjs` | 2 | 0 | 1 | 0 |
+| 215 | `frontend/tests/exportPackages.test.mjs` | 3 | 0 | 2 | 0 |
+| 216 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
+| 217 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 218 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
+| 219 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
+| 220 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
+| 221 | `frontend/tests/pricingContacts.test.mjs` | 2 | 0 | 1 | 0 |
+| 222 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
+| 223 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 224 | `frontend/tests/receiptTemplate.test.mjs` | 3 | 0 | 2 | 0 |
+| 225 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 226 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
+| 227 | `frontend/vite.config.mjs` | 2 | 1 | 0 | 0 |
+| 228 | `ops/scripts/backend/verify-data-integrity.js` | 4 | 0 | 3 | 0 |
+| 229 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
+| 230 | `ops/scripts/generate-doc-reference.js` | 3 | 0 | 1 | 0 |
+| 231 | `ops/scripts/generate-full-project-docs.js` | 3 | 1 | 1 | 0 |
+| 232 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 4 |
+| 233 | `ops/scripts/performance-scan.js` | 3 | 0 | 1 | 0 |
+| 234 | `ops/scripts/verify-runtime-deps.js` | 2 | 0 | 0 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
@@ -1476,7 +1494,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.72 `frontend/public/sw.js`
+### 3.72 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1486,7 +1504,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.73 `frontend/public/theme-bootstrap.js`
+### 3.73 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1496,7 +1514,67 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.74 `frontend/src/api/http.js`
+### 3.74 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.75 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.76 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.77 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.78 `frontend/public/sw.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.79 `frontend/public/theme-bootstrap.js`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.80 `frontend/src/api/http.js`
 
 - Declared exports: `apiFetch`, `cacheClearAll`, `cacheGet`, `cacheGetStale`, `cacheInvalidate`, `cacheSet`, `clearCallLog`, `getAuthSessionToken`, `getCallLog`, `getSyncServerUrl`, `getSyncToken`, `isNetErr`, `isServerOnline`, `isWriteBlockedError`, `isWriteConflictError`, `requireLiveServerWrite`, `route`, `setAuthSessionToken`, `setSyncServerUrl`, `setSyncToken`, `startHealthCheck`
 - Imports (2)
@@ -1512,7 +1590,7 @@ Code files documented: **216**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/web-api.js`
 
-### 3.75 `frontend/src/api/localDb.js`
+### 3.81 `frontend/src/api/localDb.js`
 
 - Declared exports: `buildCSVTemplate`, `clearLocalMirrorTables`, `dexieDb`, `localGetSettings`, `localGetSettingsMeta`, `localSaveSettings`, `localSaveSettingsMeta`, `parseCSV`, `replaceTableContents`, `resetLocalMirrorDb`
 - Imports (1)
@@ -1524,7 +1602,7 @@ Code files documented: **216**
   - `frontend/src/platform/runtime/clientRuntime.js`
   - `frontend/src/web-api.js`
 
-### 3.76 `frontend/src/api/methods.js`
+### 3.82 `frontend/src/api/methods.js`
 
 - Declared exports: `adjustStock`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `changeUserPassword`, `completePasswordReset`, `completeSupabaseOauth`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomTable`, `createCustomer`, `createDeliveryContact`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteBranch`, `deleteCategory`, `deleteCustomRow`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackup`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getAuditLogs`, `getBranchStock`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomTableData`, `getCustomTables`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getInventoryMovements`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProducts`, `getReturn`, `getReturns`, `getRoles`, `getSales`, `getSalesExport`, `getSettings`, `getSuppliers`, `getSystemConfig`, `getSystemDebugLog`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackup`, `importBackupData`, `importBackupFolder`, `insertCustomRow`, `login`, `logout`, `lookupPortalMembership`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pickBackupFile`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryPendingSyncNow`, `reviewPortalSubmission`, `saveGoogleDriveSyncPreferences`, `saveSettings`, `searchOrganizations`, `setDataPath`, `startGoogleDriveSyncOauth`, `startSupabaseOauth`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferStock`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomRow`, `updateCustomer`, `updateDeliveryContact`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadProductImage`, `uploadUserAvatar`
 - Imports (5)
@@ -1542,7 +1620,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/web-api.js`
 
-### 3.77 `frontend/src/api/websocket.js`
+### 3.83 `frontend/src/api/websocket.js`
 
 - Declared exports: `connectWS`, `disconnectWS`, `isWSConnected`, `reconnectWS`
 - Imports (2)
@@ -1555,7 +1633,7 @@ Code files documented: **216**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.js`
 
-### 3.78 `frontend/src/App.jsx`
+### 3.84 `frontend/src/App.jsx`
 
 - Declared exports: `function`
 - Imports (28)
@@ -1618,7 +1696,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/index.jsx`
 
-### 3.79 `frontend/src/app/appShellUtils.mjs`
+### 3.85 `frontend/src/app/appShellUtils.mjs`
 
 - Declared exports: `MAX_MOUNTED_PAGES`, `getNotificationColor`, `getNotificationPrefix`, `isPublicCatalogPath`, `updateMountedPages`
 - Imports (0)
@@ -1629,7 +1707,7 @@ Code files documented: **216**
   - `frontend/src/App.jsx`
   - `frontend/tests/appShellUtils.test.mjs`
 
-### 3.80 `frontend/src/AppContext.jsx`
+### 3.86 `frontend/src/AppContext.jsx`
 
 - Declared exports: `AppProvider`, `PAGE_PERMISSIONS`, `isBrokenLocalizedString`, `useApp`, `useSync`, `useT`
 - Imports (10)
@@ -1705,7 +1783,7 @@ Code files documented: **216**
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/src/index.jsx`
 
-### 3.81 `frontend/src/components/auth/Login.jsx`
+### 3.87 `frontend/src/components/auth/Login.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -1722,29 +1800,37 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.82 `frontend/src/components/branches/Branches.jsx`
+### 3.88 `frontend/src/components/branches/Branches.jsx`
 
 - Declared exports: `function`
-- Imports (8)
+- Imports (12)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/Modal`
   - `../shared/PageHeader`
+  - `../shared/pageActivity`
   - `./BranchForm`
   - `./TransferModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (6)
+- Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/branches/BranchForm.jsx`
   - `frontend/src/components/branches/TransferModal.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/utils/actionHistory.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.83 `frontend/src/components/branches/BranchForm.jsx`
+### 3.89 `frontend/src/components/branches/BranchForm.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -1755,7 +1841,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.jsx`
 
-### 3.84 `frontend/src/components/branches/TransferModal.jsx`
+### 3.90 `frontend/src/components/branches/TransferModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -1766,21 +1852,22 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.jsx`
 
-### 3.85 `frontend/src/components/catalog/CatalogPage.jsx`
+### 3.91 `frontend/src/components/catalog/CatalogPage.jsx`
 
 - Declared exports: `function`
-- Imports (10)
+- Imports (11)
   - `../../AppContext`
   - `../../utils/favicon`
   - `../files/FilePickerModal`
   - `../products/primitives`
   - `../shared/ImageGalleryLightbox`
   - `../shared/PortalMenu`
+  - `../shared/pageActivity`
   - `./CatalogProductsSection`
   - `./CatalogSecondaryTabs`
   - `./catalogUi`
   - `react`
-- Internal dependencies (9)
+- Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
@@ -1789,11 +1876,12 @@ Code files documented: **216**
   - `frontend/src/components/products/primitives.jsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/favicon.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.86 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.92 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -1807,7 +1895,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.87 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+### 3.93 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -1818,7 +1906,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.88 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.94 `frontend/src/components/catalog/catalogUi.jsx`
 
 - Declared exports: `SectionShell`, `StatusPill`, `SummaryTile`
 - Imports (1)
@@ -1830,7 +1918,7 @@ Code files documented: **216**
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
-### 3.89 `frontend/src/components/catalog/portalEditorUtils.mjs`
+### 3.95 `frontend/src/components/catalog/portalEditorUtils.mjs`
 
 - Declared exports: `createAboutBlock`, `extractGoogleMapsEmbedUrl`, `moveListItem`, `normalizeAboutBlocks`, `normalizeGoogleMapsEmbed`, `serializeAboutBlocks`
 - Imports (0)
@@ -1840,7 +1928,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.90 `frontend/src/components/contacts/contactOptionUtils.js`
+### 3.96 `frontend/src/components/contacts/contactOptionUtils.js`
 
 - Declared exports: `CONTACT_OPTION_LIMIT`, `buildContactOptionSummary`, `createContactOption`, `getPrimaryContactOption`, `hasContactOptionData`, `limitContactOptions`, `parseContactOptionsFromImportRow`, `parseStoredContactOptions`, `serializeContactOptions`
 - Imports (0)
@@ -1850,22 +1938,23 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.91 `frontend/src/components/contacts/Contacts.jsx`
+### 3.97 `frontend/src/components/contacts/Contacts.jsx`
 
 - Declared exports: `function`
-- Imports (11)
+- Imports (12)
   - `../../AppContext`
   - `../../utils/csv`
   - `../../utils/loaders.mjs`
   - `../shared/Modal`
   - `../shared/PageHeader`
+  - `../shared/pageActivity`
   - `./CustomersTab`
   - `./DeliveryTab`
   - `./SuppliersTab`
   - `./shared`
   - `lucide-react`
   - `react`
-- Internal dependencies (9)
+- Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -1873,65 +1962,78 @@ Code files documented: **216**
   - `frontend/src/components/contacts/shared.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.92 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.98 `frontend/src/components/contacts/CustomersTab.jsx`
 
 - Declared exports: `parseContactOptions`, `serializeContactOptions`
-- Imports (10)
+- Imports (13)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./shared`
   - `lucide-react`
   - `react`
-- Internal dependencies (8)
+- Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/shared.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/Modal.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (2)
   - `frontend/src/components/contacts/Contacts.jsx`
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.93 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.99 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 - Declared exports: `parseDeliveryOptions`, `serializeDeliveryOptions`
-- Imports (10)
+- Imports (13)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./shared`
   - `lucide-react`
   - `react`
-- Internal dependencies (8)
+- Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/shared.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/Modal.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.94 `frontend/src/components/contacts/shared.jsx`
+### 3.100 `frontend/src/components/contacts/shared.jsx`
 
 - Declared exports: `ContactTable`, `DetailModal`, `ImportModal`, `ThreeDotMenu`, `useContactSelection`
 - Imports (6)
@@ -1952,44 +2054,56 @@ Code files documented: **216**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
-### 3.95 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.101 `frontend/src/components/contacts/SuppliersTab.jsx`
 
 - Declared exports: none detected
-- Imports (10)
+- Imports (13)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/loaders.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/FilterMenu`
   - `../shared/Modal`
   - `./shared`
   - `lucide-react`
   - `react`
-- Internal dependencies (8)
+- Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/shared.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/Modal.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/loaders.mjs`
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.96 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.102 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 - Declared exports: `function`
-- Imports (2)
+- Imports (5)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
+  - `../../utils/historyHelpers.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `react`
-- Internal dependencies (1)
+- Internal dependencies (4)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
 - Referenced by (0)
   - none
 
-### 3.97 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.103 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2002,7 +2116,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.98 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.104 `frontend/src/components/dashboard/charts/DonutChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2015,7 +2129,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.99 `frontend/src/components/dashboard/charts/index.js`
+### 3.105 `frontend/src/components/dashboard/charts/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -2026,7 +2140,7 @@ Code files documented: **216**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.100 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.106 `frontend/src/components/dashboard/charts/LineChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2039,7 +2153,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.101 `frontend/src/components/dashboard/charts/NoData.jsx`
+### 3.107 `frontend/src/components/dashboard/charts/NoData.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2051,10 +2165,10 @@ Code files documented: **216**
   - `frontend/src/components/dashboard/charts/DonutChart.jsx`
   - `frontend/src/components/dashboard/charts/LineChart.jsx`
 
-### 3.102 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.108 `frontend/src/components/dashboard/Dashboard.jsx`
 
 - Declared exports: `function`
-- Imports (14)
+- Imports (15)
   - `../../AppContext`
   - `../../utils/csv`
   - `../../utils/dateHelpers`
@@ -2065,16 +2179,18 @@ Code files documented: **216**
   - `../../utils/pricing.js`
   - `../shared/ExportMenu`
   - `../shared/PortalMenu`
+  - `../shared/pageActivity`
   - `./MiniStat`
   - `./charts`
   - `lucide-react`
   - `react`
-- Internal dependencies (12)
+- Internal dependencies (13)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/dashboard/MiniStat.jsx`
   - `frontend/src/components/dashboard/charts/index.js`
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/dateHelpers.js`
   - `frontend/src/utils/exportPackage.js`
@@ -2085,7 +2201,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.103 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.109 `frontend/src/components/dashboard/MiniStat.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2095,7 +2211,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.104 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.110 `frontend/src/components/files/FilePickerModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2112,20 +2228,28 @@ Code files documented: **216**
   - `frontend/src/components/products/ProductForm.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
-### 3.105 `frontend/src/components/files/FilesPage.jsx`
+### 3.111 `frontend/src/components/files/FilesPage.jsx`
 
 - Declared exports: `function`
-- Imports (3)
+- Imports (7)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
+  - `../../utils/historyHelpers.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/PageHeader`
+  - `../shared/pageActivity`
   - `react`
-- Internal dependencies (2)
+- Internal dependencies (6)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
+  - `frontend/src/utils/actionHistory.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.106 `frontend/src/components/inventory/DualMoney.jsx`
+### 3.112 `frontend/src/components/inventory/DualMoney.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2135,17 +2259,20 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.107 `frontend/src/components/inventory/Inventory.jsx`
+### 3.113 `frontend/src/components/inventory/Inventory.jsx`
 
 - Declared exports: `function`
-- Imports (15)
+- Imports (18)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/exportPackage`
   - `../../utils/exportReports`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/pricing.js`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `./DualMoney`
@@ -2154,24 +2281,27 @@ Code files documented: **216**
   - `./movementGroups`
   - `lucide-react`
   - `react`
-- Internal dependencies (13)
+- Internal dependencies (16)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/inventory/DualMoney.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
   - `frontend/src/components/inventory/movementGroups.js`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/exportPackage.js`
   - `frontend/src/utils/exportReports.jsx`
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.108 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.114 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2186,7 +2316,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.109 `frontend/src/components/inventory/movementGroups.js`
+### 3.115 `frontend/src/components/inventory/movementGroups.js`
 
 - Declared exports: `buildMovementGroups`, `movementGroupHaystack`
 - Imports (0)
@@ -2196,7 +2326,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.110 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.116 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2206,19 +2336,21 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.111 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.117 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 
 - Declared exports: `function`
-- Imports (3)
+- Imports (4)
   - `../../AppContext`
+  - `../shared/pageActivity`
   - `lucide-react`
   - `react`
-- Internal dependencies (1)
+- Internal dependencies (2)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.112 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.118 `frontend/src/components/navigation/Sidebar.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -2237,7 +2369,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.113 `frontend/src/components/pos/CartItem.jsx`
+### 3.119 `frontend/src/components/pos/CartItem.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2247,7 +2379,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.114 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.120 `frontend/src/components/pos/FilterPanel.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2257,10 +2389,10 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.115 `frontend/src/components/pos/POS.jsx`
+### 3.121 `frontend/src/components/pos/POS.jsx`
 
 - Declared exports: `function`
-- Imports (13)
+- Imports (14)
   - `../../AppContext`
   - `../../utils/deviceInfo`
   - `../../utils/pricing.js`
@@ -2268,13 +2400,14 @@ Code files documented: **216**
   - `../receipt/Receipt`
   - `../sales/StatusBadge`
   - `../shared/ImageGalleryLightbox`
+  - `../shared/pageActivity`
   - `./CartItem`
   - `./FilterPanel`
   - `./ProductImage`
   - `./QuickAddModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (11)
+- Internal dependencies (12)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/pos/CartItem.jsx`
@@ -2284,22 +2417,25 @@ Code files documented: **216**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/StatusBadge.jsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/deviceInfo.js`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.116 `frontend/src/components/pos/posCore.mjs`
+### 3.122 `frontend/src/components/pos/posCore.mjs`
 
 - Declared exports: `buildProductsById`, `buildVariantChildrenByParentId`, `buildVisibleProductCards`, `findMatchingCartLineIndex`, `getCartLineId`, `getVariantChoices`, `getVariantRootProduct`, `resolveCartPriceValues`
-- Imports (1)
+- Imports (2)
   - `../../utils/pricing.js`
-- Internal dependencies (1)
+  - `../../utils/productGrouping.mjs`
+- Internal dependencies (2)
   - `frontend/src/utils/pricing.js`
+  - `frontend/src/utils/productGrouping.mjs`
 - Referenced by (0)
   - none
 
-### 3.117 `frontend/src/components/pos/ProductImage.jsx`
+### 3.123 `frontend/src/components/pos/ProductImage.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2309,7 +2445,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.118 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.124 `frontend/src/components/pos/QuickAddModal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2319,22 +2455,37 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.119 `frontend/src/components/products/BarcodeScannerModal.jsx`
+### 3.125 `frontend/src/components/products/barcodeImageScanner.mjs`
+
+- Declared exports: `scanBarcodeFromImageFile`
+- Imports (1)
+  - `@zxing/browser`
+- Internal dependencies (0)
+  - none
+- Referenced by (2)
+  - `frontend/src/components/products/BarcodeScannerModal.jsx`
+  - `frontend/tests/barcodeImageScanner.test.mjs`
+
+### 3.126 `frontend/src/components/products/BarcodeScannerModal.jsx`
 
 - Declared exports: `function`
-- Imports (5)
+- Imports (7)
   - `../shared/Modal`
+  - `./barcodeImageScanner.mjs`
   - `./barcodeScannerState.mjs`
+  - `./scanbotScanner.mjs`
   - `@zxing/browser`
   - `lucide-react`
   - `react`
-- Internal dependencies (2)
+- Internal dependencies (4)
+  - `frontend/src/components/products/barcodeImageScanner.mjs`
   - `frontend/src/components/products/barcodeScannerState.mjs`
+  - `frontend/src/components/products/scanbotScanner.mjs`
   - `frontend/src/components/shared/Modal.jsx`
 - Referenced by (1)
   - `frontend/src/components/products/ProductForm.jsx`
 
-### 3.120 `frontend/src/components/products/barcodeScannerState.mjs`
+### 3.127 `frontend/src/components/products/barcodeScannerState.mjs`
 
 - Declared exports: `deriveScannerPresentation`
 - Imports (0)
@@ -2345,7 +2496,7 @@ Code files documented: **216**
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
   - `frontend/tests/barcodeScannerState.test.mjs`
 
-### 3.121 `frontend/src/components/products/BranchStockAdjuster.jsx`
+### 3.128 `frontend/src/components/products/BranchStockAdjuster.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2355,18 +2506,17 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/ProductForm.jsx`
 
-### 3.122 `frontend/src/components/products/BulkAddStockModal.jsx`
+### 3.129 `frontend/src/components/products/BulkAddStockModal.jsx`
 
 - Declared exports: `function`
-- Imports (2)
-  - `../shared/Modal`
+- Imports (1)
   - `react`
-- Internal dependencies (1)
-  - `frontend/src/components/shared/Modal.jsx`
+- Internal dependencies (0)
+  - none
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.123 `frontend/src/components/products/BulkImportModal.jsx`
+### 3.130 `frontend/src/components/products/BulkImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2381,7 +2531,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.124 `frontend/src/components/products/HeaderActions.jsx`
+### 3.131 `frontend/src/components/products/HeaderActions.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2394,7 +2544,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.125 `frontend/src/components/products/ManageBrandsModal.jsx`
+### 3.132 `frontend/src/components/products/ManageBrandsModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2407,7 +2557,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.126 `frontend/src/components/products/ManageCategoriesModal.jsx`
+### 3.133 `frontend/src/components/products/ManageCategoriesModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2420,7 +2570,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.127 `frontend/src/components/products/ManageUnitsModal.jsx`
+### 3.134 `frontend/src/components/products/ManageUnitsModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2433,7 +2583,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.128 `frontend/src/components/products/primitives.jsx`
+### 3.135 `frontend/src/components/products/primitives.jsx`
 
 - Declared exports: none detected
 - Imports (2)
@@ -2450,7 +2600,7 @@ Code files documented: **216**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/VariantFormModal.jsx`
 
-### 3.129 `frontend/src/components/products/ProductDetailModal.jsx`
+### 3.136 `frontend/src/components/products/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2463,37 +2613,54 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.130 `frontend/src/components/products/ProductForm.jsx`
+### 3.137 `frontend/src/components/products/ProductForm.jsx`
 
 - Declared exports: `function`
-- Imports (8)
+- Imports (9)
   - `../../utils/pricing.js`
   - `../files/FilePickerModal`
   - `../shared/Modal`
   - `./BarcodeScannerModal`
   - `./BranchStockAdjuster`
   - `./primitives`
+  - `./scanbotScanner.mjs`
   - `lucide-react`
   - `react`
-- Internal dependencies (6)
+- Internal dependencies (7)
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
   - `frontend/src/components/products/BranchStockAdjuster.jsx`
   - `frontend/src/components/products/primitives.jsx`
+  - `frontend/src/components/products/scanbotScanner.mjs`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.131 `frontend/src/components/products/Products.jsx`
+### 3.138 `frontend/src/components/products/productHistoryHelpers.mjs`
+
+- Declared exports: `createProductHistoryRequestId`, `orderProductRestoreSnapshots`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (2)
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/tests/productHistoryHelpers.test.mjs`
+
+### 3.139 `frontend/src/components/products/Products.jsx`
 
 - Declared exports: `function`
-- Imports (21)
+- Imports (26)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/color.js`
   - `../../utils/csv`
   - `../../utils/groupedRecords.mjs`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/pricing.js`
+  - `../../utils/productGrouping.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/FilterMenu`
   - `../shared/ImageGalleryLightbox`
   - `../shared/Modal`
@@ -2508,9 +2675,10 @@ Code files documented: **216**
   - `./ProductForm`
   - `./VariantFormModal`
   - `./primitives`
+  - `./productHistoryHelpers.mjs`
   - `lucide-react`
   - `react`
-- Internal dependencies (19)
+- Internal dependencies (24)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/products/BulkAddStockModal.jsx`
   - `frontend/src/components/products/BulkImportModal.jsx`
@@ -2522,35 +2690,54 @@ Code files documented: **216**
   - `frontend/src/components/products/ProductForm.jsx`
   - `frontend/src/components/products/VariantFormModal.jsx`
   - `frontend/src/components/products/primitives.jsx`
+  - `frontend/src/components/products/productHistoryHelpers.mjs`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/shared/ImageGalleryLightbox.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/color.js`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/pricing.js`
+  - `frontend/src/utils/productGrouping.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.132 `frontend/src/components/products/VariantFormModal.jsx`
+### 3.140 `frontend/src/components/products/scanbotScanner.mjs`
+
+- Declared exports: `getPreferredScannerMode`, `isCameraBlockedByDocumentPolicy`, `scanBarcodeWithScanbot`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (3)
+  - `frontend/src/components/products/BarcodeScannerModal.jsx`
+  - `frontend/src/components/products/ProductForm.jsx`
+  - `frontend/tests/scanbotScanner.test.mjs`
+
+### 3.141 `frontend/src/components/products/VariantFormModal.jsx`
 
 - Declared exports: `function`
-- Imports (5)
+- Imports (6)
   - `../../AppContext`
+  - `../../utils/historyHelpers.mjs`
   - `../../utils/pricing.js`
   - `../shared/Modal`
   - `./primitives`
   - `react`
-- Internal dependencies (4)
+- Internal dependencies (5)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/products/primitives.jsx`
   - `frontend/src/components/shared/Modal.jsx`
+  - `frontend/src/utils/historyHelpers.mjs`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.133 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.142 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2563,7 +2750,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.134 `frontend/src/components/receipt-settings/constants.js`
+### 3.143 `frontend/src/components/receipt-settings/constants.js`
 
 - Declared exports: `ALL_FIELD_ITEMS`, `DEFAULT_TEMPLATE`, `getFieldItems`
 - Imports (0)
@@ -2576,7 +2763,7 @@ Code files documented: **216**
   - `frontend/src/components/receipt-settings/template.js`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.135 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.144 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - Declared exports: `class`
 - Imports (1)
@@ -2586,7 +2773,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.136 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.145 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2597,7 +2784,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.137 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.146 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2609,7 +2796,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.138 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.147 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2620,7 +2807,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.139 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.148 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 - Declared exports: `function`
 - Imports (11)
@@ -2648,7 +2835,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.140 `frontend/src/components/receipt-settings/template.js`
+### 3.149 `frontend/src/components/receipt-settings/template.js`
 
 - Declared exports: `parseReceiptTemplate`, `serializeReceiptTemplate`
 - Imports (1)
@@ -2660,7 +2847,7 @@ Code files documented: **216**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.141 `frontend/src/components/receipt/Receipt.jsx`
+### 3.150 `frontend/src/components/receipt/Receipt.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -2680,7 +2867,7 @@ Code files documented: **216**
   - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.142 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.151 `frontend/src/components/returns/EditReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2691,7 +2878,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.143 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.152 `frontend/src/components/returns/NewReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2704,7 +2891,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.144 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.153 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2715,7 +2902,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.145 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.154 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2727,23 +2914,24 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.146 `frontend/src/components/returns/Returns.jsx`
+### 3.155 `frontend/src/components/returns/Returns.jsx`
 
 - Declared exports: `function`
-- Imports (12)
+- Imports (13)
   - `../../AppContext`
   - `../../utils/csv`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
+  - `../shared/pageActivity`
   - `./EditReturnModal`
   - `./NewReturnModal`
   - `./NewSupplierReturnModal`
   - `./ReturnDetailModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (10)
+- Internal dependencies (11)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/returns/EditReturnModal.jsx`
   - `frontend/src/components/returns/NewReturnModal.jsx`
@@ -2751,13 +2939,14 @@ Code files documented: **216**
   - `frontend/src/components/returns/ReturnDetailModal.jsx`
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.147 `frontend/src/components/sales/ExportModal.jsx`
+### 3.156 `frontend/src/components/sales/ExportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2771,7 +2960,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.148 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.157 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2784,16 +2973,18 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.149 `frontend/src/components/sales/Sales.jsx`
+### 3.158 `frontend/src/components/sales/Sales.jsx`
 
 - Declared exports: `function`
-- Imports (14)
+- Imports (16)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/deviceInfo`
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
   - `../receipt/Receipt`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
   - `../shared/FilterMenu`
   - `./ExportModal`
@@ -2802,15 +2993,17 @@ Code files documented: **216**
   - `./StatusBadge`
   - `lucide-react`
   - `react`
-- Internal dependencies (12)
+- Internal dependencies (14)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/src/components/sales/ExportModal.jsx`
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/src/components/sales/StatusBadge.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/ExportMenu.jsx`
   - `frontend/src/components/shared/FilterMenu.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/deviceInfo.js`
   - `frontend/src/utils/formatters.js`
@@ -2818,7 +3011,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.150 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.159 `frontend/src/components/sales/SalesImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2833,7 +3026,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.151 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.160 `frontend/src/components/sales/StatusBadge.jsx`
 
 - Declared exports: `ALL_STATUSES`, `STATUS_COLORS`, `STATUS_LABELS`, `function`, `getStatusLabel`
 - Imports (0)
@@ -2847,20 +3040,41 @@ Code files documented: **216**
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.152 `frontend/src/components/server/ServerPage.jsx`
+### 3.161 `frontend/src/components/server/ServerPage.jsx`
 
 - Declared exports: `function`
-- Imports (3)
+- Imports (4)
   - `../../AppContext`
   - `../shared/PageHeader`
+  - `../shared/pageActivity`
   - `react`
-- Internal dependencies (2)
+- Internal dependencies (3)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/shared/PageHeader.jsx`
+  - `frontend/src/components/shared/pageActivity.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.153 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.162 `frontend/src/components/shared/ActionHistoryBar.jsx`
+
+- Declared exports: `function`
+- Imports (1)
+  - `lucide-react`
+- Internal dependencies (0)
+  - none
+- Referenced by (10)
+  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/contacts/CustomersTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/SuppliersTab.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/users/Users.jsx`
+
+### 3.163 `frontend/src/components/shared/ExportMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2876,7 +3090,7 @@ Code files documented: **216**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.154 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.164 `frontend/src/components/shared/FilterMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2894,7 +3108,7 @@ Code files documented: **216**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.155 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.165 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2907,14 +3121,14 @@ Code files documented: **216**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.156 `frontend/src/components/shared/Modal.jsx`
+### 3.166 `frontend/src/components/shared/Modal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
   - none
 - Internal dependencies (0)
   - none
-- Referenced by (22)
+- Referenced by (21)
   - `frontend/src/components/branches/Branches.jsx`
   - `frontend/src/components/contacts/Contacts.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
@@ -2924,7 +3138,6 @@ Code files documented: **216**
   - `frontend/src/components/files/FilePickerModal.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
-  - `frontend/src/components/products/BulkAddStockModal.jsx`
   - `frontend/src/components/products/BulkImportModal.jsx`
   - `frontend/src/components/products/ManageBrandsModal.jsx`
   - `frontend/src/components/products/ManageCategoriesModal.jsx`
@@ -2938,7 +3151,7 @@ Code files documented: **216**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.157 `frontend/src/components/shared/navigationConfig.js`
+### 3.167 `frontend/src/components/shared/navigationConfig.js`
 
 - Declared exports: `DEFAULT_MOBILE_PINNED`, `NAV_ITEMS`, `orderNavItems`, `parseNavSetting`
 - Imports (0)
@@ -2949,7 +3162,7 @@ Code files documented: **216**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.158 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.168 `frontend/src/components/shared/NotificationCenter.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2962,7 +3175,7 @@ Code files documented: **216**
   - `frontend/src/App.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.159 `frontend/src/components/shared/pageActivity.js`
+### 3.169 `frontend/src/components/shared/pageActivity.js`
 
 - Declared exports: `useIsPageActive`
 - Imports (2)
@@ -2970,10 +3183,19 @@ Code files documented: **216**
   - `react`
 - Internal dependencies (1)
   - `frontend/src/AppContext.jsx`
-- Referenced by (1)
+- Referenced by (10)
+  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/catalog/CatalogPage.jsx`
+  - `frontend/src/components/contacts/Contacts.jsx`
+  - `frontend/src/components/dashboard/Dashboard.jsx`
+  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/returns/Returns.jsx`
+  - `frontend/src/components/server/ServerPage.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.160 `frontend/src/components/shared/PageHeader.jsx`
+### 3.170 `frontend/src/components/shared/PageHeader.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2988,7 +3210,7 @@ Code files documented: **216**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.161 `frontend/src/components/shared/PageHelpButton.jsx`
+### 3.171 `frontend/src/components/shared/PageHelpButton.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -3002,7 +3224,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.162 `frontend/src/components/shared/pageHelpContent.js`
+### 3.172 `frontend/src/components/shared/pageHelpContent.js`
 
 - Declared exports: `PAGE_HELP_CONTENT`, `getPageHelpContent`
 - Imports (0)
@@ -3012,7 +3234,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/shared/PageHelpButton.jsx`
 
-### 3.163 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.173 `frontend/src/components/shared/PortalMenu.jsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -3031,7 +3253,7 @@ Code files documented: **216**
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.164 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.174 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3044,7 +3266,7 @@ Code files documented: **216**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.165 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.175 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -3054,7 +3276,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.166 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.176 `frontend/src/components/users/PermissionEditor.jsx`
 
 - Declared exports: `PERMISSION_DEFS`, `function`
 - Imports (0)
@@ -3065,7 +3287,7 @@ Code files documented: **216**
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.167 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.177 `frontend/src/components/users/UserDetailSheet.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3077,7 +3299,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/users/Users.jsx`
 
-### 3.168 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.178 `frontend/src/components/users/UserProfileModal.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3100,12 +3322,15 @@ Code files documented: **216**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.169 `frontend/src/components/users/Users.jsx`
+### 3.179 `frontend/src/components/users/Users.jsx`
 
 - Declared exports: `function`
-- Imports (9)
+- Imports (12)
   - `../../AppContext`
+  - `../../utils/actionHistory.mjs`
   - `../../utils/formatters`
+  - `../../utils/historyHelpers.mjs`
+  - `../shared/ActionHistoryBar.jsx`
   - `../shared/Modal`
   - `../shared/PortalMenu`
   - `./PermissionEditor`
@@ -3113,18 +3338,21 @@ Code files documented: **216**
   - `./UserProfileModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (7)
+- Internal dependencies (10)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/components/shared/ActionHistoryBar.jsx`
   - `frontend/src/components/shared/Modal.jsx`
   - `frontend/src/components/shared/PortalMenu.jsx`
   - `frontend/src/components/users/PermissionEditor.jsx`
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
+  - `frontend/src/utils/actionHistory.mjs`
   - `frontend/src/utils/formatters.js`
+  - `frontend/src/utils/historyHelpers.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.170 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.180 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -3144,7 +3372,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.171 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.181 `frontend/src/components/utils-settings/Backup.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3166,7 +3394,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.172 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.182 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -3176,7 +3404,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.173 `frontend/src/components/utils-settings/index.js`
+### 3.183 `frontend/src/components/utils-settings/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3186,7 +3414,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.174 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.184 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3198,7 +3426,7 @@ Code files documented: **216**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.175 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.185 `frontend/src/components/utils-settings/ResetData.jsx`
 
 - Declared exports: none detected
 - Imports (4)
@@ -3212,7 +3440,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.176 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.186 `frontend/src/components/utils-settings/Settings.jsx`
 
 - Declared exports: `function`
 - Imports (9)
@@ -3236,7 +3464,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.177 `frontend/src/constants.js`
+### 3.187 `frontend/src/constants.js`
 
 - Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
 - Imports (0)
@@ -3253,7 +3481,7 @@ Code files documented: **216**
   - `frontend/src/platform/runtime/clientRuntime.js`
   - `frontend/src/web-api.js`
 
-### 3.178 `frontend/src/index.jsx`
+### 3.188 `frontend/src/index.jsx`
 
 - Declared exports: none detected
 - Imports (5)
@@ -3269,7 +3497,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.179 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.189 `frontend/src/platform/runtime/clientRuntime.js`
 
 - Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
 - Imports (2)
@@ -3283,7 +3511,7 @@ Code files documented: **216**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.js`
 
-### 3.180 `frontend/src/platform/storage/storagePolicy.mjs`
+### 3.190 `frontend/src/platform/storage/storagePolicy.mjs`
 
 - Declared exports: `DRIVE_SYNC_STATUS_COOLDOWN_KEY`, `DRIVE_SYNC_STATUS_COOLDOWN_MS`, `LIVE_SERVER_SENSITIVE_MIRROR_TABLES`, `NOTIFICATION_SUMMARY_MISSING_TTL_MS`, `NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY`, `isCooldownActive`, `maxStoredNumber`, `shouldPersistLocalMirror`
 - Imports (0)
@@ -3293,7 +3521,26 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.181 `frontend/src/utils/appRefresh.js`
+### 3.191 `frontend/src/utils/actionHistory.mjs`
+
+- Declared exports: `useActionHistory`
+- Imports (1)
+  - `react`
+- Internal dependencies (0)
+  - none
+- Referenced by (10)
+  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/contacts/CustomersTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/SuppliersTab.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/sales/Sales.jsx`
+  - `frontend/src/components/users/Users.jsx`
+
+### 3.192 `frontend/src/utils/appRefresh.js`
 
 - Declared exports: `refreshAppData`
 - Imports (0)
@@ -3304,7 +3551,7 @@ Code files documented: **216**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/ResetData.jsx`
 
-### 3.182 `frontend/src/utils/color.js`
+### 3.193 `frontend/src/utils/color.js`
 
 - Declared exports: `getContrastingTextColor`
 - Imports (0)
@@ -3315,7 +3562,7 @@ Code files documented: **216**
   - `frontend/src/components/products/ProductDetailModal.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.183 `frontend/src/utils/csv.js`
+### 3.194 `frontend/src/utils/csv.js`
 
 - Declared exports: `buildCSV`, `buildZip`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`
 - Imports (0)
@@ -3336,7 +3583,7 @@ Code files documented: **216**
   - `frontend/src/utils/exportPackage.js`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.184 `frontend/src/utils/csvImport.js`
+### 3.195 `frontend/src/utils/csvImport.js`
 
 - Declared exports: `normalizeCsvKey`, `parseCsvNumber`, `parseCsvRows`, `splitCsvLine`
 - Imports (0)
@@ -3348,7 +3595,7 @@ Code files documented: **216**
   - `frontend/src/components/sales/SalesImportModal.jsx`
   - `frontend/tests/csvImport.test.mjs`
 
-### 3.185 `frontend/src/utils/dateHelpers.js`
+### 3.196 `frontend/src/utils/dateHelpers.js`
 
 - Declared exports: `offsetDate`, `todayStr`
 - Imports (0)
@@ -3358,7 +3605,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.186 `frontend/src/utils/deviceInfo.js`
+### 3.197 `frontend/src/utils/deviceInfo.js`
 
 - Declared exports: `getClientDeviceInfo`, `getClientMetaHeaders`
 - Imports (0)
@@ -3373,7 +3620,7 @@ Code files documented: **216**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.187 `frontend/src/utils/exportPackage.js`
+### 3.198 `frontend/src/utils/exportPackage.js`
 
 - Declared exports: `buildReportManifestRows`, `buildReportPackageFiles`
 - Imports (1)
@@ -3385,7 +3632,7 @@ Code files documented: **216**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.188 `frontend/src/utils/exportReports.jsx`
+### 3.199 `frontend/src/utils/exportReports.jsx`
 
 - Declared exports: `buildStandaloneReportHtml`
 - Imports (3)
@@ -3399,7 +3646,7 @@ Code files documented: **216**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.189 `frontend/src/utils/favicon.js`
+### 3.200 `frontend/src/utils/favicon.js`
 
 - Declared exports: `createCircularFaviconDataUrl`
 - Imports (0)
@@ -3411,7 +3658,7 @@ Code files documented: **216**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.190 `frontend/src/utils/formatters.js`
+### 3.201 `frontend/src/utils/formatters.js`
 
 - Declared exports: `fmtCount`, `fmtDate`, `fmtShort`, `fmtTime`
 - Imports (0)
@@ -3436,7 +3683,7 @@ Code files documented: **216**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.191 `frontend/src/utils/groupedRecords.mjs`
+### 3.202 `frontend/src/utils/groupedRecords.mjs`
 
 - Declared exports: `buildTimeActionSections`, `getAvailableYears`, `getTimeGroupingMode`, `getTimeParts`, `matchesYearMonthFilters`, `toggleIdSet`
 - Imports (0)
@@ -3454,7 +3701,26 @@ Code files documented: **216**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/tests/groupedRecords.test.mjs`
 
-### 3.192 `frontend/src/utils/index.js`
+### 3.203 `frontend/src/utils/historyHelpers.mjs`
+
+- Declared exports: `cloneHistorySnapshot`, `extractHistoryResultId`, `resolveCreatedHistorySnapshot`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (10)
+  - `frontend/src/components/branches/Branches.jsx`
+  - `frontend/src/components/contacts/CustomersTab.jsx`
+  - `frontend/src/components/contacts/DeliveryTab.jsx`
+  - `frontend/src/components/contacts/SuppliersTab.jsx`
+  - `frontend/src/components/custom-tables/CustomTables.jsx`
+  - `frontend/src/components/files/FilesPage.jsx`
+  - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/components/products/VariantFormModal.jsx`
+  - `frontend/src/components/users/Users.jsx`
+
+### 3.204 `frontend/src/utils/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3464,7 +3730,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.193 `frontend/src/utils/loaders.mjs`
+### 3.205 `frontend/src/utils/loaders.mjs`
 
 - Declared exports: `beginTrackedRequest`, `createLoaderTimeoutError`, `getFirstLoaderError`, `getLoaderErrorMessage`, `invalidateTrackedRequest`, `isTrackedRequestCurrent`, `settleLoaderMap`, `withLoaderTimeout`
 - Imports (0)
@@ -3483,7 +3749,7 @@ Code files documented: **216**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.194 `frontend/src/utils/pricing.js`
+### 3.206 `frontend/src/utils/pricing.js`
 
 - Declared exports: `formatPriceNumber`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -3502,7 +3768,7 @@ Code files documented: **216**
   - `frontend/src/components/products/VariantFormModal.jsx`
   - `frontend/tests/pricingContacts.test.mjs`
 
-### 3.195 `frontend/src/utils/printReceipt.js`
+### 3.207 `frontend/src/utils/printReceipt.js`
 
 - Declared exports: `PRINT_DEFAULTS`, `createReceiptPdfBlob`, `downloadReceiptPdf`, `getPaperWidthMm`, `getPrintSettings`, `openPrintableReceiptPreview`, `openReceiptPdf`, `printReceipt`, `savePrintSettings`
 - Imports (0)
@@ -3513,7 +3779,19 @@ Code files documented: **216**
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.196 `frontend/src/web-api.js`
+### 3.208 `frontend/src/utils/productGrouping.mjs`
+
+- Declared exports: `buildProductGroupSections`, `buildProductGroups`, `normalizeProductGroupName`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (3)
+  - `frontend/src/components/pos/posCore.mjs`
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/tests/productGrouping.test.mjs`
+
+### 3.209 `frontend/src/web-api.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -3533,7 +3811,7 @@ Code files documented: **216**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.197 `frontend/tailwind.config.mjs`
+### 3.210 `frontend/tailwind.config.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3543,7 +3821,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.198 `frontend/tests/appShellUtils.test.mjs`
+### 3.211 `frontend/tests/appShellUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3554,7 +3832,18 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.199 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.212 `frontend/tests/barcodeImageScanner.test.mjs`
+
+- Declared exports: none detected
+- Imports (2)
+  - `../src/components/products/barcodeImageScanner.mjs`
+  - `node:assert/strict`
+- Internal dependencies (1)
+  - `frontend/src/components/products/barcodeImageScanner.mjs`
+- Referenced by (0)
+  - none
+
+### 3.213 `frontend/tests/barcodeScannerState.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3565,7 +3854,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.200 `frontend/tests/csvImport.test.mjs`
+### 3.214 `frontend/tests/csvImport.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3576,7 +3865,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.201 `frontend/tests/exportPackages.test.mjs`
+### 3.215 `frontend/tests/exportPackages.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -3589,7 +3878,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.202 `frontend/tests/groupedRecords.test.mjs`
+### 3.216 `frontend/tests/groupedRecords.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3600,7 +3889,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.203 `frontend/tests/loaders.test.mjs`
+### 3.217 `frontend/tests/historyHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3610,7 +3899,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.204 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.218 `frontend/tests/loaders.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3620,7 +3909,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.205 `frontend/tests/posCore.test.mjs`
+### 3.219 `frontend/tests/portalEditorUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3630,7 +3919,17 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.206 `frontend/tests/pricingContacts.test.mjs`
+### 3.220 `frontend/tests/posCore.test.mjs`
+
+- Declared exports: none detected
+- Imports (1)
+  - `node:assert/strict`
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.221 `frontend/tests/pricingContacts.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3641,7 +3940,29 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.207 `frontend/tests/receiptTemplate.test.mjs`
+### 3.222 `frontend/tests/productGrouping.test.mjs`
+
+- Declared exports: none detected
+- Imports (2)
+  - `../src/utils/productGrouping.mjs`
+  - `node:assert/strict`
+- Internal dependencies (1)
+  - `frontend/src/utils/productGrouping.mjs`
+- Referenced by (0)
+  - none
+
+### 3.223 `frontend/tests/productHistoryHelpers.test.mjs`
+
+- Declared exports: none detected
+- Imports (2)
+  - `../src/components/products/productHistoryHelpers.mjs`
+  - `node:assert/strict`
+- Internal dependencies (1)
+  - `frontend/src/components/products/productHistoryHelpers.mjs`
+- Referenced by (0)
+  - none
+
+### 3.224 `frontend/tests/receiptTemplate.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -3654,7 +3975,18 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.208 `frontend/tests/storagePolicy.test.mjs`
+### 3.225 `frontend/tests/scanbotScanner.test.mjs`
+
+- Declared exports: none detected
+- Imports (2)
+  - `../src/components/products/scanbotScanner.mjs`
+  - `node:assert/strict`
+- Internal dependencies (1)
+  - `frontend/src/components/products/scanbotScanner.mjs`
+- Referenced by (0)
+  - none
+
+### 3.226 `frontend/tests/storagePolicy.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3664,7 +3996,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.209 `frontend/vite.config.mjs`
+### 3.227 `frontend/vite.config.mjs`
 
 - Declared exports: `defineConfig`
 - Imports (2)
@@ -3675,7 +4007,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.210 `ops/scripts/backend/verify-data-integrity.js`
+### 3.228 `ops/scripts/backend/verify-data-integrity.js`
 
 - Declared exports: none detected
 - Imports (4)
@@ -3690,7 +4022,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.211 `ops/scripts/frontend/verify-i18n.js`
+### 3.229 `ops/scripts/frontend/verify-i18n.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3701,7 +4033,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.212 `ops/scripts/generate-doc-reference.js`
+### 3.230 `ops/scripts/generate-doc-reference.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -3713,7 +4045,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.213 `ops/scripts/generate-full-project-docs.js`
+### 3.231 `ops/scripts/generate-full-project-docs.js`
 
 - Declared exports: `push`
 - Imports (3)
@@ -3725,7 +4057,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.214 `ops/scripts/lib/fs-utils.js`
+### 3.232 `ops/scripts/lib/fs-utils.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -3739,7 +4071,7 @@ Code files documented: **216**
   - `ops/scripts/generate-full-project-docs.js`
   - `ops/scripts/performance-scan.js`
 
-### 3.215 `ops/scripts/performance-scan.js`
+### 3.233 `ops/scripts/performance-scan.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -3751,7 +4083,7 @@ Code files documented: **216**
 - Referenced by (0)
   - none
 
-### 3.216 `ops/scripts/verify-runtime-deps.js`
+### 3.234 `ops/scripts/verify-runtime-deps.js`
 
 - Declared exports: none detected
 - Imports (2)

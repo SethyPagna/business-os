@@ -14,7 +14,7 @@ Total files documented: **55**
 | 2 | `backend/src/accessControl.js` | 16 | 0 |
 | 3 | `backend/src/authOtpGuards.js` | 3 | 0 |
 | 4 | `backend/src/backupSchema.js` | 3 | 0 |
-| 5 | `backend/src/config/index.js` | 21 | 0 |
+| 5 | `backend/src/config/index.js` | 23 | 0 |
 | 6 | `backend/src/conflictControl.js` | 5 | 0 |
 | 7 | `backend/src/contactOptions.js` | 8 | 0 |
 | 8 | `backend/src/database.js` | 13 | 0 |
@@ -50,7 +50,7 @@ Total files documented: **55**
 | 38 | `backend/src/routes/users.js` | 21 | 16 |
 | 39 | `backend/src/runtimeState/index.js` | 6 | 0 |
 | 40 | `backend/src/security.js` | 13 | 0 |
-| 41 | `backend/src/serverUtils.js` | 17 | 0 |
+| 41 | `backend/src/serverUtils.js` | 21 | 0 |
 | 42 | `backend/src/services/aiGateway.js` | 12 | 0 |
 | 43 | `backend/src/services/firebaseAuth.js` | 22 | 0 |
 | 44 | `backend/src/services/googleDriveSync/index.js` | 49 | 0 |
@@ -140,15 +140,17 @@ Total files documented: **55**
 | 10 | `copyTree` | function | 147 |
 | 11 | `normalizePathForCompare` | function | 162 |
 | 12 | `isSamePath` | function | 166 |
-| 13 | `isOrganizationRuntimeRoot` | function | 170 |
-| 14 | `ensureOrganizationRuntimeLayout` | function | 175 |
-| 15 | `writeMigrationMarker` | function | 181 |
-| 16 | `moveOrganizationRootPreservingSource` | function | 191 |
-| 17 | `migrateLegacySharedRootToOrganization` | function | 222 |
-| 18 | `detectExistingOrganizationRuntimeRoot` | function | 242 |
-| 19 | `STORAGE_ROOT` | const arrow | 254 |
-| 20 | `PRIMARY_ORGANIZATION_SEED` | const arrow | 262 |
-| 21 | `DATA_ROOT` | const arrow | 286 |
+| 13 | `getOrganizationDbPath` | function | 170 |
+| 14 | `isHealthySqliteDatabase` | function | 174 |
+| 15 | `isOrganizationRuntimeRoot` | function | 187 |
+| 16 | `ensureOrganizationRuntimeLayout` | function | 192 |
+| 17 | `writeMigrationMarker` | function | 198 |
+| 18 | `moveOrganizationRootPreservingSource` | function | 208 |
+| 19 | `migrateLegacySharedRootToOrganization` | function | 239 |
+| 20 | `detectExistingOrganizationRuntimeRoot` | function | 259 |
+| 21 | `STORAGE_ROOT` | const arrow | 271 |
+| 22 | `PRIMARY_ORGANIZATION_SEED` | const arrow | 279 |
+| 23 | `DATA_ROOT` | const arrow | 303 |
 
 ### 3.6 `backend/src/conflictControl.js`
 
@@ -731,10 +733,10 @@ Total files documented: **55**
 | 1 | POST | `/sales` | 227 |
 | 2 | PATCH | `/sales/:id/status` | 407 |
 | 3 | PATCH | `/sales/:id/customer` | 546 |
-| 4 | GET | `/sales` | 636 |
-| 5 | GET | `/sales/export` | 702 |
-| 6 | GET | `/dashboard` | 870 |
-| 7 | GET | `/analytics` | 967 |
+| 4 | GET | `/sales` | 641 |
+| 5 | GET | `/sales/export` | 707 |
+| 6 | GET | `/dashboard` | 875 |
+| 7 | GET | `/analytics` | 972 |
 
 ### 3.35 `backend/src/routes/settings.js`
 
@@ -904,23 +906,27 @@ Total files documented: **55**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `parseOriginHost` | function | 13 |
-| 2 | `normalizeConfiguredHost` | function | 23 |
-| 3 | `isAllowedRequestOrigin` | function | 33 |
-| 4 | `isAllowedWebSocketOrigin` | function | 43 |
-| 5 | `hostIsLoopbackPair` | function | 61 |
-| 6 | `sanitizeObjectKeys` | function | 85 |
-| 7 | `sanitizeStringValue` | function | 104 |
-| 8 | `sanitizeRequestPayload` | function | 110 |
-| 9 | `sanitizeDeepStrings` | function | 117 |
-| 10 | `isApiOrHealthPath` | function | 134 |
-| 11 | `isSpaFallbackEligible` | function | 138 |
-| 12 | `setNoStoreHeaders` | function | 146 |
-| 13 | `setHtmlNoCacheHeaders` | function | 150 |
-| 14 | `setTunnelSecurityHeaders` | function | 156 |
-| 15 | `setFrontendStaticHeaders` | function | 191 |
-| 16 | `setUploadStaticHeaders` | function | 209 |
-| 17 | `mapServerError` | function | 216 |
+| 1 | `buildOriginFromParts` | function | 13 |
+| 2 | `parseOriginHost` | function | 24 |
+| 3 | `normalizeConfiguredHost` | function | 34 |
+| 4 | `isAllowedRequestOrigin` | function | 44 |
+| 5 | `isAllowedWebSocketOrigin` | function | 54 |
+| 6 | `hostIsLoopbackPair` | function | 72 |
+| 7 | `getTrustedDocumentOrigins` | function | 77 |
+| 8 | `addOrigin` | const arrow | 79 |
+| 9 | `buildPermissionsPolicy` | function | 105 |
+| 10 | `sanitizeObjectKeys` | function | 134 |
+| 11 | `sanitizeStringValue` | function | 153 |
+| 12 | `sanitizeRequestPayload` | function | 159 |
+| 13 | `sanitizeDeepStrings` | function | 166 |
+| 14 | `isApiOrHealthPath` | function | 183 |
+| 15 | `isSpaFallbackEligible` | function | 187 |
+| 16 | `setNoStoreHeaders` | function | 195 |
+| 17 | `setHtmlNoCacheHeaders` | function | 199 |
+| 18 | `setTunnelSecurityHeaders` | function | 205 |
+| 19 | `setFrontendStaticHeaders` | function | 240 |
+| 20 | `setUploadStaticHeaders` | function | 258 |
+| 21 | `mapServerError` | function | 265 |
 
 ### 3.42 `backend/src/services/aiGateway.js`
 

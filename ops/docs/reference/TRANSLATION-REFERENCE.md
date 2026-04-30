@@ -4,8 +4,8 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 
 ## 1. Coverage Summary
 
-- English keys: **1734**
-- Khmer keys: **1739**
+- English keys: **1736**
+- Khmer keys: **1741**
 - Missing in Khmer: **0**
 - Missing in English: **5**
 
@@ -13,7 +13,7 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 
 | No. | Prefix | Key Count |
 |---:|---|---:|
-| 1 | `(misc)` | 257 |
+| 1 | `(misc)` | 259 |
 | 2 | `absorbed` | 1 |
 | 3 | `accent` | 1 |
 | 4 | `access` | 5 |
@@ -351,7 +351,7 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 
 | No. | Prefix | Key Count |
 |---:|---|---:|
-| 1 | `(misc)` | 258 |
+| 1 | `(misc)` | 260 |
 | 2 | `absorbed` | 1 |
 | 3 | `accent` | 1 |
 | 4 | `access` | 5 |

@@ -4,7 +4,7 @@ Auto-generated symbol inventory for frontend files. Regenerate with `node ops/sc
 
 ## 1. Coverage Summary
 
-Total files documented: **120**
+Total files documented: **121**
 
 ## 2. Symbol Count by File
 
@@ -39,7 +39,7 @@ Total files documented: **120**
 | 27 | `frontend/src/components/dashboard/Dashboard.jsx` | 6 |
 | 28 | `frontend/src/components/dashboard/MiniStat.jsx` | 1 |
 | 29 | `frontend/src/components/files/FilePickerModal.jsx` | 6 |
-| 30 | `frontend/src/components/files/FilesPage.jsx` | 17 |
+| 30 | `frontend/src/components/files/FilesPage.jsx` | 15 |
 | 31 | `frontend/src/components/inventory/DualMoney.jsx` | 1 |
 | 32 | `frontend/src/components/inventory/Inventory.jsx` | 10 |
 | 33 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 6 |
@@ -62,7 +62,7 @@ Total files documented: **120**
 | 50 | `frontend/src/components/products/ManageUnitsModal.jsx` | 5 |
 | 51 | `frontend/src/components/products/primitives.jsx` | 9 |
 | 52 | `frontend/src/components/products/ProductDetailModal.jsx` | 3 |
-| 53 | `frontend/src/components/products/ProductForm.jsx` | 17 |
+| 53 | `frontend/src/components/products/ProductForm.jsx` | 18 |
 | 54 | `frontend/src/components/products/Products.jsx` | 25 |
 | 55 | `frontend/src/components/products/VariantFormModal.jsx` | 5 |
 | 56 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 4 |
@@ -85,51 +85,52 @@ Total files documented: **120**
 | 73 | `frontend/src/components/sales/SalesImportModal.jsx` | 7 |
 | 74 | `frontend/src/components/sales/StatusBadge.jsx` | 1 |
 | 75 | `frontend/src/components/server/ServerPage.jsx` | 15 |
-| 76 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
-| 77 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
-| 78 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
-| 79 | `frontend/src/components/shared/Modal.jsx` | 1 |
-| 80 | `frontend/src/components/shared/navigationConfig.js` | 0 |
-| 81 | `frontend/src/components/shared/NotificationCenter.jsx` | 6 |
-| 82 | `frontend/src/components/shared/pageActivity.js` | 0 |
-| 83 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
-| 84 | `frontend/src/components/shared/PageHelpButton.jsx` | 1 |
-| 85 | `frontend/src/components/shared/pageHelpContent.js` | 0 |
-| 86 | `frontend/src/components/shared/PortalMenu.jsx` | 5 |
-| 87 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
-| 88 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
-| 89 | `frontend/src/components/users/PermissionEditor.jsx` | 4 |
-| 90 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
-| 91 | `frontend/src/components/users/UserProfileModal.jsx` | 22 |
-| 92 | `frontend/src/components/users/Users.jsx` | 15 |
-| 93 | `frontend/src/components/utils-settings/AuditLog.jsx` | 12 |
-| 94 | `frontend/src/components/utils-settings/Backup.jsx` | 37 |
-| 95 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
-| 96 | `frontend/src/components/utils-settings/index.js` | 0 |
-| 97 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
-| 98 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
-| 99 | `frontend/src/components/utils-settings/Settings.jsx` | 20 |
-| 100 | `frontend/src/constants.js` | 0 |
-| 101 | `frontend/src/index.jsx` | 13 |
-| 102 | `frontend/src/platform/runtime/clientRuntime.js` | 7 |
-| 103 | `frontend/src/utils/appRefresh.js` | 0 |
-| 104 | `frontend/src/utils/color.js` | 2 |
-| 105 | `frontend/src/utils/csv.js` | 6 |
-| 106 | `frontend/src/utils/csvImport.js` | 0 |
-| 107 | `frontend/src/utils/dateHelpers.js` | 0 |
-| 108 | `frontend/src/utils/deviceInfo.js` | 0 |
-| 109 | `frontend/src/utils/exportPackage.js` | 0 |
-| 110 | `frontend/src/utils/exportReports.jsx` | 8 |
-| 111 | `frontend/src/utils/favicon.js` | 2 |
-| 112 | `frontend/src/utils/formatters.js` | 0 |
-| 113 | `frontend/src/utils/index.js` | 0 |
-| 114 | `frontend/src/utils/pricing.js` | 0 |
-| 115 | `frontend/src/utils/printReceipt.js` | 26 |
-| 116 | `frontend/src/web-api.js` | 4 |
-| 117 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 118 | `frontend/vite.config.mjs` | 2 |
-| 119 | `frontend/postcss.config.mjs` | 0 |
-| 120 | `frontend/tailwind.config.mjs` | 0 |
+| 76 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 2 |
+| 77 | `frontend/src/components/shared/ExportMenu.jsx` | 1 |
+| 78 | `frontend/src/components/shared/FilterMenu.jsx` | 2 |
+| 79 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 5 |
+| 80 | `frontend/src/components/shared/Modal.jsx` | 1 |
+| 81 | `frontend/src/components/shared/navigationConfig.js` | 0 |
+| 82 | `frontend/src/components/shared/NotificationCenter.jsx` | 6 |
+| 83 | `frontend/src/components/shared/pageActivity.js` | 0 |
+| 84 | `frontend/src/components/shared/PageHeader.jsx` | 1 |
+| 85 | `frontend/src/components/shared/PageHelpButton.jsx` | 1 |
+| 86 | `frontend/src/components/shared/pageHelpContent.js` | 0 |
+| 87 | `frontend/src/components/shared/PortalMenu.jsx` | 5 |
+| 88 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 3 |
+| 89 | `frontend/src/components/shared/WriteConflictModal.jsx` | 5 |
+| 90 | `frontend/src/components/users/PermissionEditor.jsx` | 4 |
+| 91 | `frontend/src/components/users/UserDetailSheet.jsx` | 3 |
+| 92 | `frontend/src/components/users/UserProfileModal.jsx` | 22 |
+| 93 | `frontend/src/components/users/Users.jsx` | 15 |
+| 94 | `frontend/src/components/utils-settings/AuditLog.jsx` | 12 |
+| 95 | `frontend/src/components/utils-settings/Backup.jsx` | 37 |
+| 96 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 |
+| 97 | `frontend/src/components/utils-settings/index.js` | 0 |
+| 98 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 |
+| 99 | `frontend/src/components/utils-settings/ResetData.jsx` | 8 |
+| 100 | `frontend/src/components/utils-settings/Settings.jsx` | 20 |
+| 101 | `frontend/src/constants.js` | 0 |
+| 102 | `frontend/src/index.jsx` | 13 |
+| 103 | `frontend/src/platform/runtime/clientRuntime.js` | 7 |
+| 104 | `frontend/src/utils/appRefresh.js` | 0 |
+| 105 | `frontend/src/utils/color.js` | 2 |
+| 106 | `frontend/src/utils/csv.js` | 6 |
+| 107 | `frontend/src/utils/csvImport.js` | 0 |
+| 108 | `frontend/src/utils/dateHelpers.js` | 0 |
+| 109 | `frontend/src/utils/deviceInfo.js` | 0 |
+| 110 | `frontend/src/utils/exportPackage.js` | 0 |
+| 111 | `frontend/src/utils/exportReports.jsx` | 8 |
+| 112 | `frontend/src/utils/favicon.js` | 2 |
+| 113 | `frontend/src/utils/formatters.js` | 0 |
+| 114 | `frontend/src/utils/index.js` | 0 |
+| 115 | `frontend/src/utils/pricing.js` | 0 |
+| 116 | `frontend/src/utils/printReceipt.js` | 26 |
+| 117 | `frontend/src/web-api.js` | 4 |
+| 118 | `ops/scripts/frontend/verify-i18n.js` | 6 |
+| 119 | `frontend/vite.config.mjs` | 2 |
+| 120 | `frontend/postcss.config.mjs` | 0 |
+| 121 | `frontend/tailwind.config.mjs` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -257,10 +258,10 @@ Total files documented: **120**
 | 85 | `getReturns` | const arrow | 1143 |
 | 86 | `updateSaleStatus` | const arrow | 1164 |
 | 87 | `attachSaleCustomer` | const arrow | 1180 |
-| 88 | `getSalesExport` | const arrow | 1203 |
-| 89 | `updateReturn` | const arrow | 1207 |
-| 90 | `getDataPath` | const arrow | 1267 |
-| 91 | `browseDir` | const arrow | 1278 |
+| 88 | `getSalesExport` | const arrow | 1204 |
+| 89 | `updateReturn` | const arrow | 1208 |
+| 90 | `getDataPath` | const arrow | 1268 |
+| 91 | `browseDir` | const arrow | 1279 |
 
 ### 3.4 `frontend/src/api/websocket.js`
 
@@ -385,15 +386,15 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `formatTransferDate` | function | 21 |
-| 2 | `Branches` | component/function | 38 |
-| 3 | `load` | const arrow | 60 |
-| 4 | `loadBranchStock` | const arrow | 101 |
-| 5 | `handleSaveBranch` | const arrow | 116 |
-| 6 | `handleDelete` | const arrow | 135 |
-| 7 | `handleBulkDelete` | const arrow | 150 |
-| 8 | `toggleSelect` | const arrow | 175 |
-| 9 | `toggleSelectAll` | const arrow | 184 |
+| 1 | `formatTransferDate` | function | 25 |
+| 2 | `Branches` | component/function | 42 |
+| 3 | `load` | const arrow | 66 |
+| 4 | `loadBranchStock` | const arrow | 122 |
+| 5 | `handleSaveBranch` | const arrow | 137 |
+| 6 | `handleDelete` | const arrow | 190 |
+| 7 | `handleBulkDelete` | const arrow | 223 |
+| 8 | `toggleSelect` | const arrow | 291 |
+| 9 | `toggleSelectAll` | const arrow | 300 |
 
 ### 3.9 `frontend/src/components/branches/BranchForm.jsx`
 
@@ -415,79 +416,79 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getAboutBlockLabel` | function | 53 |
-| 2 | `withAssetVersion` | function | 59 |
-| 3 | `tt` | function | 740 |
-| 4 | `toBoolean` | function | 753 |
-| 5 | `toNumber` | function | 760 |
-| 6 | `normalizePriceDisplay` | function | 766 |
-| 7 | `normalizeHexColor` | function | 771 |
-| 8 | `normalizeExternalUrl` | function | 777 |
-| 9 | `buildFaqStarterItems` | function | 793 |
-| 10 | `buildAiFaqStarterItems` | function | 873 |
-| 11 | `hexToRgba` | function | 904 |
-| 12 | `readPortalCache` | function | 915 |
-| 13 | `writePortalCache` | function | 931 |
-| 14 | `normalizePortalPath` | function | 945 |
-| 15 | `isReservedPortalPath` | function | 958 |
-| 16 | `buildDraft` | function | 963 |
-| 17 | `applyDraft` | function | 1047 |
-| 18 | `getBranchQty` | function | 1163 |
-| 19 | `getStockStatus` | function | 1170 |
-| 20 | `normalizeProductGallery` | function | 1180 |
-| 21 | `formatDateTime` | function | 1198 |
-| 22 | `formatPortalPrice` | function | 1205 |
-| 23 | `ImageField` | function | 1218 |
-| 24 | `pickImageAsDataUrl` | function | 1284 |
-| 25 | `pickMultipleImagesAsDataUrls` | function | 1303 |
-| 26 | `replaceVars` | function | 1324 |
-| 27 | `applyGoogleTranslateSelection` | function | 1360 |
-| 28 | `readStoredTranslateTarget` | function | 1383 |
-| 29 | `CatalogPage` | component/function | 1407 |
-| 30 | `copy` | const arrow | 1487 |
-| 31 | `resolveVisibleTab` | const arrow | 1496 |
-| 32 | `loadAssistantStatus` | function | 1585 |
-| 33 | `openProductGallery` | function | 1603 |
-| 34 | `changeTranslateTarget` | function | 1616 |
-| 35 | `isPortalLoadCurrent` | function | 1632 |
-| 36 | `loadPortalEditorData` | function | 1636 |
-| 37 | `refreshPortalView` | function | 1665 |
-| 38 | `loadPortal` | function | 1693 |
-| 39 | `initWidget` | const arrow | 1874 |
-| 40 | `waitForWidget` | const arrow | 1892 |
-| 41 | `toggleFilterValue` | function | 1998 |
-| 42 | `clearPortalFilters` | function | 2006 |
-| 43 | `setDraft` | function | 2013 |
-| 44 | `openPortalImage` | function | 2018 |
-| 45 | `setAboutBlocksDraft` | function | 2029 |
-| 46 | `updateAboutBlock` | function | 2033 |
-| 47 | `addAboutBlock` | function | 2039 |
-| 48 | `moveAboutBlockBefore` | function | 2043 |
-| 49 | `removeAboutBlock` | function | 2055 |
-| 50 | `setFaqDraft` | function | 2059 |
-| 51 | `addFaqItem` | function | 2063 |
-| 52 | `mergeFaqStarterItems` | function | 2074 |
-| 53 | `addFaqStarterSet` | function | 2087 |
-| 54 | `addAiFaqStarterSet` | function | 2091 |
-| 55 | `updateFaqItem` | function | 2095 |
-| 56 | `removeFaqItem` | function | 2101 |
-| 57 | `clearAssistantState` | function | 2105 |
-| 58 | `uploadPortalImage` | function | 2120 |
-| 59 | `uploadDraftImage` | function | 2139 |
-| 60 | `uploadAboutBlockMedia` | function | 2144 |
-| 61 | `openFilePicker` | function | 2153 |
-| 62 | `handleFilePickerSelect` | function | 2157 |
-| 63 | `savePortalDraft` | function | 2173 |
-| 64 | `askAssistant` | function | 2293 |
-| 65 | `refreshMembershipData` | function | 2337 |
-| 66 | `handleMembershipLookup` | function | 2381 |
-| 67 | `addSubmissionImages` | function | 2394 |
-| 68 | `handleSubmissionPaste` | function | 2404 |
-| 69 | `handleSubmitShareProof` | function | 2420 |
-| 70 | `handleReviewSubmission` | function | 2464 |
-| 71 | `renderCatalogSection` | function | 2594 |
-| 72 | `handleUploadSubmissionImages` | const arrow | 2611 |
-| 73 | `renderSecondaryTabSection` | function | 2663 |
+| 1 | `getAboutBlockLabel` | function | 54 |
+| 2 | `withAssetVersion` | function | 60 |
+| 3 | `tt` | function | 741 |
+| 4 | `toBoolean` | function | 754 |
+| 5 | `toNumber` | function | 761 |
+| 6 | `normalizePriceDisplay` | function | 767 |
+| 7 | `normalizeHexColor` | function | 772 |
+| 8 | `normalizeExternalUrl` | function | 778 |
+| 9 | `buildFaqStarterItems` | function | 794 |
+| 10 | `buildAiFaqStarterItems` | function | 874 |
+| 11 | `hexToRgba` | function | 905 |
+| 12 | `readPortalCache` | function | 916 |
+| 13 | `writePortalCache` | function | 932 |
+| 14 | `normalizePortalPath` | function | 946 |
+| 15 | `isReservedPortalPath` | function | 959 |
+| 16 | `buildDraft` | function | 964 |
+| 17 | `applyDraft` | function | 1048 |
+| 18 | `getBranchQty` | function | 1164 |
+| 19 | `getStockStatus` | function | 1171 |
+| 20 | `normalizeProductGallery` | function | 1181 |
+| 21 | `formatDateTime` | function | 1199 |
+| 22 | `formatPortalPrice` | function | 1206 |
+| 23 | `ImageField` | function | 1219 |
+| 24 | `pickImageAsDataUrl` | function | 1285 |
+| 25 | `pickMultipleImagesAsDataUrls` | function | 1304 |
+| 26 | `replaceVars` | function | 1325 |
+| 27 | `applyGoogleTranslateSelection` | function | 1363 |
+| 28 | `readStoredTranslateTarget` | function | 1386 |
+| 29 | `CatalogPage` | component/function | 1410 |
+| 30 | `copy` | const arrow | 1492 |
+| 31 | `resolveVisibleTab` | const arrow | 1501 |
+| 32 | `loadAssistantStatus` | function | 1590 |
+| 33 | `openProductGallery` | function | 1608 |
+| 34 | `changeTranslateTarget` | function | 1621 |
+| 35 | `isPortalLoadCurrent` | function | 1637 |
+| 36 | `loadPortalEditorData` | function | 1641 |
+| 37 | `refreshPortalView` | function | 1670 |
+| 38 | `loadPortal` | function | 1699 |
+| 39 | `initWidget` | const arrow | 1894 |
+| 40 | `waitForWidget` | const arrow | 1912 |
+| 41 | `toggleFilterValue` | function | 2021 |
+| 42 | `clearPortalFilters` | function | 2029 |
+| 43 | `setDraft` | function | 2036 |
+| 44 | `openPortalImage` | function | 2041 |
+| 45 | `setAboutBlocksDraft` | function | 2052 |
+| 46 | `updateAboutBlock` | function | 2056 |
+| 47 | `addAboutBlock` | function | 2062 |
+| 48 | `moveAboutBlockBefore` | function | 2066 |
+| 49 | `removeAboutBlock` | function | 2078 |
+| 50 | `setFaqDraft` | function | 2082 |
+| 51 | `addFaqItem` | function | 2086 |
+| 52 | `mergeFaqStarterItems` | function | 2097 |
+| 53 | `addFaqStarterSet` | function | 2110 |
+| 54 | `addAiFaqStarterSet` | function | 2114 |
+| 55 | `updateFaqItem` | function | 2118 |
+| 56 | `removeFaqItem` | function | 2124 |
+| 57 | `clearAssistantState` | function | 2128 |
+| 58 | `uploadPortalImage` | function | 2143 |
+| 59 | `uploadDraftImage` | function | 2162 |
+| 60 | `uploadAboutBlockMedia` | function | 2167 |
+| 61 | `openFilePicker` | function | 2176 |
+| 62 | `handleFilePickerSelect` | function | 2180 |
+| 63 | `savePortalDraft` | function | 2196 |
+| 64 | `askAssistant` | function | 2316 |
+| 65 | `refreshMembershipData` | function | 2360 |
+| 66 | `handleMembershipLookup` | function | 2404 |
+| 67 | `addSubmissionImages` | function | 2417 |
+| 68 | `handleSubmissionPaste` | function | 2427 |
+| 69 | `handleSubmitShareProof` | function | 2443 |
+| 70 | `handleReviewSubmission` | function | 2487 |
+| 71 | `renderCatalogSection` | function | 2617 |
+| 72 | `handleUploadSubmissionImages` | const arrow | 2634 |
+| 73 | `renderSecondaryTabSection` | function | 2686 |
 
 ### 3.12 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
@@ -521,64 +522,64 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `TABS` | const arrow | 16 |
-| 2 | `ImportTypePicker` | function | 22 |
-| 3 | `T` | const arrow | 23 |
-| 4 | `Contacts` | component/function | 62 |
-| 5 | `handleExportAll` | const arrow | 69 |
-| 6 | `openImportPicker` | const arrow | 144 |
-| 7 | `handleTypeSelected` | const arrow | 146 |
-| 8 | `handleImportDone` | const arrow | 151 |
+| 1 | `TABS` | const arrow | 17 |
+| 2 | `ImportTypePicker` | function | 23 |
+| 3 | `T` | const arrow | 24 |
+| 4 | `Contacts` | component/function | 63 |
+| 5 | `handleExportAll` | const arrow | 71 |
+| 6 | `openImportPicker` | const arrow | 146 |
+| 7 | `handleTypeSelected` | const arrow | 148 |
+| 8 | `handleImportDone` | const arrow | 153 |
 
 ### 3.17 `frontend/src/components/contacts/CustomersTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `tr` | function | 31 |
-| 2 | `OptionEditor` | function | 36 |
-| 3 | `setField` | const arrow | 37 |
-| 4 | `fieldId` | const arrow | 38 |
-| 5 | `CustomerForm` | function | 80 |
-| 6 | `setField` | const arrow | 92 |
-| 7 | `addOption` | const arrow | 93 |
-| 8 | `removeOption` | const arrow | 97 |
-| 9 | `updateOption` | const arrow | 98 |
-| 10 | `handleSubmit` | const arrow | 99 |
-| 11 | `CustomersTab` | function | 207 |
-| 12 | `toggleSectionCollapsed` | const arrow | 319 |
-| 13 | `isSectionFullySelected` | const arrow | 325 |
-| 14 | `isSectionPartiallySelected` | const arrow | 326 |
-| 15 | `toggleSectionSelection` | const arrow | 327 |
-| 16 | `promise` | const arrow | 338 |
-| 17 | `handleSave` | const arrow | 395 |
-| 18 | `handleDelete` | const arrow | 423 |
-| 19 | `handleBulkDelete` | const arrow | 436 |
+| 1 | `tr` | function | 34 |
+| 2 | `OptionEditor` | function | 39 |
+| 3 | `setField` | const arrow | 40 |
+| 4 | `fieldId` | const arrow | 41 |
+| 5 | `CustomerForm` | function | 83 |
+| 6 | `setField` | const arrow | 95 |
+| 7 | `addOption` | const arrow | 96 |
+| 8 | `removeOption` | const arrow | 100 |
+| 9 | `updateOption` | const arrow | 101 |
+| 10 | `handleSubmit` | const arrow | 102 |
+| 11 | `CustomersTab` | function | 210 |
+| 12 | `toggleSectionCollapsed` | const arrow | 323 |
+| 13 | `isSectionFullySelected` | const arrow | 329 |
+| 14 | `isSectionPartiallySelected` | const arrow | 330 |
+| 15 | `toggleSectionSelection` | const arrow | 331 |
+| 16 | `promise` | const arrow | 354 |
+| 17 | `handleSave` | const arrow | 419 |
+| 18 | `handleDelete` | const arrow | 482 |
+| 19 | `handleBulkDelete` | const arrow | 512 |
 
 ### 3.18 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `BLANK_OPTION` | const arrow | 36 |
-| 2 | `OptionEditor` | function | 39 |
-| 3 | `set` | const arrow | 40 |
-| 4 | `fieldId` | const arrow | 41 |
-| 5 | `DeliveryForm` | function | 78 |
-| 6 | `set` | const arrow | 87 |
-| 7 | `addOption` | const arrow | 88 |
-| 8 | `updateOption` | const arrow | 92 |
-| 9 | `removeOption` | const arrow | 93 |
-| 10 | `handleSave` | const arrow | 94 |
-| 11 | `OptionsDisplay` | function | 164 |
-| 12 | `OptionsBadge` | function | 181 |
-| 13 | `DeliveryTab` | function | 192 |
-| 14 | `toggleSectionCollapsed` | const arrow | 296 |
-| 15 | `isSectionFullySelected` | const arrow | 302 |
-| 16 | `isSectionPartiallySelected` | const arrow | 303 |
-| 17 | `toggleSectionSelection` | const arrow | 304 |
-| 18 | `promise` | const arrow | 315 |
-| 19 | `handleSave` | const arrow | 371 |
-| 20 | `handleDelete` | const arrow | 386 |
-| 21 | `handleBulkDelete` | const arrow | 392 |
+| 1 | `BLANK_OPTION` | const arrow | 39 |
+| 2 | `OptionEditor` | function | 42 |
+| 3 | `set` | const arrow | 43 |
+| 4 | `fieldId` | const arrow | 44 |
+| 5 | `DeliveryForm` | function | 81 |
+| 6 | `set` | const arrow | 90 |
+| 7 | `addOption` | const arrow | 91 |
+| 8 | `updateOption` | const arrow | 95 |
+| 9 | `removeOption` | const arrow | 96 |
+| 10 | `handleSave` | const arrow | 97 |
+| 11 | `OptionsDisplay` | function | 167 |
+| 12 | `OptionsBadge` | function | 184 |
+| 13 | `DeliveryTab` | function | 195 |
+| 14 | `toggleSectionCollapsed` | const arrow | 300 |
+| 15 | `isSectionFullySelected` | const arrow | 306 |
+| 16 | `isSectionPartiallySelected` | const arrow | 307 |
+| 17 | `toggleSectionSelection` | const arrow | 308 |
+| 18 | `promise` | const arrow | 329 |
+| 19 | `handleSave` | const arrow | 393 |
+| 20 | `handleDelete` | const arrow | 443 |
+| 21 | `handleBulkDelete` | const arrow | 472 |
 
 ### 3.19 `frontend/src/components/contacts/shared.jsx`
 
@@ -601,37 +602,37 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `SupplierForm` | function | 24 |
-| 2 | `set` | const arrow | 40 |
-| 3 | `addOption` | const arrow | 41 |
-| 4 | `updateOption` | const arrow | 45 |
-| 5 | `removeOption` | const arrow | 46 |
-| 6 | `handleSubmit` | const arrow | 47 |
-| 7 | `SuppliersTab` | function | 134 |
-| 8 | `toggleSectionCollapsed` | const arrow | 250 |
-| 9 | `isSectionFullySelected` | const arrow | 256 |
-| 10 | `isSectionPartiallySelected` | const arrow | 257 |
-| 11 | `toggleSectionSelection` | const arrow | 258 |
-| 12 | `promise` | const arrow | 269 |
-| 13 | `handleSave` | const arrow | 326 |
-| 14 | `handleDelete` | const arrow | 346 |
-| 15 | `handleBulkDelete` | const arrow | 359 |
+| 1 | `SupplierForm` | function | 27 |
+| 2 | `set` | const arrow | 43 |
+| 3 | `addOption` | const arrow | 44 |
+| 4 | `updateOption` | const arrow | 48 |
+| 5 | `removeOption` | const arrow | 49 |
+| 6 | `handleSubmit` | const arrow | 50 |
+| 7 | `SuppliersTab` | function | 137 |
+| 8 | `toggleSectionCollapsed` | const arrow | 254 |
+| 9 | `isSectionFullySelected` | const arrow | 260 |
+| 10 | `isSectionPartiallySelected` | const arrow | 261 |
+| 11 | `toggleSectionSelection` | const arrow | 262 |
+| 12 | `promise` | const arrow | 285 |
+| 13 | `handleSave` | const arrow | 350 |
+| 14 | `handleDelete` | const arrow | 405 |
+| 15 | `handleBulkDelete` | const arrow | 435 |
 
 ### 3.21 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeRowValue` | function | 12 |
-| 2 | `buildRowPayload` | function | 25 |
-| 3 | `CustomTables` | component/function | 34 |
-| 4 | `addColumn` | const arrow | 132 |
-| 5 | `updateColumn` | const arrow | 139 |
-| 6 | `removeColumn` | const arrow | 148 |
-| 7 | `handleCreateTable` | const arrow | 155 |
-| 8 | `handleSaveRow` | const arrow | 193 |
-| 9 | `handleDeleteRow` | const arrow | 220 |
-| 10 | `openAddRow` | const arrow | 239 |
-| 11 | `openEditRow` | const arrow | 246 |
+| 1 | `normalizeRowValue` | function | 15 |
+| 2 | `buildRowPayload` | function | 28 |
+| 3 | `CustomTables` | component/function | 37 |
+| 4 | `addColumn` | const arrow | 136 |
+| 5 | `updateColumn` | const arrow | 143 |
+| 6 | `removeColumn` | const arrow | 152 |
+| 7 | `handleCreateTable` | const arrow | 159 |
+| 8 | `handleSaveRow` | const arrow | 197 |
+| 9 | `handleDeleteRow` | const arrow | 269 |
+| 10 | `openAddRow` | const arrow | 305 |
+| 11 | `openEditRow` | const arrow | 312 |
 
 ### 3.22 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
@@ -669,12 +670,12 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `Dashboard` | component/function | 19 |
-| 2 | `translateOr` | const arrow | 23 |
-| 3 | `calcTrend` | const arrow | 158 |
-| 4 | `rangeLabel` | const arrow | 183 |
-| 5 | `periodShort` | const arrow | 189 |
-| 6 | `buildExportAll` | const arrow | 457 |
+| 1 | `Dashboard` | component/function | 20 |
+| 2 | `translateOr` | const arrow | 25 |
+| 3 | `calcTrend` | const arrow | 180 |
+| 4 | `rangeLabel` | const arrow | 205 |
+| 5 | `periodShort` | const arrow | 211 |
+| 6 | `buildExportAll` | const arrow | 475 |
 
 ### 3.28 `frontend/src/components/dashboard/MiniStat.jsx`
 
@@ -697,23 +698,21 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `AssetPreview` | function | 28 |
-| 2 | `formatDateTime` | function | 42 |
-| 3 | `ProviderStatus` | function | 52 |
-| 4 | `emptyProviderForm` | function | 63 |
-| 5 | `compactTabLabel` | function | 86 |
-| 6 | `FilesPage` | component/function | 92 |
-| 7 | `tr` | const arrow | 117 |
-| 8 | `loadProviders` | function | 212 |
-| 9 | `loadResponses` | function | 225 |
-| 10 | `handleUpload` | function | 237 |
-| 11 | `handleDeleteAsset` | function | 253 |
-| 12 | `startCreateProvider` | function | 272 |
-| 13 | `startEditProvider` | function | 288 |
-| 14 | `saveProvider` | function | 313 |
-| 15 | `testProvider` | function | 357 |
-| 16 | `removeProvider` | function | 371 |
-| 17 | `tabButton` | const arrow | 384 |
+| 1 | `AssetPreview` | function | 32 |
+| 2 | `formatDateTime` | function | 46 |
+| 3 | `ProviderStatus` | function | 56 |
+| 4 | `emptyProviderForm` | function | 67 |
+| 5 | `compactTabLabel` | function | 90 |
+| 6 | `FilesPage` | component/function | 96 |
+| 7 | `tr` | const arrow | 125 |
+| 8 | `handleUpload` | function | 303 |
+| 9 | `handleDeleteAsset` | function | 319 |
+| 10 | `startCreateProvider` | function | 338 |
+| 11 | `startEditProvider` | function | 354 |
+| 12 | `saveProvider` | function | 379 |
+| 13 | `testProvider` | function | 460 |
+| 14 | `removeProvider` | function | 474 |
+| 15 | `tabButton` | const arrow | 487 |
 
 ### 3.31 `frontend/src/components/inventory/DualMoney.jsx`
 
@@ -725,16 +724,16 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `reuseSetWhenUnchanged` | function | 27 |
-| 2 | `priceCsv` | function | 36 |
-| 3 | `Inventory` | component/function | 40 |
-| 4 | `tr` | const arrow | 44 |
-| 5 | `promise` | const arrow | 88 |
-| 6 | `handleAdjust` | const arrow | 195 |
-| 7 | `openAdjust` | const arrow | 229 |
-| 8 | `matchesSearch` | const arrow | 242 |
-| 9 | `productHay` | const arrow | 249 |
-| 10 | `movHay` | const arrow | 252 |
+| 1 | `reuseSetWhenUnchanged` | function | 30 |
+| 2 | `priceCsv` | function | 39 |
+| 3 | `Inventory` | component/function | 43 |
+| 4 | `tr` | const arrow | 47 |
+| 5 | `promise` | const arrow | 92 |
+| 6 | `handleAdjust` | const arrow | 199 |
+| 7 | `openAdjust` | const arrow | 263 |
+| 8 | `matchesSearch` | const arrow | 276 |
+| 9 | `productHay` | const arrow | 283 |
+| 10 | `movHay` | const arrow | 286 |
 
 ### 3.33 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
@@ -767,14 +766,14 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sanitizeInteger` | function | 107 |
-| 2 | `sanitizeKhr` | function | 112 |
-| 3 | `formatLookupValue` | function | 118 |
-| 4 | `LoyaltyPointsPage` | component/function | 122 |
-| 5 | `copy` | const arrow | 125 |
-| 6 | `setValue` | function | 206 |
-| 7 | `handleSave` | function | 210 |
-| 8 | `handleLookup` | function | 235 |
+| 1 | `sanitizeInteger` | function | 108 |
+| 2 | `sanitizeKhr` | function | 113 |
+| 3 | `formatLookupValue` | function | 119 |
+| 4 | `LoyaltyPointsPage` | component/function | 123 |
+| 5 | `copy` | const arrow | 127 |
+| 6 | `setValue` | function | 216 |
+| 7 | `handleSave` | function | 220 |
+| 8 | `handleLookup` | function | 245 |
 
 ### 3.37 `frontend/src/components/navigation/Sidebar.jsx`
 
@@ -807,28 +806,28 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `allTermsMatch` | function | 58 |
-| 2 | `POS` | component/function | 63 |
-| 3 | `setQuickFilter` | const arrow | 101 |
-| 4 | `addNewOrder` | const arrow | 166 |
-| 5 | `closeOrder` | const arrow | 178 |
-| 6 | `selectCustomer` | const arrow | 421 |
-| 7 | `applyCustomerOption` | const arrow | 469 |
-| 8 | `clearCustomer` | const arrow | 483 |
-| 9 | `handleAddCustomer` | const arrow | 491 |
-| 10 | `selectDelivery` | const arrow | 512 |
-| 11 | `clearDelivery` | const arrow | 517 |
-| 12 | `handleAddDelivery` | const arrow | 519 |
-| 13 | `filteredProducts` | const arrow | 566 |
-| 14 | `qty` | const arrow | 595 |
-| 15 | `addToCart` | const arrow | 732 |
-| 16 | `updateQty` | const arrow | 771 |
-| 17 | `updatePrice` | const arrow | 779 |
-| 18 | `updateItemBranch` | const arrow | 803 |
-| 19 | `handleDiscountUsd` | const arrow | 852 |
-| 20 | `handleDiscountKhr` | const arrow | 853 |
-| 21 | `handleMembershipUnits` | const arrow | 854 |
-| 22 | `handleCheckout` | const arrow | 893 |
+| 1 | `allTermsMatch` | function | 59 |
+| 2 | `POS` | component/function | 64 |
+| 3 | `setQuickFilter` | const arrow | 103 |
+| 4 | `addNewOrder` | const arrow | 168 |
+| 5 | `closeOrder` | const arrow | 180 |
+| 6 | `selectCustomer` | const arrow | 440 |
+| 7 | `applyCustomerOption` | const arrow | 488 |
+| 8 | `clearCustomer` | const arrow | 502 |
+| 9 | `handleAddCustomer` | const arrow | 510 |
+| 10 | `selectDelivery` | const arrow | 531 |
+| 11 | `clearDelivery` | const arrow | 536 |
+| 12 | `handleAddDelivery` | const arrow | 538 |
+| 13 | `filteredProducts` | const arrow | 585 |
+| 14 | `qty` | const arrow | 614 |
+| 15 | `addToCart` | const arrow | 751 |
+| 16 | `updateQty` | const arrow | 790 |
+| 17 | `updatePrice` | const arrow | 798 |
+| 18 | `updateItemBranch` | const arrow | 822 |
+| 19 | `handleDiscountUsd` | const arrow | 871 |
+| 20 | `handleDiscountKhr` | const arrow | 872 |
+| 21 | `handleMembershipUnits` | const arrow | 873 |
+| 22 | `handleCheckout` | const arrow | 912 |
 
 ### 3.41 `frontend/src/components/pos/ProductImage.jsx`
 
@@ -847,11 +846,11 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `stopStream` | function | 22 |
-| 2 | `readCameraPermissionState` | function | 28 |
-| 3 | `watchCameraPermission` | function | 38 |
-| 4 | `handleChange` | const arrow | 42 |
-| 5 | `BarcodeScannerModal` | component/function | 51 |
+| 1 | `stopStream` | function | 24 |
+| 2 | `readCameraPermissionState` | function | 30 |
+| 3 | `watchCameraPermission` | function | 40 |
+| 4 | `handleChange` | const arrow | 44 |
+| 5 | `BarcodeScannerModal` | component/function | 53 |
 
 ### 3.44 `frontend/src/components/products/BranchStockAdjuster.jsx`
 
@@ -866,8 +865,8 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `BulkAddStockModal` | function | 6 |
-| 2 | `handleSave` | const arrow | 13 |
+| 1 | `BulkAddStockModal` | function | 5 |
+| 2 | `handleSave` | const arrow | 12 |
 
 ### 3.46 `frontend/src/components/products/BulkImportModal.jsx`
 
@@ -955,63 +954,64 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeGallery` | function | 16 |
-| 2 | `editablePrice` | function | 32 |
-| 3 | `pickImageFiles` | function | 37 |
-| 4 | `ProductForm` | component/function | 56 |
-| 5 | `tr` | const arrow | 127 |
-| 6 | `loadSuppliers` | function | 160 |
-| 7 | `setField` | function | 180 |
-| 8 | `setNumericField` | function | 184 |
-| 9 | `addImages` | function | 188 |
-| 10 | `addPhoto` | function | 193 |
-| 11 | `uploadPickedImages` | function | 198 |
-| 12 | `removeImage` | function | 221 |
-| 13 | `setPrimaryImage` | function | 225 |
-| 14 | `saveForm` | function | 235 |
-| 15 | `openScanner` | function | 273 |
-| 16 | `closeScanner` | function | 277 |
-| 17 | `applyScannedValue` | function | 281 |
+| 1 | `normalizeGallery` | function | 17 |
+| 2 | `editablePrice` | function | 33 |
+| 3 | `pickImageFiles` | function | 38 |
+| 4 | `readFileAsDataUrl` | function | 57 |
+| 5 | `ProductForm` | component/function | 66 |
+| 6 | `tr` | const arrow | 138 |
+| 7 | `loadSuppliers` | function | 171 |
+| 8 | `setField` | function | 191 |
+| 9 | `setNumericField` | function | 195 |
+| 10 | `addImages` | function | 199 |
+| 11 | `addPhoto` | function | 204 |
+| 12 | `uploadPickedImages` | function | 209 |
+| 13 | `removeImage` | function | 232 |
+| 14 | `setPrimaryImage` | function | 236 |
+| 15 | `saveForm` | function | 246 |
+| 16 | `openScanner` | function | 284 |
+| 17 | `closeScanner` | function | 306 |
+| 18 | `applyScannedValue` | function | 310 |
 
 ### 3.54 `frontend/src/components/products/Products.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `multiMatch` | function | 33 |
-| 2 | `ThreeDot` | function | 37 |
-| 3 | `getScrollContainer` | function | 58 |
-| 4 | `scrollNodeWithOffset` | function | 70 |
-| 5 | `Products` | component/function | 86 |
-| 6 | `promise` | const arrow | 135 |
-| 7 | `handleSave` | const arrow | 220 |
-| 8 | `normalizeGallery` | const arrow | 241 |
-| 9 | `uploadGalleryImages` | const arrow | 257 |
-| 10 | `handleSaveWithGallery` | const arrow | 279 |
-| 11 | `handleBulkDelete` | const arrow | 311 |
-| 12 | `handleBulkOutOfStock` | const arrow | 338 |
-| 13 | `handleBulkChangeBranch` | const arrow | 369 |
-| 14 | `handleBulkAddStock` | const arrow | 419 |
-| 15 | `toggleSelect` | const arrow | 424 |
-| 16 | `toggleSelectAll` | const arrow | 431 |
-| 17 | `handleDelete` | const arrow | 438 |
-| 18 | `resolveImageUrl` | const arrow | 471 |
-| 19 | `getProductGallery` | const arrow | 482 |
-| 20 | `renderUnitChip` | const arrow | 483 |
-| 21 | `openLightbox` | const arrow | 497 |
-| 22 | `getStockBadge` | const arrow | 508 |
-| 23 | `toImageName` | const arrow | 549 |
-| 24 | `toImageUrl` | const arrow | 550 |
-| 25 | `priceCsv` | const arrow | 551 |
+| 1 | `multiMatch` | function | 38 |
+| 2 | `ThreeDot` | function | 42 |
+| 3 | `getScrollContainer` | function | 63 |
+| 4 | `scrollNodeWithOffset` | function | 75 |
+| 5 | `Products` | component/function | 91 |
+| 6 | `promise` | const arrow | 143 |
+| 7 | `handleSave` | const arrow | 228 |
+| 8 | `normalizeGallery` | const arrow | 249 |
+| 9 | `uploadGalleryImages` | const arrow | 265 |
+| 10 | `handleSaveWithGallery` | const arrow | 287 |
+| 11 | `handleBulkDelete` | const arrow | 351 |
+| 12 | `handleBulkOutOfStock` | const arrow | 399 |
+| 13 | `handleBulkChangeBranch` | const arrow | 442 |
+| 14 | `handleBulkAddStock` | const arrow | 472 |
+| 15 | `toggleSelect` | const arrow | 480 |
+| 16 | `toggleSelectAll` | const arrow | 487 |
+| 17 | `handleDelete` | const arrow | 494 |
+| 18 | `resolveImageUrl` | const arrow | 539 |
+| 19 | `getProductGallery` | const arrow | 550 |
+| 20 | `renderUnitChip` | const arrow | 551 |
+| 21 | `openLightbox` | const arrow | 565 |
+| 22 | `getStockBadge` | const arrow | 576 |
+| 23 | `toImageName` | const arrow | 617 |
+| 24 | `toImageUrl` | const arrow | 618 |
+| 25 | `priceCsv` | const arrow | 619 |
 
 ### 3.55 `frontend/src/components/products/VariantFormModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `VariantFormModal` | component/function | 7 |
-| 2 | `tr` | const arrow | 9 |
-| 3 | `setField` | const arrow | 35 |
-| 4 | `setNumeric` | const arrow | 36 |
-| 5 | `handleSave` | const arrow | 38 |
+| 1 | `VariantFormModal` | component/function | 8 |
+| 2 | `tr` | const arrow | 10 |
+| 3 | `setField` | const arrow | 36 |
+| 4 | `setNumeric` | const arrow | 37 |
+| 5 | `handleSave` | const arrow | 39 |
 
 ### 3.56 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
@@ -1140,14 +1140,14 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeScope` | function | 23 |
-| 2 | `getReturnTypeKey` | function | 27 |
-| 3 | `getReturnTypeLabel` | function | 33 |
-| 4 | `exportReturnRows` | function | 41 |
-| 5 | `Returns` | component/function | 59 |
-| 6 | `promise` | const arrow | 95 |
-| 7 | `handleOpenEdit` | const arrow | 153 |
-| 8 | `renderAmount` | const arrow | 405 |
+| 1 | `normalizeScope` | function | 24 |
+| 2 | `getReturnTypeKey` | function | 28 |
+| 3 | `getReturnTypeLabel` | function | 34 |
+| 4 | `exportReturnRows` | function | 42 |
+| 5 | `Returns` | component/function | 60 |
+| 6 | `promise` | const arrow | 97 |
+| 7 | `handleOpenEdit` | const arrow | 162 |
+| 8 | `renderAmount` | const arrow | 414 |
 
 ### 3.70 `frontend/src/components/sales/ExportModal.jsx`
 
@@ -1178,16 +1178,16 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `multiMatch` | function | 22 |
-| 2 | `getSaleBranchLabel` | function | 26 |
-| 3 | `Sales` | component/function | 34 |
-| 4 | `promise` | const arrow | 73 |
-| 5 | `handleStatusChange` | const arrow | 138 |
-| 6 | `handleAttachMembership` | const arrow | 162 |
-| 7 | `toggleSelected` | const arrow | 270 |
-| 8 | `toggleSelectAll` | const arrow | 276 |
-| 9 | `handleExportSelected` | const arrow | 307 |
-| 10 | `handleBulkStatusUpdate` | const arrow | 326 |
+| 1 | `multiMatch` | function | 24 |
+| 2 | `getSaleBranchLabel` | function | 28 |
+| 3 | `Sales` | component/function | 36 |
+| 4 | `promise` | const arrow | 76 |
+| 5 | `handleStatusChange` | const arrow | 141 |
+| 6 | `handleAttachMembership` | const arrow | 176 |
+| 7 | `toggleSelected` | const arrow | 327 |
+| 8 | `toggleSelectAll` | const arrow | 333 |
+| 9 | `handleExportSelected` | const arrow | 364 |
+| 10 | `handleBulkStatusUpdate` | const arrow | 416 |
 
 ### 3.73 `frontend/src/components/sales/SalesImportModal.jsx`
 
@@ -1211,36 +1211,43 @@ Total files documented: **120**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `useLocalCopy` | function | 21 |
-| 2 | `isAutoDetected` | function | 31 |
-| 3 | `StatusRow` | function | 38 |
-| 4 | `InfoTab` | function | 50 |
-| 5 | `fmt` | const arrow | 109 |
-| 6 | `DiagnosticsPanel` | function | 195 |
-| 7 | `onErr` | const arrow | 226 |
-| 8 | `onQueueChanged` | const arrow | 230 |
-| 9 | `handleRetryQueue` | function | 272 |
-| 10 | `ServerPage` | component/function | 426 |
-| 11 | `check` | const arrow | 451 |
-| 12 | `loadSecurityConfig` | const arrow | 473 |
-| 13 | `handleTest` | function | 485 |
-| 14 | `handleSave` | function | 507 |
-| 15 | `handleDisconnect` | function | 514 |
+| 1 | `useLocalCopy` | function | 22 |
+| 2 | `isAutoDetected` | function | 32 |
+| 3 | `StatusRow` | function | 39 |
+| 4 | `InfoTab` | function | 51 |
+| 5 | `fmt` | const arrow | 116 |
+| 6 | `DiagnosticsPanel` | function | 202 |
+| 7 | `onErr` | const arrow | 240 |
+| 8 | `onQueueChanged` | const arrow | 244 |
+| 9 | `handleRetryQueue` | function | 286 |
+| 10 | `ServerPage` | component/function | 440 |
+| 11 | `check` | const arrow | 466 |
+| 12 | `loadSecurityConfig` | const arrow | 492 |
+| 13 | `handleTest` | function | 504 |
+| 14 | `handleSave` | function | 526 |
+| 15 | `handleDisconnect` | function | 533 |
 
-### 3.76 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.76 `frontend/src/components/shared/ActionHistoryBar.jsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `formatHistoryList` | function | 3 |
+| 2 | `ActionHistoryBar` | component/function | 7 |
+
+### 3.77 `frontend/src/components/shared/ExportMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `ExportMenu` | component/function | 4 |
 
-### 3.77 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.78 `frontend/src/components/shared/FilterMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `sectionButtonClass` | function | 4 |
 | 2 | `FilterMenu` | component/function | 10 |
 
-### 3.78 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.79 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1250,17 +1257,17 @@ Total files documented: **120**
 | 4 | `renderGalleryImage` | function | 40 |
 | 5 | `onKeyDown` | function | 47 |
 
-### 3.79 `frontend/src/components/shared/Modal.jsx`
+### 3.80 `frontend/src/components/shared/Modal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Modal` | component/function | 10 |
 
-### 3.80 `frontend/src/components/shared/navigationConfig.js`
+### 3.81 `frontend/src/components/shared/navigationConfig.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.81 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.82 `frontend/src/components/shared/NotificationCenter.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1271,27 +1278,27 @@ Total files documented: **120**
 | 5 | `onVisible` | const arrow | 198 |
 | 6 | `handleClickOutside` | const arrow | 221 |
 
-### 3.82 `frontend/src/components/shared/pageActivity.js`
+### 3.83 `frontend/src/components/shared/pageActivity.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.83 `frontend/src/components/shared/PageHeader.jsx`
+### 3.84 `frontend/src/components/shared/PageHeader.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `PageHeader` | component/function | 9 |
 
-### 3.84 `frontend/src/components/shared/PageHelpButton.jsx`
+### 3.85 `frontend/src/components/shared/PageHelpButton.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `PageHelpButton` | component/function | 6 |
 
-### 3.85 `frontend/src/components/shared/pageHelpContent.js`
+### 3.86 `frontend/src/components/shared/pageHelpContent.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.86 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.87 `frontend/src/components/shared/PortalMenu.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1301,7 +1308,7 @@ Total files documented: **120**
 | 4 | `scheduleReposition` | const arrow | 71 |
 | 5 | `closeIfEscape` | const arrow | 78 |
 
-### 3.87 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.88 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1309,7 +1316,7 @@ Total files documented: **120**
 | 2 | `QuickPreferenceToggles` | component/function | 23 |
 | 3 | `tr` | const arrow | 25 |
 
-### 3.88 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.89 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1319,7 +1326,7 @@ Total files documented: **120**
 | 4 | `getConflictFieldRows` | function | 73 |
 | 5 | `WriteConflictModal` | component/function | 171 |
 
-### 3.89 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.90 `frontend/src/components/users/PermissionEditor.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1328,7 +1335,7 @@ Total files documented: **120**
 | 3 | `labelFor` | const arrow | 22 |
 | 4 | `toggle` | const arrow | 25 |
 
-### 3.90 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.91 `frontend/src/components/users/UserDetailSheet.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1336,7 +1343,7 @@ Total files documented: **120**
 | 2 | `buildRowData` | function | 9 |
 | 3 | `UserDetailSheet` | component/function | 21 |
 
-### 3.91 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.92 `frontend/src/components/users/UserProfileModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1363,27 +1370,27 @@ Total files documented: **120**
 | 21 | `handleAvatarSelected` | const arrow | 584 |
 | 22 | `saveAvatarFromEditor` | const arrow | 600 |
 
-### 3.92 `frontend/src/components/users/Users.jsx`
+### 3.93 `frontend/src/components/users/Users.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ThreeDot` | function | 28 |
-| 2 | `formatContactValue` | function | 63 |
-| 3 | `Users` | component/function | 68 |
-| 4 | `canManageTargetUser` | const arrow | 105 |
-| 5 | `promise` | const arrow | 117 |
-| 6 | `openCreateUser` | const arrow | 232 |
-| 7 | `openEditUser` | const arrow | 239 |
-| 8 | `openCreateRole` | const arrow | 256 |
-| 9 | `openEditRole` | const arrow | 263 |
-| 10 | `getRolePermissions` | const arrow | 274 |
-| 11 | `getPermissionSummary` | const arrow | 283 |
-| 12 | `handleSaveUser` | const arrow | 301 |
-| 13 | `handleResetPassword` | const arrow | 351 |
-| 14 | `handleSaveRole` | const arrow | 403 |
-| 15 | `handleDeleteRole` | const arrow | 439 |
+| 1 | `ThreeDot` | function | 31 |
+| 2 | `formatContactValue` | function | 66 |
+| 3 | `Users` | component/function | 71 |
+| 4 | `canManageTargetUser` | const arrow | 109 |
+| 5 | `promise` | const arrow | 121 |
+| 6 | `openCreateUser` | const arrow | 236 |
+| 7 | `openEditUser` | const arrow | 243 |
+| 8 | `openCreateRole` | const arrow | 260 |
+| 9 | `openEditRole` | const arrow | 267 |
+| 10 | `getRolePermissions` | const arrow | 278 |
+| 11 | `getPermissionSummary` | const arrow | 287 |
+| 12 | `handleSaveUser` | const arrow | 325 |
+| 13 | `handleResetPassword` | const arrow | 393 |
+| 14 | `handleSaveRole` | const arrow | 445 |
+| 15 | `handleDeleteRole` | const arrow | 518 |
 
-### 3.93 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.94 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1400,7 +1407,7 @@ Total files documented: **120**
 | 11 | `AuditLog` | component/function | 149 |
 | 12 | `sessionEntryLabel` | function | 416 |
 
-### 3.94 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.95 `frontend/src/components/utils-settings/Backup.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1442,24 +1449,24 @@ Total files documented: **120**
 | 36 | `handleChooseImportFile` | const arrow | 1140 |
 | 37 | `handleConfirmImport` | const arrow | 1156 |
 
-### 3.95 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.96 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `FontFamilyPicker` | function | 20 |
 
-### 3.96 `frontend/src/components/utils-settings/index.js`
+### 3.97 `frontend/src/components/utils-settings/index.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.97 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.98 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `OtpModal` | component/function | 12 |
 | 2 | `loadSetup` | function | 47 |
 
-### 3.98 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.99 `frontend/src/components/utils-settings/ResetData.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1472,7 +1479,7 @@ Total files documented: **120**
 | 7 | `T` | const arrow | 176 |
 | 8 | `doFactoryReset` | function | 182 |
 
-### 3.99 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.100 `frontend/src/components/utils-settings/Settings.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1497,11 +1504,11 @@ Total files documented: **120**
 | 19 | `uploadImageSetting` | const arrow | 589 |
 | 20 | `handleSaveSettings` | const arrow | 616 |
 
-### 3.100 `frontend/src/constants.js`
+### 3.101 `frontend/src/constants.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.101 `frontend/src/index.jsx`
+### 3.102 `frontend/src/index.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1519,7 +1526,7 @@ Total files documented: **120**
 | 12 | `safeCssRulesGetter` | const function | 163 |
 | 13 | `stopKnownStartupNoise` | const arrow | 179 |
 
-### 3.102 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.103 `frontend/src/platform/runtime/clientRuntime.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1531,18 +1538,18 @@ Total files documented: **120**
 | 6 | `clearStorage` | function | 135 |
 | 7 | `restoreStorage` | function | 148 |
 
-### 3.103 `frontend/src/utils/appRefresh.js`
+### 3.104 `frontend/src/utils/appRefresh.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.104 `frontend/src/utils/color.js`
+### 3.105 `frontend/src/utils/color.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeHex` | function | 1 |
 | 2 | `relativeLuminance` | function | 12 |
 
-### 3.105 `frontend/src/utils/csv.js`
+### 3.106 `frontend/src/utils/csv.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1553,23 +1560,23 @@ Total files documented: **120**
 | 5 | `writeUint32` | function | 68 |
 | 6 | `encodeZipTimestamp` | function | 72 |
 
-### 3.106 `frontend/src/utils/csvImport.js`
+### 3.107 `frontend/src/utils/csvImport.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.107 `frontend/src/utils/dateHelpers.js`
+### 3.108 `frontend/src/utils/dateHelpers.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.108 `frontend/src/utils/deviceInfo.js`
+### 3.109 `frontend/src/utils/deviceInfo.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.109 `frontend/src/utils/exportPackage.js`
+### 3.110 `frontend/src/utils/exportPackage.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.110 `frontend/src/utils/exportReports.jsx`
+### 3.111 `frontend/src/utils/exportReports.jsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1582,26 +1589,26 @@ Total files documented: **120**
 | 7 | `renderTables` | function | 283 |
 | 8 | `renderNotes` | function | 317 |
 
-### 3.111 `frontend/src/utils/favicon.js`
+### 3.112 `frontend/src/utils/favicon.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `clamp` | function | 1 |
 | 2 | `loadImage` | function | 5 |
 
-### 3.112 `frontend/src/utils/formatters.js`
+### 3.113 `frontend/src/utils/formatters.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.113 `frontend/src/utils/index.js`
+### 3.114 `frontend/src/utils/index.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.114 `frontend/src/utils/pricing.js`
+### 3.115 `frontend/src/utils/pricing.js`
 
 - No top-level named function/class symbols detected.
 
-### 3.115 `frontend/src/utils/printReceipt.js`
+### 3.116 `frontend/src/utils/printReceipt.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1632,7 +1639,7 @@ Total files documented: **120**
 | 25 | `renderPdfBlob` | const arrow | 725 |
 | 26 | `extractReceiptLines` | function | 760 |
 
-### 3.116 `frontend/src/web-api.js`
+### 3.117 `frontend/src/web-api.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1641,7 +1648,7 @@ Total files documented: **120**
 | 3 | `isLikelyInjectedBundle` | const arrow | 50 |
 | 4 | `isSuppressedRuntimeMessage` | const arrow | 57 |
 
-### 3.117 `ops/scripts/frontend/verify-i18n.js`
+### 3.118 `ops/scripts/frontend/verify-i18n.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1652,18 +1659,18 @@ Total files documented: **120**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.118 `frontend/vite.config.mjs`
+### 3.119 `frontend/vite.config.mjs`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `fixCrossorigin` | function | 29 |
 | 2 | `manualChunks` | function | 54 |
 
-### 3.119 `frontend/postcss.config.mjs`
+### 3.120 `frontend/postcss.config.mjs`
 
 - No top-level named function/class symbols detected.
 
-### 3.120 `frontend/tailwind.config.mjs`
+### 3.121 `frontend/tailwind.config.mjs`
 
 - No top-level named function/class symbols detected.
 

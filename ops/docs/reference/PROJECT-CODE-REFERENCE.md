@@ -72,9 +72,9 @@ Total files documented: **10**
 | 13 | `groupByPrefix` | function | 234 |
 | 14 | `writeTranslationReference` | function | 243 |
 | 15 | `writeRunReleaseReference` | function | 299 |
-| 16 | `writeModuleNamingGuide` | function | 364 |
-| 17 | `writeProjectCodeReference` | function | 412 |
-| 18 | `main` | function | 453 |
+| 16 | `writeModuleNamingGuide` | function | 375 |
+| 17 | `writeProjectCodeReference` | function | 423 |
+| 18 | `main` | function | 464 |
 
 ### 3.5 `ops/scripts/generate-full-project-docs.js`
 
@@ -90,22 +90,22 @@ Total files documented: **10**
 | 8 | `readText` | function | 121 |
 | 9 | `lineCount` | function | 129 |
 | 10 | `fileCategory` | function | 134 |
-| 11 | `inferPurpose` | function | 154 |
-| 12 | `markdownHeader` | function | 179 |
-| 13 | `markdownSection` | function | 183 |
-| 14 | `extractImportsExports` | function | 187 |
-| 15 | `findSymbols` | function | 227 |
-| 16 | `writeAllFunctionReference` | function | 253 |
-| 17 | `resolveInternalImport` | function | 291 |
-| 18 | `writeAllFileInventory` | function | 314 |
-| 19 | `folderPurpose` | function | 336 |
-| 20 | `writeFolderCoverage` | function | 351 |
-| 21 | `writeImportExportReference` | function | 410 |
-| 22 | `readJsonObject` | function | 484 |
-| 23 | `translationSectionForKey` | function | 492 |
-| 24 | `writeTranslationSectionReference` | function | 543 |
-| 25 | `writeMainCoverageSummary` | function | 592 |
-| 26 | `main` | function | 621 |
+| 11 | `inferPurpose` | function | 155 |
+| 12 | `markdownHeader` | function | 180 |
+| 13 | `markdownSection` | function | 184 |
+| 14 | `extractImportsExports` | function | 188 |
+| 15 | `findSymbols` | function | 228 |
+| 16 | `writeAllFunctionReference` | function | 254 |
+| 17 | `resolveInternalImport` | function | 292 |
+| 18 | `writeAllFileInventory` | function | 315 |
+| 19 | `folderPurpose` | function | 337 |
+| 20 | `writeFolderCoverage` | function | 355 |
+| 21 | `writeImportExportReference` | function | 414 |
+| 22 | `readJsonObject` | function | 488 |
+| 23 | `translationSectionForKey` | function | 496 |
+| 24 | `writeTranslationSectionReference` | function | 547 |
+| 25 | `writeMainCoverageSummary` | function | 596 |
+| 26 | `main` | function | 625 |
 
 ### 3.6 `ops/scripts/lib/fs-utils.js`
 
