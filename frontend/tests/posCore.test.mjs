@@ -34,7 +34,7 @@ await runTest('grouped products resolve to their parent card and sorted variant 
   const visible = buildVisibleProductCards(products, productsById)
 
   assert.equal(getVariantRootProduct(products[1], productsById).id, 1)
-  assert.deepEqual(getVariantChoices(products[0], children).map((item) => item.name), ['Variant A', 'Variant B'])
+  assert.deepEqual(getVariantChoices(visible[0], children).map((item) => item.name), ['Root Product', 'Variant A', 'Variant B'])
   assert.deepEqual(visible.map((item) => item.id), [1])
 })
 
@@ -62,7 +62,20 @@ await runTest('same-name grouped families and standalone items share one POS opt
 
   assert.equal(visible.length, 1)
   assert.equal(visible[0].__groupMeta.groupKind, 'option')
-  assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [31, 32])
+  assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [30, 31, 32])
+})
+
+await runTest('group cards still include parent and siblings when only one child matches filters', () => {
+  const allProducts = [
+    { id: 40, name: 'Glow Cream', is_group: 1, selling_price_usd: 0, stock_quantity: 0 },
+    { id: 41, name: 'Glow Cream Small', parent_id: 40, selling_price_usd: 9, stock_quantity: 1 },
+    { id: 42, name: 'Glow Cream Large', parent_id: 40, selling_price_usd: 12, stock_quantity: 2 },
+  ]
+  const productsById = buildProductsById(allProducts)
+  const visible = buildVisibleProductCards([allProducts[1]], productsById)
+
+  assert.equal(visible.length, 1)
+  assert.deepEqual(getVariantChoices(visible[0]).map((item) => item.id), [40, 42, 41])
 })
 
 await runTest('cart line identity includes product, mode, and branch so modes do not merge', () => {

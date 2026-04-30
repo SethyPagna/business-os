@@ -43,7 +43,7 @@ await runTest('buildProductGroups keeps explicit parent-child variants under one
 
   assert.equal(groups.length, 1)
   assert.equal(groups[0].leadProduct.id, 10)
-  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [12, 11])
+  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [10, 12, 11])
   assert.equal(groups[0].groupKind, 'variant')
 })
 
@@ -74,7 +74,21 @@ await runTest('buildProductGroups merges same-name roots into one option group',
   assert.equal(groups.length, 1)
   assert.equal(groups[0].items.length, 3)
   assert.equal(groups[0].groupKind, 'option')
-  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [21, 22])
+  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [20, 21, 22])
+})
+
+await runTest('buildProductGroups expands a filtered child back to the full product family', () => {
+  const allProducts = [
+    { id: 30, name: 'Mask', is_group: 1, stock_quantity: 0, selling_price_usd: 0 },
+    { id: 31, name: 'Mask Small', parent_id: 30, stock_quantity: 1, selling_price_usd: 5.5 },
+    { id: 32, name: 'Mask Large', parent_id: 30, stock_quantity: 2, selling_price_usd: 7.25 },
+  ]
+  const productsById = new Map(allProducts.map((product) => [product.id, product]))
+  const groups = buildProductGroups([allProducts[2]], productsById)
+
+  assert.equal(groups.length, 1)
+  assert.deepEqual(groups[0].items.map((item) => item.id), [30, 32, 31])
+  assert.deepEqual(groups[0].matchedIds, [32])
 })
 
 if (failed > 0) {

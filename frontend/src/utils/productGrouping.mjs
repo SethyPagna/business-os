@@ -41,9 +41,21 @@ function buildChildrenByParentId(products = []) {
 }
 
 function resolveRootProduct(product, productsById = new Map()) {
-  const parentId = Number(product?.parent_id || 0)
-  if (!parentId) return product
-  return productsById.get(parentId) || product
+  let current = product
+  const visited = new Set()
+  while (current) {
+    const currentId = Number(current?.id || 0)
+    if (currentId > 0) {
+      if (visited.has(currentId)) break
+      visited.add(currentId)
+    }
+    const parentId = Number(current?.parent_id || 0)
+    if (!parentId) break
+    const parent = productsById.get(parentId)
+    if (!parent) break
+    current = parent
+  }
+  return current || product
 }
 
 function resolveFamilyRootId(product, productsById = new Map()) {
@@ -87,13 +99,26 @@ function resolveGroupKey(product, {
 
 export function buildProductGroups(products = [], productsById = new Map()) {
   const source = Array.isArray(products) ? products : []
-  const childrenByParentId = buildChildrenByParentId(source)
+  const universe = productsById instanceof Map && productsById.size > 0
+    ? [...productsById.values()]
+    : source
+  const childrenByParentId = buildChildrenByParentId(universe)
+  const activeKeys = new Set()
+  const matchedIdsByKey = new Map()
+
+  source.forEach((product) => {
+    const { key } = resolveGroupKey(product, { productsById })
+    activeKeys.add(key)
+    if (!matchedIdsByKey.has(key)) matchedIdsByKey.set(key, new Set())
+    matchedIdsByKey.get(key).add(Number(product?.id || 0))
+  })
 
   const groups = new Map()
-  source.forEach((product) => {
+  universe.forEach((product) => {
     const { key, explicitRootId, normalizedName } = resolveGroupKey(product, {
       productsById,
     })
+    if (!activeKeys.has(key)) return
     if (!groups.has(key)) {
       groups.set(key, {
         key,
@@ -101,10 +126,13 @@ export function buildProductGroups(products = [], productsById = new Map()) {
         items: [],
         explicitRootId,
         normalizedName,
+        matchedIds: matchedIdsByKey.get(key) || new Set(),
       })
     }
     const group = groups.get(key)
-    group.ids.push(Number(product?.id || 0))
+    const productId = Number(product?.id || 0)
+    if (group.ids.includes(productId)) return
+    group.ids.push(productId)
     group.items.push(product)
   })
 
@@ -115,12 +143,10 @@ export function buildProductGroups(products = [], productsById = new Map()) {
       const itemId = Number(item?.id || 0)
       return !Number(item?.parent_id || 0) && familyRootIds.includes(itemId)
     }) || items[0]
-    const sellableItems = items.filter((item) => {
-      if (Number(item?.parent_id || 0) > 0) return true
-      if (!Number(item?.is_group || 0)) return true
-      return items.length === 1
-    })
-    const priceValues = sellableItems.map((item) => Number(item?.selling_price_usd || 0)).filter((value) => Number.isFinite(value))
+    const sellableItems = [...items]
+    const priceValues = items
+      .map((item) => Number(item?.selling_price_usd || 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
     const stockTotal = items.reduce((sum, item) => sum + Number(item?.stock_quantity || 0), 0)
     const latestCreatedAt = items.reduce((latest, item) => {
       const value = String(item?.created_at || '')
@@ -134,6 +160,7 @@ export function buildProductGroups(products = [], productsById = new Map()) {
       normalizedName: group.normalizedName,
       explicitRootId: Number(leadProduct?.id || 0),
       ids: items.map((item) => Number(item?.id || 0)).filter((id) => Number.isFinite(id) && id > 0),
+      matchedIds: [...(group.matchedIds || new Set())].filter((id) => Number.isFinite(id) && id > 0),
       items,
       leadProduct,
       sellableItems,
