@@ -625,6 +625,11 @@ export default function Settings() {
     }
   }
 
+  const notificationRealertValue = String(form.notifications_realert_minutes || '10')
+  const notificationRealertPreset = ['5', '10', '30', '60'].includes(notificationRealertValue)
+    ? notificationRealertValue
+    : 'custom'
+
   return (
     <div className="page-scroll p-4 sm:p-6">
       <PageHeader
@@ -1286,6 +1291,46 @@ export default function Settings() {
                   value={form.notifications_loyalty_threshold || '100'}
                   onChange={(event) => setValue('notifications_loyalty_threshold', event.target.value)}
                 />
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="settings-notifications-realert" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t('notification_realert_interval') || 'Unresolved alert repeat interval'}
+                </label>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,16rem)_minmax(0,12rem)]">
+                  <select
+                    id="settings-notifications-realert"
+                    name="notifications_realert_preset"
+                    className="input"
+                    value={notificationRealertPreset}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (value !== 'custom') {
+                        setValue('notifications_realert_minutes', value)
+                      }
+                    }}
+                  >
+                    <option value="5">{t('every_5_minutes') || 'Every 5 minutes'}</option>
+                    <option value="10">{t('every_10_minutes') || 'Every 10 minutes'}</option>
+                    <option value="30">{t('every_30_minutes') || 'Every 30 minutes'}</option>
+                    <option value="60">{t('every_hour') || 'Every hour'}</option>
+                    <option value="custom">{t('custom') || 'Custom'}</option>
+                  </select>
+                  <input
+                    id="settings-notifications-realert-custom"
+                    name="notifications_realert_minutes"
+                    className="input"
+                    type="number"
+                    min="5"
+                    max="1440"
+                    step="1"
+                    value={notificationRealertValue}
+                    onChange={(event) => setValue('notifications_realert_minutes', event.target.value)}
+                    aria-label={t('notification_realert_minutes') || 'Notification repeat minutes'}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {t('notification_realert_interval_desc') || 'Opening notifications clears the badge. Unresolved alerts can appear again after this interval.'}
+                </p>
               </div>
             </div>
           </SettingsSection>

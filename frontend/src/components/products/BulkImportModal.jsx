@@ -154,6 +154,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [analysisProgress, setAnalysisProgress] = useState(null)
   const [decisions, setDecisions] = useState({})
   const [imageDecisions, setImageDecisions] = useState({})
+  const [identifierDecisions, setIdentifierDecisions] = useState({})
+  const [conflictFilter, setConflictFilter] = useState('all')
+  const [conflictQuery, setConflictQuery] = useState('')
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
   const [fieldRules, setFieldRules] = useState({})
   const [result, setResult] = useState(null)
@@ -172,6 +175,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setAnalysisProgress(null)
     setDecisions({})
     setImageDecisions({})
+    setIdentifierDecisions({})
+    setConflictFilter('all')
+    setConflictQuery('')
     setSelectedConflictIds(new Set())
     setFieldRules({})
     setZipFile(null)
@@ -242,6 +248,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         _action: action,
         image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
         _field_rules: JSON.stringify(fieldRules || {}),
+        _identifier_conflict_mode: identifierDecisions[rowIndex] || row?._identifier_conflict_mode || 'clear_imported',
         _target_product_id: row?._target_product_id || '',
         _parent_id: row?._parent_id || '',
       }
@@ -249,7 +256,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     const headers = Array.from(instructions.reduce((set, row) => {
       Object.keys(row || {}).forEach((key) => set.add(key))
       return set
-    }, new Set(['name', 'sku', 'barcode', '_action', '_target_product_id', '_parent_id', '_field_rules', 'image_conflict_mode'])))
+    }, new Set(['name', 'sku', 'barcode', '_action', '_target_product_id', '_parent_id', '_field_rules', '_identifier_conflict_mode', 'image_conflict_mode'])))
     return [
       headers.join(','),
       ...instructions.map((row) => headers.map((header) => csvEscape(row?.[header])).join(',')),
@@ -351,10 +358,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         }
       })
       const nextImageDecisions = {}
+      const nextIdentifierDecisions = {}
       ;[...(analysis.cleanRows || []), ...nextConflicts].forEach((entry) => {
         const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
         const incomingImages = getIncomingImageFilenames(entry.row)
         nextImageDecisions[index] = incomingImages.length ? (entry.plannedAction === 'merge_stock' ? 'keep_existing' : 'replace_with_csv') : 'keep_existing'
+        if (entry.conflictType === 'identifier') nextIdentifierDecisions[index] = entry.row?._identifier_conflict_mode || 'clear_imported'
       })
 
       setConflicts(nextConflicts)
@@ -363,6 +372,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setAnalysisSummary(analysis.summary || null)
       setDecisions(analysis.decisions || {})
       setImageDecisions(nextImageDecisions)
+      setIdentifierDecisions(nextIdentifierDecisions)
       setSelectedConflictIds(new Set(nextConflicts.map((entry) => entry.index)))
       setStep(2)
     } catch (error) {
@@ -431,7 +441,26 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const allDecided = pendingAsk.length === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
-  const visibleConflicts = useMemo(() => conflicts.slice(0, 200), [conflicts])
+  const conflictGroups = useMemo(() => ({
+    sameName: conflicts.filter((entry) => entry.conflictType !== 'identifier').length,
+    identifier: conflicts.filter((entry) => entry.conflictType === 'identifier').length,
+  }), [conflicts])
+  const visibleConflicts = useMemo(() => {
+    const query = conflictQuery.trim().toLowerCase()
+    return conflicts.filter((entry) => {
+      const type = entry.conflictType === 'identifier' ? 'identifier' : 'same_name'
+      if (conflictFilter !== 'all' && conflictFilter !== type) return false
+      if (!query) return true
+      const row = entry.row || {}
+      const existing = entry.existing || {}
+      const hay = [
+        row.name, row.sku, row.barcode, row.category, row.brand, row.description,
+        existing.name, existing.sku, existing.barcode,
+        ...(entry.conflictFields || []),
+      ].join(' ').toLowerCase()
+      return hay.includes(query)
+    }).slice(0, 200)
+  }, [conflictFilter, conflictQuery, conflicts])
 
   const toggleConflictSelection = (index) => {
     setSelectedConflictIds((current) => {
@@ -447,7 +476,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setSelectedConflictIds(new Set())
       return
     }
-    setSelectedConflictIds(new Set(conflicts.map((entry) => entry.index)))
+    setSelectedConflictIds(new Set(visibleConflicts.map((entry) => entry.index)))
   }
 
   const applyDecisionToSelection = (value) => {
@@ -465,6 +494,16 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const next = { ...current }
       conflicts.forEach((entry) => {
         if (selectedConflictIds.has(entry.index) && entry.incomingImages.length) next[entry.index] = value
+      })
+      return next
+    })
+  }
+
+  const applyIdentifierDecisionToSelection = (value) => {
+    setIdentifierDecisions((current) => {
+      const next = { ...current }
+      conflicts.forEach((entry) => {
+        if (selectedConflictIds.has(entry.index) && entry.conflictType === 'identifier') next[entry.index] = value
       })
       return next
     })
@@ -604,14 +643,41 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           {conflicts.length ? (
             <div className="space-y-3">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                  <label className="sr-only" htmlFor="product-import-conflict-search">Search conflicts</label>
+                  <input
+                    id="product-import-conflict-search"
+                    className="input text-xs"
+                    value={conflictQuery}
+                    onChange={(event) => setConflictQuery(event.target.value)}
+                    placeholder="Search conflicts by name, SKU, barcode, brand, category..."
+                    autoComplete="off"
+                  />
+                  <div className="flex flex-wrap gap-1.5 text-xs">
+                    {[
+                      ['all', `All (${conflicts.length})`],
+                      ['same_name', `Same name (${conflictGroups.sameName})`],
+                      ['identifier', `SKU/barcode (${conflictGroups.identifier})`],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`rounded-full px-3 py-1.5 font-semibold ${conflictFilter === value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
+                        onClick={() => setConflictFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                     <input
                       type="checkbox"
-                      checked={selectedConflictCount > 0 && selectedConflictCount === conflicts.length}
+                      checked={selectedConflictCount > 0 && selectedConflictCount === visibleConflicts.length}
                       onChange={(event) => toggleSelectAllConflicts(event.target.checked)}
                     />
-                    All matches
+                    Visible matches
                   </label>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge_stock')}>Add stock only</button>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('create_variant')}>Create variants</button>
@@ -625,6 +691,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       {item.label}
                     </button>
                   ))}
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('clear_imported')}>Clear duplicate SKU/barcode</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('allow_duplicate')}>Allow same SKU/barcode</button>
                 </div>
                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                   {[
@@ -672,7 +740,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
-                {visibleConflicts.map(({ row, index, existing, plannedAction, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
+                {visibleConflicts.map(({ row, index, existing, plannedAction, conflictType, conflictFields = [], sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
                 <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -681,6 +749,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
+                      {conflictType === 'identifier' ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
                       <span className={`rounded px-1.5 py-0.5 ${sameBasic ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Basic: {sameBasic ? 'Same' : 'Different'}</span>
                       <span className={`rounded px-1.5 py-0.5 ${samePricing ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Pricing: {samePricing ? 'Same' : 'Different'}</span>
                       <span className={`rounded px-1.5 py-0.5 ${sameImages ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>Images: {sameImages ? 'Same' : 'Different'}</span>
@@ -691,6 +760,18 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
                       <div>CSV images: {incomingImages.join(', ')}</div>
                       <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
+                    </div>
+                  ) : null}
+
+                  {conflictType === 'identifier' ? (
+                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
+                      <div className="font-semibold">Identifier conflict</div>
+                      <div>Imported: SKU {row.sku || '-'} / Barcode {row.barcode || '-'}</div>
+                      <div>Existing: {existing?.name || '-'} - SKU {existing?.sku || '-'} / Barcode {existing?.barcode || '-'}</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <button type="button" onClick={() => setIdentifierDecisions((state) => ({ ...state, [index]: 'clear_imported' }))} className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] !== 'allow_duplicate' ? 'border-orange-600 bg-orange-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}>Clear duplicate SKU/barcode</button>
+                        <button type="button" onClick={() => setIdentifierDecisions((state) => ({ ...state, [index]: 'allow_duplicate' }))} className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] === 'allow_duplicate' ? 'border-purple-600 bg-purple-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}>Allow same SKU/barcode</button>
+                      </div>
                     </div>
                   ) : null}
 

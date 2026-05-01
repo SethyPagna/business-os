@@ -273,6 +273,17 @@ router.delete('/:id', authToken, requireImportPermission, async (req, res) => {
   }
 })
 
+router.post('/:id/delete', authToken, requireImportPermission, async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    ok(res, await deleteImportJob(job.id))
+  } catch (error) {
+    const status = error?.code === 'import_still_stopping' ? 409 : 400
+    err(res, error?.message || 'Failed to remove import job', status)
+  }
+})
+
 router.post('/:id/retry', authToken, requireImportPermission, async (req, res) => {
   try {
     const job = getJobOr404(req, res)

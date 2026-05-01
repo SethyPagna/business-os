@@ -110,6 +110,7 @@ export default function Products() {
   const [branches,     setBranches]     = useState([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
+  const [groupFilter, setGroupFilter] = useState('all') // all | parent | variant | standalone
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
   const [productSortDirection, setProductSortDirection] = useState('desc')
@@ -537,6 +538,10 @@ export default function Products() {
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [products, settings?.product_brand_options])
+  const branchNameById = useMemo(
+    () => new Map(branches.map((branch) => [String(branch.id), branch.name])),
+    [branches],
+  )
   const [lightbox, setLightbox] = useState(null)
   const availableCreatedYears = useMemo(
     () => getAvailableYears(products, (product) => product?.created_at),
@@ -579,6 +584,11 @@ export default function Products() {
   const getBranchQty = useCallback((p, branchId) => (
     p.branch_stock || []
   ).find((stock) => String(stock.branch_id) === String(branchId))?.quantity ?? 0, [])
+  const parentProductIds = useMemo(() => new Set(
+    products
+      .map((product) => Number(product?.parent_id || 0))
+      .filter(Boolean),
+  ), [products])
   const getStockBadge = (p) => {
     const qty = branchFilter!=='all' ? getBranchQty(p,branchFilter) : p.stock_quantity
     if (qty<=(p.out_of_stock_threshold||0)) return <span className="badge-red">{t('out_of_stock')}</span>
@@ -606,6 +616,16 @@ export default function Products() {
     const matchBranch = branchFilter === 'all' || (p.branch_stock || []).some((bs) => String(bs.branch_id) === branchFilter)
     const matchSupplier = supplierFilter === 'all' || (p.supplier || '').toLowerCase() === supplierFilter.toLowerCase()
     const matchCreated = matchesYearMonthFilters(p.created_at, { year: createdYearFilter, month: createdMonthFilter })
+    const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
+    const isVariant = Boolean(p.parent_id)
+    const matchGroup =
+      groupFilter === 'all'
+        ? true
+        : groupFilter === 'parent'
+          ? isParent && !isVariant
+          : groupFilter === 'variant'
+            ? isVariant
+            : !isParent && !isVariant
     const qty = branchFilter !== 'all' ? getBranchQty(p, branchFilter) : p.stock_quantity
 
     if (branchFilter !== 'all' && stockFilter !== 'out' && qty <= (p.out_of_stock_threshold || 0)) return false
@@ -616,8 +636,8 @@ export default function Products() {
           : stockFilter === 'low' ? qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
             : stockFilter === 'in_stock' ? qty > (p.low_stock_threshold || 10)
               : true
-    return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchCreated && matchStock
-  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, getBranchQty, products, searchMode, searchTerms, stockFilter, supplierFilter])
+    return matchSearch && matchCat && matchBrand && matchBranch && matchSupplier && matchCreated && matchGroup && matchStock
+  }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, getBranchQty, groupFilter, parentProductIds, products, searchMode, searchTerms, stockFilter, supplierFilter])
 
   const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
     const toImageName = (value) => String(value || '').split(/[\\/]/).pop() || ''
@@ -691,7 +711,7 @@ export default function Products() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
   const pagedProducts = useMemo(
     () => paginateItems(allVisibleProducts, productPage, productPageSize),
@@ -826,6 +846,7 @@ export default function Products() {
     branchFilter !== 'all' ? 1 : 0,
     supplierFilter !== 'all' ? 1 : 0,
     stockFilter !== 'all' ? 1 : 0,
+    groupFilter !== 'all' ? 1 : 0,
     createdYearFilter !== 'all' ? 1 : 0,
     createdMonthFilter !== 'all' ? 1 : 0,
     productSortDirection !== 'desc' ? 1 : 0,
@@ -837,6 +858,7 @@ export default function Products() {
     setBranchFilter('all')
     setSupplierFilter('all')
     setStockFilter('all')
+    setGroupFilter('all')
     setCreatedYearFilter('all')
     setCreatedMonthFilter('all')
     setProductSortDirection('desc')
@@ -1224,6 +1246,16 @@ export default function Products() {
 
   const productFilterSections = useMemo(() => ([
     {
+      id: 'group',
+      label: t('product_group') || 'Product group',
+      options: [
+        { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+        { id: 'group-parent', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
+        { id: 'group-variant', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
+        { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
+      ],
+    },
+    {
       id: 'stock',
       label: t('stock_status') || 'Stock status',
       options: [
@@ -1323,7 +1355,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1331,6 +1363,12 @@ export default function Products() {
     const promotion = calculateProductDiscount(p, exchangeRate)
     const marginUsd = p.selling_price_usd - purchaseUsd
     const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
+    const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
+    const compactMeta = [
+      selectedBranchName ? { key: 'branch', label: selectedBranchName } : null,
+      p.barcode ? { key: 'barcode', label: p.barcode } : null,
+      p.brand ? { key: 'brand', label: p.brand } : null,
+    ].filter(Boolean)
     return (
       <tr
         key={p.id}
@@ -1347,6 +1385,15 @@ export default function Products() {
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
         <td className="px-3 py-2">
+          {compactMeta.length ? (
+            <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1">
+              {compactMeta.map((item) => (
+                <span key={item.key} className="max-w-[9rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                  {item.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="flex items-center gap-1.5">
             <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
             {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
@@ -1354,7 +1401,6 @@ export default function Products() {
           </div>
           {p.supplier && <div className="text-xs text-gray-400 truncate max-w-32">{p.supplier}</div>}
         </td>
-        <td className="px-3 py-2 text-gray-400 font-mono text-xs hidden lg:table-cell">{p.sku || 'N/A'}</td>
         <td className="px-3 py-2 hidden md:table-cell">
           {p.category ? (
             <span
@@ -1409,7 +1455,7 @@ export default function Products() {
         </td>
       </tr>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1734,7 +1780,6 @@ export default function Products() {
                 </th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold w-16">Image</th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('product_name')}</th>
-                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold hidden lg:table-cell">{t('sku')}</th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold hidden md:table-cell">{t('category')}</th>
                 <th className="text-right px-3 py-3 text-red-600 dark:text-red-400 font-semibold col-highlight-red">{t('cost_in_purchase')}</th>
                 <th className="text-right px-3 py-3 text-green-600 dark:text-green-400 font-semibold col-highlight-green">{t('selling_price_label')}</th>
@@ -1745,14 +1790,14 @@ export default function Products() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={11} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-              : visibleProducts.length === 0 ? <tr><td colSpan={11} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
+              {loading ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
+              : visibleProducts.length === 0 ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
               : productSections.map((section) => {
                 const isCollapsed = collapsedProductSections.has(section.id)
                 return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={11} className="px-4 py-2">
+                    <td colSpan={10} className="px-4 py-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
@@ -1789,7 +1834,7 @@ export default function Products() {
                             className="bg-white/80 dark:bg-slate-900/45"
                             data-product-jump-id={group.anchorId}
                           >
-                            <td colSpan={11} className="px-4 py-2.5">
+                            <td colSpan={10} className="px-4 py-2.5">
                               <div className="flex items-center justify-between gap-3">
                                 <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-100">
                                   <input

@@ -65,6 +65,7 @@ export default function Inventory() {
   const [search,        setSearch]        = useState('')
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
+  const [groupFilter,   setGroupFilter]   = useState('all')
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(50)
   const [tab,           setTab]           = useState('products')
@@ -204,6 +205,11 @@ export default function Inventory() {
     if (branchFilter !== 'all') return product.display_quantity ?? product.stock_quantity ?? 0
     return product.stock_quantity ?? 0
   }, [branchFilter])
+  const parentProductIds = useMemo(() => new Set(
+    summary
+      .map((product) => Number(product?.parent_id || 0))
+      .filter(Boolean),
+  ), [summary])
 
   const handleAdjust = async () => {
     if (adjustSaving) return
@@ -384,6 +390,11 @@ export default function Inventory() {
   const filteredSummary = summary.filter(p => {
     if (!matchesSearch(productHay(p))) return false
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
+    const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
+    const isVariant = Boolean(p.parent_id)
+    if (groupFilter === 'parent' && (!isParent || isVariant)) return false
+    if (groupFilter === 'variant' && !isVariant) return false
+    if (groupFilter === 'standalone' && (isParent || isVariant)) return false
     const qty = getStockQty(p)
     if (stockFilter === 'low')      return qty > 0 && qty <= p.low_stock_threshold
     if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
@@ -393,7 +404,7 @@ export default function Inventory() {
 
   useEffect(() => {
     setInventoryProductPage(1)
-  }, [branchFilter, brandFilter, search, searchMode, stockFilter, tab])
+  }, [branchFilter, brandFilter, groupFilter, search, searchMode, stockFilter, tab])
 
   const pagedSummary = useMemo(
     () => paginateItems(filteredSummary, inventoryProductPage, inventoryProductPageSize),
@@ -1377,6 +1388,16 @@ export default function Inventory() {
         ],
       } : null,
       {
+        id: 'group',
+        label: t('product_group') || 'Product group',
+        options: [
+          { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+          { id: 'parents', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
+          { id: 'variants', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
+          { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
+        ],
+      },
+      {
         id: 'stock',
         label: t('stock_status') || 'Stock status',
         options: [
@@ -1391,6 +1412,7 @@ export default function Inventory() {
     branchFilter,
     branches,
     brandFilter,
+    groupFilter,
     inventoryBrands,
     movFilter,
     movementGroupMode,
@@ -1418,13 +1440,15 @@ export default function Inventory() {
     return [
       branchFilter !== 'all',
       brandFilter !== 'all',
+      groupFilter !== 'all',
       stockFilter !== 'all',
     ].filter(Boolean).length
-  }, [branchFilter, brandFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
+  }, [branchFilter, brandFilter, groupFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
+    setGroupFilter('all')
     setStockFilter('all')
     setMovFilter('all')
     setMovementYearFilter('all')

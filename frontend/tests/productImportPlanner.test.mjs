@@ -51,6 +51,19 @@ await runTest('malformed existing product rows do not crash import analysis', ()
   assert.equal(analysis.rows[0]._target_product_id, 20)
 })
 
+await runTest('different product name with same SKU or barcode becomes editable identifier conflict', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum Travel', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '8.001', stock_quantity: '2' },
+  ], [
+    { id: 20, name: 'Serum Full Size', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12.01 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'new')
+  assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
+  assert.equal(analysis.conflicts[0].conflictType, 'identifier')
+  assert.deepEqual(analysis.conflicts[0].conflictFields, ['sku', 'barcode'])
+})
+
 await runTest('duplicate imported same-name rows avoid unsafe temporary row ids', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', sku: 'C-1', selling_price_usd: '3.001', stock_quantity: '1' },

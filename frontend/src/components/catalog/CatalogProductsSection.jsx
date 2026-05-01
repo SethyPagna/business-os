@@ -22,6 +22,13 @@ function getBadgeToneClass(badge) {
   return 'bg-slate-900/90 text-white ring-1 ring-white/20'
 }
 
+function getProductInitial(product) {
+  const chars = Array.from(String(product?.name || '').trim())
+  if (!chars.length) return '#'
+  const first = chars[0].toLocaleUpperCase('km')
+  return /[\p{L}\p{N}]/u.test(first) ? first : '#'
+}
+
 /**
  * Product-facing portal catalog view. Kept separate so the editor shell can
  * lazy-load the heavy customer-facing product list only when the tab is active.
@@ -63,14 +70,26 @@ export default function CatalogProductsSection(props) {
   } = props
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [initialFilter, setInitialFilter] = useState('all')
 
   useEffect(() => {
     setPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, search, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, initialFilter, search, stockFilter])
+
+  const initialOptions = useMemo(() => {
+    const values = Array.from(new Set((filteredProducts || []).map(getProductInitial)))
+    return values.sort((left, right) => left.localeCompare(right, 'km'))
+  }, [filteredProducts])
+
+  const letterFilteredProducts = useMemo(() => (
+    initialFilter === 'all'
+      ? filteredProducts
+      : (filteredProducts || []).filter((product) => getProductInitial(product) === initialFilter)
+  ), [filteredProducts, initialFilter])
 
   const pagedProducts = useMemo(
-    () => paginateItems(filteredProducts, page, pageSize),
-    [filteredProducts, page, pageSize],
+    () => paginateItems(letterFilteredProducts, page, pageSize),
+    [letterFilteredProducts, page, pageSize],
   )
 
   return (
@@ -172,10 +191,32 @@ export default function CatalogProductsSection(props) {
         <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-500 dark:text-slate-400">
           <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
           <span className="font-semibold text-slate-600 dark:text-slate-200">
-            {replaceVars(copy('filterSummary', '{count} result(s)'), { count: filteredProducts.length })}
+            {replaceVars(copy('filterSummary', '{count} result(s)'), { count: letterFilteredProducts.length })}
           </span>
         </div>
       </div>
+
+      {initialOptions.length > 1 ? (
+        <div className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900/80">
+          <button
+            type="button"
+            className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${initialFilter === 'all' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+            onClick={() => setInitialFilter('all')}
+          >
+            {copy('all', 'All')}
+          </button>
+          {initialOptions.map((letter) => (
+            <button
+              key={letter}
+              type="button"
+              className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${initialFilter === letter ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+              onClick={() => setInitialFilter(initialFilter === letter ? 'all' : letter)}
+            >
+              {letter}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {portalError ? (
         <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/30 dark:text-rose-200">
@@ -295,7 +336,7 @@ export default function CatalogProductsSection(props) {
         className="mt-4"
         page={page}
         pageSize={pageSize}
-        totalItems={filteredProducts.length}
+        totalItems={letterFilteredProducts.length}
         label={copy('products', 'products')}
         t={(key) => ({
           page: copy('page', 'Page'),
@@ -310,7 +351,7 @@ export default function CatalogProductsSection(props) {
         }}
       />
 
-      {filteredProducts.length === 0 ? (
+      {letterFilteredProducts.length === 0 ? (
         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
           {copy('noProducts', 'No products matched the current filters.')}
         </div>

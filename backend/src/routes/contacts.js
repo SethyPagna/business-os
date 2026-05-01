@@ -45,6 +45,26 @@ function ensureMembershipNumber(value, excludeId = null) {
   return assertUniqueMembershipNumber(normalized, excludeId)
 }
 
+function generateCustomerMembershipNumber(row = {}, reserved = new Set()) {
+  const source = cleanText(row?.name) || 'customer'
+  const prefix = source
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .slice(0, 4)
+    .toUpperCase() || 'CUS'
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
+    const candidate = `${prefix}-${entropy.slice(-8)}`
+    if (reserved.has(candidate.toLowerCase())) continue
+    const existing = db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1').get(candidate)
+    if (!existing) {
+      reserved.add(candidate.toLowerCase())
+      return candidate
+    }
+  }
+  throw new Error('Could not generate a unique membership number')
+}
+
 function normalizeFieldRule(value, fallback) {
   const rule = String(value || fallback || '').trim().toLowerCase()
   return ['keep_existing', 'use_imported', 'merge_blank_only', 'clear_value'].includes(rule)
@@ -267,6 +287,7 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
     SET name = ?, membership_number = ?, phone = ?, email = ?, address = ?, company = ?, notes = ?, updated_at = datetime('now')
     WHERE id = ?
   `)
+  const generatedMemberships = new Set()
 
   const findExisting = (row) => {
     const membershipNumber = cleanMembershipNumber(row.membership_number)
@@ -298,18 +319,13 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
         errors.push(`Row ${rowNumber}: name is required`)
         continue
       }
-      if (!cleanMembershipNumber(row.membership_number)) {
-        errors.push(`Row ${rowNumber}: membership number is required`)
-        continue
-      }
-
       try {
         const rowConflictMode = normalizeConflictMode(row._conflict_mode || conflictMode)
         const rowFieldRules = row._field_rules && typeof row._field_rules === 'object' ? row._field_rules : {}
         const contactState = buildImportedContactState(row, { mode: 'address' })
         const incoming = {
           name: row.name?.trim() || '',
-          membership_number: cleanMembershipNumber(row.membership_number),
+          membership_number: cleanMembershipNumber(row.membership_number) || generateCustomerMembershipNumber(row, generatedMemberships),
           phone: cleanText(contactState.primary.phone || row.phone),
           email: cleanText(contactState.primary.email || row.email),
           address: contactState.serialized || cleanText(row.address),

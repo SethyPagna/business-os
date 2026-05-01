@@ -83,6 +83,7 @@ export default function POS() {
   const [brandFilter,     setBrandFilter]     = useState(() => sessionStorage.getItem('pos_brand')    || 'all')
   const [branchFilter,    setBranchFilter]    = useState(() => sessionStorage.getItem('pos_branch')   || 'all')
   const [stockFilter,     setStockFilter]     = useState(() => sessionStorage.getItem('pos_stock')    || 'all')
+  const [groupFilter,     setGroupFilter]     = useState(() => sessionStorage.getItem('pos_group')    || 'all')
   const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
   const [productPage, setProductPage] = useState(1)
@@ -102,6 +103,7 @@ export default function POS() {
   const setPersistedBrand    = v => { sessionStorage.setItem('pos_brand',    v); setBrandFilter(v) }
   const setPersistedBranch   = v => { sessionStorage.setItem('pos_branch',   v); setBranchFilter(v) }
   const setPersistedStock    = v => { sessionStorage.setItem('pos_stock',    v); setStockFilter(v) }
+  const setPersistedGroup    = v => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
   const setPersistedSupplier = v => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
   const setQuickFilter = (key, enabled) => {
     setQuickFilters((prev) => {
@@ -669,14 +671,22 @@ export default function POS() {
     [products],
   )
 
-  const visibleProductCards = useMemo(
-    () => buildVisibleProductCards(filteredProducts, productsById),
-    [filteredProducts, productsById],
-  )
+  const visibleProductCards = useMemo(() => {
+    const cards = buildVisibleProductCards(filteredProducts, productsById)
+    if (groupFilter === 'all') return cards
+    return cards.filter((product) => {
+      const meta = product.__groupMeta || {}
+      const isVariantGroup = meta.groupKind === 'variant' || Boolean(product.parent_id)
+      const isParentGroup = Boolean(product.is_group || meta.hasExplicitGroup || meta.hasMultipleItems)
+      if (groupFilter === 'variant') return isVariantGroup
+      if (groupFilter === 'parent') return isParentGroup && !isVariantGroup
+      return !isParentGroup && !isVariantGroup
+    })
+  }, [filteredProducts, groupFilter, productsById])
 
   useEffect(() => {
     setProductPage(1)
-  }, [branchFilter, brandFilter, categoryFilter, search, searchMode, stockFilter, supplierFilter])
+  }, [branchFilter, brandFilter, categoryFilter, groupFilter, search, searchMode, stockFilter, supplierFilter])
 
   const pagedProductCards = useMemo(
     () => paginateItems(visibleProductCards, productPage, productPageSize),
@@ -1104,6 +1114,7 @@ export default function POS() {
                     brandFilter    !== 'all' ? 1 : 0,
                     branchFilter   !== 'all' ? 1 : 0,
                     stockFilter    !== 'all' ? 1 : 0,
+                    groupFilter    !== 'all' ? 1 : 0,
                     supplierFilter !== 'all' ? 1 : 0,
                   ].reduce((a, b) => a + b, 0)
                   return (
@@ -1140,6 +1151,7 @@ export default function POS() {
                   brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
                   branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
                   stockFilter={stockFilter}         setStockFilter={setPersistedStock}
+                  groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
                   supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
                   quickFilters={quickFilters}
                   setQuickFilter={setQuickFilter}

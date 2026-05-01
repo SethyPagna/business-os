@@ -192,6 +192,7 @@ function chooseParentProduct(existingRows = []) {
 function buildExistingIndex(existingProducts = []) {
   const byName = new Map()
   const bySku = new Map()
+  const byBarcode = new Map()
   ;(Array.isArray(existingProducts) ? existingProducts : []).forEach((product) => {
     const nameKey = normalizeImportProductName(product?.name)
     if (nameKey) {
@@ -200,8 +201,10 @@ function buildExistingIndex(existingProducts = []) {
     }
     const sku = normalizeComparableText(product?.sku)
     if (sku) bySku.set(sku, product)
+    const barcode = normalizeComparableText(product?.barcode)
+    if (barcode) byBarcode.set(barcode, product)
   })
-  return { byName, bySku }
+  return { byName, bySku, byBarcode }
 }
 
 export function analyzeProductImportRows(rows = [], existingProducts = []) {
@@ -209,7 +212,7 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     .map((row, index) => normalizeProductImportRow(row, index))
     .filter((row) => normalizeText(row.name))
 
-  const { byName, bySku } = buildExistingIndex(existingProducts)
+  const { byName, bySku, byBarcode } = buildExistingIndex(existingProducts)
   const firstPlannedByName = new Map()
   const signatureOwnerByName = new Map()
   const decisions = {}
@@ -221,11 +224,21 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     const rowIndex = Number(row._import_row_index ?? index)
     const nameKey = normalizeImportProductName(row.name)
     const skuKey = normalizeComparableText(row.sku)
+    const barcodeKey = normalizeComparableText(row.barcode)
     const sameNameProducts = byName.get(nameKey) || []
     const skuMatch = skuKey ? bySku.get(skuKey) : null
+    const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null
+    const identifierMatch = skuMatch || barcodeMatch || null
+    const identifierMatchSameName = identifierMatch && normalizeImportProductName(identifierMatch.name) === nameKey
+    const identifierConflictFields = [
+      skuMatch && !identifierMatchSameName ? 'sku' : '',
+      barcodeMatch && !identifierMatchSameName ? 'barcode' : '',
+    ].filter(Boolean)
     const existingCandidates = skuMatch && normalizeImportProductName(skuMatch.name) === nameKey
       ? [skuMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(skuMatch.id))]
-      : sameNameProducts
+      : barcodeMatch && normalizeImportProductName(barcodeMatch.name) === nameKey
+        ? [barcodeMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(barcodeMatch.id))]
+        : sameNameProducts
     const signature = getProductImportDetailSignature(row)
     const matchingExisting = existingCandidates.find((product) => getProductImportDetailSignature(product) === signature) || null
     const parent = chooseParentProduct(existingCandidates)
@@ -239,6 +252,8 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     } else if (existingCandidates.length) {
       plannedAction = 'create_variant'
       parentId = Number(parent?.parent_id || parent?.id || 0) || null
+    } else if (identifierConflictFields.length) {
+      plannedAction = 'new'
     } else {
       const signatureOwners = signatureOwnerByName.get(nameKey) || new Map()
       if (signatureOwners.has(signature)) {
@@ -261,19 +276,22 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       _target_product_id: targetProductId,
       _parent_id: parentId,
       _detail_signature: signature,
+      _identifier_conflict_mode: identifierConflictFields.length ? 'clear_imported' : '',
     }
     normalizedRows[index] = plannedRow
     decisions[rowIndex] = plannedAction
 
-    if (plannedAction === 'new') {
+    if (plannedAction === 'new' && !identifierConflictFields.length) {
       cleanRows.push({ row: plannedRow, index: rowIndex, incomingImages: [] })
     } else {
       conflicts.push({
         id: rowIndex,
         row: plannedRow,
         index: rowIndex,
-        existing: matchingExisting || parent || null,
+        existing: matchingExisting || parent || identifierMatch || null,
         plannedAction,
+        conflictType: identifierConflictFields.length ? 'identifier' : 'same_name',
+        conflictFields: identifierConflictFields,
         sameBasic: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         samePricing: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         sameImages: true,

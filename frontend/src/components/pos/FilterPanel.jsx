@@ -16,6 +16,8 @@ export default function POSFilterPanel({
   setBranchFilter,
   stockFilter,
   setStockFilter,
+  groupFilter = 'all',
+  setGroupFilter,
   supplierFilter,
   setSupplierFilter,
   quickFilters,
@@ -29,6 +31,7 @@ export default function POSFilterPanel({
     brandFilter !== 'all',
     branchFilter !== 'all',
     stockFilter !== 'all',
+    groupFilter !== 'all',
     supplierFilter !== 'all',
   ].filter(Boolean).length
 
@@ -37,6 +40,7 @@ export default function POSFilterPanel({
     setBrandFilter('all')
     setBranchFilter('all')
     setStockFilter('all')
+    setGroupFilter?.('all')
     setSupplierFilter('all')
   }
 
@@ -111,6 +115,26 @@ export default function POSFilterPanel({
               key={value}
               onClick={() => setStockFilter(value)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(stockFilter === value)}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel icon={Package}>{T('product_group', 'Product group')}</SectionLabel>
+        <div className="flex flex-wrap gap-1">
+          {[
+            ['all', T('all', 'All')],
+            ['parent', T('parents', 'Parents')],
+            ['variant', T('variants', 'Variants')],
+            ['standalone', T('standalone', 'Standalone')],
+          ].map(([value, label]) => (
+            <button
+              key={`group-${value}`}
+              onClick={() => setGroupFilter?.(groupFilter === value && value !== 'all' ? 'all' : value)}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(groupFilter === value)}`}
             >
               {label}
             </button>

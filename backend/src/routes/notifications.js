@@ -14,6 +14,7 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_portal_enabled',
   'notifications_system_enabled',
   'notifications_loyalty_threshold',
+  'notifications_realert_minutes',
 ]
 
 function normalizeBoolean(value, fallback = true) {
@@ -49,6 +50,7 @@ function loadNotificationPreferences() {
     portalEnabled: normalizeBoolean(map.notifications_portal_enabled, true),
     systemEnabled: normalizeBoolean(map.notifications_system_enabled, true),
     loyaltyThreshold: Math.max(1, Math.floor(toNumber(map.notifications_loyalty_threshold, 100))),
+    realertMinutes: Math.max(5, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
   }
 }
 
@@ -91,7 +93,7 @@ function buildInventorySection() {
       AND stock_quantity > COALESCE(out_of_stock_threshold, 0)
       AND stock_quantity <= COALESCE(low_stock_threshold, 10)
     ORDER BY stock_quantity ASC, name COLLATE NOCASE ASC
-    LIMIT 6
+    LIMIT 50
   `).all()
 
   const outOfStock = db.prepare(`
@@ -100,7 +102,7 @@ function buildInventorySection() {
     WHERE is_active = 1
       AND stock_quantity <= COALESCE(out_of_stock_threshold, 0)
     ORDER BY stock_quantity ASC, name COLLATE NOCASE ASC
-    LIMIT 6
+    LIMIT 50
   `).all()
 
   const countLow = db.prepare(`
@@ -165,7 +167,7 @@ function buildSalesSection() {
     FROM sales
     WHERE COALESCE(sale_status, 'completed') = 'awaiting_payment'
     ORDER BY created_at DESC
-    LIMIT 6
+    LIMIT 50
   `).all()
 
   const awaitingDelivery = db.prepare(`
@@ -173,7 +175,7 @@ function buildSalesSection() {
     FROM sales
     WHERE COALESCE(sale_status, 'completed') = 'awaiting_delivery'
     ORDER BY created_at DESC
-    LIMIT 6
+    LIMIT 50
   `).all()
 
   const counts = db.prepare(`
@@ -300,7 +302,7 @@ function buildLoyaltySection(threshold) {
     summaryKey: 'notification_loyalty_summary',
     summaryParams: { count: matches.length, threshold },
     summary: `${matches.length} customer${matches.length === 1 ? '' : 's'} reached ${threshold}+ points`,
-    items: matches.slice(0, 6).map((customer) => ({
+    items: matches.slice(0, 50).map((customer) => ({
       id: `loyalty-${customer.id}`,
       tone: 'success',
       label: customer.name,
@@ -319,7 +321,7 @@ function buildPortalSection() {
     FROM customer_share_submissions
     WHERE status = 'pending'
     ORDER BY created_at DESC
-    LIMIT 6
+    LIMIT 50
   `).all()
 
   const pendingCount = Number(

@@ -485,7 +485,15 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
   return parent
 }
 
-function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allowDuplicateName = false }) {
+function assertUniqueProductFields({
+  name,
+  sku,
+  barcode,
+  excludeId = null,
+  allowDuplicateName = false,
+  allowDuplicateSku = false,
+  allowDuplicateBarcode = false,
+}) {
   const trimmedName = normalizeText(name)
   if (!trimmedName) throw new Error('Product name required')
   const conflict = db.prepare(`
@@ -506,9 +514,75 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allow
     excludeId, excludeId,
   )
   if (!conflict) return
-  if ((sku || '') && conflict.sku === sku) throw new Error(`Duplicate SKU "${sku}" is not allowed`)
-  if ((barcode || '') && conflict.barcode === barcode) throw new Error(`Duplicate barcode "${barcode}" is not allowed`)
+  if (!allowDuplicateSku && (sku || '') && conflict.sku === sku) throw new Error(`Duplicate SKU "${sku}" is not allowed`)
+  if (!allowDuplicateBarcode && (barcode || '') && conflict.barcode === barcode) throw new Error(`Duplicate barcode "${barcode}" is not allowed`)
   if (!allowDuplicateName) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+}
+
+function findProductIdentifierConflict({ sku, barcode, excludeId = null }) {
+  const normalizedSku = normalizeText(sku)
+  const normalizedBarcode = normalizeText(barcode)
+  if (!normalizedSku && !normalizedBarcode) return null
+  return db.prepare(`
+    SELECT id, name, sku, barcode
+    FROM products
+    WHERE (
+      (? IS NOT NULL AND ? != '' AND sku = ?)
+      OR (? IS NOT NULL AND ? != '' AND barcode = ?)
+    )
+    AND (? IS NULL OR id != ?)
+    ORDER BY id ASC
+    LIMIT 1
+  `).get(
+    normalizedSku || null, normalizedSku || '', normalizedSku || null,
+    normalizedBarcode || null, normalizedBarcode || '', normalizedBarcode || null,
+    excludeId, excludeId,
+  ) || null
+}
+
+function normalizeIdentifierConflictMode(value) {
+  const mode = normalizeLookup(value)
+  if (['allow_duplicate', 'allow_duplicates', 'allow_same', 'same'].includes(mode)) return 'allow_duplicate'
+  if (['clear', 'clear_imported', 'remove', 'blank'].includes(mode)) return 'clear_imported'
+  if (['fail', 'error', 'reject'].includes(mode)) return 'fail'
+  return 'clear_imported'
+}
+
+function resolveNewProductIdentifiers(normalized, row = {}) {
+  const mode = normalizeIdentifierConflictMode(row._identifier_conflict_mode || row.identifier_conflict_mode)
+  const conflict = findProductIdentifierConflict({ sku: normalized.sku, barcode: normalized.barcode })
+  if (!conflict) {
+    return {
+      sku: normalized.sku,
+      barcode: normalized.barcode,
+      allowDuplicateSku: false,
+      allowDuplicateBarcode: false,
+      conflict: null,
+      mode,
+    }
+  }
+  if (mode === 'fail') {
+    if (normalized.sku && conflict.sku === normalized.sku) throw new Error(`Duplicate SKU "${normalized.sku}" is not allowed`)
+    if (normalized.barcode && conflict.barcode === normalized.barcode) throw new Error(`Duplicate barcode "${normalized.barcode}" is not allowed`)
+  }
+  if (mode === 'allow_duplicate') {
+    return {
+      sku: normalized.sku,
+      barcode: normalized.barcode,
+      allowDuplicateSku: !!(normalized.sku && conflict.sku === normalized.sku),
+      allowDuplicateBarcode: !!(normalized.barcode && conflict.barcode === normalized.barcode),
+      conflict,
+      mode,
+    }
+  }
+  return {
+    sku: normalized.sku && conflict.sku === normalized.sku ? null : normalized.sku,
+    barcode: normalized.barcode && conflict.barcode === normalized.barcode ? null : normalized.barcode,
+    allowDuplicateSku: false,
+    allowDuplicateBarcode: false,
+    conflict,
+    mode,
+  }
 }
 
 async function copyImageIntoAssets(sourcePath, originalName, actor = {}, { importJobId = null, importFileId = null } = {}) {
@@ -804,7 +878,9 @@ function insertInventoryMovement({ productId, productName, branch, movementType,
 
 function seedBranchRows(productId, ctx) {
   const insert = db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 0)')
-  ctx.activeBranches.forEach((branch) => insert.run(productId, branch.id))
+  if (ctx.defaultBranch?.id) {
+    insert.run(productId, ctx.defaultBranch.id)
+  }
 }
 
 async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache }) {
@@ -852,11 +928,14 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
     if (action === 'new') {
       const parentRecord = ensureParentProductExists(parentId || null)
       const normalizedParentId = parentRecord?.id || null
+      const identifiers = resolveNewProductIdentifiers(normalized, row)
       assertUniqueProductFields({
         name: normalized.name,
-        sku: normalized.sku,
-        barcode: normalized.barcode,
+        sku: identifiers.sku,
+        barcode: identifiers.barcode,
         allowDuplicateName: importActionLabel === 'create_variant' && !!normalizedParentId,
+        allowDuplicateSku: identifiers.allowDuplicateSku,
+        allowDuplicateBarcode: identifiers.allowDuplicateBarcode,
       })
       const primary = incomingGallery[0] || null
       const result = db.prepare(`
@@ -870,8 +949,8 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         normalized.name,
-        normalized.sku,
-        normalized.barcode,
+        identifiers.sku,
+        identifiers.barcode,
         normalized.category,
         normalized.unit,
         normalized.description,
@@ -921,7 +1000,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
 
     const existing = plannedTargetId
       ? db.prepare('SELECT * FROM products WHERE id = ?').get(plannedTargetId)
-      : (matching || db.prepare("SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) OR (sku IS NOT NULL AND sku = ?)").get(normalized.name, normalized.sku || '__NOSKUMATCH__'))
+      : (matching || db.prepare("SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) OR (sku IS NOT NULL AND sku = ?) OR (barcode IS NOT NULL AND barcode = ?)").get(normalized.name, normalized.sku || '__NOSKUMATCH__', normalized.barcode || '__NOBARCODEMATCH__'))
     if (!existing) throw new Error('Existing product not found')
 
     const fieldRules = row._field_rules && typeof row._field_rules === 'object'
@@ -1213,6 +1292,17 @@ function parseFieldRules(row = {}) {
   return safeJson(raw, {})
 }
 
+function generateCustomerMembershipNumber(row = {}) {
+  const namePart = normalizeLookup(row?.name || 'customer').replace(/[^a-z0-9]+/g, '').slice(0, 4).toUpperCase() || 'CUS'
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = `${Date.now().toString(36)}${attempt.toString(36)}`.toUpperCase().slice(-7)
+    const candidate = `${namePart}-${suffix}`
+    const exists = db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1').get(candidate)
+    if (!exists) return candidate
+  }
+  throw new Error('Could not generate a unique membership number')
+}
+
 async function processContactRowBatches({ jobId, rowBatches, totalRows = null, actor, type }) {
   const isCustomer = type === 'customers'
   const isSupplier = type === 'suppliers'
@@ -1264,7 +1354,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
           if (isCustomer) {
             incoming = {
               name: cleanText(row.name),
-              membership_number: cleanText(row.membership_number),
+              membership_number: cleanText(row.membership_number) || generateCustomerMembershipNumber(row),
               phone: cleanText(contactState.primary.phone || row.phone),
               email: cleanText(contactState.primary.email || row.email),
               address: contactState.serialized || cleanText(row.address),
@@ -1272,7 +1362,6 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
               notes: cleanText(row.notes),
             }
             if (!incoming.name) throw new Error('name is required')
-            if (!incoming.membership_number) throw new Error('membership number is required')
             existing = findCustomerByMembership.get(incoming.membership_number)
               || (incoming.phone ? findCustomerByPhone.get(incoming.phone) : null)
               || findCustomerByName.get(incoming.name)
