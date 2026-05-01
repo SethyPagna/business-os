@@ -10,7 +10,7 @@ const SRC_ROOT = path.join(FRONTEND_ROOT, 'src')
 const COMPONENT_ROOT = path.join(SRC_ROOT, 'components')
 const KM_PATH = path.join(SRC_ROOT, 'lang', 'km.json')
 const PACKAGE_PATH = path.join(FRONTEND_ROOT, 'package.json')
-const VERIFY_BAT_PATH = path.join(PROJECT_ROOT, 'ops', 'run', 'bat', 'verify-local.bat')
+const VERIFY_BAT_PATH = path.join(PROJECT_ROOT, 'run', 'bat', 'verify-local.bat')
 const MAIN_CSS_PATH = path.join(SRC_ROOT, 'styles', 'main.css')
 
 const REQUIRED_KM_VALUES = {

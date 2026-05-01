@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 KILLED=0
 
 echo ""
@@ -46,7 +46,7 @@ fi
 echo ""
 echo "[INFO] Stopping Tailscale Funnel..."
 if command -v tailscale &>/dev/null; then
-  tailscale funnel --bg off 2>/dev/null || true
+  tailscale serve reset 2>/dev/null || true
   echo "[OK]  Tailscale Funnel stopped"
 else
   echo "[INFO] Tailscale not found - skipping"

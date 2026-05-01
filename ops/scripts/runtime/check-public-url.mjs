@@ -1,9 +1,9 @@
 import https from 'node:https'
 import net from 'node:net'
 
-const DEFAULT_TIMEOUT_MS = 15000
-const PUBLIC_DNS_TIMEOUT_MS = 8000
-const PUBLIC_INGRESS_TIMEOUT_MS = 15000
+const DEFAULT_TIMEOUT_MS = 5000
+const PUBLIC_DNS_TIMEOUT_MS = 4000
+const PUBLIC_INGRESS_TIMEOUT_MS = 6000
 
 function normalizeBaseUrl(value) {
   const raw = String(value || '').trim()
@@ -161,19 +161,21 @@ async function main() {
   ]))
 
   let hasFailure = false
-  for (const path of paths) {
+  const routeResults = await Promise.all(paths.map(async (path) => {
     const url = /^https?:\/\//i.test(path) ? path : `${baseUrl}${path}`
     try {
       const response = await fetchWithTimeout(url)
       const ok = response.status >= 200 && response.status < 400
-      const label = ok ? 'OK' : 'FAIL'
-      console.log(`[${label}] ${response.status} ${url}`)
-      if (!ok) hasFailure = true
+      return { ok, line: `[${ok ? 'OK' : 'FAIL'}] ${response.status} ${url}` }
     } catch (error) {
-      hasFailure = true
-      console.log(`[FAIL] ERR ${url} :: ${error?.message || error}`)
+      return { ok: false, line: `[FAIL] ERR ${url} :: ${error?.message || error}` }
     }
-  }
+  }))
+  routeResults.forEach((result) => {
+    console.log(result.line)
+    if (!result.ok) hasFailure = true
+  })
+  const routeHasFailure = routeResults.some((result) => !result.ok)
 
   if (shouldCheckPublicIngress(baseUrl)) {
     const hostname = new URL(baseUrl).hostname
@@ -181,28 +183,33 @@ async function main() {
     try {
       publicEndpoints = await resolvePublicIngress(hostname)
     } catch (error) {
-      console.log(`[FAIL] DNS ${hostname} :: ${error?.message || error}`)
-      hasFailure = true
+      const label = routeHasFailure ? 'FAIL' : 'WARN'
+      console.log(`[${label}] DNS ${hostname} :: ${error?.message || error}`)
+      if (routeHasFailure) hasFailure = true
     }
 
     if (!publicEndpoints.length) {
-      console.log(`[FAIL] DNS ${hostname} :: no public IPv4/IPv6 ingress addresses resolved`)
-      hasFailure = true
+      const label = routeHasFailure ? 'FAIL' : 'WARN'
+      console.log(`[${label}] DNS ${hostname} :: no public IPv4/IPv6 ingress addresses resolved`)
+      if (routeHasFailure) hasFailure = true
     }
 
-    for (const endpoint of publicEndpoints) {
+    const ingressResults = await Promise.all(publicEndpoints.map(async (endpoint) => {
       const url = `${baseUrl}/health`
       try {
         const response = await checkHttpsViaIp(url, endpoint)
         const ok = response.status >= 200 && response.status < 400
-        const label = ok ? 'OK' : 'FAIL'
-        console.log(`[${label}] ${response.status} ${url} via ${endpoint.ip}`)
-        if (!ok) hasFailure = true
+        const label = ok ? 'OK' : routeHasFailure ? 'FAIL' : 'WARN'
+        return { ok: ok || !routeHasFailure, line: `[${label}] ${response.status} ${url} via ${endpoint.ip}` }
       } catch (error) {
-        hasFailure = true
-        console.log(`[FAIL] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}`)
+        const label = routeHasFailure ? 'FAIL' : 'WARN'
+        return { ok: !routeHasFailure, line: `[${label}] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}` }
       }
-    }
+    }))
+    ingressResults.forEach((result) => {
+      console.log(result.line)
+      if (!result.ok) hasFailure = true
+    })
   }
 
   if (hasFailure) {

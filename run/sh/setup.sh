@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 DATA_DIR="$ROOT/business-os-data"
 ENV_FILE="$ROOT/backend/.env"
 
@@ -38,7 +38,7 @@ fi
 
 cat > "$ENV_FILE" <<ENVEOF
 # Business OS - Backend Configuration
-# Written by ops/run/sh/setup.sh
+# Written by run/sh/setup.sh
 
 PORT=4000
 
@@ -68,7 +68,7 @@ echo "[OK] Written: $ENV_FILE"
 
 echo ""
 echo "[INFO] Starting required Docker scale services..."
-"$ROOT/ops/run/sh/scale-services.sh" up
+"$ROOT/run/sh/scale-services.sh" up
 echo "[OK] Required scale services ready"
 
 echo ""

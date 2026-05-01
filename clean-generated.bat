@@ -1,3 +1,3 @@
 @echo off
 set "BUSINESS_OS_REPO_ROOT=%~dp0"
-call "%~dp0ops\run\bat\clean-generated.bat" %*
+call "%~dp0run\bat\clean-generated.bat" %*

@@ -16,7 +16,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
     set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-    for %%I in ("%~dp0..\..\..") do set "ROOT=%%~fI"
+    for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
@@ -84,14 +84,14 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%.*LISTENING" 2^>nul')
 )
 if defined FOUND_ANY (
     if !LOOP! LSS 6 (
-        timeout /t 1 /nobreak >nul
+        powershell -NoProfile -Command "Start-Sleep -Seconds 1" >nul 2>&1
         goto :kill_loop
     )
 )
 
 echo [INFO] Killing residual node server.js processes...
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+server\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-timeout /t 2 /nobreak >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
 
 if defined TAILSCALE_CMD (
     echo.
@@ -135,4 +135,4 @@ if defined PORT_STILL_BUSY (
     echo [%DATE% %TIME%] STOP succeeded port=%PORT%>>"%RUN_LOG%"
 )
 echo.
-pause
+exit /b 0

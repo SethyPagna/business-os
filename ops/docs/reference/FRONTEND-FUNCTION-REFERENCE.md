@@ -1474,16 +1474,16 @@ Total files documented: **123**
 | 29 | `forgetCredentials` | const arrow | 922 |
 | 30 | `ScaleMigrationSection` | function | 1090 |
 | 31 | `prepare` | const arrow | 1118 |
-| 32 | `Backup` | component/function | 1208 |
-| 33 | `loadHostConfig` | function | 1241 |
-| 34 | `browseServerFolders` | const arrow | 1255 |
-| 35 | `toggleServerBrowser` | const arrow | 1277 |
-| 36 | `handleExport` | const arrow | 1291 |
-| 37 | `pickFolder` | const arrow | 1312 |
-| 38 | `handleFolderExport` | const arrow | 1325 |
-| 39 | `handleFolderImport` | const arrow | 1350 |
-| 40 | `handleChooseImportFile` | const arrow | 1378 |
-| 41 | `handleConfirmImport` | const arrow | 1398 |
+| 32 | `Backup` | component/function | 1231 |
+| 33 | `loadHostConfig` | function | 1264 |
+| 34 | `browseServerFolders` | const arrow | 1278 |
+| 35 | `toggleServerBrowser` | const arrow | 1300 |
+| 36 | `handleExport` | const arrow | 1314 |
+| 37 | `pickFolder` | const arrow | 1335 |
+| 38 | `handleFolderExport` | const arrow | 1348 |
+| 39 | `handleFolderImport` | const arrow | 1373 |
+| 40 | `handleChooseImportFile` | const arrow | 1401 |
+| 41 | `handleConfirmImport` | const arrow | 1421 |
 
 ### 3.96 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 

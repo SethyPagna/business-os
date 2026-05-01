@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BACKEND_DIR="$ROOT/backend"
 FRONTEND_DIR="$ROOT/frontend"
 RUNTIME_DIR="$ROOT/ops/runtime"
@@ -41,7 +41,7 @@ export DATABASE_DRIVER="${DATABASE_DRIVER:-sqlite}"
 export OBJECT_STORAGE_DRIVER="${OBJECT_STORAGE_DRIVER:-local}"
 
 info "Starting required Docker scale services..."
-"$ROOT/ops/run/sh/scale-services.sh" up
+"$ROOT/run/sh/scale-services.sh" up
 ok "Required scale services ready"
 
 if [ ! -d "$BACKEND_DIR/node_modules" ]; then

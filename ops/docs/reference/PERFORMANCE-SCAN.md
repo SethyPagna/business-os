@@ -20,15 +20,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/en.json` | 112.4 | 2359 |
 | `frontend/src/components/products/Products.jsx` | 103.2 | 2021 |
 | `frontend/src/components/pos/POS.jsx` | 102.7 | 1747 |
-| `frontend/src/components/utils-settings/Backup.jsx` | 75.5 | 1644 |
+| `frontend/src/components/utils-settings/Backup.jsx` | 77.6 | 1667 |
 | `frontend/src/components/dashboard/Dashboard.jsx` | 67.6 | 1341 |
 | `frontend/src/api/methods.js` | 67.0 | 1395 |
 | `backend/src/routes/products.js` | 63.7 | 1306 |
 | `frontend/src/components/users/UserProfileModal.jsx` | 60.3 | 1112 |
+| `backend/src/routes/system/index.js` | 60.2 | 1501 |
 | `frontend/src/components/utils-settings/Settings.jsx` | 59.9 | 1342 |
 | `backend/src/routes/sales.js` | 56.4 | 1329 |
 | `frontend/src/AppContext.jsx` | 56.1 | 1373 |
-| `backend/src/routes/system/index.js` | 54.4 | 1350 |
 | `backend/src/database.js` | 53.6 | 1447 |
 | `frontend/src/components/files/FilesPage.jsx` | 52.8 | 886 |
 | `backend/src/services/importJobs.js` | 50.9 | 1256 |
@@ -50,11 +50,11 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/en.json` | 2359 | 112.4 |
 | `frontend/src/components/products/Products.jsx` | 2021 | 103.2 |
 | `frontend/src/components/pos/POS.jsx` | 1747 | 102.7 |
-| `frontend/src/components/utils-settings/Backup.jsx` | 1644 | 75.5 |
+| `frontend/src/components/utils-settings/Backup.jsx` | 1667 | 77.6 |
+| `backend/src/routes/system/index.js` | 1501 | 60.2 |
 | `backend/src/database.js` | 1447 | 53.6 |
 | `frontend/src/api/methods.js` | 1395 | 67.0 |
 | `frontend/src/AppContext.jsx` | 1373 | 56.1 |
-| `backend/src/routes/system/index.js` | 1350 | 54.4 |
 | `frontend/src/components/utils-settings/Settings.jsx` | 1342 | 59.9 |
 | `frontend/src/components/dashboard/Dashboard.jsx` | 1341 | 67.6 |
 | `backend/src/routes/sales.js` | 1329 | 56.4 |
@@ -75,12 +75,12 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | Asset | Size (KB) |
 |---|---:|
 | `frontend/dist/assets/vendor.js` | 437.0 |
-| `frontend/dist/assets/index-dp6Xo5Nu.js` | 399.3 |
+| `frontend/dist/assets/index-CUAKXD3j.js` | 400.9 |
 | `frontend/dist/assets/lang-km.js` | 237.5 |
 | `frontend/dist/assets/vendor-react.js` | 207.2 |
 | `frontend/dist/assets/Products.js` | 179.5 |
 | `frontend/dist/assets/CatalogPage.js` | 165.8 |
-| `frontend/dist/assets/index.css` | 123.3 |
+| `frontend/dist/assets/index.css` | 123.4 |
 | `frontend/dist/assets/lang-en.js` | 105.0 |
 | `frontend/dist/assets/app-shared.js` | 101.6 |
 | `frontend/dist/assets/Inventory.js` | 96.1 |

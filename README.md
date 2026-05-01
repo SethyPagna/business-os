@@ -34,8 +34,8 @@ In Settings > Backup, the Data migration panel has a one-button safety step. It 
 
 Only use these if support asks:
 
-- `ops\run\bat\scale-services.bat status`
-- `ops\run\bat\scale-services.bat logs`
+- `run\bat\scale-services.bat status`
+- `run\bat\scale-services.bat logs`
 - `stop-server.bat --with-services`
 
 Technical notes are in `ops\readme\README.md`.

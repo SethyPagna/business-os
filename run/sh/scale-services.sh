@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT="${BUSINESS_OS_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)}"
+ROOT="${BUSINESS_OS_REPO_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}"
 cd "$ROOT"
 
 if [ "${1:-}" = "" ]; then

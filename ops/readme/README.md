@@ -53,10 +53,10 @@ stop-server.bat --with-services
 These commands are hidden from normal user instructions:
 
 ```bat
-ops\run\bat\scale-services.bat status
-ops\run\bat\scale-services.bat logs
-ops\run\bat\scale-services.bat up
-ops\run\bat\scale-services.bat down
+run\bat\scale-services.bat status
+run\bat\scale-services.bat logs
+run\bat\scale-services.bat up
+run\bat\scale-services.bat down
 ```
 
 The batch wrapper delegates to the shared PowerShell bootstrapper and uses a project-local Docker config folder at `ops\runtime\docker-config` to avoid user profile Docker config permission issues.

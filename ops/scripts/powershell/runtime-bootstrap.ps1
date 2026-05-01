@@ -212,7 +212,7 @@ function Wait-ScaleServicesHealthy($dockerExe, $timeoutSeconds = 90) {
   foreach ($service in $services) {
     Write-Warn "$service health: $(Get-ServiceHealth $dockerExe $service)"
   }
-  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run ops\run\bat\scale-services.bat status for support details.'
+  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\bat\scale-services.bat status for support details.'
 }
 
 function Verify-ScaleServices($dockerExe) {

@@ -16,7 +16,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
     set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-    for %%I in ("%~dp0..\..\..") do set "ROOT=%%~fI"
+    for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
@@ -113,7 +113,7 @@ if "!PRESTART_HTTP!"=="200" (
         if not errorlevel 1 (
             echo [WARN] Clearing stale Business OS listener on port %PORT% ^(PID !PORT_PID!^)...
             powershell -NoProfile -Command "try { Stop-Process -Id %PORT_PID% -Force -ErrorAction Stop; exit 0 } catch { exit 1 }" >nul 2>&1
-            timeout /t 2 /nobreak >nul
+            powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
         ) else (
             echo [ERROR] Port %PORT% is already being used by another program ^(PID !PORT_PID!^).
             echo         Stop that program or change PORT= in %ENV_FILE%, then try again.
@@ -187,7 +187,7 @@ if defined TAILSCALE_CMD (
                     set /p TAILSCALE_URL_FOUND=<"%TEMP%\bos_ts_url.txt"
                     del "%TEMP%\bos_ts_url.txt" 2>nul
                 )
-                if "!TAILSCALE_URL_FOUND!"=="" if %%N LSS 6 timeout /t 2 /nobreak >nul
+                if "!TAILSCALE_URL_FOUND!"=="" if %%N LSS 6 powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
             )
         )
         if "!TAILSCALE_URL_FOUND!"=="" (
@@ -229,7 +229,7 @@ if errorlevel 1 (
     goto :foreground
 )
 echo [OK] Background node process launched.
-goto :after_start
+goto :after_pm2_start
 
 :foreground
 echo.
@@ -274,7 +274,7 @@ for /l %%N in (1,1,20) do (
         set "SERVER_OK=1"
         goto :after_health_done
     )
-    timeout /t 3 /nobreak >nul
+    powershell -NoProfile -Command "Start-Sleep -Seconds 3" >nul 2>&1
 )
 
 :after_health_done
@@ -342,6 +342,9 @@ if defined PUBLIC_URL_OK (
 ) else (
     if not "!TAILSCALE_URL_FOUND!"=="" echo   Public URL check: warning - see log output above
 )
+if not defined PUBLIC_URL_OK if not "!TAILSCALE_URL_FOUND!"=="" (
+    echo   Multi-device note: same-tailnet devices may still work; public internet devices need Tailscale Funnel DNS/ingress enabled.
+)
 echo.
 echo   Factory-reset default login: admin / admin
 echo   Data folder:   %DATA_DIR%
@@ -359,5 +362,5 @@ echo.
 echo ========================================================================
 echo.
 echo Press any key to close this window (server keeps running in background)
-pause >nul
+powershell -NoProfile -Command "if (-not [Console]::IsInputRedirected) { Write-Host 'Press any key to close...'; $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') }" >nul 2>&1
 exit /b 0

@@ -2,7 +2,7 @@
 
 Auto-generated script inventory for startup, shutdown, setup, and release workflows.
 
-Total scripts documented: **25**
+Total scripts documented: **24**
 
 ## setup.bat
 
@@ -25,6 +25,13 @@ Total scripts documented: **25**
 - Labels: **0**
 - Step markers: **0**
 
+## verify-local.bat
+
+- File type: `.bat`
+- Total lines: **4**
+- Labels: **0**
+- Step markers: **0**
+
 ## build-release.bat
 
 - File type: `.bat`
@@ -32,46 +39,31 @@ Total scripts documented: **25**
 - Labels: **0**
 - Step markers: **0**
 
-## start-server-release.bat
+## clean-generated.bat
 
 - File type: `.bat`
-- Total lines: **8**
+- Total lines: **4**
 - Labels: **0**
 - Step markers: **0**
 
-## stop-server-release.bat
+## run/bat/scale-services.bat
 
 - File type: `.bat`
-- Total lines: **8**
+- Total lines: **21**
 - Labels: **0**
 - Step markers: **0**
 
-## setup.sh
-
-- File type: `.sh`
-- Total lines: **7**
-
-## start-server.sh
-
-- File type: `.sh`
-- Total lines: **7**
-
-## stop-server.sh
-
-- File type: `.sh`
-- Total lines: **7**
-
-## ops/run/bat/setup.bat
+## run/bat/setup.bat
 
 - File type: `.bat`
 - Total lines: **307**
 - Labels: **0**
 - Step markers: **0**
 
-## ops/run/bat/start-server.bat
+## run/bat/start-server.bat
 
 - File type: `.bat`
-- Total lines: **364**
+- Total lines: **367**
 - Labels: **5**
 - Step markers: **0**
 
@@ -85,7 +77,7 @@ Total scripts documented: **25**
 | `after_start` | 263 |
 | `after_health_done` | 280 |
 
-## ops/run/bat/stop-server.bat
+## run/bat/stop-server.bat
 
 - File type: `.bat`
 - Total lines: **139**
@@ -98,7 +90,7 @@ Total scripts documented: **25**
 |---|---:|
 | `kill_loop` | 71 |
 
-## ops/run/bat/verify-local.bat
+## run/bat/verify-local.bat
 
 - File type: `.bat`
 - Total lines: **92**
@@ -112,7 +104,7 @@ Total scripts documented: **25**
 | `parse_args` | 13 |
 | `after_args` | 23 |
 
-## ops/run/bat/build-release.bat
+## run/bat/build-release.bat
 
 - File type: `.bat`
 - Total lines: **617**
@@ -144,14 +136,14 @@ Total scripts documented: **25**
 | STEP 8 | Assembling release\business-os folder... | 353 |
 | STEP 9 | Building installer... | 546 |
 
-## ops/run/bat/clean-generated.bat
+## run/bat/clean-generated.bat
 
 - File type: `.bat`
 - Total lines: **59**
 - Labels: **0**
 - Step markers: **0**
 
-## ops/run/bat/release/start-server.bat
+## run/bat/release/start-server.bat
 
 - File type: `.bat`
 - Total lines: **313**
@@ -167,24 +159,29 @@ Total scripts documented: **25**
 | `health_retry` | 255 |
 | `health_done` | 279 |
 
-## ops/run/bat/release/stop-server.bat
+## run/bat/release/stop-server.bat
 
 - File type: `.bat`
 - Total lines: **146**
 - Labels: **0**
 - Step markers: **0**
 
-## ops/run/sh/setup.sh
+## run/sh/scale-services.sh
+
+- File type: `.sh`
+- Total lines: **44**
+
+## run/sh/setup.sh
 
 - File type: `.sh`
 - Total lines: **110**
 
-## ops/run/sh/start-server.sh
+## run/sh/start-server.sh
 
 - File type: `.sh`
 - Total lines: **140**
 
-## ops/run/sh/stop-server.sh
+## run/sh/stop-server.sh
 
 - File type: `.sh`
 - Total lines: **62**
@@ -202,7 +199,7 @@ Total scripts documented: **25**
 ## ops/scripts/generate-doc-reference.js
 
 - File type: `.js`
-- Total lines: **476**
+- Total lines: **475**
 
 ## ops/scripts/generate-full-project-docs.js
 

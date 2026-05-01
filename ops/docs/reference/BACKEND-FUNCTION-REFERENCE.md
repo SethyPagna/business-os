@@ -50,7 +50,7 @@ Total files documented: **61**
 | 38 | `backend/src/routes/returns.js` | 7 | 5 |
 | 39 | `backend/src/routes/sales.js` | 14 | 7 |
 | 40 | `backend/src/routes/settings.js` | 5 | 3 |
-| 41 | `backend/src/routes/system/index.js` | 30 | 28 |
+| 41 | `backend/src/routes/system/index.js` | 38 | 28 |
 | 42 | `backend/src/routes/units.js` | 3 | 0 |
 | 43 | `backend/src/routes/users.js` | 21 | 16 |
 | 44 | `backend/src/runtimeState/index.js` | 6 | 0 |
@@ -882,58 +882,66 @@ Total files documented: **61**
 | 9 | `getTableColumns` | function | 176 |
 | 10 | `getSafeTableCount` | function | 180 |
 | 11 | `buildMigrationTableCounts` | function | 188 |
-| 12 | `buildScaleMigrationStatus` | function | 196 |
-| 13 | `extractUploadPathsFromText` | function | 245 |
-| 14 | `collectBackupUploads` | function | 254 |
-| 15 | `addUpload` | const arrow | 258 |
-| 16 | `restoreBackupUploads` | function | 288 |
-| 17 | `deleteAllUploads` | function | 298 |
-| 18 | `getBackupDataRootCandidate` | function | 307 |
-| 19 | `readBackupTablesFromDataRoot` | function | 319 |
-| 20 | `restoreUploadsFromDataRoot` | function | 352 |
-| 21 | `restoreSnapshotTables` | function | 366 |
-| 22 | `replaceTableRows` | function | 422 |
-| 23 | `normaliseBackupTables` | function | 457 |
-| 24 | `normaliseBackupCustomTableRows` | function | 486 |
-| 25 | `repairRelationalConsistency` | function | 491 |
-| 26 | `getCustomTableNames` | function | 499 |
-| 27 | `parseCustomTableDefinition` | function | 505 |
-| 28 | `recreateCustomTable` | function | 548 |
-| 29 | `listWindowsFsRoots` | const arrow | 1183 |
-| 30 | `listDriveRoots` | const arrow | 1200 |
+| 12 | `safeJsonParse` | function | 208 |
+| 13 | `readSystemSettings` | function | 217 |
+| 14 | `writeSystemSettings` | function | 228 |
+| 15 | `getMigrationSafetyBackupDestination` | function | 243 |
+| 16 | `getMigrationSafetyState` | function | 247 |
+| 17 | `createMigrationSafetyBackup` | function | 269 |
+| 18 | `runMigrationSafetyDriveSync` | function | 287 |
+| 19 | `runMigrationSafetyAutomation` | function | 325 |
+| 20 | `buildScaleMigrationStatus` | function | 340 |
+| 21 | `extractUploadPathsFromText` | function | 390 |
+| 22 | `collectBackupUploads` | function | 399 |
+| 23 | `addUpload` | const arrow | 403 |
+| 24 | `restoreBackupUploads` | function | 433 |
+| 25 | `deleteAllUploads` | function | 443 |
+| 26 | `getBackupDataRootCandidate` | function | 452 |
+| 27 | `readBackupTablesFromDataRoot` | function | 464 |
+| 28 | `restoreUploadsFromDataRoot` | function | 497 |
+| 29 | `restoreSnapshotTables` | function | 511 |
+| 30 | `replaceTableRows` | function | 567 |
+| 31 | `normaliseBackupTables` | function | 602 |
+| 32 | `normaliseBackupCustomTableRows` | function | 631 |
+| 33 | `repairRelationalConsistency` | function | 636 |
+| 34 | `getCustomTableNames` | function | 644 |
+| 35 | `parseCustomTableDefinition` | function | 650 |
+| 36 | `recreateCustomTable` | function | 693 |
+| 37 | `listWindowsFsRoots` | const arrow | 1334 |
+| 38 | `listDriveRoots` | const arrow | 1351 |
 
 #### 3.41.1 Route Handlers
 
 | No. | Method | Path | Line |
 |---:|---|---|---:|
-| 1 | GET | `/audit-logs` | 559 |
-| 2 | GET | `/debug/log` | 563 |
-| 3 | GET | `/config` | 569 |
-| 4 | GET | `/drive-sync/status` | 602 |
-| 5 | POST | `/drive-sync/preferences` | 608 |
-| 6 | POST | `/drive-sync/oauth/start` | 619 |
-| 7 | GET | `/drive-sync/oauth/callback` | 662 |
-| 8 | POST | `/drive-sync/disconnect` | 690 |
-| 9 | POST | `/drive-sync/forget-credentials` | 699 |
-| 10 | POST | `/drive-sync/sync-now` | 716 |
-| 11 | GET | `/backup/export` | 728 |
-| 12 | POST | `/backup/export-folder` | 756 |
-| 13 | POST | `/backup/import` | 795 |
-| 14 | POST | `/backup/import-folder` | 818 |
-| 15 | POST | `/reset-data` | 860 |
-| 16 | POST | `/factory-reset` | 903 |
-| 17 | POST | `/sync/push` | 943 |
-| 18 | GET | `/verify-integrity` | 953 |
-| 19 | POST | `/repair-integrity` | 982 |
-| 20 | GET | `/data-path` | 1012 |
-| 21 | GET | `/scale-migration/status` | 1033 |
-| 22 | POST | `/scale-migration/prepare` | 1042 |
-| 23 | POST | `/scale-migration/run` | 1066 |
-| 24 | POST | `/data-path` | 1084 |
-| 25 | DELETE | `/data-path` | 1147 |
-| 26 | POST | `/browse-dir` | 1180 |
-| 27 | POST | `/open-path` | 1247 |
-| 28 | POST | `/pick-folder` | 1276 |
+| 1 | GET | `/audit-logs` | 704 |
+| 2 | GET | `/debug/log` | 708 |
+| 3 | GET | `/config` | 714 |
+| 4 | GET | `/drive-sync/status` | 747 |
+| 5 | POST | `/drive-sync/preferences` | 753 |
+| 6 | POST | `/drive-sync/oauth/start` | 764 |
+| 7 | GET | `/drive-sync/oauth/callback` | 807 |
+| 8 | POST | `/drive-sync/disconnect` | 835 |
+| 9 | POST | `/drive-sync/forget-credentials` | 844 |
+| 10 | POST | `/drive-sync/sync-now` | 861 |
+| 11 | GET | `/backup/export` | 873 |
+| 12 | POST | `/backup/export-folder` | 901 |
+| 13 | POST | `/backup/import` | 940 |
+| 14 | POST | `/backup/import-folder` | 963 |
+| 15 | POST | `/reset-data` | 1005 |
+| 16 | POST | `/factory-reset` | 1048 |
+| 17 | POST | `/sync/push` | 1088 |
+| 18 | GET | `/verify-integrity` | 1098 |
+| 19 | POST | `/repair-integrity` | 1127 |
+| 20 | GET | `/data-path` | 1157 |
+| 21 | GET | `/scale-migration/status` | 1178 |
+| 22 | POST | `/scale-migration/prepare` | 1187 |
+| 23 | POST | `/scale-migration/run` | 1217 |
+| 24 | POST | `/data-path` | 1235 |
+| 25 | DELETE | `/data-path` | 1298 |
+| 26 | POST | `/browse-dir` | 1331 |
+| 27 | POST | `/open-path` | 1398 |
+| 28 | POST | `/pick-folder` | 1427 |
 
 ### 3.42 `backend/src/routes/units.js`
 

@@ -50,7 +50,7 @@ Code files scanned: **252**
 | 38 | `backend/src/routes/returns.js` | 7 |
 | 39 | `backend/src/routes/sales.js` | 14 |
 | 40 | `backend/src/routes/settings.js` | 5 |
-| 41 | `backend/src/routes/system/index.js` | 30 |
+| 41 | `backend/src/routes/system/index.js` | 38 |
 | 42 | `backend/src/routes/units.js` | 3 |
 | 43 | `backend/src/routes/users.js` | 21 |
 | 44 | `backend/src/runtimeState/index.js` | 6 |
@@ -871,25 +871,33 @@ Code files scanned: **252**
 | 9 | `getTableColumns` | function | 176 |
 | 10 | `getSafeTableCount` | function | 180 |
 | 11 | `buildMigrationTableCounts` | function | 188 |
-| 12 | `buildScaleMigrationStatus` | function | 196 |
-| 13 | `extractUploadPathsFromText` | function | 245 |
-| 14 | `collectBackupUploads` | function | 254 |
-| 15 | `addUpload` | const arrow | 258 |
-| 16 | `restoreBackupUploads` | function | 288 |
-| 17 | `deleteAllUploads` | function | 298 |
-| 18 | `getBackupDataRootCandidate` | function | 307 |
-| 19 | `readBackupTablesFromDataRoot` | function | 319 |
-| 20 | `restoreUploadsFromDataRoot` | function | 352 |
-| 21 | `restoreSnapshotTables` | function | 366 |
-| 22 | `replaceTableRows` | function | 422 |
-| 23 | `normaliseBackupTables` | function | 457 |
-| 24 | `normaliseBackupCustomTableRows` | function | 486 |
-| 25 | `repairRelationalConsistency` | function | 491 |
-| 26 | `getCustomTableNames` | function | 499 |
-| 27 | `parseCustomTableDefinition` | function | 505 |
-| 28 | `recreateCustomTable` | function | 548 |
-| 29 | `listWindowsFsRoots` | const arrow | 1183 |
-| 30 | `listDriveRoots` | const arrow | 1200 |
+| 12 | `safeJsonParse` | function | 208 |
+| 13 | `readSystemSettings` | function | 217 |
+| 14 | `writeSystemSettings` | function | 228 |
+| 15 | `getMigrationSafetyBackupDestination` | function | 243 |
+| 16 | `getMigrationSafetyState` | function | 247 |
+| 17 | `createMigrationSafetyBackup` | function | 269 |
+| 18 | `runMigrationSafetyDriveSync` | function | 287 |
+| 19 | `runMigrationSafetyAutomation` | function | 325 |
+| 20 | `buildScaleMigrationStatus` | function | 340 |
+| 21 | `extractUploadPathsFromText` | function | 390 |
+| 22 | `collectBackupUploads` | function | 399 |
+| 23 | `addUpload` | const arrow | 403 |
+| 24 | `restoreBackupUploads` | function | 433 |
+| 25 | `deleteAllUploads` | function | 443 |
+| 26 | `getBackupDataRootCandidate` | function | 452 |
+| 27 | `readBackupTablesFromDataRoot` | function | 464 |
+| 28 | `restoreUploadsFromDataRoot` | function | 497 |
+| 29 | `restoreSnapshotTables` | function | 511 |
+| 30 | `replaceTableRows` | function | 567 |
+| 31 | `normaliseBackupTables` | function | 602 |
+| 32 | `normaliseBackupCustomTableRows` | function | 631 |
+| 33 | `repairRelationalConsistency` | function | 636 |
+| 34 | `getCustomTableNames` | function | 644 |
+| 35 | `parseCustomTableDefinition` | function | 650 |
+| 36 | `recreateCustomTable` | function | 693 |
+| 37 | `listWindowsFsRoots` | const arrow | 1334 |
+| 38 | `listDriveRoots` | const arrow | 1351 |
 
 ### 3.42 `backend/src/routes/units.js`
 
@@ -3112,16 +3120,16 @@ Code files scanned: **252**
 | 29 | `forgetCredentials` | const arrow | 922 |
 | 30 | `ScaleMigrationSection` | function | 1090 |
 | 31 | `prepare` | const arrow | 1118 |
-| 32 | `Backup` | export default function | 1208 |
-| 33 | `loadHostConfig` | function | 1241 |
-| 34 | `browseServerFolders` | const arrow | 1255 |
-| 35 | `toggleServerBrowser` | const arrow | 1277 |
-| 36 | `handleExport` | const arrow | 1291 |
-| 37 | `pickFolder` | const arrow | 1312 |
-| 38 | `handleFolderExport` | const arrow | 1325 |
-| 39 | `handleFolderImport` | const arrow | 1350 |
-| 40 | `handleChooseImportFile` | const arrow | 1378 |
-| 41 | `handleConfirmImport` | const arrow | 1398 |
+| 32 | `Backup` | export default function | 1231 |
+| 33 | `loadHostConfig` | function | 1264 |
+| 34 | `browseServerFolders` | const arrow | 1278 |
+| 35 | `toggleServerBrowser` | const arrow | 1300 |
+| 36 | `handleExport` | const arrow | 1314 |
+| 37 | `pickFolder` | const arrow | 1335 |
+| 38 | `handleFolderExport` | const arrow | 1348 |
+| 39 | `handleFolderImport` | const arrow | 1373 |
+| 40 | `handleChooseImportFile` | const arrow | 1401 |
+| 41 | `handleConfirmImport` | const arrow | 1421 |
 
 ### 3.193 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
@@ -3665,9 +3673,9 @@ Code files scanned: **252**
 | 13 | `groupByPrefix` | function | 234 |
 | 14 | `writeTranslationReference` | function | 243 |
 | 15 | `writeRunReleaseReference` | function | 299 |
-| 16 | `writeModuleNamingGuide` | function | 375 |
-| 17 | `writeProjectCodeReference` | function | 423 |
-| 18 | `main` | function | 464 |
+| 16 | `writeModuleNamingGuide` | function | 374 |
+| 17 | `writeProjectCodeReference` | function | 422 |
+| 18 | `main` | function | 463 |
 
 ### 3.247 `ops/scripts/generate-full-project-docs.js`
 

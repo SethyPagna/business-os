@@ -17,7 +17,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
 set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-for %%I in ("%~dp0..\..\..") do set "ROOT=%%~fI"
+for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG=%ROOT%\ops\runtime\logs\build-release.log"
@@ -115,10 +115,10 @@ powershell -Command "if (Get-Process business-os-server -ErrorAction SilentlyCon
 if not errorlevel 1 (
     echo [INFO] Stopping running business-os-server.exe...
     powershell -Command "Stop-Process -Name 'business-os-server' -Force -ErrorAction Stop" >nul 2>&1
-    timeout /t 2 /nobreak >nul
+    powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
     where tailscale >nul 2>&1
     if not errorlevel 1 (
-        tailscale funnel --bg 0 >nul 2>&1
+        tailscale serve reset >nul 2>&1
     )
     echo [OK] Running packaged server stopped
 ) else (
@@ -209,7 +209,7 @@ set /a FRONTEND_DIST_RETRIES=0
 if exist "%FRONTEND_DIST_INDEX%" goto frontend_dist_ready
 if %FRONTEND_DIST_RETRIES% GEQ 10 goto frontend_dist_missing
 set /a FRONTEND_DIST_RETRIES+=1
-timeout /t 1 /nobreak >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 1" >nul 2>&1
 goto wait_for_frontend_dist
 
 :frontend_dist_missing
@@ -398,20 +398,20 @@ if errorlevel 1 (
 echo [OK] business-os-server.exe copied
 
 REM ---- Start / stop scripts - COPY THE RELEASE VERSIONS
-if not exist "%ROOT%\ops\run\bat\release\start-server.bat" (
+if not exist "%ROOT%\run\bat\release\start-server.bat" (
     echo [ERROR] Release start script template not found.
     pause
     exit /b 1
 )
-copy /y "%ROOT%\ops\run\bat\release\start-server.bat" "%DIST_OUT%\start-server.bat" >nul
+copy /y "%ROOT%\run\bat\release\start-server.bat" "%DIST_OUT%\start-server.bat" >nul
 echo [OK] start-server.bat (release version) added
 
-if not exist "%ROOT%\ops\run\bat\release\stop-server.bat" (
+if not exist "%ROOT%\run\bat\release\stop-server.bat" (
     echo [ERROR] Release stop script template not found.
     pause
     exit /b 1
 )
-copy /y "%ROOT%\ops\run\bat\release\stop-server.bat" "%DIST_OUT%\stop-server.bat" >nul
+copy /y "%ROOT%\run\bat\release\stop-server.bat" "%DIST_OUT%\stop-server.bat" >nul
 echo [OK] stop-server.bat (release version) added
 
 REM ---- Runtime bootstrap + Docker Compose service config
@@ -534,7 +534,7 @@ if exist "%EMBEDDED_FRONTEND%" (
     echo [OK] Removed embedded frontend staging folder
 )
 if exist "%PRESERVE_TMP%" (
-    rmdir /s /q "%PRESERVE_TMP%"
+    powershell -NoProfile -Command "Remove-Item -LiteralPath '%PRESERVE_TMP%' -Recurse -Force -ErrorAction SilentlyContinue" >nul 2>&1
 )
 
 echo [OK] release\business-os assembled

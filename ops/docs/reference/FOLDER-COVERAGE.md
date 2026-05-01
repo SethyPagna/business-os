@@ -10,7 +10,7 @@ Total folders documented: **60**
 
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
-| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 15 | 7 |
+| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 9 | 8 |
 | 2 | `backend` | Backend project root | 5 | 2 |
 | 3 | `backend/src` | Backend runtime core | 27 | 7 |
 | 4 | `backend/src/config` | Backend runtime core | 1 | 0 |
@@ -61,23 +61,23 @@ Total folders documented: **60**
 | 49 | `frontend/src/styles` | Project folder | 1 | 0 |
 | 50 | `frontend/src/utils` | Project folder | 18 | 0 |
 | 51 | `frontend/tests` | Project folder | 19 | 0 |
-| 52 | `ops/run` | Project run-script home for bat and sh launchers | 0 | 2 |
-| 53 | `ops/run/bat` | Windows run/build/verify scripts | 7 | 0 |
-| 54 | `ops/run/sh` | POSIX run/setup/stop scripts | 4 | 0 |
-| 55 | `ops/scripts` | Project-level automation scripts | 6 | 5 |
-| 56 | `ops/scripts/backend` | Project folder | 1 | 0 |
-| 57 | `ops/scripts/frontend` | Project folder | 3 | 0 |
-| 58 | `ops/scripts/lib` | Project folder | 1 | 0 |
-| 59 | `ops/scripts/powershell` | Project folder | 2 | 0 |
-| 60 | `ops/scripts/runtime` | Project folder | 1 | 0 |
+| 52 | `ops/scripts` | Project-level automation scripts | 6 | 5 |
+| 53 | `ops/scripts/backend` | Project folder | 1 | 0 |
+| 54 | `ops/scripts/frontend` | Project folder | 3 | 0 |
+| 55 | `ops/scripts/lib` | Project folder | 1 | 0 |
+| 56 | `ops/scripts/powershell` | Project folder | 2 | 0 |
+| 57 | `ops/scripts/runtime` | Project folder | 1 | 0 |
+| 58 | `run` | Project run-script home for bat and sh launchers | 0 | 2 |
+| 59 | `run/bat` | Windows run/build/verify scripts | 7 | 0 |
+| 60 | `run/sh` | POSIX run/setup/stop scripts | 4 | 0 |
 
 ## 3. Detailed Folder Commentary
 
 ### 3.1 Folder: `.`
 
 - Purpose: Project root (run files, setup, packaging, top-level config)
-- Direct files: **15**
-- Direct subfolders: **7**
+- Direct files: **9**
+- Direct subfolders: **8**
 
 #### 3.1.1 Subfolders
 
@@ -88,8 +88,9 @@ Total folders documented: **60**
 | 3 | `frontend` |
 | 4 | `ops` |
 | 5 | `output` |
-| 6 | `runtime` |
-| 7 | `scanbot-web-sdk-7.0.0` |
+| 6 | `run` |
+| 7 | `runtime` |
+| 8 | `scanbot-web-sdk-7.0.0` |
 
 #### 3.1.2 Files
 
@@ -98,18 +99,12 @@ Total folders documented: **60**
 | 1 | `.npmrc` | Project source/support file |
 | 2 | `build-release.bat` | Release build orchestration script |
 | 3 | `clean-generated.bat` | Project source/support file |
-| 4 | `clean-generated.ps1` | Project source/support file |
-| 5 | `package.json` | Configuration/data manifest |
-| 6 | `README.md` | Project documentation entrypoint |
-| 7 | `setup.bat` | Environment setup script |
-| 8 | `setup.sh` | Environment setup script |
-| 9 | `start-server-release.bat` | Server lifecycle launcher script |
-| 10 | `start-server.bat` | Server lifecycle launcher script |
-| 11 | `start-server.sh` | Server lifecycle launcher script |
-| 12 | `stop-server-release.bat` | Server lifecycle launcher script |
-| 13 | `stop-server.bat` | Server lifecycle launcher script |
-| 14 | `stop-server.sh` | Server lifecycle launcher script |
-| 15 | `verify-local.bat` | Project source/support file |
+| 4 | `package.json` | Configuration/data manifest |
+| 5 | `README.md` | Project documentation entrypoint |
+| 6 | `setup.bat` | Environment setup script |
+| 7 | `start-server.bat` | Server lifecycle launcher script |
+| 8 | `stop-server.bat` | Server lifecycle launcher script |
+| 9 | `verify-local.bat` | Project source/support file |
 
 
 ### 3.2 Folder: `backend`
@@ -1074,13 +1069,109 @@ Total folders documented: **60**
 | 19 | `storagePolicy.test.mjs` | Project source/support file |
 
 
-### 3.52 Folder: `ops/run`
+### 3.52 Folder: `ops/scripts`
+
+- Purpose: Project-level automation scripts
+- Direct files: **6**
+- Direct subfolders: **5**
+
+#### 3.52.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `backend` |
+| 2 | `frontend` |
+| 3 | `lib` |
+| 4 | `powershell` |
+| 5 | `runtime` |
+
+#### 3.52.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `generate-doc-reference.js` | Project source/support file |
+| 2 | `generate-full-project-docs.js` | Project source/support file |
+| 3 | `performance-scan.js` | Project source/support file |
+| 4 | `sync-firebase-release-env.ps1` | Project source/support file |
+| 5 | `verify-runtime-deps.js` | Project source/support file |
+| 6 | `verify-scale-services.js` | Project source/support file |
+
+
+### 3.53 Folder: `ops/scripts/backend`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.53.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `verify-data-integrity.js` | Project source/support file |
+
+
+### 3.54 Folder: `ops/scripts/frontend`
+
+- Purpose: Project folder
+- Direct files: **3**
+- Direct subfolders: **0**
+
+#### 3.54.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `verify-i18n.js` | Project source/support file |
+| 2 | `verify-performance.js` | Project source/support file |
+| 3 | `verify-ui.js` | Project source/support file |
+
+
+### 3.55 Folder: `ops/scripts/lib`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.55.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `fs-utils.js` | Project source/support file |
+
+
+### 3.56 Folder: `ops/scripts/powershell`
+
+- Purpose: Project folder
+- Direct files: **2**
+- Direct subfolders: **0**
+
+#### 3.56.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `clean-generated.ps1` | Project source/support file |
+| 2 | `runtime-bootstrap.ps1` | Project source/support file |
+
+
+### 3.57 Folder: `ops/scripts/runtime`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.57.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `check-public-url.mjs` | Project source/support file |
+
+
+### 3.58 Folder: `run`
 
 - Purpose: Project run-script home for bat and sh launchers
 - Direct files: **0**
 - Direct subfolders: **2**
 
-#### 3.52.1 Subfolders
+#### 3.58.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1088,13 +1179,13 @@ Total folders documented: **60**
 | 2 | `sh` |
 
 
-### 3.53 Folder: `ops/run/bat`
+### 3.59 Folder: `run/bat`
 
 - Purpose: Windows run/build/verify scripts
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.53.2 Files
+#### 3.59.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1107,13 +1198,13 @@ Total folders documented: **60**
 | 7 | `verify-local.bat` | Project source/support file |
 
 
-### 3.54 Folder: `ops/run/sh`
+### 3.60 Folder: `run/sh`
 
 - Purpose: POSIX run/setup/stop scripts
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.54.2 Files
+#### 3.60.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1121,101 +1212,5 @@ Total folders documented: **60**
 | 2 | `setup.sh` | Project source/support file |
 | 3 | `start-server.sh` | Project source/support file |
 | 4 | `stop-server.sh` | Project source/support file |
-
-
-### 3.55 Folder: `ops/scripts`
-
-- Purpose: Project-level automation scripts
-- Direct files: **6**
-- Direct subfolders: **5**
-
-#### 3.55.1 Subfolders
-
-| No. | Name |
-|---:|---|
-| 1 | `backend` |
-| 2 | `frontend` |
-| 3 | `lib` |
-| 4 | `powershell` |
-| 5 | `runtime` |
-
-#### 3.55.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `generate-doc-reference.js` | Project source/support file |
-| 2 | `generate-full-project-docs.js` | Project source/support file |
-| 3 | `performance-scan.js` | Project source/support file |
-| 4 | `sync-firebase-release-env.ps1` | Project source/support file |
-| 5 | `verify-runtime-deps.js` | Project source/support file |
-| 6 | `verify-scale-services.js` | Project source/support file |
-
-
-### 3.56 Folder: `ops/scripts/backend`
-
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.56.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `verify-data-integrity.js` | Project source/support file |
-
-
-### 3.57 Folder: `ops/scripts/frontend`
-
-- Purpose: Project folder
-- Direct files: **3**
-- Direct subfolders: **0**
-
-#### 3.57.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `verify-i18n.js` | Project source/support file |
-| 2 | `verify-performance.js` | Project source/support file |
-| 3 | `verify-ui.js` | Project source/support file |
-
-
-### 3.58 Folder: `ops/scripts/lib`
-
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.58.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `fs-utils.js` | Project source/support file |
-
-
-### 3.59 Folder: `ops/scripts/powershell`
-
-- Purpose: Project folder
-- Direct files: **2**
-- Direct subfolders: **0**
-
-#### 3.59.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `clean-generated.ps1` | Project source/support file |
-| 2 | `runtime-bootstrap.ps1` | Project source/support file |
-
-
-### 3.60 Folder: `ops/scripts/runtime`
-
-- Purpose: Project folder
-- Direct files: **1**
-- Direct subfolders: **0**
-
-#### 3.60.2 Files
-
-| No. | File | Purpose |
-|---:|---|---|
-| 1 | `check-public-url.mjs` | Project source/support file |
 
 
