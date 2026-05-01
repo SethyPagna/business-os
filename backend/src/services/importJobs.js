@@ -44,6 +44,23 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function wait(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))))
+}
+
+async function yieldImportWorker(multiplier = 1) {
+  const pauseMs = Math.max(0, Number(process.env.IMPORT_WORKER_PAUSE_MS || 8))
+  await wait(pauseMs * Math.max(1, Number(multiplier || 1)))
+}
+
+async function readCsvRowsFromFile(csvFile) {
+  const csvText = await fs.promises.readFile(csvFile.stored_path, 'utf8')
+  await yieldImportWorker()
+  const rows = parseCsvRows(csvText)
+  await yieldImportWorker()
+  return rows
+}
+
 function safeJson(value, fallback = {}) {
   if (value && typeof value === 'object') return value
   try { return JSON.parse(String(value || '')) } catch (_) { return fallback }
@@ -910,6 +927,7 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
       `).run(failed, stringify({ imported, updated, failed }), jobId)
     }
     db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    await yieldImportWorker()
   }
 
   if (ctx.changed.brands) {
@@ -1003,6 +1021,7 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
         message: error?.message || 'Image processing failed',
       })
     }
+    await yieldImportWorker()
   }
   return { imported: 0, updated: 0, images_matched: imagesMatched, failed, cancelled: false }
 }
@@ -1186,6 +1205,7 @@ async function processContactRows({ jobId, rows, actor, type }) {
       summary_json: stringify({ imported, updated, failed }),
     })
     db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    await yieldImportWorker()
   }
 
   audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type, imported, updated, failed })
@@ -1291,6 +1311,7 @@ async function processInventoryRows({ jobId, rows, actor }) {
       failed_rows: failed,
       summary_json: stringify({ imported, updated: 0, failed }),
     })
+    await yieldImportWorker()
   }
   audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'inventory', imported, failed })
   broadcast('products')
@@ -1319,7 +1340,8 @@ async function processSalesRows({ jobId, rows, actor }) {
 
   const grouped = new Map()
   let failed = 0
-  rows.forEach((row, index) => {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]
     try {
       const product = productMap.get(normalizeCsvKey(row.sku))
         || productMap.get(normalizeCsvKey(row.barcode))
@@ -1369,10 +1391,20 @@ async function processSalesRows({ jobId, rows, actor }) {
         raw: row,
       })
     }
-  })
+    if ((index + 1) % IMPORT_ROW_BATCH_SIZE === 0) {
+      updateJob(jobId, {
+        phase: 'grouping_sales',
+        processed_rows: Math.min(rows.length, index + 1),
+        failed_rows: failed,
+        summary_json: stringify({ imported: 0, updated: 0, duplicates: 0, failed, grouped: grouped.size }),
+      })
+      await yieldImportWorker()
+    }
+  }
 
   let imported = 0
   let duplicates = 0
+  let saleRowsApplied = 0
   for (const sale of grouped.values()) {
     if (isCancelled(jobId)) {
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
@@ -1468,6 +1500,7 @@ async function processSalesRows({ jobId, rows, actor }) {
         audit(actor.userId, actor.userName, 'create', 'sale', saleId, { receiptNumber: sale.receiptNumber, source: 'import_job' })
         imported += 1
       })()
+      saleRowsApplied += sale.items.length
     } catch (error) {
       failed += 1
       addJobError(jobId, {
@@ -1476,10 +1509,12 @@ async function processSalesRows({ jobId, rows, actor }) {
       })
     }
     updateJob(jobId, {
-      processed_rows: Math.min(rows.length, rows.length),
+      phase: 'applying_rows',
+      processed_rows: Math.min(rows.length, saleRowsApplied + failed),
       failed_rows: failed,
       summary_json: stringify({ imported, updated: duplicates, duplicates, failed }),
     })
+    await yieldImportWorker()
   }
   audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'sales', imported, duplicates, failed })
   broadcast('sales')
@@ -1558,13 +1593,13 @@ async function extractZipImages(jobId, zipFile) {
   return added
 }
 
-async function processImportJob(jobId) {
+async function processImportJob(jobId, { mode = 'analyze' } = {}) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
   if (job.status === 'running') return job
   updateJob(jobId, {
     status: 'running',
-    phase: 'starting',
+    phase: mode === 'apply' ? 'applying_rows' : 'analyzing',
     started_at: job.started_at || nowIso(),
     last_error: null,
   })
@@ -1572,16 +1607,48 @@ async function processImportJob(jobId) {
   try {
     const csvFile = getJobFiles(jobId, 'csv')[0]
     if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) throw new Error('CSV file is required before starting import')
-    updateJob(jobId, { phase: 'extracting_images' })
-    const zipFiles = getJobFiles(jobId, 'zip')
+    updateJob(jobId, { phase: mode === 'apply' ? 'preparing_files' : 'analyzing_files' })
+    const zipFiles = getJobFiles(jobId, 'zip').filter((file) => file.status !== 'processed')
     for (const zipFile of zipFiles) {
       await extractZipImages(jobId, zipFile)
+      await yieldImportWorker(2)
     }
     const imageFiles = getJobFiles(jobId, 'image')
-    updateJob(jobId, { total_images: imageFiles.length, phase: 'parsing_csv' })
-    const csvText = fs.readFileSync(csvFile.stored_path, 'utf8')
-    const rows = parseCsvRows(csvText)
-    updateJob(jobId, { total_rows: rows.length, phase: 'processing_rows', processed_rows: 0, failed_rows: 0 })
+    updateJob(jobId, { total_images: imageFiles.length, phase: mode === 'apply' ? 'reading_rows' : 'analyzing_rows' })
+    const rows = await readCsvRowsFromFile(csvFile)
+
+    if (mode !== 'apply') {
+      const summary = {
+        requiresApproval: true,
+        analyzed: true,
+        rows: rows.length,
+        images: imageFiles.length,
+        type: job.type,
+        nextPhase: 'approved',
+      }
+      updateJob(jobId, {
+        status: 'awaiting_review',
+        phase: 'awaiting_review',
+        total_rows: rows.length,
+        processed_rows: rows.length,
+        failed_rows: 0,
+        total_images: imageFiles.length,
+        summary_json: stringify(summary),
+        cancel_requested: 0,
+        finished_at: null,
+      })
+      audit(actor.userId, actor.userName, 'import_job_analyzed', 'import_job', null, { jobId, type: job.type, rows: rows.length, images: imageFiles.length })
+      return getImportJob(jobId)
+    }
+
+    updateJob(jobId, {
+      total_rows: rows.length,
+      processed_rows: 0,
+      failed_rows: 0,
+      processed_images: 0,
+      failed_images: 0,
+      phase: rows.length ? 'applying_rows' : 'processing_images',
+    })
     let result
     if (job.type === 'products') {
       result = rows.length
@@ -1602,6 +1669,8 @@ async function processImportJob(jobId) {
       throw new Error(`Import type "${job.type}" is not implemented in the job pipeline yet`)
     }
     if (result.cancelled) return getImportJob(jobId)
+    updateJob(jobId, { phase: 'finalizing_indexes' })
+    await yieldImportWorker(3)
     updateJob(jobId, {
       status: result.failed > 0 ? 'completed_with_errors' : 'completed',
       phase: 'completed',
@@ -1628,10 +1697,11 @@ async function processImportJob(jobId) {
   }
 }
 
-async function runLocalJob(jobId) {
-  if (runningLocalJobs.has(jobId)) return
-  runningLocalJobs.add(jobId)
-  try { await processImportJob(jobId) } finally { runningLocalJobs.delete(jobId) }
+async function runLocalJob(jobId, mode = 'analyze') {
+  const key = `${jobId}:${mode}`
+  if (runningLocalJobs.has(key)) return
+  runningLocalJobs.add(key)
+  try { await processImportJob(jobId, { mode }) } finally { runningLocalJobs.delete(key) }
 }
 
 async function initializeBullQueue() {
@@ -1652,7 +1722,7 @@ async function initializeBullQueue() {
     await connection.ping()
     bullQueue = new Queue(IMPORT_QUEUE_NAME, { connection })
     bullWorker = new Worker(IMPORT_QUEUE_NAME, async (job) => {
-      await processImportJob(job.data.jobId)
+      await processImportJob(job.data.jobId, { mode: job.data.mode || 'analyze' })
     }, {
       connection,
       concurrency: 1,
@@ -1667,12 +1737,17 @@ async function initializeBullQueue() {
   return bullStatus
 }
 
-async function enqueueImportJob(jobId) {
+async function enqueueImportJob(jobId, { mode = 'analyze' } = {}) {
+  const normalizedMode = mode === 'apply' ? 'apply' : 'analyze'
+  const currentJob = getImportJob(jobId)
+  if (['running', 'queued', 'cancelling'].includes(String(currentJob?.status || '').toLowerCase())) {
+    return currentJob
+  }
   const status = await initializeBullQueue()
   if (status.available && bullQueue) {
-    updateJob(jobId, { queue_driver: 'bullmq', status: 'queued', phase: 'queued' })
-    await bullQueue.add('process-import', { jobId }, {
-      jobId,
+    updateJob(jobId, { queue_driver: 'bullmq', status: 'queued', phase: normalizedMode === 'apply' ? 'apply_queued' : 'analyze_queued' })
+    await bullQueue.add('process-import', { jobId, mode: normalizedMode }, {
+      jobId: `${jobId}:${normalizedMode}:${Date.now()}`,
       attempts: 3,
       backoff: { type: 'exponential', delay: 3000 },
       removeOnComplete: 100,
@@ -1689,22 +1764,42 @@ async function enqueueImportJob(jobId) {
     })
     throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
   }
-  updateJob(jobId, { queue_driver: 'sqlite', status: 'queued', phase: 'queued' })
-  setImmediate(() => { runLocalJob(jobId).catch(() => {}) })
+  updateJob(jobId, { queue_driver: 'sqlite', status: 'queued', phase: normalizedMode === 'apply' ? 'apply_queued' : 'analyze_queued' })
+  setImmediate(() => { runLocalJob(jobId, normalizedMode).catch(() => {}) })
   return getImportJob(jobId)
+}
+
+async function approveImportJob(jobId) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  if (['running', 'queued', 'cancelling'].includes(String(job.status || '').toLowerCase())) {
+    throw new Error('Import job is already busy')
+  }
+  if (!['awaiting_review', 'completed_with_errors', 'failed', 'cancelled', 'approved'].includes(String(job.status || '').toLowerCase())) {
+    throw new Error('Import job is not ready to apply')
+  }
+  updateJob(jobId, {
+    status: 'approved',
+    phase: 'approved',
+    cancel_requested: 0,
+    last_error: null,
+    finished_at: null,
+  })
+  return enqueueImportJob(jobId, { mode: 'apply' })
 }
 
 function recoverImportJobs() {
   const rows = db.prepare(`
-    SELECT id
+    SELECT id, phase
     FROM import_jobs
     WHERE status IN ('running', 'queued', 'cancelling')
     ORDER BY datetime(created_at) ASC
     LIMIT 20
   `).all()
   rows.forEach((row) => {
-    updateJob(row.id, { status: 'queued', phase: 'recovered_after_restart' })
-    setImmediate(() => { runLocalJob(row.id).catch(() => {}) })
+    const mode = String(row.phase || '').includes('apply') ? 'apply' : 'analyze'
+    updateJob(row.id, { status: 'queued', phase: mode === 'apply' ? 'apply_recovered_after_restart' : 'analyze_recovered_after_restart' })
+    setImmediate(() => { runLocalJob(row.id, mode).catch(() => {}) })
   })
 }
 
@@ -1734,6 +1829,7 @@ function buildErrorsCsv(jobId) {
 
 module.exports = {
   addJobFile,
+  approveImportJob,
   buildErrorsCsv,
   createImportJob,
   enqueueImportJob,

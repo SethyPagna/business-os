@@ -92,6 +92,19 @@ export function writePortalTranslateTarget(sourceLang, targetLang) {
   return target
 }
 
+export function storePortalTranslatePreference(targetLang) {
+  const rawTarget = canonicalTranslateLanguage(targetLang, 'original')
+  const target = ['original', 'en', 'km'].includes(rawTarget)
+    ? rawTarget
+    : normalizeTranslateTarget(rawTarget, 'en')
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage?.setItem(PORTAL_TRANSLATE_STORAGE_KEY, target)
+    } catch (_) {}
+  }
+  return target
+}
+
 function ensureLinkHint(rel, href) {
   if (typeof document === 'undefined') return
   const selector = `link[rel="${rel}"][href="${href}"]`
@@ -189,7 +202,9 @@ export function readStoredTranslateTarget(sourceLang) {
   }
   if (typeof window !== 'undefined') {
     try {
-      const stored = normalizeTranslateTarget(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY), from)
+      const rawStored = canonicalTranslateLanguage(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY), 'original')
+      if (['original', 'en', 'km'].includes(rawStored)) return rawStored
+      const stored = normalizeTranslateTarget(rawStored, from)
       if (stored) return stored
     } catch (_) {}
   }

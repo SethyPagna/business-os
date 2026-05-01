@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, FileDown, Loader2, RotateCcw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
 
-const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling'])
-const REVIEW_STATUSES = new Set(['completed_with_errors', 'failed', 'cancelled'])
+const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
+const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
 
 function normalizeJobStatus(job) {
@@ -17,6 +17,8 @@ function isRecent(job, maxAgeMs = 2 * 60 * 60 * 1000) {
 }
 
 function getJobProgress(job) {
+  const status = normalizeJobStatus(job)
+  if (status === 'awaiting_review') return 60
   const rowsTotal = Number(job?.total_rows || 0)
   const rowsDone = Number(job?.processed_rows || 0)
   const imagesTotal = Number(job?.total_images || 0)
@@ -24,7 +26,8 @@ function getJobProgress(job) {
   const total = rowsTotal + imagesTotal
   const done = rowsDone + imagesDone
   if (total <= 0) return 0
-  return Math.max(0, Math.min(100, Math.round((done / total) * 100)))
+  const raw = Math.max(0, Math.min(100, Math.round((done / total) * 100)))
+  return ACTIVE_STATUSES.has(status) ? Math.min(95, raw) : raw
 }
 
 function getJobLabel(job) {
@@ -95,6 +98,7 @@ export default function BackgroundImportTracker() {
   const cancelLabel = t('cancel') || 'Cancel'
   const errorsLabel = t('errors') || 'Errors'
   const retryLabel = t('retry') || 'Retry'
+  const approveLabel = t('approve_import') || 'Approve import'
 
   const handleCancel = async (job) => {
     if (!job?.id || busyJobId) return
@@ -119,6 +123,20 @@ export default function BackgroundImportTracker() {
       notify(t('import_retry_started') || 'Import retry started', 'success')
     } catch (error) {
       notify(error?.message || (t('import_retry_failed') || 'Could not retry import'), 'error')
+    } finally {
+      setBusyJobId('')
+    }
+  }
+
+  const handleApprove = async (job) => {
+    if (!job?.id || busyJobId) return
+    setBusyJobId(job.id)
+    try {
+      await window.api.approveImportJob(job.id)
+      await loadJobs()
+      notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')
+    } catch (error) {
+      notify(error?.message || (t('import_apply_failed') || 'Could not approve import'), 'error')
     } finally {
       setBusyJobId('')
     }
@@ -166,6 +184,7 @@ export default function BackgroundImportTracker() {
             const jobStatus = normalizeJobStatus(job)
             const jobProgress = getJobProgress(job)
             const isJobActive = ACTIVE_STATUSES.has(jobStatus)
+            const isAwaitingReview = jobStatus === 'awaiting_review'
             const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
             const failedImages = Number(job.failed_images || 0)
             return (
@@ -186,7 +205,12 @@ export default function BackgroundImportTracker() {
                         <XCircle className="mr-1 inline h-3.5 w-3.5" /> {cancelLabel}
                       </button>
                     ) : null}
-                    {REVIEW_STATUSES.has(jobStatus) ? (
+                    {isAwaitingReview ? (
+                      <button type="button" className="btn-primary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleApprove(job)}>
+                        <PlayCircle className="mr-1 inline h-3.5 w-3.5" /> {approveLabel}
+                      </button>
+                    ) : null}
+                    {REVIEW_STATUSES.has(jobStatus) && !isAwaitingReview ? (
                       <>
                         <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleDownloadErrors(job)}>
                           <FileDown className="mr-1 inline h-3.5 w-3.5" /> {errorsLabel}

@@ -72,8 +72,7 @@ export default function SalesImportModal({ onClose, onDone }) {
       const queuedResult = { imported: 0, duplicates: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
-      notify(tr('sales_import_started', 'Sales import started: {count} row(s) queued. You can keep using the app.').replace('{count}', rowCount), 'success')
-      onDone?.()
+      notify(tr('sales_import_started', 'Sales import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', rowCount), 'success')
       return
     } catch (error) {
       const nextResult = { imported: 0, duplicates: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
@@ -126,7 +125,7 @@ export default function SalesImportModal({ onClose, onDone }) {
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
               {result.queued
-                ? tr('import_job_queued_count', '{count} row(s) queued. Progress is shown at the top of the app.').replace('{count}', result.queued)
+                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', result.queued)
                 : tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', result.imported)}
               {!result.queued && result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', result.duplicates)}` : ''}
             </div>

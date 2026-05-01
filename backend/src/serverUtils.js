@@ -212,6 +212,10 @@ function setTunnelSecurityHeaders(req, res) {
   const allowPortalTranslateEval = isCustomerPortalRoutePath(req?.path)
   const portalTranslateEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
   const portalTranslateElemEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
+  const portalTranslateStyleSources = allowPortalTranslateEval ? ' https://translate.google.com https://translate.googleapis.com https://www.gstatic.com' : ''
+  const portalTranslateFrameSources = allowPortalTranslateEval ? ' https://translate.google.com https://translate.googleapis.com' : ''
+  const portalTranslateConnectSources = allowPortalTranslateEval ? ' https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com' : ''
+  const portalTranslateScriptSources = allowPortalTranslateEval ? ' https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com' : ''
 
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -232,14 +236,14 @@ function setTunnelSecurityHeaders(req, res) {
       "img-src 'self' data: blob: https:",
       "media-src 'self' data: blob: https:",
       "manifest-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
-      "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
+      `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com${portalTranslateStyleSources}`,
+      `style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com${portalTranslateStyleSources}`,
       "font-src 'self' data: https://fonts.gstatic.com",
-      "frame-src 'self' https://www.google.com https://maps.google.com https://translate.google.com https://translate.googleapis.com",
-      "connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://*.supabase.co",
+      `frame-src 'self' https://www.google.com https://maps.google.com${portalTranslateFrameSources}`,
+      `connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://*.supabase.co${portalTranslateConnectSources}`,
       "worker-src 'self' blob:",
-      `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com`,
-      `script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'${portalTranslateElemEvalSource} https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com`,
+      `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource}${portalTranslateScriptSources}`,
+      `script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'${portalTranslateElemEvalSource}${portalTranslateScriptSources}`,
     ].join('; '),
   )
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()

@@ -72,8 +72,7 @@ export default function InventoryImportModal({ onClose, onDone }) {
       const queuedResult = { imported: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
-      notify(tr('inventory_import_started', 'Inventory import started: {count} row(s) queued. You can keep using the app.').replace('{count}', rowCount), 'success')
-      onDone?.()
+      notify(tr('inventory_import_started', 'Inventory import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', rowCount), 'success')
       return
     } catch (error) {
       const nextResult = { imported: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
@@ -126,7 +125,7 @@ export default function InventoryImportModal({ onClose, onDone }) {
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
               {result.queued
-                ? tr('import_job_queued_count', '{count} row(s) queued. Progress is shown at the top of the app.').replace('{count}', result.queued)
+                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', result.queued)
                 : tr('imported_rows_count', 'Imported {count} row(s)', 'បាននាំចូល {count} ជួរ').replace('{count}', result.imported)}
             </div>
             {result.errors?.length ? (

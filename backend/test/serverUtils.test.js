@@ -113,7 +113,7 @@ runTest('mapServerError maps known errors and defaults to 500', () => {
   assert.equal(mapServerError(new Error('boom')).status, 500)
 })
 
-runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and same-origin camera policy', () => {
+runTest('setTunnelSecurityHeaders emits strict internal CSP with wasm support and same-origin camera policy', () => {
   const headers = new Map()
   const res = {
     setHeader(name, value) {
@@ -138,15 +138,15 @@ runTest('setTunnelSecurityHeaders emits strict script CSP with wasm support and 
   assert.match(scriptSrc, /^script-src\b/)
   assert.match(scriptSrc, /'self'/)
   assert.match(scriptSrc, /'wasm-unsafe-eval'/)
-  assert.match(scriptSrc, /https:\/\/translate\.google\.com/)
-  assert.match(scriptSrc, /https:\/\/translate\.googleapis\.com/)
-  assert.match(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
+  assert.doesNotMatch(scriptSrc, /https:\/\/translate\.google\.com/)
+  assert.doesNotMatch(scriptSrc, /https:\/\/translate\.googleapis\.com/)
+  assert.doesNotMatch(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
   assert.doesNotMatch(scriptSrc, /unsafe-inline/)
   assert.doesNotMatch(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
-  assert.match(csp, /connect-src .*https:\/\/translate-pa\.googleapis\.com/)
-  assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
-  assert.match(csp, /style-src-elem 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/www\.gstatic\.com/)
-  assert.match(csp, /script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval' https:\/\/translate\.google\.com https:\/\/translate\.googleapis\.com https:\/\/translate-pa\.googleapis\.com https:\/\/www\.gstatic\.com/)
+  assert.doesNotMatch(csp, /connect-src .*https:\/\/translate-pa\.googleapis\.com/)
+  assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com/)
+  assert.match(csp, /style-src-elem 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com/)
+  assert.match(csp, /script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'(;|$)/)
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
@@ -180,6 +180,8 @@ runTest('setTunnelSecurityHeaders scopes Google Translate eval allowance to cust
   assert.match(scriptSrc, /^script-src\b/)
   assert.match(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
   assert.match(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
+  assert.match(csp, /style-src .*https:\/\/translate\.google\.com/)
+  assert.match(csp, /connect-src .*https:\/\/translate-pa\.googleapis\.com/)
 })
 
 runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for tunnel performance', () => {

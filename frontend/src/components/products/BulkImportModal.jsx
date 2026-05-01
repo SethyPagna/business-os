@@ -304,9 +304,16 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
       }
       await window.api.startImportJob(jobId)
-      setResult({ imported: 0, updated: 0, images_matched: 0, queued: Object.keys(imageFiles).length, jobId, errors: [] })
+      setResult({
+        imported: 0,
+        updated: 0,
+        images_matched: 0,
+        queued: Object.keys(imageFiles).length,
+        jobId,
+        errors: [],
+        message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
+      })
       setStep(3)
-      onDone?.()
       return
     } catch (error) {
       setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
@@ -401,9 +408,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
       }
       await window.api.startImportJob(jobId)
-      setResult({ imported: 0, updated: 0, queued: totalCount, jobId, errors: [] })
+      setResult({
+        imported: 0,
+        updated: 0,
+        queued: totalCount,
+        jobId,
+        errors: [],
+        message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
+      })
       setStep(3)
-      onDone?.()
       return
     } catch (error) {
       setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
@@ -744,7 +757,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       {step === 3 && result ? (
         <div className="space-y-4">
           <div className={`rounded-xl p-4 ${result.queued ? 'bg-blue-50 dark:bg-blue-900/20' : (result.imported || 0) + (result.updated || 0) > 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-            {result.queued ? <p className="text-sm font-medium">{T('import_job_started_background', '{n} item(s) queued. The import is running in the background.').replace('{n}', String(result.queued))}</p> : null}
+            {result.queued ? <p className="text-sm font-medium">{result.message || T('import_job_started_background', '{n} item(s) queued for background analysis. Review and approve it from the top progress bar.').replace('{n}', String(result.queued))}</p> : null}
             {result.jobId ? <p className="mt-1 text-xs opacity-70">Job: {result.jobId}</p> : null}
             {result.imported > 0 ? <p className="text-sm">{T('n_products_created', '{n} new products created').replace('{n}', String(result.imported))}</p> : null}
             {result.updated > 0 ? <p className="text-sm">{T('n_products_updated', '{n} products updated').replace('{n}', String(result.updated))}</p> : null}
@@ -764,7 +777,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               ) : null}
             </div>
           ) : null}
-          <button type="button" className="btn-primary w-full" onClick={onClose}>{T('done', 'Done')}</button>
+          <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>
         </div>
       ) : null}
 

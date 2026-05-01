@@ -27,6 +27,8 @@ import {
   Ticket,
   Upload,
 } from 'lucide-react'
+import enTranslations from '../../lang/en.json'
+import kmTranslations from '../../lang/km.json'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
@@ -57,12 +59,15 @@ import {
   applyGoogleTranslateSelection,
   ensurePortalTranslateScript,
   ensurePortalTranslateWidgetHost,
+  hasPortalTranslatedMarker,
   isPortalTranslateApplied,
   normalizeTranslateTarget,
   readStoredTranslateTarget,
   removePortalTranslateWidgetHost,
   requestPortalTranslateReload,
+  storePortalTranslatePreference,
   writePortalTranslateTarget,
+  clearGoogleTranslateCookies,
 } from './portalTranslateController.mjs'
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
@@ -339,7 +344,7 @@ const PORTAL_TEXT_EXTRA = {
     publicUrlPlaceholder: 'https://customers.example.com',
     openEmbeddedPreview: 'Open public preview',
     translateWidget: 'Enable public translate widget',
-    translateWidgetHint: 'Public customers can switch languages with Google Translate. Internal Business OS translation stays separate.',
+    translateWidgetHint: 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.',
     refreshSeconds: 'Public refresh interval (seconds)',
     stockThresholdMode: 'Stock badge mode',
     stockThresholdModeProduct: 'Use each product threshold',
@@ -1392,10 +1397,23 @@ function replaceVars(template, values) {
   return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => values?.[key] ?? '')
 }
 
+function getPortalResourceText(lang, key) {
+  const bundle = lang === 'km' ? kmTranslations : enTranslations
+  const scoped = bundle?.pages?.portalEditor?.[key] || bundle?.portalEditor?.[key]
+  if (typeof scoped === 'string' && scoped.trim() && !isBrokenLocalizedString(scoped)) return scoped
+  const topLevel = bundle?.[key]
+  if (typeof topLevel === 'string' && topLevel.trim() && !isBrokenLocalizedString(topLevel)) return topLevel
+  return ''
+}
+
+const FIRST_PARTY_TRANSLATE_VALUES = new Set(['original', 'en', 'km'])
+const FIRST_PARTY_TRANSLATE_LANG_OPTIONS = [
+  { value: 'original', label: 'Original', kind: 'first_party' },
+  { value: 'en', label: 'English', kind: 'first_party' },
+  { value: 'km', label: 'Khmer', kind: 'first_party' },
+]
+
 const PUBLIC_TRANSLATE_LANG_OPTIONS = [
-  { value: 'original', label: 'Original' },
-  { value: 'en', label: 'English' },
-  { value: 'km', label: 'Khmer' },
   { value: 'zh-CN', label: 'Chinese (Simplified)' },
   { value: 'zh-TW', label: 'Chinese (Traditional)' },
   { value: 'th', label: 'Thai' },
@@ -1422,7 +1440,23 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
   { value: 'el', label: 'Greek' },
   { value: 'bn', label: 'Bengali' },
   { value: 'ta', label: 'Tamil' },
+].map((option) => ({ ...option, kind: 'external' }))
+
+const ALL_PUBLIC_TRANSLATE_OPTIONS = [
+  ...FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
+  ...PUBLIC_TRANSLATE_LANG_OPTIONS,
 ]
+
+function isFirstPartyTranslateTarget(value) {
+  return FIRST_PARTY_TRANSLATE_VALUES.has(String(value || '').trim().toLowerCase())
+}
+
+function normalizePortalTranslateChoice(value, sourceLang = 'en') {
+  const raw = String(value || 'original').trim()
+  const lower = raw.toLowerCase()
+  if (FIRST_PARTY_TRANSLATE_VALUES.has(lower)) return lower
+  return normalizeTranslateTarget(raw, sourceLang)
+}
 
 function isDocumentVisible() {
   if (typeof document === 'undefined') return true
@@ -1524,13 +1558,22 @@ export default function CatalogPage({ publicView = false }) {
     ),
     [editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
-  const language = previewConfig.language === 'km' ? 'km' : 'en'
+  const configuredPortalLanguage = previewConfig.language === 'km' ? 'km' : 'en'
+  const normalizedTranslateTarget = normalizePortalTranslateChoice(translateTarget, configuredPortalLanguage)
+  const externalTranslateTarget = publicView
+    && previewConfig.translateWidgetEnabled
+    && !isFirstPartyTranslateTarget(normalizedTranslateTarget)
+  const portalCopyLanguage = publicView && previewConfig.translateWidgetEnabled && !externalTranslateTarget
+    ? (normalizedTranslateTarget === 'original' ? configuredPortalLanguage : normalizedTranslateTarget)
+    : configuredPortalLanguage
+  const language = publicView ? portalCopyLanguage : configuredPortalLanguage
   const portalTranslateContentKey = useMemo(() => {
     if (!publicView) return ''
     const firstProduct = products[0]?.id || products[0]?.name || ''
     const lastProduct = products[products.length - 1]?.id || products[products.length - 1]?.name || ''
     return [
       loading ? 'loading' : 'ready',
+      language,
       activeTab,
       products.length,
       firstProduct,
@@ -1545,6 +1588,7 @@ export default function CatalogPage({ publicView = false }) {
     ].join('|')
   }, [
     activeTab,
+    language,
     loading,
     previewConfig.aiEnabled,
     previewConfig.businessName,
@@ -1557,10 +1601,14 @@ export default function CatalogPage({ publicView = false }) {
     publicView,
   ])
   const editorLanguage = appLanguage === 'km' ? 'km' : 'en'
+  const activeCopyLanguage = publicView ? language : editorLanguage
   const copy = (key, fallback, fallbackKm = fallback) => {
+    const portalResource = getPortalResourceText(activeCopyLanguage, key)
+    if (portalResource) return portalResource
+    if (publicView) return tt(activeCopyLanguage, key, fallback, fallbackKm)
     const global = typeof t === 'function' ? t(key) : ''
     if (global && global !== key && !isBrokenLocalizedString(global)) return global
-    return tt(editorLanguage, key, fallback, fallbackKm)
+    return tt(activeCopyLanguage, key, fallback, fallbackKm)
   }
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
@@ -1685,35 +1733,49 @@ export default function CatalogPage({ publicView = false }) {
     })
   }
 
-  /** Apply selected language via Google Translate and confirm the page changed. */
+  /** Apply selected language. Business OS handles English/Khmer instantly; Google is only the external fallback. */
   async function changeTranslateTarget(nextTarget) {
-    const target = normalizeTranslateTarget(nextTarget, language)
+    const target = normalizePortalTranslateChoice(nextTarget, configuredPortalLanguage)
     setTranslateTarget(target)
     setTranslateApplyMessage('')
     if (!publicView || !previewConfig.translateWidgetEnabled) return
-    writePortalTranslateTarget(language, target)
     if (typeof window === 'undefined') return
-    setTranslateApplyState('pending')
-    setTranslateApplyMessage(copy('preparingTranslations', 'Preparing translation tools...'))
 
-    const sourceReadyAtStart = translateReady
-    const maxAttempts = sourceReadyAtStart
-      ? (target === 'original' || target === language ? 10 : 26)
-      : 36
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const attempted = applyGoogleTranslateSelection(language, target)
-      if (attempted && isPortalTranslateApplied(language, target)) {
-        setTranslateApplyState('applied')
-        setTranslateApplyMessage(target === 'original' || target === language
+    if (isFirstPartyTranslateTarget(target)) {
+      clearGoogleTranslateCookies()
+      storePortalTranslatePreference(target)
+      removePortalTranslateWidgetHost()
+      setTranslateReady(true)
+      setTranslateApplyState('pending')
+      setTranslateApplyMessage(copy('translationApplied', 'Translation applied'))
+      if (hasPortalTranslatedMarker() && requestPortalTranslateReload('first-party-switch', 5000)) return
+      window.requestAnimationFrame(() => {
+        if (!aliveRef.current) return
+        setTranslateApplyState(target === 'original' ? 'idle' : 'applied')
+        setTranslateApplyMessage(target === 'original'
           ? copy('translationOriginalApplied', 'Original language restored')
           : copy('translationApplied', 'Translation applied'))
+      })
+      return
+    }
+
+    writePortalTranslateTarget(configuredPortalLanguage, target)
+    setTranslateApplyState('pending')
+    setTranslateApplyMessage(copy('externalTranslationPreparing', 'Preparing external translation...'))
+
+    const sourceReadyAtStart = translateReady
+    const maxAttempts = sourceReadyAtStart ? 26 : 36
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const attempted = applyGoogleTranslateSelection(configuredPortalLanguage, target)
+      if (attempted && isPortalTranslateApplied(configuredPortalLanguage, target)) {
+        setTranslateApplyState('applied')
+        setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
         return
       }
       await sleep(sourceReadyAtStart ? 180 : 220)
     }
 
-    const reloadReason = target === 'original' || target === language ? 'reset-stuck' : 'apply-stuck'
-    if (requestPortalTranslateReload(reloadReason, 5000)) {
+    if (requestPortalTranslateReload('external-translate-stuck', 5000)) {
       return
     }
     setTranslateApplyState('failed')
@@ -1950,17 +2012,28 @@ export default function CatalogPage({ publicView = false }) {
   ])
 
   useEffect(() => {
-    setTranslateReady(false)
+    setTranslateReady(!externalTranslateTarget)
     return undefined
-  }, [publicView, previewConfig.translateWidgetEnabled, language])
+  }, [externalTranslateTarget, publicView, previewConfig.translateWidgetEnabled])
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled) return
-    setTranslateTarget(readStoredTranslateTarget(language))
-  }, [language, previewConfig.translateWidgetEnabled, publicView])
+    setTranslateTarget(readStoredTranslateTarget(configuredPortalLanguage))
+  }, [configuredPortalLanguage, previewConfig.translateWidgetEnabled, publicView])
 
   useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled || typeof window === 'undefined' || typeof document === 'undefined') {
+    if (!publicView || !previewConfig.translateWidgetEnabled || externalTranslateTarget) return undefined
+    removePortalTranslateWidgetHost()
+    setTranslateReady(true)
+    setTranslateApplyState(normalizedTranslateTarget === 'original' ? 'idle' : 'applied')
+    setTranslateApplyMessage(normalizedTranslateTarget === 'original'
+      ? ''
+      : copy('translationApplied', 'Translation applied'))
+    return undefined
+  }, [externalTranslateTarget, normalizedTranslateTarget, previewConfig.translateWidgetEnabled, publicView])
+
+  useEffect(() => {
+    if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || typeof window === 'undefined' || typeof document === 'undefined') {
       removePortalTranslateWidgetHost()
       return undefined
     }
@@ -1975,7 +2048,7 @@ export default function CatalogPage({ publicView = false }) {
         container.innerHTML = ''
         window.google.translate.TranslateElement(
           {
-            pageLanguage: language === 'km' ? 'km' : 'en',
+            pageLanguage: configuredPortalLanguage === 'km' ? 'km' : 'en',
             includedLanguages: PUBLIC_TRANSLATE_LANG_OPTIONS
               .map((option) => option.value)
               .filter((value) => value !== 'original')
@@ -2027,7 +2100,7 @@ export default function CatalogPage({ publicView = false }) {
     return () => {
       cancelled = true
     }
-  }, [language, previewConfig.translateWidgetEnabled, publicView])
+  }, [configuredPortalLanguage, externalTranslateTarget, previewConfig.translateWidgetEnabled, publicView])
 
   useEffect(() => {
     if (!isPageActive || !syncChannel) return undefined
@@ -2049,23 +2122,22 @@ export default function CatalogPage({ publicView = false }) {
   }, [isPageActive, syncChannel])
 
   useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled || !translateReady) return undefined
+    if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || !translateReady) return undefined
     let cancelled = false
     const settleTimer = window.setTimeout(async () => {
-      const isOriginalTarget = translateTarget === 'original' || translateTarget === language
-      const maxTries = isOriginalTarget ? 4 : 20
+      const maxTries = 20
       for (let tries = 0; tries < maxTries; tries += 1) {
         if (cancelled) return
-        applyGoogleTranslateSelection(language, translateTarget)
-        if (isPortalTranslateApplied(language, translateTarget)) {
-          setTranslateApplyState(isOriginalTarget ? 'idle' : 'applied')
-          setTranslateApplyMessage('')
+        applyGoogleTranslateSelection(configuredPortalLanguage, normalizedTranslateTarget)
+        if (isPortalTranslateApplied(configuredPortalLanguage, normalizedTranslateTarget)) {
+          setTranslateApplyState('applied')
+          setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
           return
         }
         await sleep(180)
       }
       if (cancelled) return
-      if (isOriginalTarget && requestPortalTranslateReload('reset-stuck', 5000)) return
+      if (requestPortalTranslateReload('external-translate-stuck', 5000)) return
       setTranslateApplyState('failed')
       setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
     }, loading ? 650 : 260)
@@ -2074,13 +2146,14 @@ export default function CatalogPage({ publicView = false }) {
       window.clearTimeout(settleTimer)
     }
   }, [
-    language,
+    configuredPortalLanguage,
+    externalTranslateTarget,
     loading,
+    normalizedTranslateTarget,
     portalTranslateContentKey,
     previewConfig.translateWidgetEnabled,
     publicView,
     translateReady,
-    translateTarget,
   ])
 
   const filteredProducts = useMemo(() => {
@@ -3308,7 +3381,7 @@ export default function CatalogPage({ publicView = false }) {
             <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div>
                 <div className="text-sm font-medium text-slate-700">{copy('translateWidget', 'Enable public translate widget')}</div>
-                <div className="mt-1 text-xs text-slate-500">{copy('translateWidgetHint', 'Public customers can switch languages with Google Translate. English stays the source language for the portal.')}</div>
+                <div className="mt-1 text-xs text-slate-500">{copy('translateWidgetHint', 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.')}</div>
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
@@ -3943,7 +4016,7 @@ export default function CatalogPage({ publicView = false }) {
                                 <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                                   {copy('publicTranslation', 'Language tools')}
                                 </div>
-                                {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => {
+                                {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => {
                                   const active = translateTarget === option.value && (
                                     translateApplyState === 'applied'
                                     || (option.value === 'original' && translateApplyState === 'idle')
@@ -3962,7 +4035,13 @@ export default function CatalogPage({ publicView = false }) {
                                         closeMenu()
                                       }}
                                     >
-                                      <span>{option.value === 'original' ? copy('followApp', 'Original') : option.label}</span>
+                                      <span>
+                                        {option.value === 'original'
+                                          ? copy('followApp', 'Original')
+                                          : option.kind === 'external'
+                                            ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
+                                            : option.label}
+                                      </span>
                                       {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
                                     </button>
                                   )
@@ -3976,9 +4055,9 @@ export default function CatalogPage({ publicView = false }) {
                                     {translateApplyMessage}
                                   </div>
                                 ) : null}
-                                {!translateReady ? (
+                                {externalTranslateTarget && !translateReady ? (
                                   <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                                    {copy('preparingTranslations', 'Preparing translation tools...')}
+                                    {copy('externalTranslationPreparing', 'Preparing external translation...')}
                                   </div>
                                 ) : null}
                               </div>
@@ -4013,17 +4092,21 @@ export default function CatalogPage({ publicView = false }) {
                         value={translateTarget}
                         onChange={(event) => changeTranslateTarget(event.target.value)}
                       >
-                        {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => (
+                        {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {option.value === 'original' ? copy('followApp', 'Original') : option.label}
+                            {option.value === 'original'
+                              ? copy('followApp', 'Original')
+                              : option.kind === 'external'
+                                ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
+                                : option.label}
                           </option>
                         ))}
                       </select>
                     </label>
                     <div className={`text-xs ${translateApplyState === 'failed' ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                      {translateApplyMessage || (translateReady
+                      {translateApplyMessage || (!externalTranslateTarget || translateReady
                         ? copy('translationReady', 'Translation tools are ready')
-                        : copy('preparingTranslations', 'Preparing translation tools...'))}
+                        : copy('externalTranslationPreparing', 'Preparing external translation...'))}
                     </div>
                   </div>
                 </div>

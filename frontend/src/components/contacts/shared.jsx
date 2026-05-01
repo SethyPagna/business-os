@@ -369,8 +369,7 @@ export function ImportModal({ type, onClose, onDone }) {
         conflictMode,
       }
       setResult(response || null)
-      notify(`Import job started: ${rowCount} row(s) queued. You can keep using the app.`, 'success')
-      onDone?.()
+      notify(`Import analysis started: ${rowCount} row(s) queued. Review and approve it from the top progress bar.`, 'success')
     } catch (error) {
       notify(error?.message || 'Import failed', 'error')
     } finally {
@@ -459,7 +458,7 @@ export function ImportModal({ type, onClose, onDone }) {
 
         {result ? (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-800/70">
-            {result?.queued ? <div>Queued: {Number(result.queued || 0)} row(s). Progress is shown at the top of the app.</div> : null}
+            {result?.queued ? <div>Queued: {Number(result.queued || 0)} row(s) for analysis. Review and approve it from the top progress bar.</div> : null}
             <div>Imported: {Number(result?.imported || 0)}</div>
             <div>Updated: {Number(result?.updated || 0)}</div>
             <div>Failed: {Number(result?.failed || 0)}</div>

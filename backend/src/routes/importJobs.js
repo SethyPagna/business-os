@@ -10,6 +10,7 @@ const { authToken, hasPermission, routeRateLimit, getAuditActor } = require('../
 const { sanitizeOriginalFileName } = require('../fileAssets')
 const {
   addJobFile,
+  approveImportJob,
   buildErrorsCsv,
   createImportJob,
   enqueueImportJob,
@@ -232,10 +233,21 @@ router.post('/:id/start', authToken, requireImportPermission, routeRateLimit({ n
     const job = getJobOr404(req, res)
     if (!job) return
     if (!getJobFiles(job.id, 'csv').length) return err(res, 'Upload a CSV before starting the import')
-    const queued = await enqueueImportJob(job.id)
+    const queued = await enqueueImportJob(job.id, { mode: 'analyze' })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
     err(res, error?.message || 'Failed to start import job')
+  }
+})
+
+router.post('/:id/approve', authToken, requireImportPermission, routeRateLimit({ name: 'import_jobs:approve', max: 20, windowMs: 15 * 60 * 1000, message: 'Too many import approvals.' }), async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    const queued = await approveImportJob(job.id)
+    ok(res, { job: queued, queue: getQueueStatus() })
+  } catch (error) {
+    err(res, error?.message || 'Failed to approve import job')
   }
 })
 
@@ -249,7 +261,10 @@ router.post('/:id/retry', authToken, requireImportPermission, async (req, res) =
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    const queued = await enqueueImportJob(job.id)
+    const mode = ['awaiting_review', 'approved'].includes(String(job.status || '').toLowerCase()) ? 'apply' : 'analyze'
+    const queued = mode === 'apply'
+      ? await approveImportJob(job.id)
+      : await enqueueImportJob(job.id, { mode: 'analyze' })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
     err(res, error?.message || 'Failed to retry import job')

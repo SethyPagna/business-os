@@ -6,6 +6,7 @@ import {
   normalizeTranslateTarget,
   readStoredTranslateTarget,
   removePortalTranslateWidgetHost,
+  storePortalTranslatePreference,
   writePortalTranslateTarget,
 } from '../src/components/catalog/portalTranslateController.mjs'
 
@@ -122,6 +123,11 @@ try {
   globalThis.document.documentElement.className = ''
   assert.equal(readStoredTranslateTarget('en'), 'original')
   assert.equal(isPortalTranslateApplied('en', 'original'), true)
+
+  assert.equal(storePortalTranslatePreference('en'), 'en')
+  assert.equal(readStoredTranslateTarget('en'), 'en')
+  assert.equal(storePortalTranslatePreference('km'), 'km')
+  assert.equal(readStoredTranslateTarget('en'), 'km')
 
   const firstHost = ensurePortalTranslateWidgetHost()
   const secondHost = ensurePortalTranslateWidgetHost()

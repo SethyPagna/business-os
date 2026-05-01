@@ -725,6 +725,7 @@ export const listImportJobs = (params = {}) => {
 }
 export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
 export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
+export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
 export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
 export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/retry`, {}), null, true)
 export const getImportQueueStatus = () => route('importJobs:queueStatus', () => apiFetch('GET', '/api/import-jobs/queue/status'), null)
