@@ -113,6 +113,64 @@ function stringify(value) {
   try { return JSON.stringify(value ?? {}) } catch (_) { return '{}' }
 }
 
+function decorateImportJobRow(row) {
+  if (!row) return null
+  return {
+    ...row,
+    policy: safeJson(row.policy_json, {}),
+    summary: safeJson(row.summary_json, {}),
+  }
+}
+
+function isImportJobStale(row, staleMs = 30_000) {
+  const updatedAt = Date.parse(row?.updated_at || row?.started_at || row?.created_at || '')
+  if (!Number.isFinite(updatedAt)) return true
+  return Date.now() - updatedAt >= Math.max(1_000, Number(staleMs || 30_000))
+}
+
+function isImportJobWorkDrained(row) {
+  if (!row) return true
+  const totalRows = Math.max(0, Number(row.total_rows || 0))
+  const processedRows = Math.max(0, Number(row.processed_rows || 0))
+  const totalImages = Math.max(0, Number(row.total_images || 0))
+  const processedImages = Math.max(0, Number(row.processed_images || 0))
+  const failedImages = Math.max(0, Number(row.failed_images || 0))
+  const rowsDone = totalRows <= 0 || processedRows >= totalRows
+  const imagesDone = totalImages <= 0 || (processedImages + failedImages) >= totalImages
+  return rowsDone && imagesDone
+}
+
+function markStoredImportFilesCancelled(jobId, reason = 'Import cleanup removed pending files.') {
+  db.prepare(`
+    UPDATE import_job_files
+    SET status = 'cancelled',
+        error_message = COALESCE(error_message, ?),
+        updated_at = datetime('now')
+    WHERE job_id = ? AND status IN ('stored', 'queued_media', 'processing')
+  `).run(reason, jobId)
+}
+
+function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
+  if (!row) return null
+  const status = String(row.status || '').toLowerCase()
+  const cancelRequested = !!row.cancel_requested || status === 'cancelling'
+  if (!cancelRequested) return row
+  if (!['running', 'queued', 'cancelling', 'approved'].includes(status)) return row
+  if (!isImportJobWorkDrained(row) && !isImportJobStale(row, staleMs)) return row
+
+  markStoredImportFilesCancelled(row.id, 'Import cancellation cleanup finished.')
+  db.prepare(`
+    UPDATE import_jobs
+    SET status = 'cancelled',
+        phase = 'cancelled',
+        cancel_requested = 1,
+        finished_at = COALESCE(finished_at, datetime('now')),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(row.id)
+  return db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(row.id)
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
 }
@@ -175,11 +233,7 @@ function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriv
 function getImportJob(id) {
   const row = db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(id)
   if (!row) return null
-  return {
-    ...row,
-    policy: safeJson(row.policy_json, {}),
-    summary: safeJson(row.summary_json, {}),
-  }
+  return decorateImportJobRow(reconcileImportJobRow(row))
 }
 
 function listImportJobs({ limit = 50 } = {}) {
@@ -188,11 +242,7 @@ function listImportJobs({ limit = 50 } = {}) {
     FROM import_jobs
     ORDER BY datetime(created_at) DESC, id DESC
     LIMIT ?
-  `).all(Math.max(1, Math.min(200, Number(limit || 50)))).map((row) => ({
-    ...row,
-    policy: safeJson(row.policy_json, {}),
-    summary: safeJson(row.summary_json, {}),
-  }))
+  `).all(Math.max(1, Math.min(200, Number(limit || 50)))).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
 }
 
 function updateJob(id, patch = {}) {
@@ -2208,6 +2258,7 @@ async function cancelImportJob(jobId) {
   const freshStatus = String(fresh?.status || '').toLowerCase()
   const canFinishNow = ['pending', 'queued', 'approved', 'awaiting_review', 'failed'].includes(status)
     || (freshStatus === 'cancelling' && removedQueued.length > 0)
+    || (fresh?.cancel_requested && isImportJobWorkDrained(fresh))
   if (canFinishNow && !runningLocalJobs.has(`${jobId}:analyze`) && !runningLocalJobs.has(`${jobId}:apply`)) {
     updateJob(jobId, {
       status: 'cancelled',
@@ -2215,11 +2266,7 @@ async function cancelImportJob(jobId) {
       last_error: null,
       finished_at: nowIso(),
     })
-    db.prepare(`
-      UPDATE import_job_files
-      SET status = 'cancelled', updated_at = datetime('now')
-      WHERE job_id = ? AND status IN ('stored', 'queued_media')
-    `).run(jobId)
+    markStoredImportFilesCancelled(jobId, 'Import was cancelled.')
   }
   return getImportJob(jobId)
 }
@@ -2291,12 +2338,16 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
 async function deleteImportJob(jobId, { force = false } = {}) {
   const job = getImportJob(jobId)
   if (!job) return { deleted: false, missing: true, id: jobId }
-  const status = String(job.status || '').toLowerCase()
+  const reconciled = reconcileImportJobRow(job, { staleMs: 5_000 })
+  const current = decorateImportJobRow(reconciled) || job
+  const status = String(current.status || '').toLowerCase()
   const busy = ['running', 'queued', 'cancelling', 'approved'].includes(status)
   if (busy && !force) {
     await cancelImportJob(jobId)
     const remaining = await waitForImportJobsToStop([jobId], 5000)
-    if (remaining.length) {
+    const afterCancel = getImportJob(jobId)
+    const stillBusy = remaining.length && !isImportJobWorkDrained(afterCancel)
+    if (stillBusy) {
       const error = new Error('Import is still stopping. Try remove again after it changes to cancelled.')
       error.code = 'import_still_stopping'
       throw error

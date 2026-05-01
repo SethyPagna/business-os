@@ -12,6 +12,18 @@ function normalizeJobStatus(job) {
   return String(job?.status || '').trim().toLowerCase()
 }
 
+function dedupeJobsById(jobs = []) {
+  const seen = new Set()
+  const result = []
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const id = String(job?.id || '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    result.push(job)
+  }
+  return result
+}
+
 function isRecent(job, maxAgeMs = 2 * 60 * 60 * 1000) {
   const stamp = Date.parse(job?.updated_at || job?.finished_at || job?.created_at || '')
   if (!Number.isFinite(stamp)) return true
@@ -47,6 +59,17 @@ function getJobProgressDetails(job, labels = {}) {
   const imagesDone = Number(job?.processed_images || 0)
   const total = rowsTotal + imagesTotal
   const done = rowsDone + imagesDone
+  if (status === 'cancelling' || phase === 'cancel_requested') {
+    const rowsComplete = rowsTotal <= 0 || rowsDone >= rowsTotal
+    const imagesComplete = imagesTotal <= 0 || Number(job?.processed_images || 0) + Number(job?.failed_images || 0) >= imagesTotal
+    return {
+      value: rowsComplete && imagesComplete ? 98 : Math.max(12, Math.min(90, total ? Math.round((done / total) * 100) : 28)),
+      label: rowsComplete && imagesComplete
+        ? (labels.finalCleanup || 'Final cleanup')
+        : (labels.cancelRequested || 'Cancel requested'),
+      indeterminate: true,
+    }
+  }
   if (status === 'completed' || status === 'completed_with_errors') {
     return { value: 100, label: '100%', indeterminate: false }
   }
@@ -119,7 +142,7 @@ export default function BackgroundImportTracker() {
   const jobsSignatureRef = useRef('')
 
   const visibleJobs = useMemo(() => (
-    jobs.filter((job) => {
+    dedupeJobsById(jobs).filter((job) => {
       const status = normalizeJobStatus(job)
       if (ACTIVE_STATUSES.has(status) || REVIEW_STATUSES.has(status)) return true
       return DONE_STATUSES.has(status) && isRecent(job, 60 * 60 * 1000)
@@ -134,7 +157,7 @@ export default function BackgroundImportTracker() {
     try {
       const result = await window.api.listImportJobs?.({ limit: 8 })
       if (!aliveRef.current) return
-      const nextJobs = Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : [])
+      const nextJobs = dedupeJobsById(Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : []))
       const nextSignature = buildJobsSignature(nextJobs)
       if (nextSignature === jobsSignatureRef.current) return
       jobsSignatureRef.current = nextSignature
@@ -186,6 +209,8 @@ export default function BackgroundImportTracker() {
     analyzingFile: t('analyzing_file') || 'Analyzing file',
     cancelled: t('cancelled') || 'Cancelled',
     queued: t('queued') || 'Queued',
+    cancelRequested: t('import_cancel_requested') || 'Cancel requested',
+    finalCleanup: t('import_final_cleanup') || 'Final cleanup',
   }
   const resultLabels = {
     created: t('created') || 'created',

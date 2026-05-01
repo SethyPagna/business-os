@@ -201,6 +201,7 @@
   "import_cancel_requested": "បានស្នើបោះបង់ការនាំចូល",
   "import_errors_download_failed": "មិនអាចទាញយកកំហុសការនាំចូលបាន",
   "import_finished": "ការនាំចូលបានបញ្ចប់",
+  "import_final_cleanup": "ការសម្អាតចុងក្រោយ",
   "import_images_label": "រូបភាព",
   "import_issues_label": "បញ្ហា",
   "import_job_queued_count": "{count} ជួរបានដាក់សម្រាប់វិភាគ។ សូមពិនិត្យ និងអនុម័តពីរបារវឌ្ឍនភាពខាងលើ។",

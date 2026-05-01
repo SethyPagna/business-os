@@ -141,6 +141,11 @@ function parseRelativePaths(req) {
   }
 }
 
+function shouldForceDelete(req) {
+  const raw = req.body?.force ?? req.query?.force
+  return raw === true || raw === 1 || String(raw || '').toLowerCase() === 'true' || String(raw || '') === '1'
+}
+
 router.get('/queue/status', authToken, requireAnyImportPermission, (_req, res) => {
   ok(res, { queue: getQueueStatus() })
 })
@@ -266,7 +271,7 @@ router.delete('/:id', authToken, requireImportPermission, async (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, await deleteImportJob(job.id))
+    ok(res, await deleteImportJob(job.id, { force: shouldForceDelete(req) }))
   } catch (error) {
     const status = error?.code === 'import_still_stopping' ? 409 : 400
     err(res, error?.message || 'Failed to remove import job', status)
@@ -277,7 +282,7 @@ router.post('/:id/delete', authToken, requireImportPermission, async (req, res) 
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, await deleteImportJob(job.id))
+    ok(res, await deleteImportJob(job.id, { force: shouldForceDelete(req) }))
   } catch (error) {
     const status = error?.code === 'import_still_stopping' ? 409 : 400
     err(res, error?.message || 'Failed to remove import job', status)

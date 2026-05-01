@@ -513,6 +513,7 @@
   "import_cancel_requested": "Import cancel requested",
   "import_errors_download_failed": "Could not download import errors",
   "import_finished": "Import finished",
+  "import_final_cleanup": "Final cleanup",
   "import_images_label": "images",
   "import_issues_label": "issue(s)",
   "import_job_queued_count": "{count} row(s) queued for analysis. Review and approve it from the top progress bar.",

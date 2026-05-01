@@ -122,6 +122,27 @@ async function main() {
     assert.equal(fs.existsSync(jobRoot), false)
   })
 
+  await runTest('deleteImportJob removes drained cancelling jobs without waiting forever', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeJobFile(job.id, 'drained-cancel.csv', 'name,stock_quantity\nDrained Product,1\n')
+    addJobFile(job.id, { path: csvPath, originalname: 'drained-cancel.csv', mimetype: 'text/csv' }, 'csv', 'drained-cancel.csv')
+    updateJob(job.id, {
+      status: 'cancelling',
+      phase: 'cancel_requested',
+      cancel_requested: 1,
+      total_rows: 5545,
+      processed_rows: 5545,
+      failed_rows: 28,
+      summary_json: JSON.stringify({ imported: 5513, updated: 4, failed: 28 }),
+    })
+
+    const result = await deleteImportJob(job.id)
+
+    assert.deepEqual(result, { deleted: true, id: job.id })
+    assert.equal(getImportJob(job.id), null)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM import_job_files WHERE job_id = ?').get(job.id).count, 0)
+  })
+
   await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {
     const jobs = [
       createImportJob({ type: 'products', actor: { userName: 'test' } }),

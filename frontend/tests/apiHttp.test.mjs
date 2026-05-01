@@ -103,10 +103,10 @@ await runTest('write dedupe clears after settle and keeps different writes separ
   }
 })
 
-await runTest('import job delete uses canonical DELETE route', () => {
+await runTest('import job delete prefers canonical DELETE route with legacy fallback', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
-  assert.match(source, /deleteImportJob\s*=\s*id\s*=>[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{id\}`/)
-  assert.doesNotMatch(source, /deleteImportJob\s*=\s*id\s*=>[\s\S]*\/api\/import-jobs\/\$\{id\}\/delete/)
+  assert.match(source, /deleteImportJob\s*=\s*\(id,[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{encodedId\}/)
+  assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
 })
 
 if (failed > 0) {
