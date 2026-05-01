@@ -76,6 +76,7 @@ set "EXISTING_CLOUDFLARE_ACCOUNT_ID="
 set "EXISTING_CLOUDFLARE_ZONE_ID="
 set "EXISTING_CLOUDFLARE_TUNNEL_ID="
 set "EXISTING_CLOUDFLARE_TUNNEL_TOKEN_FILE="
+set "EXISTING_APP_RUNTIME="
 set "EXISTING_TOKEN="
 set "EXISTING_APP_ENCRYPTION_KEY="
 set "EXISTING_RESEND_API_KEY="
@@ -127,6 +128,9 @@ if exist "%ENV_FILE%" (
     )
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE"') do (
         set "EXISTING_CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
+    )
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^BUSINESS_OS_APP_RUNTIME"') do (
+        set "EXISTING_APP_RUNTIME=%%b"
     )
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SYNC_TOKEN"') do (
         set "EXISTING_TOKEN=%%b"
@@ -213,6 +217,7 @@ if "!EXISTING_CLOUDFLARE_ACCOUNT_ID!"=="" set "EXISTING_CLOUDFLARE_ACCOUNT_ID=74
 if "!EXISTING_CLOUDFLARE_ZONE_ID!"=="" set "EXISTING_CLOUDFLARE_ZONE_ID=c5f99cba9062112ef5f73f9baa4fdbd6"
 if "!EXISTING_CLOUDFLARE_TUNNEL_ID!"=="" set "EXISTING_CLOUDFLARE_TUNNEL_ID=b6d18448-a7eb-45ae-8a45-e19a3647130d"
 if "!EXISTING_CLOUDFLARE_TUNNEL_TOKEN_FILE!"=="" set "EXISTING_CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
+if "!EXISTING_APP_RUNTIME!"=="" set "EXISTING_APP_RUNTIME=docker"
 if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=https://leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback"
 (
     echo # Business OS - Backend Configuration
@@ -267,6 +272,7 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
     echo.
     echo # Required local scale services ^(started automatically by setup/start^)
+    echo BUSINESS_OS_APP_RUNTIME=!EXISTING_APP_RUNTIME!
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq
     echo REDIS_URL=redis://127.0.0.1:6379

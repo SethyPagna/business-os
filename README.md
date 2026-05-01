@@ -5,7 +5,7 @@ Business OS is meant to run like a normal Windows business app.
 ## Everyday Use
 
 1. Run `run\setup.bat` once on a new laptop.
-2. Run `run\start-server.bat` whenever you want to open the app.
+2. Run `run\start-server.bat` whenever you want to open the app. This now starts the Docker app/runtime by default.
 3. Open the local URL printed by the start window, usually `http://localhost:4000`.
 4. Use `https://admin.leangcosmetics.dpdns.org` for staff/admin access once the admin hostname is added in Cloudflare.
 5. Use `https://leangcosmetics.dpdns.org/public` for the public customer portal.
@@ -13,7 +13,7 @@ Business OS is meant to run like a normal Windows business app.
 
 That is the normal workflow. You do not need to run Redis, Postgres, MinIO, Docker Compose, or import workers by hand.
 
-If the start window says the public URL check failed, the app still started locally, but Cloudflare Tunnel is not connected to the custom domain yet. Check the tunnel token file and Cloudflare tunnel health before using public devices.
+If the start window says the public URL check failed, the app still started locally, but Cloudflare Tunnel is not connected to the custom domain yet. Check the tunnel token file and Cloudflare tunnel health before using public devices. In the Cloudflare Tunnel dashboard, the public hostname origin should be `http://127.0.0.1:4000` when the tunnel runs on Windows, or `http://app:4000` when the tunnel connector runs inside Docker.
 
 Cloudflare setup details are in `ops\docs\cloudflare-ready-setup.md`.
 
@@ -39,6 +39,8 @@ Only use these if support asks:
 
 - `run\scale-services.bat status`
 - `run\scale-services.bat logs`
+- `run\cloudflare-origin.bat host`
+- `run\cloudflare-origin.bat docker`
 - `run\stop-server.bat --with-services`
 
 Technical notes are in `ops\readme\README.md`.

@@ -19,9 +19,9 @@ x-node-env: &node-env
   REDIS_URL: redis://redis-queue:6379
   RUNTIME_CACHE_ENABLED: "${RUNTIME_CACHE_ENABLED:-1}"
   CACHE_REDIS_URL: redis://redis-cache:6379
-  DATABASE_DRIVER: postgres
-  DATABASE_URL: "postgres://${POSTGRES_USER:-business_os}:${POSTGRES_PASSWORD:-business_os_dev_password}@postgres:5432/${POSTGRES_DB:-business_os}"
-  OBJECT_STORAGE_DRIVER: minio
+  DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"
+  DATABASE_URL: "${DATABASE_URL:-}"
+  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
   S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
@@ -201,20 +201,20 @@ services:
     logging: *service-logging
 
   app:
-    image: node:24-alpine
-    profiles: ["postgres-runtime"]
+    image: node:24-bookworm
+    profiles: ["runtime", "postgres-runtime"]
     restart: unless-stopped
     working_dir: /app/backend
     environment:
       <<: *node-env
       WORKER_RUNTIME: docker
-      NODE_OPTIONS: "--max-old-space-size=512"
-    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
+      NODE_OPTIONS: "--max-old-space-size=768"
+    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/better-sqlite3/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm rebuild better-sqlite3 --loglevel=warn >/dev/null 2>&1 || true; npm run start"]
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${PORT:-4000}:4000"
     volumes:
       - ../../:/app
-      - business_os_backend_node_modules:/app/backend/node_modules
+      - business_os_backend_node_modules_app:/app/backend/node_modules
       - business_os_frontend_node_modules:/app/frontend/node_modules
     networks:
       - business_os_internal
@@ -227,24 +227,30 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
     mem_limit: "${APP_MEMORY_LIMIT:-1024m}"
     cpus: "${APP_CPUS:-1.5}"
     stop_grace_period: 30s
     logging: *service-logging
 
   import-worker:
-    image: node:24-alpine
-    profiles: ["postgres-runtime"]
+    image: node:24-bookworm
+    profiles: ["runtime", "postgres-runtime"]
     restart: unless-stopped
     working_dir: /app/backend
     environment:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=768"
-    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:import"]
+    command: ["sh", "-lc", "set -e; if [ ! -d node_modules/cors ] || [ ! -f node_modules/better-sqlite3/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm rebuild better-sqlite3 --loglevel=warn >/dev/null 2>&1 || true; npm run worker:import"]
     volumes:
       - ../../:/app
-      - business_os_backend_node_modules:/app/backend/node_modules
+      - business_os_backend_node_modules_import:/app/backend/node_modules
     networks:
       - business_os_internal
     depends_on:
@@ -255,6 +261,8 @@ services:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      app:
         condition: service_healthy
     mem_limit: "${IMPORT_WORKER_MEMORY_LIMIT:-2560m}"
     cpus: "${IMPORT_WORKER_CPUS:-3.0}"
@@ -262,18 +270,18 @@ services:
     logging: *service-logging
 
   media-worker:
-    image: node:24-alpine
-    profiles: ["postgres-runtime"]
+    image: node:24-bookworm
+    profiles: ["runtime", "postgres-runtime"]
     restart: unless-stopped
     working_dir: /app/backend
     environment:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=1024"
-    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:media"]
+    command: ["sh", "-lc", "set -e; if [ ! -d node_modules/cors ] || [ ! -f node_modules/better-sqlite3/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm rebuild better-sqlite3 --loglevel=warn >/dev/null 2>&1 || true; npm run worker:media"]
     volumes:
       - ../../:/app
-      - business_os_backend_node_modules:/app/backend/node_modules
+      - business_os_backend_node_modules_media:/app/backend/node_modules
     networks:
       - business_os_internal
     depends_on:
@@ -285,16 +293,39 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      app:
+        condition: service_healthy
     mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-3072m}"
     cpus: "${MEDIA_WORKER_CPUS:-3.5}"
     stop_grace_period: 60s
+    logging: *service-logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare-runtime"]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token"]
+    volumes:
+      - type: bind
+        source: ${CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE:-../runtime/secrets/cloudflare-business-os-leangcosmetics.token}
+        target: /run/secrets/cloudflare.token
+        read_only: true
+    networks:
+      - business_os_internal
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: "${CLOUDFLARED_MEMORY_LIMIT:-256m}"
+    cpus: "${CLOUDFLARED_CPUS:-0.5}"
     logging: *service-logging
 
 volumes:
   business_os_redis_queue:
   business_os_postgres18:
   business_os_minio:
-  business_os_backend_node_modules:
+  business_os_backend_node_modules_app:
+  business_os_backend_node_modules_import:
+  business_os_backend_node_modules_media:
   business_os_frontend_node_modules:
 
 networks:

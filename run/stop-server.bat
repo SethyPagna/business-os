@@ -25,6 +25,9 @@ set "ENV_FILE=%ROOT%\backend\.env"
 set "PORT=4000"
 set "TAILSCALE_CMD="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
+set "COMPOSE_FILE=%ROOT%\ops\docker\compose.scale.yml"
+set "DOCKER_ENV=%ROOT%\ops\runtime\docker-scale.env"
+set "DOCKER_CONFIG=%ROOT%\ops\runtime\docker-config"
 if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 
 if exist "%ENV_FILE%" (
@@ -54,6 +57,18 @@ echo ============================================================
 echo   Business OS  ^|  Stopping Server
 echo ============================================================
 echo.
+
+echo [INFO] Stopping Docker app/runtime containers if they are running...
+set "DOCKER_CMD="
+for %%g in (docker.exe docker.cmd docker.bat docker) do (
+    if not defined DOCKER_CMD (
+        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined DOCKER_CMD set "DOCKER_CMD=%%p"
+    )
+)
+if not defined DOCKER_CMD if exist "%ProgramFiles%\Docker\Docker\resources\bin\docker.exe" set "DOCKER_CMD=%ProgramFiles%\Docker\Docker\resources\bin\docker.exe"
+if defined DOCKER_CMD if exist "%COMPOSE_FILE%" if exist "%DOCKER_ENV%" (
+    "%DOCKER_CMD%" compose --env-file "%DOCKER_ENV%" -f "%COMPOSE_FILE%" --profile runtime --profile cloudflare-runtime stop app import-worker media-worker cloudflared >nul 2>&1
+)
 
 if /I "%BUSINESS_OS_REMOTE_PROVIDER%"=="tailscale" if defined TAILSCALE_CMD (
     echo [INFO] Stopping Tailscale health monitor...

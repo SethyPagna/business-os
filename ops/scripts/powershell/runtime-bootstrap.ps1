@@ -107,6 +107,9 @@ function Write-DockerScaleProfile {
 
   $values = [ordered]@{
     BUSINESS_OS_DOCKER_PROFILE = $profile
+    BUSINESS_OS_APP_RUNTIME = 'docker'
+    DATABASE_DRIVER = 'sqlite'
+    OBJECT_STORAGE_DRIVER = 'local'
     REDIS_QUEUE_BIND_HOST = '127.0.0.1'
     REDIS_QUEUE_PORT = '6379'
     REDIS_QUEUE_MAX_MEMORY = '1536mb'
@@ -260,7 +263,7 @@ function Wait-DockerEngine($dockerExe, $timeoutSeconds = 90) {
 }
 
 function Invoke-Compose($dockerExe, [string[]]$composeArgs) {
-  $dockerArgs = @('compose', '--env-file', $DockerScaleEnv, '-f', $ComposeFile) + $composeArgs
+  $dockerArgs = @('compose', '--progress', 'quiet', '--env-file', $DockerScaleEnv, '-f', $ComposeFile) + $composeArgs
   $process = Start-Process -FilePath $dockerExe -ArgumentList $dockerArgs -Wait -NoNewWindow -PassThru
   return $process.ExitCode
 }

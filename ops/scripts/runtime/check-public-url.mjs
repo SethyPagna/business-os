@@ -1,7 +1,7 @@
 import https from 'node:https'
 import net from 'node:net'
 
-const DEFAULT_TIMEOUT_MS = 5000
+const DEFAULT_TIMEOUT_MS = 15000
 const PUBLIC_DNS_TIMEOUT_MS = 4000
 const PUBLIC_INGRESS_TIMEOUT_MS = 6000
 
@@ -173,16 +173,17 @@ async function main() {
   ]))
 
   let hasFailure = false
-  const routeResults = await Promise.all(paths.map(async (path) => {
+  const routeResults = []
+  for (const path of paths) {
     const url = /^https?:\/\//i.test(path) ? path : `${baseUrl}${path}`
     try {
       const response = await fetchWithTimeout(url)
       const ok = response.status >= 200 && response.status < 400
-      return { ok, line: `[${ok ? 'OK' : 'FAIL'}] ${response.status} ${url}` }
+      routeResults.push({ ok, line: `[${ok ? 'OK' : 'FAIL'}] ${response.status} ${url}` })
     } catch (error) {
-      return { ok: false, line: `[FAIL] ERR ${url} :: ${error?.message || error}` }
+      routeResults.push({ ok: false, line: `[FAIL] ERR ${url} :: ${error?.cause?.code || error?.message || error}` })
     }
-  }))
+  }
   routeResults.forEach((result) => {
     console.log(result.line)
     if (!result.ok) hasFailure = true

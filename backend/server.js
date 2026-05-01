@@ -294,7 +294,10 @@ function bootstrapServer() {
   server.keepAliveTimeout = 15 * 1000
   require('./src/websocket').attachWss(server)
 
-  server.listen(PORT, '0.0.0.0', () => {
+  // Do not pin to IPv4 here. Cloudflare Tunnel/dashboard origins often use
+  // localhost, which may resolve to ::1 first on Windows. Let Node bind the
+  // unspecified address so IPv4 and IPv6 loopback origins can both connect.
+  server.listen(PORT, () => {
     startDatabaseMaintenanceTimer()
     console.log(getStartupBanner())
   })

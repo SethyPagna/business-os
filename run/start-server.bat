@@ -40,6 +40,7 @@ set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business
 set "TAILSCALE_NET_OK="
 set "LOCAL_API=http://127.0.0.1:4000"
 set "SERVER_ALREADY_RUNNING=0"
+set "BUSINESS_OS_APP_RUNTIME="
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
 set "JOB_QUEUE_DRIVER=bullmq"
 set "WORKER_RUNTIME=host"
@@ -68,16 +69,24 @@ if exist "%ENV_FILE%" (
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_ADMIN_URL="') do set "CLOUDFLARE_ADMIN_URL=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^BUSINESS_OS_REMOTE_PROVIDER="') do set "BUSINESS_OS_REMOTE_PROVIDER=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^BUSINESS_OS_APP_RUNTIME="') do set "BUSINESS_OS_APP_RUNTIME=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
 if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
 if "%CLOUDFLARE_ADMIN_URL%"=="" set "CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org"
 if "%PUBLIC_BASE_URL%"=="" set "PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%"
 if "%BUSINESS_OS_REMOTE_PROVIDER%"=="" set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
+if "%BUSINESS_OS_APP_RUNTIME%"=="" set "BUSINESS_OS_APP_RUNTIME=docker"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 if not exist "%PM2_HOME%" mkdir "%PM2_HOME%" >nul 2>&1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] START requested (port=%PORT%)>>"%RUN_LOG%"
+
+if /I "%BUSINESS_OS_APP_RUNTIME%"=="docker" (
+    echo [INFO] BUSINESS_OS_APP_RUNTIME=docker. Handing off to Docker runtime launcher...
+    call "%ROOT%\run\start-docker.bat"
+    exit /b %ERRORLEVEL%
+)
 
 echo.
 echo [INFO] Starting required runtime services...

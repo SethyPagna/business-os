@@ -9,11 +9,25 @@ Use two hostnames:
 - `admin.leangcosmetics.dpdns.org` -> staff/admin app.
 - `leangcosmetics.dpdns.org/public` -> public customer portal.
 
-Both hostnames can point to the same Cloudflare Tunnel and local service:
+Both hostnames can point to the same Cloudflare Tunnel and local service. The
+origin must not be plain `localhost`.
+
+When `cloudflared` runs on Windows/host, use:
 
 ```text
 http://127.0.0.1:4000
 ```
+
+When `cloudflared` runs inside Docker Compose, use:
+
+```text
+http://app:4000
+```
+
+Do not use `http://localhost:4000` in the Cloudflare Tunnel dashboard. On
+Windows it can resolve to `::1` before IPv4, and inside a container it points
+at the `cloudflared` container itself. Both cases cause slow retries, blank
+pages, or intermittent connection closed errors.
 
 Protect only the admin hostname with Cloudflare Access. Do not protect the public portal hostname, or customers will be blocked before they can view the portal.
 
@@ -37,6 +51,16 @@ ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token
 ```
 
 The token file should contain only the Cloudflare tunnel token. Never commit it. `run\start-server.bat` starts `cloudflared` automatically when this file exists.
+
+If you have a scoped Cloudflare API token with Tunnel configuration permission,
+the origin can be corrected from the repo:
+
+```text
+run\cloudflare-origin.bat host
+```
+
+Use `run\cloudflare-origin.bat docker` only when the Cloudflare Tunnel connector
+itself is running inside Docker Compose.
 
 ## SSL/TLS
 
