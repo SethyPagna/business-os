@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   __resetApiWriteDedupeForTests,
   apiFetch,
@@ -100,6 +101,12 @@ await runTest('write dedupe clears after settle and keeps different writes separ
     globalThis.fetch = originalFetch
     resetApiState()
   }
+})
+
+await runTest('import job delete uses canonical DELETE route', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(source, /deleteImportJob\s*=\s*id\s*=>[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{id\}`/)
+  assert.doesNotMatch(source, /deleteImportJob\s*=\s*id\s*=>[\s\S]*\/api\/import-jobs\/\$\{id\}\/delete/)
 })
 
 if (failed > 0) {

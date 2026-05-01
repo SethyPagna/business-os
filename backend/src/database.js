@@ -20,7 +20,16 @@ const fs       = require('fs')
 const crypto   = require('crypto')
 const Database = require('better-sqlite3')
 const bcrypt   = require('bcryptjs')
-const { DB_PATH, DEFAULT_ORGANIZATION_BOOTSTRAP } = require('./config')
+const {
+  DB_PATH,
+  DEFAULT_ORGANIZATION_BOOTSTRAP,
+  SQLITE_BUSY_TIMEOUT_MS,
+  SQLITE_CACHE_SIZE_KB,
+  SQLITE_MMAP_SIZE_MB,
+  SQLITE_WAL_AUTOCHECKPOINT,
+  SQLITE_JOURNAL_SIZE_LIMIT_MB,
+  SQLITE_SYNCHRONOUS,
+} = require('./config')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
 
@@ -28,13 +37,33 @@ const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
 
 const db = new Database(DB_PATH)
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
-db.pragma('synchronous = NORMAL')
-db.pragma('cache_size = -32000')
-db.pragma('temp_store = MEMORY')
-db.pragma('mmap_size = 268435456')
-db.pragma('wal_autocheckpoint = 1000')
+
+function safePragma(statement) {
+  try { return db.pragma(statement) } catch (_) { return null }
+}
+
+function applyDatabasePragmas() {
+  safePragma('journal_mode = WAL')
+  safePragma('foreign_keys = ON')
+  safePragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`)
+  safePragma(`synchronous = ${SQLITE_SYNCHRONOUS}`)
+  safePragma(`cache_size = -${SQLITE_CACHE_SIZE_KB}`)
+  safePragma('temp_store = MEMORY')
+  safePragma(`mmap_size = ${Math.max(0, SQLITE_MMAP_SIZE_MB) * 1024 * 1024}`)
+  safePragma(`wal_autocheckpoint = ${SQLITE_WAL_AUTOCHECKPOINT}`)
+  safePragma(`journal_size_limit = ${SQLITE_JOURNAL_SIZE_LIMIT_MB * 1024 * 1024}`)
+  safePragma('analysis_limit = 1000')
+}
+
+function runDatabaseMaintenance({ checkpoint = 'PASSIVE', optimize = true } = {}) {
+  if (optimize) safePragma('optimize')
+  const mode = String(checkpoint || 'PASSIVE').toUpperCase()
+  if (['PASSIVE', 'FULL', 'RESTART', 'TRUNCATE'].includes(mode)) {
+    safePragma(`wal_checkpoint(${mode})`)
+  }
+}
+
+applyDatabasePragmas()
 
 // ── Schema ─────────────────────────────────────────────────────────────────────
 db.exec(`
@@ -1319,6 +1348,57 @@ try {
 
 try {
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_active_name
+    ON products(is_active, lower(trim(name)), id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_parent_active
+    ON products(parent_id, is_active, id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_barcode_lookup
+    ON products(lower(trim(barcode)))
+    WHERE barcode IS NOT NULL AND trim(barcode) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_sku_lookup
+    ON products(lower(trim(sku)))
+    WHERE sku IS NOT NULL AND trim(sku) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_brand_category
+    ON products(lower(trim(brand)), lower(trim(category)), is_active)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_discount_active
+    ON products(discount_enabled, is_active, updated_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_branch_stock_branch_product
+    ON branch_stock(branch_id, product_id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_request_id
     ON sales(client_request_id)
     WHERE client_request_id IS NOT NULL AND trim(client_request_id) != ''
@@ -1358,6 +1438,51 @@ try {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_returns_sale_created_at
     ON returns(sale_id, created_at DESC, id DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_customers_name_lookup
+    ON customers(lower(trim(name)), id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_customers_phone_lookup
+    ON customers(phone)
+    WHERE phone IS NOT NULL AND trim(phone) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_customers_email_lookup
+    ON customers(lower(trim(email)))
+    WHERE email IS NOT NULL AND trim(email) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_suppliers_name_lookup
+    ON suppliers(lower(trim(name)), id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_suppliers_phone_lookup
+    ON suppliers(phone)
+    WHERE phone IS NOT NULL AND trim(phone) != ''
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_delivery_contacts_name_area
+    ON delivery_contacts(lower(trim(name)), lower(trim(area)), id)
   `)
 } catch (_) {}
 
@@ -1438,9 +1563,13 @@ try {
   `)
 } catch (_) {}
 
+runDatabaseMaintenance({ checkpoint: 'PASSIVE', optimize: true })
+
 module.exports = {
   db,
+  applyDatabasePragmas,
   ensureCoreDataInvariants,
   ensureDefaultOrganizationAndGroup,
   ensurePrimaryAdminRoleAndUser,
+  runDatabaseMaintenance,
 }

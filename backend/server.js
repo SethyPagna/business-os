@@ -34,7 +34,7 @@ const cors = require('cors')
 const express = require('express')
 const { requestContextMiddleware } = require('./src/requestContext')
 const { authToken, networkAccessGuard } = require('./src/middleware')
-const { db } = require('./src/database')
+const { db, runDatabaseMaintenance } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
@@ -53,6 +53,7 @@ const { PORT, STORAGE_ROOT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN } =
 
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
+let databaseMaintenanceTimer = null
 
 function loadCompressionMiddleware() {
   // Compression is optional so the server can still boot in minimal installs.
@@ -222,8 +223,19 @@ function getStartupBanner() {
 function closeDatabase() {
   // Close quietly during shutdown; repeated calls should not crash the process.
   try {
+    if (databaseMaintenanceTimer) clearInterval(databaseMaintenanceTimer)
+    databaseMaintenanceTimer = null
+    runDatabaseMaintenance({ checkpoint: 'TRUNCATE', optimize: true })
     db.close()
   } catch (_) {}
+}
+
+function startDatabaseMaintenanceTimer() {
+  if (databaseMaintenanceTimer) return
+  databaseMaintenanceTimer = setInterval(() => {
+    runDatabaseMaintenance({ checkpoint: 'PASSIVE', optimize: true })
+  }, 5 * 60 * 1000)
+  databaseMaintenanceTimer.unref?.()
 }
 
 function registerShutdownHandlers() {
@@ -277,6 +289,7 @@ function bootstrapServer() {
   require('./src/websocket').attachWss(server)
 
   server.listen(PORT, '0.0.0.0', () => {
+    startDatabaseMaintenanceTimer()
     console.log(getStartupBanner())
   })
 

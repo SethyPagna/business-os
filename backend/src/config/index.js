@@ -365,14 +365,22 @@ const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_
 const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
-const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '200', 10) || 200))
+const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '10000', 10) || 10000))
+const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '65536', 10) || 65536))
+const SQLITE_MMAP_SIZE_MB = Math.min(1024, Math.max(0, parseInt(process.env.SQLITE_MMAP_SIZE_MB || '512', 10) || 512))
+const SQLITE_WAL_AUTOCHECKPOINT = Math.min(10000, Math.max(500, parseInt(process.env.SQLITE_WAL_AUTOCHECKPOINT || '4000', 10) || 4000))
+const SQLITE_JOURNAL_SIZE_LIMIT_MB = Math.min(512, Math.max(16, parseInt(process.env.SQLITE_JOURNAL_SIZE_LIMIT_MB || '128', 10) || 128))
+const SQLITE_SYNCHRONOUS = ['off', 'normal', 'full', 'extra'].includes(trim(process.env.SQLITE_SYNCHRONOUS || '').toLowerCase())
+  ? trim(process.env.SQLITE_SYNCHRONOUS).toUpperCase()
+  : 'NORMAL'
+const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '400', 10) || 400))
 const IMPORT_IMAGE_CONCURRENCY = Math.min(8, Math.max(1, parseInt(process.env.IMPORT_IMAGE_CONCURRENCY || '3', 10) || 3))
-const IMPORT_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.IMPORT_QUEUE_CONCURRENCY || '1', 10) || 1))
-const MEDIA_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.MEDIA_QUEUE_CONCURRENCY || '2', 10) || 2))
-const IMPORT_BATCH_PAUSE_MS = Math.min(1000, Math.max(0, parseInt(process.env.IMPORT_BATCH_PAUSE_MS || process.env.IMPORT_WORKER_PAUSE_MS || '50', 10) || 0))
+const IMPORT_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.IMPORT_QUEUE_CONCURRENCY || '2', 10) || 2))
+const MEDIA_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.MEDIA_QUEUE_CONCURRENCY || '3', 10) || 3))
+const IMPORT_BATCH_PAUSE_MS = Math.min(1000, Math.max(0, parseInt(process.env.IMPORT_BATCH_PAUSE_MS || process.env.IMPORT_WORKER_PAUSE_MS || '20', 10) || 0))
 const MEDIA_IMAGE_MAX_WIDTH = Math.min(4096, Math.max(320, parseInt(process.env.MEDIA_IMAGE_MAX_WIDTH || '1600', 10) || 1600))
 const MEDIA_IMAGE_QUALITY = Math.min(92, Math.max(45, parseInt(process.env.MEDIA_IMAGE_QUALITY || '72', 10) || 72))
-const UPLOAD_CHUNK_MB = Math.min(64, Math.max(1, parseInt(process.env.UPLOAD_CHUNK_MB || '8', 10) || 8))
+const UPLOAD_CHUNK_MB = Math.min(64, Math.max(1, parseInt(process.env.UPLOAD_CHUNK_MB || '12', 10) || 12))
 const IMPORT_MAX_CSV_MB = Math.min(512, Math.max(1, parseInt(process.env.IMPORT_MAX_CSV_MB || '80', 10) || 80))
 const IMPORT_MAX_ZIP_MB = Math.min(4096, Math.max(1, parseInt(process.env.IMPORT_MAX_ZIP_MB || '2048', 10) || 2048))
 
@@ -433,6 +441,12 @@ module.exports = {
   S3_SECRET_ACCESS_KEY,
   S3_BUCKET,
   MINIO_LICENSE_FILE,
+  SQLITE_BUSY_TIMEOUT_MS,
+  SQLITE_CACHE_SIZE_KB,
+  SQLITE_MMAP_SIZE_MB,
+  SQLITE_WAL_AUTOCHECKPOINT,
+  SQLITE_JOURNAL_SIZE_LIMIT_MB,
+  SQLITE_SYNCHRONOUS,
   IMPORT_ROW_BATCH_SIZE,
   IMPORT_IMAGE_CONCURRENCY,
   IMPORT_QUEUE_CONCURRENCY,
