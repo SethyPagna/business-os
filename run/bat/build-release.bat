@@ -418,6 +418,7 @@ REM ---- Runtime bootstrap + Docker Compose service config
 if not exist "%DIST_OUT%\ops\scripts\powershell" mkdir "%DIST_OUT%\ops\scripts\powershell" >nul 2>&1
 if not exist "%DIST_OUT%\ops\docker" mkdir "%DIST_OUT%\ops\docker" >nul 2>&1
 copy /y "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" "%DIST_OUT%\ops\scripts\powershell\runtime-bootstrap.ps1" >nul
+copy /y "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" "%DIST_OUT%\ops\scripts\powershell\tailscale-health-monitor.ps1" >nul
 copy /y "%ROOT%\ops\docker\compose.scale.yml" "%DIST_OUT%\ops\docker\compose.scale.yml" >nul
 echo [OK] Runtime bootstrap and Docker Compose config added
 

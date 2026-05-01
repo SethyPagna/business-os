@@ -202,12 +202,24 @@ if defined TAILSCALE_CMD (
             echo [INFO] Checking Tailscale relay health...
             powershell -NoProfile -Command "$tailscale='!TAILSCALE_CMD!'; $out=@(& $tailscale netcheck 2>&1); $text=($out -join [Environment]::NewLine); if($text -match 'Nearest DERP:\s+unknown' -or $text -match 'no response to latency probes' -or $text -match 'could not connect') { $text | Set-Content -Encoding UTF8 '%TEMP%\bos_tailscale_netcheck.txt'; exit 1 }; exit 0" >nul 2>&1
             if errorlevel 1 (
-                echo [WARN] Tailscale relay health failed. Public internet devices may time out.
+                echo [WARN] Tailscale relay health failed. Attempting automatic relay repair...
                 if exist "%TEMP%\bos_tailscale_netcheck.txt" (
                     type "%TEMP%\bos_tailscale_netcheck.txt"
                     del "%TEMP%\bos_tailscale_netcheck.txt" >nul 2>&1
                 )
-                echo      Check VPN/firewall/proxy rules. Tailscale needs outbound HTTPS to control/DERP relays.
+                powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode RepairOnce -Root "%ROOT%" -TailscalePath "!TAILSCALE_CMD!" -IntervalSeconds 60 >nul 2>&1
+                powershell -NoProfile -Command "$tailscale='!TAILSCALE_CMD!'; $out=@(& $tailscale netcheck 2>&1); $text=($out -join [Environment]::NewLine); if($text -match 'Nearest DERP:\s+unknown' -or $text -match 'no response to latency probes' -or $text -match 'could not connect') { $text | Set-Content -Encoding UTF8 '%TEMP%\bos_tailscale_netcheck_retry.txt'; exit 1 }; exit 0" >nul 2>&1
+                if errorlevel 1 (
+                    echo [WARN] Tailscale relay health still failed. Public internet devices may time out.
+                    if exist "%TEMP%\bos_tailscale_netcheck_retry.txt" (
+                        type "%TEMP%\bos_tailscale_netcheck_retry.txt"
+                        del "%TEMP%\bos_tailscale_netcheck_retry.txt" >nul 2>&1
+                    )
+                    echo      Check VPN/firewall/proxy rules. Tailscale needs outbound HTTPS to control/DERP relays.
+                ) else (
+                    set "TAILSCALE_NET_OK=1"
+                    echo [OK] Tailscale relay health repaired.
+                )
             ) else (
                 set "TAILSCALE_NET_OK=1"
                 echo [OK] Tailscale relay health passed.
@@ -223,6 +235,11 @@ if defined TAILSCALE_CMD (
     )
 ) else (
     echo [WARN] Tailscale CLI not found. Local access only.
+)
+
+if defined TAILSCALE_CMD (
+    echo [INFO] Starting Tailscale health monitor...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode Start -Root "%ROOT%" -TailscalePath "!TAILSCALE_CMD!" -IntervalSeconds 60
 )
 
 echo.

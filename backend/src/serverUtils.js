@@ -249,21 +249,40 @@ function setTunnelSecurityHeaders(req, res) {
 }
 
 function setFrontendStaticHeaders(res, filePath) {
+  const normalizedPath = String(filePath || '').replace(/\\/g, '/')
+  const fileName = normalizedPath.split('/').pop() || ''
+
   if (filePath.endsWith('.css')) {
     res.setHeader('Content-Type', 'text/css; charset=utf-8')
   }
   if (filePath.endsWith('.js')) {
     res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
   }
+  if (filePath.endsWith('.wasm')) {
+    res.setHeader('Content-Type', 'application/wasm')
+  }
 
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
-  res.setHeader('Pragma', 'no-cache')
-  res.setHeader('Expires', '0')
 
   if (filePath.endsWith('index.html')) {
     setHtmlNoCacheHeaders(res)
+    return
   }
+
+  res.removeHeader?.('Pragma')
+  res.removeHeader?.('Expires')
+
+  const isScannerAsset = normalizedPath.includes('/scanbot-web-sdk/')
+  const hasContentHash = /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(fileName)
+  if (isScannerAsset || hasContentHash) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    return
+  }
+
+  // Route chunks use stable names so stale tabs can survive a rebuild. Cache
+  // them briefly to keep Tailscale/Funnel page transitions fast while still
+  // allowing same-day app updates to refresh without a hard cache clear.
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
 }
 
 function setUploadStaticHeaders(res, filePath) {

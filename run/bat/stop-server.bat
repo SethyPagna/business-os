@@ -49,6 +49,11 @@ echo   Business OS  ^|  Stopping Server
 echo ============================================================
 echo.
 
+if defined TAILSCALE_CMD (
+    echo [INFO] Stopping Tailscale health monitor...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode Stop -Root "%ROOT%" -TailscalePath "!TAILSCALE_CMD!" >nul 2>&1
+)
+
 where pm2 >nul 2>&1
 if not errorlevel 1 (
     echo [INFO] Stopping PM2 app ^(project and user homes^)...

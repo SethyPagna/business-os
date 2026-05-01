@@ -10,6 +10,7 @@ const {
   isAllowedWebSocketOrigin,
   mapServerError,
   setTunnelSecurityHeaders,
+  setFrontendStaticHeaders,
 } = require('../src/serverUtils')
 
 let failed = 0
@@ -169,6 +170,36 @@ runTest('setTunnelSecurityHeaders scopes Google Translate eval allowance to cust
   assert.match(scriptSrc, /^script-src\b/)
   assert.match(scriptSrc, /(^|\s)'unsafe-eval'(\s|$)/)
   assert.match(scriptSrc, /https:\/\/translate-pa\.googleapis\.com/)
+})
+
+runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for tunnel performance', () => {
+  const collectHeaders = (filePath) => {
+    const headers = new Map()
+    const res = {
+      setHeader(name, value) {
+        headers.set(String(name), String(value))
+      },
+      removeHeader(name) {
+        headers.delete(String(name))
+      },
+    }
+    setFrontendStaticHeaders(res, filePath)
+    return headers
+  }
+
+  const html = collectHeaders('C:/app/frontend/dist/index.html')
+  assert.equal(html.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
+
+  const pageChunk = collectHeaders('C:/app/frontend/dist/assets/CatalogPage.js')
+  assert.equal(pageChunk.get('Content-Type'), 'application/javascript; charset=utf-8')
+  assert.match(pageChunk.get('Cache-Control'), /max-age=3600/)
+
+  const hashedEntry = collectHeaders('C:/app/frontend/dist/assets/index-CUAKXD3j.js')
+  assert.equal(hashedEntry.get('Cache-Control'), 'public, max-age=31536000, immutable')
+
+  const scannerEngine = collectHeaders('C:/app/frontend/dist/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm.wasm')
+  assert.equal(scannerEngine.get('Content-Type'), 'application/wasm')
+  assert.equal(scannerEngine.get('Cache-Control'), 'public, max-age=31536000, immutable')
 })
 
 if (failed > 0) {
