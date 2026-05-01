@@ -111,6 +111,10 @@ function broadcast(channel, data = {}) {
     if (ws.readyState === 1) ws.send(msg)
   }
   try {
+    const { invalidateForChannel } = require('./runtimeCache')
+    invalidateForChannel(channel).catch(() => {})
+  } catch (_) {}
+  try {
     const { scheduleDriveSync } = require('./services/googleDriveSync')
     scheduleDriveSync(`broadcast:${channel}`, 4000)
   } catch (_) {}

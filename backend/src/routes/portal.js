@@ -16,8 +16,13 @@ const { checkRateLimit } = require('../security')
 const { getDefaultOrganization, getPortalPublicPath } = require('../organizationContext')
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
 const { sanitizeMediaList, sanitizeSettingsSnapshot } = require('../settingsSnapshot')
+const { getOrSetJson } = require('../runtimeCache')
 
 const router = express.Router()
+
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
+}
 
 /** Parse a finite number with safe fallback for invalid values. */
 function toNumber(value, fallback = 0) {
@@ -487,6 +492,23 @@ function getPortalProducts(config = buildPortalConfig()) {
   })
 }
 
+function cacheTtl(seconds = 20) {
+  return Math.min(60, Math.max(5, Number(seconds || 20) || 20))
+}
+
+function getCachedPortalConfig() {
+  return getOrSetJson('portal:config', 20, () => buildPortalConfig())
+}
+
+function getCachedPortalMeta() {
+  return getOrSetJson('portal:meta', 20, () => getPortalCatalogMeta())
+}
+
+function getCachedPortalProducts(config) {
+  const ttl = cacheTtl(config?.refreshSeconds || 20)
+  return getOrSetJson('portal:products', ttl, () => getPortalProducts(config))
+}
+
 function getPortalCatalogMeta() {
   const categories = db.prepare(`
     SELECT id, name
@@ -601,27 +623,27 @@ function applyPortalRateLimit(req, res, { name, max, windowMs, key = '' }) {
   return false
 }
 
-router.get('/config', (_req, res) => {
-  res.json(buildPortalConfig())
-})
+router.get('/config', asyncRoute(async (_req, res) => {
+  res.json(await getCachedPortalConfig())
+}))
 
-router.get('/bootstrap', (_req, res) => {
-  const config = buildPortalConfig()
+router.get('/bootstrap', asyncRoute(async (_req, res) => {
+  const config = await getCachedPortalConfig()
   res.json({
     config,
-    meta: getPortalCatalogMeta(),
-    products: getPortalProducts(config),
+    meta: await getCachedPortalMeta(),
+    products: await getCachedPortalProducts(config),
   })
-})
+}))
 
-router.get('/catalog/meta', (_req, res) => {
-  res.json(getPortalCatalogMeta())
-})
+router.get('/catalog/meta', asyncRoute(async (_req, res) => {
+  res.json(await getCachedPortalMeta())
+}))
 
-router.get('/catalog/products', (_req, res) => {
-  const config = buildPortalConfig()
-  res.json(getPortalProducts(config))
-})
+router.get('/catalog/products', asyncRoute(async (_req, res) => {
+  const config = await getCachedPortalConfig()
+  res.json(await getCachedPortalProducts(config))
+}))
 
 router.get('/ai/status', (_req, res) => {
   const config = buildPortalConfig()
@@ -638,7 +660,7 @@ router.get('/ai/status', (_req, res) => {
 router.post('/ai/chat', async (req, res) => {
   try {
     if (!applyPortalRateLimit(req, res, { name: 'portal:ai_chat', max: 20, windowMs: 60 * 1000 })) return
-    const config = buildPortalConfig()
+    const config = await getCachedPortalConfig()
     if (!config.aiEnabled) {
       return res.status(403).json({ error: 'Portal AI is currently disabled' })
     }
@@ -649,7 +671,7 @@ router.post('/ai/chat', async (req, res) => {
       return res.status(400).json({ error: 'Add a question or at least one shopping preference first' })
     }
 
-    const products = getPortalProducts()
+    const products = await getCachedPortalProducts(config)
     const response = await generatePortalAiResponse({
       config,
       profile,

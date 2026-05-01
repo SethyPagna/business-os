@@ -12,7 +12,9 @@ x-node-env: &node-env
   NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=512}"
   BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
   JOB_QUEUE_DRIVER: bullmq
-  REDIS_URL: redis://redis:6379
+  REDIS_URL: redis://redis-queue:6379
+  RUNTIME_CACHE_ENABLED: "${RUNTIME_CACHE_ENABLED:-1}"
+  CACHE_REDIS_URL: redis://redis-cache:6379
   DATABASE_DRIVER: postgres
   DATABASE_URL: "postgres://${POSTGRES_USER:-business_os}:${POSTGRES_PASSWORD:-business_os_dev_password}@postgres:5432/${POSTGRES_DB:-business_os}"
   OBJECT_STORAGE_DRIVER: minio
@@ -30,7 +32,7 @@ x-node-env: &node-env
   UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-12}"
 
 services:
-  redis:
+  redis-queue:
     image: redis:7-alpine
     command:
       - redis-server
@@ -42,7 +44,44 @@ services:
       - "60"
       - "1000"
       - --maxmemory
-      - "${REDIS_MAX_MEMORY:-512mb}"
+      - "${REDIS_QUEUE_MAX_MEMORY:-1536mb}"
+      - --maxmemory-policy
+      - noeviction
+      - --tcp-keepalive
+      - "60"
+      - --timeout
+      - "0"
+    restart: unless-stopped
+    ports:
+      - "${REDIS_QUEUE_BIND_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6379}:6379"
+    volumes:
+      - business_os_redis_queue:/data
+    networks:
+      - business_os_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    mem_limit: "${REDIS_QUEUE_MEMORY_LIMIT:-1536m}"
+    cpus: "${REDIS_QUEUE_CPUS:-1.0}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging: *service-logging
+
+  redis-cache:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - "${REDIS_CACHE_MAX_MEMORY:-768mb}"
       - --maxmemory-policy
       - allkeys-lru
       - --tcp-keepalive
@@ -51,17 +90,17 @@ services:
       - "0"
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - business_os_redis:/data
+      - "${REDIS_CACHE_BIND_HOST:-127.0.0.1}:${REDIS_CACHE_PORT:-6380}:6379"
+    networks:
+      - business_os_internal
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
-    mem_limit: 768m
-    cpus: 1.0
+    mem_limit: "${REDIS_CACHE_MEMORY_LIMIT:-768m}"
+    cpus: "${REDIS_CACHE_CPUS:-0.5}"
     ulimits:
       nofile:
         soft: 65536
@@ -78,17 +117,17 @@ services:
     command:
       - postgres
       - -c
-      - shared_buffers=256MB
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
       - -c
-      - effective_cache_size=768MB
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
       - -c
-      - work_mem=16MB
+      - work_mem=${POSTGRES_WORK_MEM:-32MB}
       - -c
-      - maintenance_work_mem=128MB
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
       - -c
-      - max_wal_size=2GB
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-4GB}
       - -c
-      - checkpoint_timeout=15min
+      - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-20min}
       - -c
       - checkpoint_completion_target=0.9
       - -c
@@ -102,17 +141,20 @@ services:
       - -c
       - idle_in_transaction_session_timeout=60000
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND_HOST:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - business_os_postgres18:/var/lib/postgresql/data
+    networks:
+      - business_os_internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 10s
-    mem_limit: 1536m
-    cpus: 1.5
+    shm_size: "${POSTGRES_SHM_SIZE:-1g}"
+    mem_limit: "${POSTGRES_MEMORY_LIMIT:-4608m}"
+    cpus: "${POSTGRES_CPUS:-4.0}"
     ulimits:
       nofile:
         soft: 65536
@@ -130,22 +172,24 @@ services:
       MINIO_API_REQUESTS_MAX: "${MINIO_API_REQUESTS_MAX:-1600}"
       MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-10s}"
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${MINIO_BIND_HOST:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_BIND_HOST:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - business_os_minio:/data
       - type: bind
         source: ${MINIO_LICENSE_HOST_FILE:-../runtime/secrets/minio.license}
         target: /run/secrets/minio.license
         read_only: true
+    networks:
+      - business_os_internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 10s
-    mem_limit: 1024m
-    cpus: 1.0
+    mem_limit: "${MINIO_MEMORY_LIMIT:-1536m}"
+    cpus: "${MINIO_CPUS:-1.5}"
     ulimits:
       nofile:
         soft: 65536
@@ -163,20 +207,24 @@ services:
       NODE_OPTIONS: "--max-old-space-size=512"
     command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
     ports:
-      - "${PORT:-4000}:4000"
+      - "${APP_BIND_HOST:-127.0.0.1}:${PORT:-4000}:4000"
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
       - business_os_frontend_node_modules:/app/frontend/node_modules
+    networks:
+      - business_os_internal
     depends_on:
-      redis:
+      redis-queue:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-    mem_limit: 768m
-    cpus: 1.0
+    mem_limit: "${APP_MEMORY_LIMIT:-1024m}"
+    cpus: "${APP_CPUS:-1.5}"
     stop_grace_period: 30s
     logging: *service-logging
 
@@ -193,15 +241,19 @@ services:
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
+    networks:
+      - business_os_internal
     depends_on:
-      redis:
+      redis-queue:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-    mem_limit: 1024m
-    cpus: 1.0
+    mem_limit: "${IMPORT_WORKER_MEMORY_LIMIT:-2560m}"
+    cpus: "${IMPORT_WORKER_CPUS:-3.0}"
     stop_grace_period: 60s
     logging: *service-logging
 
@@ -218,21 +270,30 @@ services:
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
+    networks:
+      - business_os_internal
     depends_on:
-      redis:
+      redis-queue:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
-    mem_limit: 1536m
-    cpus: 1.0
+    mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-3072m}"
+    cpus: "${MEDIA_WORKER_CPUS:-3.5}"
     stop_grace_period: 60s
     logging: *service-logging
 
 volumes:
-  business_os_redis:
+  business_os_redis_queue:
   business_os_postgres18:
   business_os_minio:
   business_os_backend_node_modules:
   business_os_frontend_node_modules:
+
+networks:
+  business_os_internal:
+    name: business_os_internal
+    driver: bridge

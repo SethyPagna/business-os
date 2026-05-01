@@ -5,6 +5,7 @@ const { ok, err } = require('../helpers')
 const { authToken, hasPermission } = require('../middleware')
 const { getQueueStatus, initializeBullQueue } = require('../services/importJobs')
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue')
+const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache')
 
 const router = express.Router()
 
@@ -19,6 +20,7 @@ router.get('/queues/status', authToken, requireRuntimePermission, async (_req, r
       initializeBullQueue(),
       initializeMediaQueue(),
     ])
+    const cacheReady = await pingRuntimeCache()
     ok(res, {
       queues: {
         import: {
@@ -29,6 +31,10 @@ router.get('/queues/status', authToken, requireRuntimePermission, async (_req, r
           ...getMediaQueueStatus(),
           probeError: mediaProbe.status === 'rejected' ? (mediaProbe.reason?.message || String(mediaProbe.reason)) : null,
         },
+      },
+      cache: {
+        ...getRuntimeCacheStatus(),
+        ready: cacheReady,
       },
     })
   } catch (error) {

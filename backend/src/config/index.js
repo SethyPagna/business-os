@@ -357,6 +357,10 @@ const BUSINESS_OS_REQUIRE_SCALE_SERVICES = ['1', 'true', 'yes', 'required'].incl
 const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'auto').toLowerCase()
 const WORKER_RUNTIME = trim(process.env.WORKER_RUNTIME || 'auto').toLowerCase()
 const REDIS_URL = trim(process.env.REDIS_URL || 'redis://127.0.0.1:6379')
+const CACHE_REDIS_URL = trim(process.env.CACHE_REDIS_URL || 'redis://127.0.0.1:6380')
+const RUNTIME_CACHE_ENABLED = !['0', 'false', 'no', 'off', 'disabled'].includes(
+  trim(process.env.RUNTIME_CACHE_ENABLED || (BUSINESS_OS_REQUIRE_SCALE_SERVICES ? '1' : '0')).toLowerCase()
+)
 const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
 const DATABASE_URL = trim(process.env.DATABASE_URL)
 const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'local').toLowerCase()
@@ -365,9 +369,9 @@ const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_
 const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
-const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '10000', 10) || 10000))
-const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '65536', 10) || 65536))
-const SQLITE_MMAP_SIZE_MB = Math.min(1024, Math.max(0, parseInt(process.env.SQLITE_MMAP_SIZE_MB || '512', 10) || 512))
+const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '30000', 10) || 30000))
+const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '196608', 10) || 196608))
+const SQLITE_MMAP_SIZE_MB = Math.min(1024, Math.max(0, parseInt(process.env.SQLITE_MMAP_SIZE_MB || '1024', 10) || 1024))
 const SQLITE_WAL_AUTOCHECKPOINT = Math.min(10000, Math.max(500, parseInt(process.env.SQLITE_WAL_AUTOCHECKPOINT || '4000', 10) || 4000))
 const SQLITE_JOURNAL_SIZE_LIMIT_MB = Math.min(512, Math.max(16, parseInt(process.env.SQLITE_JOURNAL_SIZE_LIMIT_MB || '128', 10) || 128))
 const SQLITE_SYNCHRONOUS = ['off', 'normal', 'full', 'extra'].includes(trim(process.env.SQLITE_SYNCHRONOUS || '').toLowerCase())
@@ -433,6 +437,8 @@ module.exports = {
   JOB_QUEUE_DRIVER,
   WORKER_RUNTIME,
   REDIS_URL,
+  CACHE_REDIS_URL,
+  RUNTIME_CACHE_ENABLED,
   DATABASE_DRIVER,
   DATABASE_URL,
   OBJECT_STORAGE_DRIVER,

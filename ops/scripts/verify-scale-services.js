@@ -7,6 +7,7 @@ const { execFileSync, spawnSync } = require('child_process')
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..')
 const DOCKER_CONFIG = path.join(PROJECT_ROOT, 'ops', 'runtime', 'docker-config')
+const DOCKER_SCALE_ENV = path.join(PROJECT_ROOT, 'ops', 'runtime', 'docker-scale.env')
 const COMPOSE_FILE = path.join(PROJECT_ROOT, 'ops', 'docker', 'compose.scale.yml')
 const args = new Set(process.argv.slice(2))
 const requireServices = args.has('--require') || process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES === '1'
@@ -92,9 +93,18 @@ function checkSecretIgnoreRules() {
 
 function main() {
   ensureDir(DOCKER_CONFIG)
+  ensureDir(path.dirname(DOCKER_SCALE_ENV))
   checkSecretIgnoreRules()
   if (!fs.existsSync(COMPOSE_FILE)) {
     failures.push('Scale Compose file is missing: ops/docker/compose.scale.yml')
+  } else {
+    const composeText = fs.readFileSync(COMPOSE_FILE, 'utf8')
+    ;['redis-queue:', 'redis-cache:', 'postgres:', 'minio:', 'business_os_internal:'].forEach((token) => {
+      if (!composeText.includes(token)) failures.push(`Scale Compose is missing ${token.replace(':', '')}`)
+    })
+    if (!composeText.includes('127.0.0.1')) {
+      failures.push('Scale Compose must bind database/cache/object-storage ports to localhost only.')
+    }
   }
 
   const dockerExe = resolveDocker()
@@ -129,8 +139,9 @@ function main() {
     }
     if (printComposeCommand) {
       console.log(`Compose file: ${COMPOSE_FILE}`)
+      console.log(`Compose env: ${DOCKER_SCALE_ENV}`)
       console.log(`Docker config: ${DOCKER_CONFIG}`)
-      console.log(`Start scale services: "${dockerExe}" compose -f "${COMPOSE_FILE}" up -d`)
+      console.log(`Start scale services: "${dockerExe}" compose --env-file "${DOCKER_SCALE_ENV}" -f "${COMPOSE_FILE}" up -d --remove-orphans`)
     }
   }
 
