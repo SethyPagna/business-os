@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
 
@@ -36,6 +36,21 @@ function getJobLabel(job) {
   return `${type} import${phase ? ` - ${phase}` : ''}`
 }
 
+function buildJobsSignature(jobs = []) {
+  return jobs.map((job) => [
+    job.id,
+    job.status,
+    job.phase,
+    job.total_rows,
+    job.processed_rows,
+    job.failed_rows,
+    job.total_images,
+    job.processed_images,
+    job.failed_images,
+    job.updated_at,
+  ].join(':')).join('|')
+}
+
 export default function BackgroundImportTracker() {
   const { notify, t } = useApp()
   const [jobs, setJobs] = useState([])
@@ -43,6 +58,7 @@ export default function BackgroundImportTracker() {
   const [busyJobId, setBusyJobId] = useState('')
   const aliveRef = useRef(true)
   const timerRef = useRef(null)
+  const jobsSignatureRef = useRef('')
 
   const visibleJobs = useMemo(() => (
     jobs.filter((job) => {
@@ -56,30 +72,36 @@ export default function BackgroundImportTracker() {
   const reviewJobs = useMemo(() => visibleJobs.filter((job) => REVIEW_STATUSES.has(normalizeJobStatus(job))), [visibleJobs])
   const primaryJob = activeJobs[0] || reviewJobs[0] || visibleJobs[0] || null
 
-  const loadJobs = async () => {
+  const loadJobs = useCallback(async () => {
     try {
       const result = await window.api.listImportJobs?.({ limit: 8 })
       if (!aliveRef.current) return
       const nextJobs = Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : [])
-      setJobs(nextJobs)
+      const nextSignature = buildJobsSignature(nextJobs)
+      if (nextSignature === jobsSignatureRef.current) return
+      jobsSignatureRef.current = nextSignature
+      startTransition(() => setJobs(nextJobs))
     } catch (_) {
       if (!aliveRef.current) return
-      setJobs([])
+      if (!jobsSignatureRef.current) return
+      jobsSignatureRef.current = ''
+      startTransition(() => setJobs([]))
     }
-  }
+  }, [])
 
   useEffect(() => {
     aliveRef.current = true
     loadJobs()
+    const intervalMs = activeJobs.length ? 5000 : 12000
     timerRef.current = window.setInterval(() => {
       if (document.visibilityState === 'hidden' && !activeJobs.length) return
       loadJobs()
-    }, activeJobs.length ? 2500 : 8000)
+    }, intervalMs)
     return () => {
       aliveRef.current = false
       if (timerRef.current) window.clearInterval(timerRef.current)
     }
-  }, [activeJobs.length])
+  }, [activeJobs.length, loadJobs])
 
   if (!primaryJob) return null
 
@@ -155,7 +177,7 @@ export default function BackgroundImportTracker() {
   }
 
   return (
-    <div className={`sticky top-0 z-40 border-b px-3 py-2 text-sm shadow-sm backdrop-blur ${
+    <div className={`sticky top-0 z-40 border-b px-3 py-2 text-sm shadow-sm backdrop-blur [content-visibility:auto] ${
       hasAttention
         ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100'
         : 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-100'

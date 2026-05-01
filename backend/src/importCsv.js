@@ -1,5 +1,7 @@
 'use strict'
 
+const fs = require('fs')
+
 const KHMER_ZERO = 0x17E0
 const ARABIC_INDIC_ZERO = 0x0660
 const EXTENDED_ARABIC_INDIC_ZERO = 0x06F0
@@ -121,10 +123,137 @@ function parseCsvRows(text, options = {}) {
     .filter((row) => Object.entries(row).some(([key, value]) => key !== '_rowNumber' && String(value || '').trim() !== ''))
 }
 
+async function detectCsvDelimiterFromFile(filePath) {
+  const handle = await fs.promises.open(filePath, 'r')
+  try {
+    const buffer = Buffer.alloc(64 * 1024)
+    const result = await handle.read(buffer, 0, buffer.length, 0)
+    return detectCsvDelimiter(buffer.slice(0, result.bytesRead).toString('utf8'))
+  } finally {
+    await handle.close()
+  }
+}
+
+function csvValuesToRow(values, headers, rowNumber) {
+  const row = { _rowNumber: rowNumber }
+  headers.forEach((header, headerIndex) => {
+    if (!header) return
+    const value = values[headerIndex]
+    row[header] = typeof value === 'string' ? value.normalize('NFC').trim() : value
+  })
+  return row
+}
+
+function hasCsvContent(values) {
+  return Array.isArray(values) && values.some((value) => String(value || '').trim() !== '')
+}
+
+async function* parseCsvRowBatchesFromFile(filePath, options = {}) {
+  const delimiter = options.delimiter || await detectCsvDelimiterFromFile(filePath)
+  const batchSize = Math.max(1, Math.min(5000, Number(options.batchSize || 250)))
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8', highWaterMark: options.highWaterMark || 64 * 1024 })
+  let headers = null
+  let row = []
+  let current = ''
+  let inQuotes = false
+  let initialized = false
+  let carry = ''
+  let skipNextLf = false
+  let recordNumber = 0
+  let batch = []
+
+  const emitRecord = async function* () {
+    row.push(current)
+    current = ''
+    if (hasCsvContent(row)) {
+      recordNumber += 1
+      if (!headers) {
+        headers = row.map((value) => normalizeCsvKey(value))
+      } else {
+        batch.push(csvValuesToRow(row, headers, recordNumber))
+        if (batch.length >= batchSize) {
+          yield batch
+          batch = []
+        }
+      }
+    }
+    row = []
+  }
+
+  async function* processChunk(sourceChunk, flush = false) {
+    let source = sourceChunk
+    if (!initialized) {
+      source = stripBom(source)
+      initialized = true
+    }
+    if (carry) {
+      source = carry + source
+      carry = ''
+    }
+    if (!flush && (source.endsWith('"') || source.endsWith('\r'))) {
+      carry = source.slice(-1)
+      source = source.slice(0, -1)
+    }
+
+    for (let index = 0; index < source.length; index += 1) {
+      const char = source[index]
+      const nextChar = source[index + 1]
+
+      if (skipNextLf && char === '\n') {
+        skipNextLf = false
+        continue
+      }
+      skipNextLf = false
+
+      if (char === '"' && inQuotes && nextChar === '"') {
+        current += '"'
+        index += 1
+        continue
+      }
+
+      if (char === '"') {
+        inQuotes = !inQuotes
+        continue
+      }
+
+      if (char === delimiter && !inQuotes) {
+        row.push(current)
+        current = ''
+        continue
+      }
+
+      if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r') skipNextLf = true
+        yield* emitRecord()
+        continue
+      }
+
+      current += char
+    }
+  }
+
+  for await (const chunk of stream) {
+    yield* processChunk(String(chunk || ''))
+  }
+  if (carry) yield* processChunk('', true)
+  row.push(current)
+  if (hasCsvContent(row)) {
+    recordNumber += 1
+    if (!headers) {
+      headers = row.map((value) => normalizeCsvKey(value))
+    } else {
+      batch.push(csvValuesToRow(row, headers, recordNumber))
+    }
+  }
+  if (batch.length) yield batch
+}
+
 module.exports = {
   detectCsvDelimiter,
+  detectCsvDelimiterFromFile,
   normalizeCsvKey,
   normalizeNumericText,
+  parseCsvRowBatchesFromFile,
   parseCsvRows,
   parseDelimitedRows,
 }

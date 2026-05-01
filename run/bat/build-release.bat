@@ -469,6 +469,7 @@ if exist "%PRESERVE_ENV%" (
     echo # Required local scale services ^(started automatically by start-server.bat^). Keep real secrets in .env or machine environment.
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq
+    echo WORKER_RUNTIME=host
     echo REDIS_URL=redis://127.0.0.1:6379
     echo DATABASE_DRIVER=sqlite
     echo DATABASE_URL=
@@ -478,15 +479,19 @@ if exist "%PRESERVE_ENV%" (
     echo S3_SECRET_ACCESS_KEY=
     echo S3_BUCKET=business-os-assets
     echo MINIO_LICENSE_FILE=
-    echo IMPORT_ROW_BATCH_SIZE=200
+    echo IMPORT_QUEUE_CONCURRENCY=1
+    echo MEDIA_QUEUE_CONCURRENCY=2
+    echo IMPORT_ROW_BATCH_SIZE=300
+    echo IMPORT_BATCH_PAUSE_MS=50
     echo IMPORT_IMAGE_CONCURRENCY=3
+    echo UPLOAD_CHUNK_MB=8
     echo IMPORT_MAX_CSV_MB=80
     echo IMPORT_MAX_ZIP_MB=2048
     ) > "%DIST_OUT%\.env"
     echo [OK] Default .env created
 )
 
-powershell -NoProfile -Command "$p='%DIST_OUT%\.env'; $pairs=[ordered]@{BUSINESS_OS_REQUIRE_SCALE_SERVICES='1'; JOB_QUEUE_DRIVER='bullmq'; REDIS_URL='redis://127.0.0.1:6379'; DATABASE_DRIVER='sqlite'; OBJECT_STORAGE_DRIVER='local'}; $lines=@(); if(Test-Path $p){$lines=Get-Content -LiteralPath $p}; foreach($key in $pairs.Keys){$value=$pairs[$key]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) }}; Set-Content -LiteralPath $p -Value $lines" >nul 2>&1
+powershell -NoProfile -Command "$p='%DIST_OUT%\.env'; $pairs=[ordered]@{BUSINESS_OS_REQUIRE_SCALE_SERVICES='1'; JOB_QUEUE_DRIVER='bullmq'; WORKER_RUNTIME='host'; REDIS_URL='redis://127.0.0.1:6379'; DATABASE_DRIVER='sqlite'; OBJECT_STORAGE_DRIVER='local'; IMPORT_QUEUE_CONCURRENCY='1'; MEDIA_QUEUE_CONCURRENCY='2'; IMPORT_ROW_BATCH_SIZE='300'; IMPORT_BATCH_PAUSE_MS='50'; UPLOAD_CHUNK_MB='8'}; $lines=@(); if(Test-Path $p){$lines=Get-Content -LiteralPath $p}; foreach($key in $pairs.Keys){$value=$pairs[$key]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) }}; Set-Content -LiteralPath $p -Value $lines" >nul 2>&1
 
 if exist "%PRESERVE_DATA_LOCATION%" (
     copy /y "%PRESERVE_DATA_LOCATION%" "%DIST_OUT%\data-location.json" >nul

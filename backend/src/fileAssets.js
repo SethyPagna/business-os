@@ -525,6 +525,7 @@ module.exports = {
   buildUniqueStoredName,
   getFileAssetById,
   getFileAssetByPublicPath,
+  getMimeTypeFromName,
   getMediaType,
   listFileAssets,
   registerStoredAsset,

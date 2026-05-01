@@ -92,6 +92,22 @@ assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch upl
 assert(!/imageFiles:\s*imagePayload/.test(apiMethods + bulkImport), 'Bulk image imports must not send imageFiles JSON payloads.')
 assert(read(path.join(SRC_ROOT, 'utils', 'csv.js')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
 
+const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.js'))
+const backendImportJobs = read(path.join(PROJECT_ROOT, 'backend', 'src', 'services', 'importJobs.js'))
+const backendPackage = read(path.join(PROJECT_ROOT, 'backend', 'package.json'))
+assert(backendImportCsv.includes('parseCsvRowBatchesFromFile'), 'Backend imports must expose a streaming CSV batch reader.')
+assert(backendImportJobs.includes('rowBatchesFromFile'), 'Backend import jobs must consume CSV rows from streaming batches.')
+assert(!/fs\.promises\.readFile\(csvFile\.stored_path/.test(backendImportJobs), 'Import jobs must not read whole CSV files into memory.')
+assert(!/const\s+rows\s*=\s*await\s+readCsvRowsFromFile/.test(backendImportJobs), 'Import jobs must not parse all rows before background processing.')
+assert(fs.existsSync(path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'importWorker.js')), 'Dedicated import worker entrypoint is missing.')
+assert(fs.existsSync(path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'mediaWorker.js')), 'Dedicated media worker entrypoint is missing.')
+assert(backendPackage.includes('worker:import') && backendPackage.includes('worker:media'), 'Backend worker npm scripts are missing.')
+assert(!/new\s+Worker\s*\([^)]*IMPORT_QUEUE_NAME/.test(backendImportJobs), 'Web import service must not create an in-process BullMQ worker.')
+assert(backendImportJobs.includes('startImportWorkers'), 'Import worker startup must be explicit and separate from web queue producers.')
+
+const verificationReport = path.join(PROJECT_ROOT, 'ops', 'reports', 'whole-app-verification.md')
+assert(fs.existsSync(verificationReport), 'Whole-app verification report is missing.')
+
 const indexHtml = read(path.join(FRONTEND_ROOT, 'index.html'))
 const preconnectCount = (indexHtml.match(/rel=["']preconnect["']/g) || []).length
 assert(preconnectCount <= 3, `Too many preconnect hints (${preconnectCount}); keep the connection pool bounded.`)

@@ -30,9 +30,15 @@ set "DEFAULT_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=%GOOGLE_DRIVE_OAUTH_REDIRECT_URI%"
 if "%DEFAULT_GOOGLE_DRIVE_OAUTH_REDIRECT_URI%"=="" set "DEFAULT_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=https://leangcosmetics.crane-qilin.ts.net/api/system/drive-sync/oauth/callback"
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
 set "JOB_QUEUE_DRIVER=bullmq"
+set "WORKER_RUNTIME=host"
 if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
 if not defined DATABASE_DRIVER set "DATABASE_DRIVER=sqlite"
 if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=local"
+if not defined IMPORT_QUEUE_CONCURRENCY set "IMPORT_QUEUE_CONCURRENCY=1"
+if not defined MEDIA_QUEUE_CONCURRENCY set "MEDIA_QUEUE_CONCURRENCY=2"
+if not defined IMPORT_ROW_BATCH_SIZE set "IMPORT_ROW_BATCH_SIZE=300"
+if not defined IMPORT_BATCH_PAUSE_MS set "IMPORT_BATCH_PAUSE_MS=50"
+if not defined UPLOAD_CHUNK_MB set "UPLOAD_CHUNK_MB=8"
 
 title Business OS  ^|  Server
 
@@ -94,8 +100,13 @@ if not exist "%ENV_FILE%" (
         echo S3_SECRET_ACCESS_KEY=
         echo S3_BUCKET=business-os-assets
         echo MINIO_LICENSE_FILE=
-        echo IMPORT_ROW_BATCH_SIZE=200
+        echo WORKER_RUNTIME=host
+        echo IMPORT_QUEUE_CONCURRENCY=1
+        echo MEDIA_QUEUE_CONCURRENCY=2
+        echo IMPORT_ROW_BATCH_SIZE=300
+        echo IMPORT_BATCH_PAUSE_MS=50
         echo IMPORT_IMAGE_CONCURRENCY=3
+        echo UPLOAD_CHUNK_MB=8
         echo IMPORT_MAX_CSV_MB=80
         echo IMPORT_MAX_ZIP_MB=2048
         echo.
@@ -258,6 +269,20 @@ pause
 exit /b 1
 
 :proc_found
+echo [INFO] Starting background import/media workers...
+powershell -NoProfile -Command "$psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName='%EXE%'; $psi.WorkingDirectory='%ROOT%'; $psi.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden; $psi.UseShellExecute=$false; $psi.EnvironmentVariables['BUSINESS_OS_WORKER_ROLE']='import-worker'; $p=[System.Diagnostics.Process]::Start($psi); if($p){exit 0}else{exit 1}" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Import worker could not be started. Large imports will stay queued until a worker is available.
+) else (
+    echo [OK] Import worker started.
+)
+powershell -NoProfile -Command "$psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName='%EXE%'; $psi.WorkingDirectory='%ROOT%'; $psi.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden; $psi.UseShellExecute=$false; $psi.EnvironmentVariables['BUSINESS_OS_WORKER_ROLE']='media-worker'; $p=[System.Diagnostics.Process]::Start($psi); if($p){exit 0}else{exit 1}" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Media worker could not be started. Media optimization will stay queued until a worker is available.
+) else (
+    echo [OK] Media worker started.
+)
+
 echo [INFO] Waiting for server to respond on port %PORT%...
 set "SERVER_OK="
 set "RETRY=0"

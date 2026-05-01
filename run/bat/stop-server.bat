@@ -60,7 +60,11 @@ if not errorlevel 1 (
     for %%H in ("%ROOT%\ops\runtime\pm2" "%USERPROFILE%\.pm2") do (
         set "PM2_HOME=%%~H"
         call pm2 stop business-os >nul 2>&1
+        call pm2 stop business-os-import-worker >nul 2>&1
+        call pm2 stop business-os-media-worker >nul 2>&1
         call pm2 delete business-os >nul 2>&1
+        call pm2 delete business-os-import-worker >nul 2>&1
+        call pm2 delete business-os-media-worker >nul 2>&1
         call pm2 kill >nul 2>&1
     )
     echo [INFO] Stopping PM2 daemon processes...
@@ -96,6 +100,8 @@ if defined FOUND_ANY (
 
 echo [INFO] Killing residual node server.js processes...
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+server\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+echo [INFO] Killing residual import/media worker processes...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+src[\\/]+workers[\\/]+(importWorker|mediaWorker)\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
 
 if defined TAILSCALE_CMD (

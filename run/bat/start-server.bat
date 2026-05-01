@@ -34,9 +34,15 @@ set "LOCAL_API=http://127.0.0.1:4000"
 set "SERVER_ALREADY_RUNNING=0"
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
 set "JOB_QUEUE_DRIVER=bullmq"
+set "WORKER_RUNTIME=host"
 if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
 if not defined DATABASE_DRIVER set "DATABASE_DRIVER=sqlite"
 if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=local"
+if not defined IMPORT_QUEUE_CONCURRENCY set "IMPORT_QUEUE_CONCURRENCY=1"
+if not defined MEDIA_QUEUE_CONCURRENCY set "MEDIA_QUEUE_CONCURRENCY=2"
+if not defined IMPORT_ROW_BATCH_SIZE set "IMPORT_ROW_BATCH_SIZE=300"
+if not defined IMPORT_BATCH_PAUSE_MS set "IMPORT_BATCH_PAUSE_MS=50"
+if not defined UPLOAD_CHUNK_MB set "UPLOAD_CHUNK_MB=8"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
@@ -174,6 +180,42 @@ if "!USING_PM2!"=="1" (
 )
 
 :after_pm2_start
+echo.
+echo [INFO] Starting background import/media workers...
+if "!USING_PM2!"=="1" (
+    call "!PM2_CMD!" stop business-os-import-worker >nul 2>&1
+    call "!PM2_CMD!" delete business-os-import-worker >nul 2>&1
+    call "!PM2_CMD!" start src/workers/importWorker.js --name "business-os-import-worker" --update-env >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] PM2 could not start import worker. Large imports will stay queued until a worker is available.
+    ) else (
+        echo [OK] Import worker started with PM2.
+    )
+    call "!PM2_CMD!" stop business-os-media-worker >nul 2>&1
+    call "!PM2_CMD!" delete business-os-media-worker >nul 2>&1
+    call "!PM2_CMD!" start src/workers/mediaWorker.js --name "business-os-media-worker" --update-env >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] PM2 could not start media worker. Media optimization will stay queued until a worker is available.
+    ) else (
+        echo [OK] Media worker started with PM2.
+    )
+    call "!PM2_CMD!" save >nul 2>&1
+) else (
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+src[\\/]+workers[\\/]+(importWorker|mediaWorker)\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+    powershell -Command "$argsList=@('src/workers/importWorker.js'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Background import worker launch failed.
+    ) else (
+        echo [OK] Import worker launched in background node mode.
+    )
+    powershell -Command "$argsList=@('src/workers/mediaWorker.js'); $p = Start-Process -FilePath 'node' -ArgumentList $argsList -WorkingDirectory '%ROOT%\backend' -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Background media worker launch failed.
+    ) else (
+        echo [OK] Media worker launched in background node mode.
+    )
+)
+
 echo.
 echo [INFO] Checking Tailscale for remote access...
 if defined TAILSCALE_CMD (

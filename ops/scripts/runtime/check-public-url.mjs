@@ -191,20 +191,21 @@ async function main() {
 
   if (shouldCheckPublicIngress(baseUrl)) {
     const requirePublicIngress = shouldRequirePublicIngress(baseUrl)
+    const requireIngressFailure = routeHasFailure && requirePublicIngress
     const hostname = new URL(baseUrl).hostname
     let publicEndpoints = []
     try {
       publicEndpoints = await resolvePublicIngress(hostname)
     } catch (error) {
-      const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
+      const label = requireIngressFailure ? 'FAIL' : 'WARN'
       console.log(`[${label}] DNS ${hostname} :: ${error?.message || error}`)
-      if (routeHasFailure || requirePublicIngress) hasFailure = true
+      if (requireIngressFailure) hasFailure = true
     }
 
     if (!publicEndpoints.length) {
-      const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
+      const label = requireIngressFailure ? 'FAIL' : 'WARN'
       console.log(`[${label}] DNS ${hostname} :: no public IPv4/IPv6 ingress addresses resolved`)
-      if (routeHasFailure || requirePublicIngress) hasFailure = true
+      if (requireIngressFailure) hasFailure = true
     }
 
     const ingressResults = await Promise.all(publicEndpoints.map(async (endpoint) => {
@@ -212,11 +213,11 @@ async function main() {
       try {
         const response = await checkHttpsViaIp(url, endpoint)
         const ok = response.status >= 200 && response.status < 400
-        const label = ok ? 'OK' : routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
-        return { ok: ok || (!routeHasFailure && !requirePublicIngress), line: `[${label}] ${response.status} ${url} via ${endpoint.ip}` }
+        const label = ok ? 'OK' : requireIngressFailure ? 'FAIL' : 'WARN'
+        return { ok: ok || !requireIngressFailure, line: `[${label}] ${response.status} ${url} via ${endpoint.ip}` }
       } catch (error) {
-        const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
-        return { ok: !routeHasFailure && !requirePublicIngress, line: `[${label}] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}` }
+        const label = requireIngressFailure ? 'FAIL' : 'WARN'
+        return { ok: !requireIngressFailure, line: `[${label}] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}` }
       }
     }))
     ingressResults.forEach((result) => {

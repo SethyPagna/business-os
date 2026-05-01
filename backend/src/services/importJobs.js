@@ -9,6 +9,8 @@ const {
   IMPORTS_PATH,
   IMPORT_ROW_BATCH_SIZE,
   IMPORT_IMAGE_CONCURRENCY,
+  IMPORT_QUEUE_CONCURRENCY,
+  IMPORT_BATCH_PAUSE_MS,
   IMPORT_MAX_ZIP_MB,
   JOB_QUEUE_DRIVER,
   BUSINESS_OS_REQUIRE_SCALE_SERVICES,
@@ -21,7 +23,8 @@ const { validateUploadedPath } = require('../uploadSecurity')
 const { isSafeExternalImageReference } = require('../netSecurity')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
-const { normalizeCsvKey, parseCsvRows } = require('../importCsv')
+const { normalizeCsvKey, parseCsvRowBatchesFromFile } = require('../importCsv')
+const { enqueueMediaOptimization } = require('./mediaQueue')
 const { buildImportedContactState, cleanText } = require('../contactOptions')
 const {
   hasImportValue,
@@ -34,11 +37,13 @@ const {
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_ZIP_IMAGES = 25_000
 const MAX_ZIP_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
-const IMPORT_QUEUE_NAME = 'business-os-imports'
+const IMPORT_ANALYZE_QUEUE_NAME = process.env.IMPORT_ANALYZE_QUEUE_NAME || 'business-os-import-analyze'
+const IMPORT_APPLY_QUEUE_NAME = process.env.IMPORT_APPLY_QUEUE_NAME || 'business-os-import-apply'
 const runningLocalJobs = new Set()
-let bullQueue = null
-let bullWorker = null
-let bullStatus = { driver: 'sqlite', available: false, reason: 'not_checked' }
+let bullConnection = null
+let bullQueues = { analyze: null, apply: null }
+let bullWorkers = { analyze: null, apply: null }
+let bullStatus = { driver: 'sqlite', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
 
 function nowIso() {
   return new Date().toISOString()
@@ -49,16 +54,48 @@ function wait(ms = 0) {
 }
 
 async function yieldImportWorker(multiplier = 1) {
-  const pauseMs = Math.max(0, Number(process.env.IMPORT_WORKER_PAUSE_MS || 8))
+  const pauseMs = Math.max(0, Number(IMPORT_BATCH_PAUSE_MS || 0))
   await wait(pauseMs * Math.max(1, Number(multiplier || 1)))
 }
 
-async function readCsvRowsFromFile(csvFile) {
-  const csvText = await fs.promises.readFile(csvFile.stored_path, 'utf8')
-  await yieldImportWorker()
-  const rows = parseCsvRows(csvText)
-  await yieldImportWorker()
+async function countCsvRowsFromFile(csvFile, jobId) {
+  let rows = 0
+  let batches = 0
+  for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(500, IMPORT_ROW_BATCH_SIZE) })) {
+    rows += batchRows.length
+    batches += 1
+    if (jobId && (batches % 4 === 0 || batchRows.length < IMPORT_ROW_BATCH_SIZE)) {
+      updateJob(jobId, {
+        total_rows: rows,
+        processed_rows: rows,
+        phase: 'analyzing_rows',
+      })
+    }
+    await yieldImportWorker()
+  }
   return rows
+}
+
+async function* rowBatchesFromFile(csvFile) {
+  let startIndex = 0
+  let batchIndex = 0
+  for await (const rows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: IMPORT_ROW_BATCH_SIZE })) {
+    yield { rows, startIndex, batchIndex }
+    startIndex += rows.length
+    batchIndex += 1
+    await yieldImportWorker()
+  }
+}
+
+async function* rowBatchesFromArray(rows = [], batchSize = IMPORT_ROW_BATCH_SIZE) {
+  const safeRows = Array.isArray(rows) ? rows : []
+  for (let offset = 0; offset < safeRows.length; offset += batchSize) {
+    yield {
+      rows: safeRows.slice(offset, offset + batchSize),
+      startIndex: offset,
+      batchIndex: Math.floor(offset / batchSize),
+    }
+  }
 }
 
 function safeJson(value, fallback = {}) {
@@ -197,6 +234,29 @@ function markJobCancelled(jobId) {
 
 function isCancelled(jobId) {
   return !!db.prepare('SELECT cancel_requested FROM import_jobs WHERE id = ?').get(jobId)?.cancel_requested
+}
+
+async function waitForQueuedImportMedia(jobId) {
+  let lastPending = -1
+  while (!isCancelled(jobId)) {
+    const pending = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM import_job_files
+      WHERE job_id = ? AND status = 'queued_media'
+    `).get(jobId)?.count || 0
+    if (!pending) return
+    if (pending !== lastPending) {
+      lastPending = pending
+      updateJob(jobId, {
+        phase: 'processing_media',
+        summary_json: stringify({
+          ...(getImportJob(jobId)?.summary || {}),
+          pending_media: pending,
+        }),
+      })
+    }
+    await wait(1000)
+  }
 }
 
 function normalizeLookup(value) {
@@ -395,13 +455,14 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allow
   if (!allowDuplicateName) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
-async function copyImageIntoAssets(sourcePath, originalName, actor = {}) {
+async function copyImageIntoAssets(sourcePath, originalName, actor = {}, { importJobId = null, importFileId = null } = {}) {
   const safeOriginal = sanitizeOriginalFileName(originalName || path.basename(sourcePath))
   const storedName = buildUniqueStoredName(safeOriginal)
   const destination = path.join(UPLOADS_PATH, storedName)
   fs.copyFileSync(sourcePath, destination)
   const file = { path: destination, mimetype: getMimeTypeFromName(storedName), originalname: safeOriginal }
   await validateUploadedPath(destination, file)
+  const byteSize = fs.existsSync(destination) ? fs.statSync(destination).size : null
   const asset = await registerStoredAsset({
     storedName,
     originalName: safeOriginal,
@@ -409,8 +470,28 @@ async function copyImageIntoAssets(sourcePath, originalName, actor = {}) {
     createdById: actor.userId || null,
     createdByName: actor.userName || null,
     source: 'bulk_import',
+    optimization: {
+      original_byte_size: byteSize,
+      optimized_byte_size: byteSize,
+      optimization_status: 'queued',
+      optimization_note: 'Queued for media worker optimization',
+      duration_seconds: null,
+    },
   })
-  return asset.public_path
+  if (importFileId) {
+    db.prepare("UPDATE import_job_files SET status = 'queued_media', updated_at = datetime('now') WHERE id = ?").run(importFileId)
+  }
+  try {
+    await enqueueMediaOptimization({ storedName, source: 'bulk_import', importJobId, importFileId })
+  } catch (error) {
+    console.warn(`[media-queue] Could not enqueue ${storedName}: ${error?.message || error}`)
+    if (importFileId) {
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(error?.message || 'Media queue unavailable', importFileId)
+    }
+    throw error
+  }
+  return { publicPath: asset.public_path, mediaQueued: !!importFileId }
 }
 
 async function resolveImageGallery(row, imageLookup, actor, jobId) {
@@ -434,13 +515,16 @@ async function resolveImageGallery(row, imageLookup, actor, jobId) {
       continue
     }
     try {
-      gallery.push(await copyImageIntoAssets(file.stored_path, file.original_name || file.relative_path, actor))
-      db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
-      db.prepare(`
-        UPDATE import_jobs
-        SET processed_images = processed_images + 1, updated_at = datetime('now')
-        WHERE id = ?
-      `).run(jobId)
+      const copied = await copyImageIntoAssets(file.stored_path, file.original_name || file.relative_path, actor, { importJobId: jobId, importFileId: file.id })
+      gallery.push(copied.publicPath)
+      if (!copied.mediaQueued) {
+        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+        db.prepare(`
+          UPDATE import_jobs
+          SET processed_images = processed_images + 1, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(jobId)
+      }
     } catch (error) {
       db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
       db.prepare(`
@@ -878,20 +962,20 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId }) {
   })()
 }
 
-async function processProductRows({ jobId, rows, imageLookup, actor }) {
+async function processProductRowBatches({ jobId, rowBatches, totalRows = null, imageLookup, actor }) {
   const ctx = createProductContext()
   let imported = 0
   let updated = 0
   let failed = 0
-  const batchSize = IMPORT_ROW_BATCH_SIZE
 
-  for (let offset = 0; offset < rows.length; offset += batchSize) {
+  for await (const batch of rowBatches) {
     if (isCancelled(jobId)) {
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
       return { imported, updated, failed, cancelled: true }
     }
-    const batchRows = rows.slice(offset, offset + batchSize)
-    const batchIndex = Math.floor(offset / batchSize)
+    const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
+    const offset = Number(batch?.startIndex || 0)
+    const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
       VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
@@ -927,6 +1011,13 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
       `).run(failed, stringify({ imported, updated, failed }), jobId)
     }
     db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    if (totalRows) {
+      updateJob(jobId, {
+        processed_rows: Math.min(totalRows, offset + batchRows.length),
+        failed_rows: failed,
+        summary_json: stringify({ imported, updated, failed }),
+      })
+    }
     await yieldImportWorker()
   }
 
@@ -940,6 +1031,16 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
   if (ctx.changed.branches) broadcast('branches')
   if (ctx.changed.suppliers) broadcast('suppliers')
   return { imported, updated, failed, cancelled: false }
+}
+
+async function processProductRows({ jobId, rows, imageLookup, actor }) {
+  return processProductRowBatches({
+    jobId,
+    rowBatches: rowBatchesFromArray(rows),
+    totalRows: Array.isArray(rows) ? rows.length : null,
+    imageLookup,
+    actor,
+  })
 }
 
 function buildImageLookup(files = []) {
@@ -997,18 +1098,21 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
       continue
     }
     try {
-      const publicPath = await copyImageIntoAssets(file.stored_path, file.original_name || file.relative_path, actor)
+      const copied = await copyImageIntoAssets(file.stored_path, file.original_name || file.relative_path, actor, { importJobId: jobId, importFileId: file.id })
+      const publicPath = copied.publicPath
       db.transaction(() => {
         const gallery = loadCurrentGallery(product.id, product.image_path)
         syncProductImageGallery(product.id, [...gallery, publicPath])
-        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
-        db.prepare(`
-          UPDATE import_jobs
-          SET processed_images = processed_images + 1,
-              summary_json = ?,
-              updated_at = datetime('now')
-          WHERE id = ?
-        `).run(stringify({ imported: 0, updated: 0, images_matched: imagesMatched + 1, failed }), jobId)
+        if (!copied.mediaQueued) {
+          db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+          db.prepare(`
+            UPDATE import_jobs
+            SET processed_images = processed_images + 1,
+                summary_json = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(stringify({ imported: 0, updated: 0, images_matched: imagesMatched + 1, failed }), jobId)
+        }
       })()
       imagesMatched += 1
     } catch (error) {
@@ -1045,7 +1149,7 @@ function parseFieldRules(row = {}) {
   return safeJson(raw, {})
 }
 
-async function processContactRows({ jobId, rows, actor, type }) {
+async function processContactRowBatches({ jobId, rowBatches, totalRows = null, actor, type }) {
   const isCustomer = type === 'customers'
   const isSupplier = type === 'suppliers'
   const table = isCustomer ? 'customers' : isSupplier ? 'suppliers' : 'delivery_contacts'
@@ -1055,7 +1159,6 @@ async function processContactRows({ jobId, rows, actor, type }) {
   let imported = 0
   let updated = 0
   let failed = 0
-  const batchSize = IMPORT_ROW_BATCH_SIZE
 
   const findCustomerByMembership = db.prepare('SELECT * FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1')
   const findCustomerByPhone = db.prepare("SELECT * FROM customers WHERE trim(coalesce(phone,'')) != '' AND trim(phone) = trim(?) LIMIT 1")
@@ -1065,13 +1168,14 @@ async function processContactRows({ jobId, rows, actor, type }) {
   const findDeliveryByName = db.prepare('SELECT * FROM delivery_contacts WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1')
   const findDeliveryByPhone = db.prepare("SELECT * FROM delivery_contacts WHERE trim(coalesce(phone,'')) != '' AND trim(phone) = trim(?) LIMIT 1")
 
-  for (let offset = 0; offset < rows.length; offset += batchSize) {
+  for await (const batch of rowBatches) {
     if (isCancelled(jobId)) {
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
       return { imported, updated, failed, cancelled: true }
     }
-    const batchRows = rows.slice(offset, offset + batchSize)
-    const batchIndex = Math.floor(offset / batchSize)
+    const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
+    const offset = Number(batch?.startIndex || 0)
+    const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
       VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
@@ -1200,7 +1304,7 @@ async function processContactRows({ jobId, rows, actor, type }) {
     })()
 
     updateJob(jobId, {
-      processed_rows: Math.min(rows.length, offset + batchRows.length),
+      processed_rows: totalRows ? Math.min(totalRows, offset + batchRows.length) : offset + batchRows.length,
       failed_rows: failed,
       summary_json: stringify({ imported, updated, failed }),
     })
@@ -1213,6 +1317,16 @@ async function processContactRows({ jobId, rows, actor, type }) {
   return { imported, updated, failed, cancelled: false }
 }
 
+async function processContactRows({ jobId, rows, actor, type }) {
+  return processContactRowBatches({
+    jobId,
+    rowBatches: rowBatchesFromArray(rows),
+    totalRows: Array.isArray(rows) ? rows.length : null,
+    actor,
+    type,
+  })
+}
+
 function normalizeInventoryAction(value) {
   const action = normalizeCsvKey(value)
   if (['add', 'remove', 'set'].includes(action)) return action
@@ -1220,7 +1334,7 @@ function normalizeInventoryAction(value) {
   return 'add'
 }
 
-async function processInventoryRows({ jobId, rows, actor }) {
+async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null, actor }) {
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
@@ -1241,13 +1355,13 @@ async function processInventoryRows({ jobId, rows, actor }) {
 
   let imported = 0
   let failed = 0
-  const batchSize = IMPORT_ROW_BATCH_SIZE
-  for (let offset = 0; offset < rows.length; offset += batchSize) {
+  for await (const batch of rowBatches) {
     if (isCancelled(jobId)) {
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
       return { imported, updated: 0, failed, cancelled: true }
     }
-    const batchRows = rows.slice(offset, offset + batchSize)
+    const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
+    const offset = Number(batch?.startIndex || 0)
     db.transaction(() => {
       for (const row of batchRows) {
         try {
@@ -1307,7 +1421,7 @@ async function processInventoryRows({ jobId, rows, actor }) {
       }
     })()
     updateJob(jobId, {
-      processed_rows: Math.min(rows.length, offset + batchRows.length),
+      processed_rows: totalRows ? Math.min(totalRows, offset + batchRows.length) : offset + batchRows.length,
       failed_rows: failed,
       summary_json: stringify({ imported, updated: 0, failed }),
     })
@@ -1319,7 +1433,16 @@ async function processInventoryRows({ jobId, rows, actor }) {
   return { imported, updated: 0, failed, cancelled: false }
 }
 
-async function processSalesRows({ jobId, rows, actor }) {
+async function processInventoryRows({ jobId, rows, actor }) {
+  return processInventoryRowBatches({
+    jobId,
+    rowBatches: rowBatchesFromArray(rows),
+    totalRows: Array.isArray(rows) ? rows.length : null,
+    actor,
+  })
+}
+
+async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, actor }) {
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
@@ -1340,61 +1463,67 @@ async function processSalesRows({ jobId, rows, actor }) {
 
   const grouped = new Map()
   let failed = 0
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index]
-    try {
-      const product = productMap.get(normalizeCsvKey(row.sku))
-        || productMap.get(normalizeCsvKey(row.barcode))
-        || productMap.get(normalizeCsvKey(row.name))
-      if (!product) throw new Error(`Row ${row._rowNumber || index + 2}: product not found`)
-      const qty = parseImportNumber(row, 'quantity', 0)
-      if (!(qty > 0)) throw new Error(`Row ${row._rowNumber || index + 2}: quantity must be greater than 0`)
-      const branchValue = normalizeCsvKey(row.branch || row.branch_id)
-      const branch = branchValue ? branchMap.get(branchValue) : defaultBranch
-      if (!branch) throw new Error(`Row ${row._rowNumber || index + 2}: active branch required`)
-      const receiptNumber = normalizeText(row.receipt_number) || `IMP-SALE-${Date.now()}-${index + 1}`
-      const sale = grouped.get(receiptNumber) || {
-        receiptNumber,
-        createdAt: normalizeText(row.sale_date || row.date || row.created_at) || null,
-        status: normalizeText(row.sale_status) || 'completed',
-        paymentMethod: normalizeText(row.payment_method) || 'Cash',
-        paymentCurrency: normalizeText(row.payment_currency) || 'USD',
-        customerName: normalizeText(row.customer_name) || null,
-        customerPhone: normalizeText(row.customer_phone) || null,
-        customerAddress: normalizeText(row.customer_address) || null,
-        cashierName: normalizeText(row.cashier_name) || actor.userName || null,
-        notes: normalizeText(row.notes) || null,
-        branchId: branch.id,
-        branchName: branch.name,
-        items: [],
-        subtotalUsd: 0,
-        subtotalKhr: 0,
+  let groupedRows = 0
+  for await (const batch of rowBatches) {
+    const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
+    for (let index = 0; index < batchRows.length; index += 1) {
+      const row = batchRows[index]
+      const absoluteIndex = Number(batch?.startIndex || 0) + index
+      try {
+        const product = productMap.get(normalizeCsvKey(row.sku))
+          || productMap.get(normalizeCsvKey(row.barcode))
+          || productMap.get(normalizeCsvKey(row.name))
+        if (!product) throw new Error(`Row ${row._rowNumber || absoluteIndex + 2}: product not found`)
+        const qty = parseImportNumber(row, 'quantity', 0)
+        if (!(qty > 0)) throw new Error(`Row ${row._rowNumber || absoluteIndex + 2}: quantity must be greater than 0`)
+        const branchValue = normalizeCsvKey(row.branch || row.branch_id)
+        const branch = branchValue ? branchMap.get(branchValue) : defaultBranch
+        if (!branch) throw new Error(`Row ${row._rowNumber || absoluteIndex + 2}: active branch required`)
+        const receiptNumber = normalizeText(row.receipt_number) || `IMP-SALE-${Date.now()}-${absoluteIndex + 1}`
+        const sale = grouped.get(receiptNumber) || {
+          receiptNumber,
+          createdAt: normalizeText(row.sale_date || row.date || row.created_at) || null,
+          status: normalizeText(row.sale_status) || 'completed',
+          paymentMethod: normalizeText(row.payment_method) || 'Cash',
+          paymentCurrency: normalizeText(row.payment_currency) || 'USD',
+          customerName: normalizeText(row.customer_name) || null,
+          customerPhone: normalizeText(row.customer_phone) || null,
+          customerAddress: normalizeText(row.customer_address) || null,
+          cashierName: normalizeText(row.cashier_name) || actor.userName || null,
+          notes: normalizeText(row.notes) || null,
+          branchId: branch.id,
+          branchName: branch.name,
+          items: [],
+          subtotalUsd: 0,
+          subtotalKhr: 0,
+        }
+        const priceUsd = normalizePriceValue(parseImportNumber(row, 'unit_price_usd', product.selling_price_usd || 0))
+        const priceKhr = normalizePriceValue(parseImportNumber(row, 'unit_price_khr', product.selling_price_khr || 0))
+        sale.items.push({
+          product,
+          branch,
+          quantity: qty,
+          applied_price_usd: priceUsd,
+          applied_price_khr: priceKhr,
+        })
+        sale.subtotalUsd += priceUsd * qty
+        sale.subtotalKhr += priceKhr * qty
+        grouped.set(receiptNumber, sale)
+      } catch (error) {
+        failed += 1
+        addJobError(jobId, {
+          rowNumber: row?._rowNumber || null,
+          code: 'row_failed',
+          message: error?.message || 'Sales row failed',
+          raw: row,
+        })
       }
-      const priceUsd = normalizePriceValue(parseImportNumber(row, 'unit_price_usd', product.selling_price_usd || 0))
-      const priceKhr = normalizePriceValue(parseImportNumber(row, 'unit_price_khr', product.selling_price_khr || 0))
-      sale.items.push({
-        product,
-        branch,
-        quantity: qty,
-        applied_price_usd: priceUsd,
-        applied_price_khr: priceKhr,
-      })
-      sale.subtotalUsd += priceUsd * qty
-      sale.subtotalKhr += priceKhr * qty
-      grouped.set(receiptNumber, sale)
-    } catch (error) {
-      failed += 1
-      addJobError(jobId, {
-        rowNumber: row?._rowNumber || null,
-        code: 'row_failed',
-        message: error?.message || 'Sales row failed',
-        raw: row,
-      })
+      groupedRows += 1
     }
-    if ((index + 1) % IMPORT_ROW_BATCH_SIZE === 0) {
+    if (groupedRows % IMPORT_ROW_BATCH_SIZE === 0 || batchRows.length) {
       updateJob(jobId, {
         phase: 'grouping_sales',
-        processed_rows: Math.min(rows.length, index + 1),
+        processed_rows: totalRows ? Math.min(totalRows, groupedRows) : groupedRows,
         failed_rows: failed,
         summary_json: stringify({ imported: 0, updated: 0, duplicates: 0, failed, grouped: grouped.size }),
       })
@@ -1510,7 +1639,7 @@ async function processSalesRows({ jobId, rows, actor }) {
     }
     updateJob(jobId, {
       phase: 'applying_rows',
-      processed_rows: Math.min(rows.length, saleRowsApplied + failed),
+      processed_rows: totalRows ? Math.min(totalRows, saleRowsApplied + failed) : saleRowsApplied + failed,
       failed_rows: failed,
       summary_json: stringify({ imported, updated: duplicates, duplicates, failed }),
     })
@@ -1521,6 +1650,15 @@ async function processSalesRows({ jobId, rows, actor }) {
   broadcast('products')
   broadcast('inventory')
   return { imported, updated: duplicates, duplicates, failed, cancelled: false }
+}
+
+async function processSalesRows({ jobId, rows, actor }) {
+  return processSalesRowBatches({
+    jobId,
+    rowBatches: rowBatchesFromArray(rows),
+    totalRows: Array.isArray(rows) ? rows.length : null,
+    actor,
+  })
 }
 
 async function extractZipImages(jobId, zipFile) {
@@ -1615,13 +1753,13 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
     }
     const imageFiles = getJobFiles(jobId, 'image')
     updateJob(jobId, { total_images: imageFiles.length, phase: mode === 'apply' ? 'reading_rows' : 'analyzing_rows' })
-    const rows = await readCsvRowsFromFile(csvFile)
 
     if (mode !== 'apply') {
+      const totalRows = await countCsvRowsFromFile(csvFile, jobId)
       const summary = {
         requiresApproval: true,
         analyzed: true,
-        rows: rows.length,
+        rows: totalRows,
         images: imageFiles.length,
         type: job.type,
         nextPhase: 'approved',
@@ -1629,53 +1767,62 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
       updateJob(jobId, {
         status: 'awaiting_review',
         phase: 'awaiting_review',
-        total_rows: rows.length,
-        processed_rows: rows.length,
+        total_rows: totalRows,
+        processed_rows: totalRows,
         failed_rows: 0,
         total_images: imageFiles.length,
         summary_json: stringify(summary),
         cancel_requested: 0,
         finished_at: null,
       })
-      audit(actor.userId, actor.userName, 'import_job_analyzed', 'import_job', null, { jobId, type: job.type, rows: rows.length, images: imageFiles.length })
+      audit(actor.userId, actor.userName, 'import_job_analyzed', 'import_job', null, { jobId, type: job.type, rows: totalRows, images: imageFiles.length })
       return getImportJob(jobId)
     }
 
+    const totalRows = Number(job.total_rows || 0) || await countCsvRowsFromFile(csvFile, jobId)
     updateJob(jobId, {
-      total_rows: rows.length,
+      total_rows: totalRows,
       processed_rows: 0,
       failed_rows: 0,
       processed_images: 0,
       failed_images: 0,
-      phase: rows.length ? 'applying_rows' : 'processing_images',
+      phase: totalRows ? 'applying_rows' : 'processing_images',
     })
     let result
     if (job.type === 'products') {
-      result = rows.length
-        ? await processProductRows({
+      result = totalRows
+        ? await processProductRowBatches({
             jobId,
-            rows,
+            rowBatches: rowBatchesFromFile(csvFile),
+            totalRows,
             imageLookup: buildImageLookup(imageFiles),
             actor,
           })
         : await processImageOnlyFiles({ jobId, imageFiles, actor })
     } else if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
-      result = await processContactRows({ jobId, rows, actor, type: job.type })
+      result = await processContactRowBatches({ jobId, rowBatches: rowBatchesFromFile(csvFile), totalRows, actor, type: job.type })
     } else if (job.type === 'inventory') {
-      result = await processInventoryRows({ jobId, rows, actor })
+      result = await processInventoryRowBatches({ jobId, rowBatches: rowBatchesFromFile(csvFile), totalRows, actor })
     } else if (job.type === 'sales') {
-      result = await processSalesRows({ jobId, rows, actor })
+      result = await processSalesRowBatches({ jobId, rowBatches: rowBatchesFromFile(csvFile), totalRows, actor })
     } else {
       throw new Error(`Import type "${job.type}" is not implemented in the job pipeline yet`)
     }
     if (result.cancelled) return getImportJob(jobId)
-    updateJob(jobId, { phase: 'finalizing_indexes' })
+    if (job.type === 'products') {
+      await waitForQueuedImportMedia(jobId)
+      if (isCancelled(jobId)) {
+        updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+        return getImportJob(jobId)
+      }
+    }
+    updateJob(jobId, { phase: 'finalizing' })
     await yieldImportWorker(3)
     updateJob(jobId, {
       status: result.failed > 0 ? 'completed_with_errors' : 'completed',
       phase: 'completed',
-      failed_rows: rows.length ? result.failed : 0,
-      failed_images: rows.length ? getImportJob(jobId).failed_images : result.failed,
+      failed_rows: totalRows ? result.failed : 0,
+      failed_images: totalRows ? getImportJob(jobId).failed_images : result.failed,
       summary_json: stringify(result),
       finished_at: nowIso(),
     })
@@ -1704,32 +1851,61 @@ async function runLocalJob(jobId, mode = 'analyze') {
   try { await processImportJob(jobId, { mode }) } finally { runningLocalJobs.delete(key) }
 }
 
+function normalizeQueueMode(mode = 'analyze') {
+  return mode === 'apply' ? 'apply' : 'analyze'
+}
+
+function queueNameForMode(mode = 'analyze') {
+  return normalizeQueueMode(mode) === 'apply' ? IMPORT_APPLY_QUEUE_NAME : IMPORT_ANALYZE_QUEUE_NAME
+}
+
+function configuredQueueDriver() {
+  if (JOB_QUEUE_DRIVER === 'sqlite') return 'sqlite'
+  if (JOB_QUEUE_DRIVER === 'bullmq') return 'bullmq'
+  return BUSINESS_OS_REQUIRE_SCALE_SERVICES ? 'bullmq' : 'auto'
+}
+
+function getImportQueueConcurrency() {
+  return IMPORT_QUEUE_CONCURRENCY
+}
+
+function hasBullProducer() {
+  return !!(bullQueues.analyze && bullQueues.apply)
+}
+
+function hasBullWorkers() {
+  return !!(bullWorkers.analyze || bullWorkers.apply)
+}
+
+async function getBullConnection() {
+  if (bullConnection) return bullConnection
+  const IORedis = require('ioredis')
+  bullConnection = new IORedis(REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    lazyConnect: true,
+  })
+  await bullConnection.connect()
+  await bullConnection.ping()
+  return bullConnection
+}
+
 async function initializeBullQueue() {
-  if (bullQueue || bullWorker) return bullStatus
+  if (hasBullProducer()) return bullStatus
   if (JOB_QUEUE_DRIVER === 'sqlite') {
-    bullStatus = { driver: 'sqlite', available: false, reason: 'sqlite_configured' }
+    bullStatus = { driver: 'sqlite', available: false, reason: 'sqlite_configured', producerReady: false, workerActive: hasBullWorkers() }
     return bullStatus
   }
   try {
-    const { Queue, Worker } = require('bullmq')
-    const IORedis = require('ioredis')
-    const connection = new IORedis(REDIS_URL, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      lazyConnect: true,
-    })
-    await connection.connect()
-    await connection.ping()
-    bullQueue = new Queue(IMPORT_QUEUE_NAME, { connection })
-    bullWorker = new Worker(IMPORT_QUEUE_NAME, async (job) => {
-      await processImportJob(job.data.jobId, { mode: job.data.mode || 'analyze' })
-    }, {
-      connection,
-      concurrency: 1,
-    })
-    bullStatus = { driver: 'bullmq', available: true, reason: 'ready' }
+    const { Queue } = require('bullmq')
+    const connection = await getBullConnection()
+    bullQueues.analyze = bullQueues.analyze || new Queue(IMPORT_ANALYZE_QUEUE_NAME, { connection })
+    bullQueues.apply = bullQueues.apply || new Queue(IMPORT_APPLY_QUEUE_NAME, { connection })
+    bullStatus = { driver: 'bullmq', available: true, reason: 'producer_ready', producerReady: true, workerActive: hasBullWorkers() }
   } catch (error) {
-    bullStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable' }
+    bullConnection = null
+    bullQueues = { analyze: null, apply: null }
+    bullStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: hasBullWorkers() }
     if (JOB_QUEUE_DRIVER === 'bullmq') {
       console.warn(`[import-jobs] BullMQ unavailable: ${bullStatus.reason}`)
     }
@@ -1737,16 +1913,59 @@ async function initializeBullQueue() {
   return bullStatus
 }
 
-async function enqueueImportJob(jobId, { mode = 'analyze' } = {}) {
-  const normalizedMode = mode === 'apply' ? 'apply' : 'analyze'
+async function startImportWorkers({ concurrency = getImportQueueConcurrency() } = {}) {
+  const status = await initializeBullQueue()
+  if (!status.available || !hasBullProducer()) {
+    throw new Error(`Import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
+  }
+  const { Worker } = require('bullmq')
+  const connection = await getBullConnection()
+  const startWorker = (mode) => {
+    if (bullWorkers[mode]) return bullWorkers[mode]
+    const worker = new Worker(queueNameForMode(mode), async (job) => {
+      const jobId = job?.data?.jobId
+      if (!jobId) throw new Error('Import worker received a job without jobId')
+      await processImportJob(jobId, { mode })
+    }, {
+      connection,
+      concurrency,
+      autorun: true,
+    })
+    worker.on('failed', (job, error) => {
+      const jobId = job?.data?.jobId
+      if (jobId) {
+        updateJob(jobId, {
+          status: 'failed',
+          phase: 'worker_failed',
+          last_error: error?.message || 'Import worker failed',
+          finished_at: nowIso(),
+        })
+        addJobError(jobId, { code: 'worker_failed', message: error?.message || 'Import worker failed' })
+      }
+      console.warn(`[import-worker] ${mode} job failed: ${error?.message || error}`)
+    })
+    worker.on('error', (error) => {
+      console.warn(`[import-worker] ${mode} worker error: ${error?.message || error}`)
+    })
+    bullWorkers[mode] = worker
+    return worker
+  }
+  startWorker('analyze')
+  startWorker('apply')
+  bullStatus = { driver: 'bullmq', available: true, reason: 'workers_ready', producerReady: true, workerActive: true }
+  return getQueueStatus()
+}
+
+async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {}) {
+  const normalizedMode = normalizeQueueMode(mode)
   const currentJob = getImportJob(jobId)
-  if (['running', 'queued', 'cancelling'].includes(String(currentJob?.status || '').toLowerCase())) {
+  if (!force && ['running', 'queued', 'cancelling'].includes(String(currentJob?.status || '').toLowerCase())) {
     return currentJob
   }
   const status = await initializeBullQueue()
-  if (status.available && bullQueue) {
+  if (status.available && hasBullProducer()) {
     updateJob(jobId, { queue_driver: 'bullmq', status: 'queued', phase: normalizedMode === 'apply' ? 'apply_queued' : 'analyze_queued' })
-    await bullQueue.add('process-import', { jobId, mode: normalizedMode }, {
+    await bullQueues[normalizedMode].add(`import-${normalizedMode}`, { jobId, mode: normalizedMode }, {
       jobId: `${jobId}:${normalizedMode}:${Date.now()}`,
       attempts: 3,
       backoff: { type: 'exponential', delay: 3000 },
@@ -1788,7 +2007,7 @@ async function approveImportJob(jobId) {
   return enqueueImportJob(jobId, { mode: 'apply' })
 }
 
-function recoverImportJobs() {
+async function recoverImportJobs({ forceQueue = false } = {}) {
   const rows = db.prepare(`
     SELECT id, phase
     FROM import_jobs
@@ -1796,18 +2015,37 @@ function recoverImportJobs() {
     ORDER BY datetime(created_at) ASC
     LIMIT 20
   `).all()
-  rows.forEach((row) => {
+  for (const row of rows) {
     const mode = String(row.phase || '').includes('apply') ? 'apply' : 'analyze'
+    if (forceQueue || configuredQueueDriver() !== 'sqlite') {
+      try {
+        await enqueueImportJob(row.id, { mode, force: true })
+      } catch (error) {
+        updateJob(row.id, {
+          status: 'queued',
+          phase: 'queue_recovery_waiting',
+          last_error: error?.message || 'Import queue recovery failed',
+        })
+      }
+      continue
+    }
     updateJob(row.id, { status: 'queued', phase: mode === 'apply' ? 'apply_recovered_after_restart' : 'analyze_recovered_after_restart' })
     setImmediate(() => { runLocalJob(row.id, mode).catch(() => {}) })
-  })
+  }
 }
 
 function getQueueStatus() {
   return {
     ...bullStatus,
     configuredDriver: JOB_QUEUE_DRIVER,
+    effectiveDriver: configuredQueueDriver(),
     redisUrlConfigured: !!REDIS_URL,
+    queues: {
+      analyze: IMPORT_ANALYZE_QUEUE_NAME,
+      apply: IMPORT_APPLY_QUEUE_NAME,
+    },
+    producerReady: hasBullProducer(),
+    workerActive: hasBullWorkers(),
     imageConcurrency: IMPORT_IMAGE_CONCURRENCY,
     rowBatchSize: IMPORT_ROW_BATCH_SIZE,
   }
@@ -1840,6 +2078,8 @@ module.exports = {
   initializeBullQueue,
   listImportJobs,
   markJobCancelled,
+  processImportJob,
   recoverImportJobs,
+  startImportWorkers,
   updateJob,
 }

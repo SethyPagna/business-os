@@ -355,6 +355,7 @@ const IMPORTS_PATH = trim(process.env.IMPORTS_PATH)
 
 const BUSINESS_OS_REQUIRE_SCALE_SERVICES = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES || '').toLowerCase())
 const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'auto').toLowerCase()
+const WORKER_RUNTIME = trim(process.env.WORKER_RUNTIME || 'auto').toLowerCase()
 const REDIS_URL = trim(process.env.REDIS_URL || 'redis://127.0.0.1:6379')
 const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
 const DATABASE_URL = trim(process.env.DATABASE_URL)
@@ -366,6 +367,12 @@ const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
 const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '200', 10) || 200))
 const IMPORT_IMAGE_CONCURRENCY = Math.min(8, Math.max(1, parseInt(process.env.IMPORT_IMAGE_CONCURRENCY || '3', 10) || 3))
+const IMPORT_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.IMPORT_QUEUE_CONCURRENCY || '1', 10) || 1))
+const MEDIA_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.MEDIA_QUEUE_CONCURRENCY || '2', 10) || 2))
+const IMPORT_BATCH_PAUSE_MS = Math.min(1000, Math.max(0, parseInt(process.env.IMPORT_BATCH_PAUSE_MS || process.env.IMPORT_WORKER_PAUSE_MS || '50', 10) || 0))
+const MEDIA_IMAGE_MAX_WIDTH = Math.min(4096, Math.max(320, parseInt(process.env.MEDIA_IMAGE_MAX_WIDTH || '1600', 10) || 1600))
+const MEDIA_IMAGE_QUALITY = Math.min(92, Math.max(45, parseInt(process.env.MEDIA_IMAGE_QUALITY || '72', 10) || 72))
+const UPLOAD_CHUNK_MB = Math.min(64, Math.max(1, parseInt(process.env.UPLOAD_CHUNK_MB || '8', 10) || 8))
 const IMPORT_MAX_CSV_MB = Math.min(512, Math.max(1, parseInt(process.env.IMPORT_MAX_CSV_MB || '80', 10) || 80))
 const IMPORT_MAX_ZIP_MB = Math.min(4096, Math.max(1, parseInt(process.env.IMPORT_MAX_ZIP_MB || '2048', 10) || 2048))
 
@@ -416,6 +423,7 @@ module.exports = {
   FRONTEND_DIST,
   BUSINESS_OS_REQUIRE_SCALE_SERVICES,
   JOB_QUEUE_DRIVER,
+  WORKER_RUNTIME,
   REDIS_URL,
   DATABASE_DRIVER,
   DATABASE_URL,
@@ -427,6 +435,12 @@ module.exports = {
   MINIO_LICENSE_FILE,
   IMPORT_ROW_BATCH_SIZE,
   IMPORT_IMAGE_CONCURRENCY,
+  IMPORT_QUEUE_CONCURRENCY,
+  MEDIA_QUEUE_CONCURRENCY,
+  IMPORT_BATCH_PAUSE_MS,
+  MEDIA_IMAGE_MAX_WIDTH,
+  MEDIA_IMAGE_QUALITY,
+  UPLOAD_CHUNK_MB,
   IMPORT_MAX_CSV_MB,
   IMPORT_MAX_ZIP_MB,
   GOOGLE_DRIVE_CLIENT_ID,

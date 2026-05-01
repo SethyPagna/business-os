@@ -1,9 +1,45 @@
 name: business-os-scale
 
+x-service-logging: &service-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-node-env: &node-env
+  NODE_ENV: production
+  PORT: "${PORT:-4000}"
+  BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
+  JOB_QUEUE_DRIVER: bullmq
+  REDIS_URL: redis://redis:6379
+  DATABASE_DRIVER: postgres
+  DATABASE_URL: "postgres://${POSTGRES_USER:-business_os}:${POSTGRES_PASSWORD:-business_os_dev_password}@postgres:5432/${POSTGRES_DB:-business_os}"
+  OBJECT_STORAGE_DRIVER: minio
+  S3_ENDPOINT: http://minio:9000
+  S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
+  S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
+  S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
+  IMPORT_QUEUE_CONCURRENCY: "${IMPORT_QUEUE_CONCURRENCY:-1}"
+  MEDIA_QUEUE_CONCURRENCY: "${MEDIA_QUEUE_CONCURRENCY:-2}"
+  IMPORT_ROW_BATCH_SIZE: "${IMPORT_ROW_BATCH_SIZE:-300}"
+  IMPORT_BATCH_PAUSE_MS: "${IMPORT_BATCH_PAUSE_MS:-50}"
+  IMPORT_IMAGE_CONCURRENCY: "${IMPORT_IMAGE_CONCURRENCY:-2}"
+  MEDIA_IMAGE_MAX_WIDTH: "${MEDIA_IMAGE_MAX_WIDTH:-1600}"
+  MEDIA_IMAGE_QUALITY: "${MEDIA_IMAGE_QUALITY:-72}"
+  UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-8}"
+
 services:
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "${REDIS_MAX_MEMORY:-256mb}"
+      - --maxmemory-policy
+      - allkeys-lru
+    restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -13,25 +49,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 384m
+    cpus: 0.5
+    logging: *service-logging
 
   postgres:
     image: postgres:18-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: "${POSTGRES_DB:-business_os}"
       POSTGRES_USER: "${POSTGRES_USER:-business_os}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-business_os_dev_password}"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - synchronous_commit=off
+      - -c
+      - statement_timeout=300000
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - business_os_postgres18:/var/lib/postgresql
+      - business_os_postgres18:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 768m
+    cpus: 1.0
+    logging: *service-logging
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-businessos}"
@@ -51,8 +105,85 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 768m
+    cpus: 0.75
+    logging: *service-logging
+
+  app:
+    image: node:24-alpine
+    profiles: ["postgres-runtime"]
+    restart: unless-stopped
+    working_dir: /app/backend
+    environment:
+      <<: *node-env
+      WORKER_RUNTIME: docker
+    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run start"]
+    ports:
+      - "${PORT:-4000}:4000"
+    volumes:
+      - ../../:/app
+      - business_os_backend_node_modules:/app/backend/node_modules
+      - business_os_frontend_node_modules:/app/frontend/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 0.75
+    logging: *service-logging
+
+  import-worker:
+    image: node:24-alpine
+    profiles: ["postgres-runtime"]
+    restart: unless-stopped
+    working_dir: /app/backend
+    environment:
+      <<: *node-env
+      WORKER_RUNTIME: docker
+    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run worker:import"]
+    volumes:
+      - ../../:/app
+      - business_os_backend_node_modules:/app/backend/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    mem_limit: 768m
+    cpus: 0.5
+    logging: *service-logging
+
+  media-worker:
+    image: node:24-alpine
+    profiles: ["postgres-runtime"]
+    restart: unless-stopped
+    working_dir: /app/backend
+    environment:
+      <<: *node-env
+      WORKER_RUNTIME: docker
+    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run worker:media"]
+    volumes:
+      - ../../:/app
+      - business_os_backend_node_modules:/app/backend/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    mem_limit: 1024m
+    cpus: 0.75
+    logging: *service-logging
 
 volumes:
   business_os_redis:
   business_os_postgres18:
   business_os_minio:
+  business_os_backend_node_modules:
+  business_os_frontend_node_modules:

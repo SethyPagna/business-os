@@ -1,5 +1,21 @@
 'use strict'
 
+if (process.env.BUSINESS_OS_WORKER_ROLE === 'import-worker') {
+  require('./src/workers/importWorker').start().catch((error) => {
+    console.error(`[import-worker] failed to start: ${error?.message || error}`)
+    process.exit(1)
+  })
+  return
+}
+
+if (process.env.BUSINESS_OS_WORKER_ROLE === 'media-worker') {
+  require('./src/workers/mediaWorker').start().catch((error) => {
+    console.error(`[media-worker] failed to start: ${error?.message || error}`)
+    process.exit(1)
+  })
+  return
+}
+
 /**
  * Backend runtime entrypoint.
  *
@@ -124,6 +140,7 @@ function mountApiRoutes(target) {
   target.use('/api/portal', require('./src/routes/portal'))
   target.use('/api/notifications', require('./src/routes/notifications'))
   target.use('/api/action-history', require('./src/routes/actionHistory'))
+  target.use('/api/runtime', require('./src/routes/runtime'))
   target.use('/api/inventory', require('./src/routes/inventory'))
   target.use('/api', require('./src/routes/sales'))
   target.use('/api', require('./src/routes/contacts'))
@@ -246,7 +263,9 @@ function bootstrapServer() {
     initializeBullQueue().catch((error) => {
       console.warn(`[import-jobs] Queue initialization skipped: ${error?.message || error}`)
     })
-    recoverImportJobs()
+    recoverImportJobs().catch((error) => {
+      console.warn(`[import-jobs] Recovery skipped: ${error?.message || error}`)
+    })
   } catch (error) {
     console.warn(`[import-jobs] Recovery skipped: ${error?.message || error}`)
   }
