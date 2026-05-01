@@ -356,6 +356,16 @@ export function ImportModal({ type, onClose, onDone }) {
     window.api.downloadImportTemplate(type)
   }
 
+  const applyContactRulePreset = (preset) => {
+    const rule = preset === 'use_imported'
+      ? 'use_imported'
+      : preset === 'keep_existing'
+        ? 'keep_existing'
+        : 'merge_blank_only'
+    const fields = fieldList.filter((field) => field !== 'name')
+    setFieldRules({ __preset: preset, ...Object.fromEntries(fields.map((field) => [field, rule])) })
+  }
+
   const handleImport = async () => {
     if (!config?.jobType) {
       notify('Unsupported import type', 'error')
@@ -461,25 +471,23 @@ export function ImportModal({ type, onClose, onDone }) {
               <option value="overwrite">Overwrite existing records</option>
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {fieldList.filter((field) => field !== 'name').slice(0, 6).map((field) => (
-              <div key={field}>
-                <label htmlFor={`contacts-field-rule-${field}`} className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {field === 'contact_options' ? 'contact options' : field.replaceAll('_', ' ')}
-                </label>
-                <select
-                  id={`contacts-field-rule-${field}`}
-                  className="input text-sm"
-                  value={fieldRules[field] || 'merge_blank_only'}
-                  onChange={(event) => setFieldRules((current) => ({ ...current, [field]: event.target.value }))}
-                >
-                  <option value="merge_blank_only">Fill blanks only</option>
-                  <option value="use_imported">Use imported value</option>
-                  <option value="keep_existing">Keep existing value</option>
-                  <option value="clear_value">Clear value</option>
-                </select>
-              </div>
-            ))}
+          <div>
+            <label htmlFor="contacts-field-rule-preset" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Contact detail handling
+            </label>
+            <select
+              id="contacts-field-rule-preset"
+              className="input"
+              value={fieldRules.__preset || 'merge_blank_only'}
+              onChange={(event) => applyContactRulePreset(event.target.value)}
+            >
+              <option value="merge_blank_only">Fill blanks only</option>
+              <option value="keep_existing">Keep existing</option>
+              <option value="use_imported">Use imported</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Conflicts focus on same name, same phone/email/contact info, and duplicate membership numbers. Blank customer membership IDs stay auto-generated.
+            </p>
           </div>
         </div>
 

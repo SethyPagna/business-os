@@ -392,15 +392,15 @@ function useDataWarmup(user, canAccessPage) {
     const runWarmup = async () => {
       if (cancelled || started) return
       started = true
-      await runWarmupBatches(loaders, 3)
+      await runWarmupBatches(loaders, 1)
     }
 
-    timeoutId = window.setTimeout(runWarmup, 220)
+    timeoutId = window.setTimeout(runWarmup, 1200)
 
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 1800 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: 2800 })
     } else {
-      followupId = window.setTimeout(runWarmup, 1100)
+      followupId = window.setTimeout(runWarmup, 2400)
     }
 
     return () => {
@@ -422,6 +422,8 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
     if (!user || !ADMIN_PAGE_SEQUENCE.includes(activePageId) || typeof window === 'undefined') return undefined
 
     let cancelled = false
+    let idleId = null
+    let timerId = null
     const currentIndex = ADMIN_PAGE_SEQUENCE.indexOf(activePageId)
     const remainingPageIds = ADMIN_PAGE_SEQUENCE.slice(currentIndex)
     const importerLoaders = remainingPageIds
@@ -436,15 +438,20 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
     const run = async () => {
       if (cancelled) return
       await Promise.allSettled([
-        runWarmupBatches(importerLoaders, 2),
-        runWarmupBatches(dataLoaders, 3),
+        runWarmupBatches(importerLoaders, 1),
+        runWarmupBatches(dataLoaders, 1),
       ])
     }
 
-    const timer = window.setTimeout(run, 80)
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 2500 })
+    } else {
+      timerId = window.setTimeout(run, 1800)
+    }
     return () => {
       cancelled = true
-      window.clearTimeout(timer)
+      if (idleId != null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId)
+      if (timerId != null) window.clearTimeout(timerId)
     }
   }, [activePageId, canAccessPage, user])
 }

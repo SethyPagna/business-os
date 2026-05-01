@@ -230,6 +230,10 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null
     const identifierMatch = skuMatch || barcodeMatch || null
     const identifierMatchSameName = identifierMatch && normalizeImportProductName(identifierMatch.name) === nameKey
+    const identifierMatchFields = [
+      skuMatch ? 'sku' : '',
+      barcodeMatch ? 'barcode' : '',
+    ].filter(Boolean)
     const identifierConflictFields = [
       skuMatch && !identifierMatchSameName ? 'sku' : '',
       barcodeMatch && !identifierMatchSameName ? 'barcode' : '',
@@ -276,7 +280,7 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       _target_product_id: targetProductId,
       _parent_id: parentId,
       _detail_signature: signature,
-      _identifier_conflict_mode: identifierConflictFields.length ? 'clear_imported' : '',
+      _identifier_conflict_mode: identifierMatchFields.length && ['new', 'create_variant'].includes(plannedAction) ? 'clear_imported' : '',
     }
     normalizedRows[index] = plannedRow
     decisions[rowIndex] = plannedAction
@@ -290,8 +294,8 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         index: rowIndex,
         existing: matchingExisting || parent || identifierMatch || null,
         plannedAction,
-        conflictType: identifierConflictFields.length ? 'identifier' : 'same_name',
-        conflictFields: identifierConflictFields,
+        conflictType: identifierConflictFields.length ? 'identifier' : (identifierMatchFields.length ? 'same_name_identifier' : 'same_name'),
+        conflictFields: identifierMatchFields,
         sameBasic: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         samePricing: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         sameImages: true,

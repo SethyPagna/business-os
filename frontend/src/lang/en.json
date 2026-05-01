@@ -521,6 +521,7 @@
   "import_needs_review": "Import needs review",
   "import_remove_failed": "Could not remove import",
   "import_removed": "Import removed",
+  "import_hidden_restart_server": "Import hidden locally. Restart or update the server to finish deleting its stored files.",
   "import_retry_failed": "Could not retry import",
   "import_retry_started": "Import retry started",
   "import_rows_label": "rows",

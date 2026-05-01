@@ -64,6 +64,19 @@ await runTest('different product name with same SKU or barcode becomes editable 
   assert.deepEqual(analysis.conflicts[0].conflictFields, ['sku', 'barcode'])
 })
 
+await runTest('same product name with same barcode still exposes identifier handling', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', barcode: 'BC-1', selling_price_usd: '15', supplier: 'Supplier B', stock_quantity: '2' },
+  ], [
+    { id: 20, name: 'Serum', barcode: 'BC-1', selling_price_usd: 12.01, supplier: 'Supplier A', created_at: '2026-01-01' },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
+  assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
+  assert.equal(analysis.conflicts[0].conflictType, 'same_name_identifier')
+  assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
+})
+
 await runTest('duplicate imported same-name rows avoid unsafe temporary row ids', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', sku: 'C-1', selling_price_usd: '3.001', stock_quantity: '1' },

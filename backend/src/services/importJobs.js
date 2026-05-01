@@ -1160,9 +1160,24 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
   let imported = 0
   let updated = 0
   let failed = 0
+  let pendingProgressRows = 0
+
+  const flushProgress = () => {
+    if (!pendingProgressRows) return
+    db.prepare(`
+      UPDATE import_jobs
+      SET processed_rows = processed_rows + ?,
+          failed_rows = ?,
+          summary_json = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(pendingProgressRows, failed, stringify({ imported, updated, failed }), jobId)
+    pendingProgressRows = 0
+  }
 
   for await (const batch of rowBatches) {
     if (isCancelled(jobId)) {
+      flushProgress()
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
       return { imported, updated, failed, cancelled: true }
     }
@@ -1180,6 +1195,11 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
     for (const row of batchRows) {
+      if (isCancelled(jobId)) {
+        flushProgress()
+        updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+        return { imported, updated, failed, cancelled: true }
+      }
       try {
         const result = await processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache })
         imported += result.imported || 0
@@ -1194,15 +1214,10 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
           raw: row,
         })
       }
-      db.prepare(`
-        UPDATE import_jobs
-        SET processed_rows = processed_rows + 1,
-            failed_rows = ?,
-            summary_json = ?,
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(failed, stringify({ imported, updated, failed }), jobId)
+      pendingProgressRows += 1
+      if (pendingProgressRows >= 25) flushProgress()
     }
+    flushProgress()
     db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
     if (totalRows) {
       updateJob(jobId, {

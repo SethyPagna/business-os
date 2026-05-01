@@ -731,12 +731,18 @@ export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFet
 export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${id}`, async () => {
   const encodedId = encodeURIComponent(id)
   const force = options.force ? '?force=1' : ''
+  let firstError = null
   try {
     return await apiFetch('DELETE', `/api/import-jobs/${encodedId}${force}`, {})
   } catch (error) {
-    const message = String(error?.message || '')
-    if ((Number(error?.status) === 404 || /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) && !/\/delete<\/pre>/i.test(message)) {
-      return apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, { force: !!options.force })
+    firstError = error
+  }
+  try {
+    return await apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, { force: !!options.force })
+  } catch (error) {
+    const message = String(error?.message || firstError?.message || '')
+    if (Number(error?.status) === 404 || /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) {
+      throw new Error('Import remove route is unavailable. Restart or update the server, then try Remove import again.')
     }
     throw error
   }

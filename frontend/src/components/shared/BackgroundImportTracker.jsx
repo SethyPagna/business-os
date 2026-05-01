@@ -137,17 +137,19 @@ export default function BackgroundImportTracker() {
   const [jobs, setJobs] = useState([])
   const [expanded, setExpanded] = useState(false)
   const [busyJobId, setBusyJobId] = useState('')
+  const [hiddenJobIds, setHiddenJobIds] = useState(() => new Set())
   const aliveRef = useRef(true)
   const timerRef = useRef(null)
   const jobsSignatureRef = useRef('')
 
   const visibleJobs = useMemo(() => (
     dedupeJobsById(jobs).filter((job) => {
+      if (hiddenJobIds.has(String(job?.id || ''))) return false
       const status = normalizeJobStatus(job)
       if (ACTIVE_STATUSES.has(status) || REVIEW_STATUSES.has(status)) return true
-      return DONE_STATUSES.has(status) && isRecent(job, 60 * 60 * 1000)
+      return DONE_STATUSES.has(status) && isRecent(job, 10 * 60 * 1000)
     }).slice(0, 8)
-  ), [jobs])
+  ), [hiddenJobIds, jobs])
 
   const activeJobs = useMemo(() => visibleJobs.filter((job) => ACTIVE_STATUSES.has(normalizeJobStatus(job))), [visibleJobs])
   const reviewJobs = useMemo(() => visibleJobs.filter((job) => REVIEW_STATUSES.has(normalizeJobStatus(job))), [visibleJobs])
@@ -284,13 +286,19 @@ export default function BackgroundImportTracker() {
     const removedId = String(job.id)
     setBusyJobId(removedId)
     try {
-      await window.api.deleteImportJob(removedId)
+      await window.api.deleteImportJob(removedId, { force: true })
       const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== removedId)
       jobsSignatureRef.current = buildJobsSignature(filteredJobs)
+      setHiddenJobIds((current) => new Set([...current, removedId]))
       startTransition(() => setJobs(filteredJobs))
       await loadJobs()
       notify(t('import_removed') || 'Import removed', 'success')
     } catch (error) {
+      if (/remove route is unavailable|Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(String(error?.message || ''))) {
+        setHiddenJobIds((current) => new Set([...current, removedId]))
+        notify(t('import_hidden_restart_server') || 'Import hidden locally. Restart/update the server to finish deleting its stored files.', 'warning')
+        return
+      }
       notify(error?.message || (t('import_remove_failed') || 'Could not remove import'), 'error')
     } finally {
       setBusyJobId('')

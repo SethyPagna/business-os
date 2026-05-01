@@ -363,7 +363,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
         const incomingImages = getIncomingImageFilenames(entry.row)
         nextImageDecisions[index] = incomingImages.length ? (entry.plannedAction === 'merge_stock' ? 'keep_existing' : 'replace_with_csv') : 'keep_existing'
-        if (entry.conflictType === 'identifier') nextIdentifierDecisions[index] = entry.row?._identifier_conflict_mode || 'clear_imported'
+        if ((entry.conflictFields || []).length) nextIdentifierDecisions[index] = entry.row?._identifier_conflict_mode || 'clear_imported'
       })
 
       setConflicts(nextConflicts)
@@ -442,14 +442,21 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
   const conflictGroups = useMemo(() => ({
-    sameName: conflicts.filter((entry) => entry.conflictType !== 'identifier').length,
-    identifier: conflicts.filter((entry) => entry.conflictType === 'identifier').length,
+    sameName: conflicts.filter((entry) => String(entry.conflictType || '').includes('same_name')).length,
+    identifier: conflicts.filter((entry) => (entry.conflictFields || []).length).length,
+    barcode: conflicts.filter((entry) => (entry.conflictFields || []).includes('barcode')).length,
+    sku: conflicts.filter((entry) => (entry.conflictFields || []).includes('sku')).length,
   }), [conflicts])
   const visibleConflicts = useMemo(() => {
     const query = conflictQuery.trim().toLowerCase()
     return conflicts.filter((entry) => {
-      const type = entry.conflictType === 'identifier' ? 'identifier' : 'same_name'
-      if (conflictFilter !== 'all' && conflictFilter !== type) return false
+      const type = String(entry.conflictType || '')
+      const fields = entry.conflictFields || []
+      if (conflictFilter === 'same_name' && !type.includes('same_name')) return false
+      if (conflictFilter === 'identifier' && !fields.length) return false
+      if (conflictFilter === 'barcode' && !fields.includes('barcode')) return false
+      if (conflictFilter === 'sku' && !fields.includes('sku')) return false
+      if (!['all', 'same_name', 'identifier', 'barcode', 'sku'].includes(conflictFilter)) return false
       if (!query) return true
       const row = entry.row || {}
       const existing = entry.existing || {}
@@ -503,10 +510,26 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setIdentifierDecisions((current) => {
       const next = { ...current }
       conflicts.forEach((entry) => {
-        if (selectedConflictIds.has(entry.index) && entry.conflictType === 'identifier') next[entry.index] = value
+        if (selectedConflictIds.has(entry.index) && (entry.conflictFields || []).length) next[entry.index] = value
       })
       return next
     })
+  }
+
+  const applyFieldRulePreset = (preset) => {
+    const fields = [
+      'category', 'brand', 'unit', 'supplier', 'description',
+      'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
+      'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
+      'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
+      'purchase_price_usd', 'purchase_price_khr', 'low_stock_threshold',
+    ]
+    const rule = preset === 'use_imported'
+      ? 'use_imported'
+      : preset === 'keep_existing'
+        ? 'keep_existing'
+        : 'merge_blank_only'
+    setFieldRules({ __preset: preset, ...Object.fromEntries(fields.map((field) => [field, rule])) })
   }
 
   return (
@@ -650,7 +673,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     className="input text-xs"
                     value={conflictQuery}
                     onChange={(event) => setConflictQuery(event.target.value)}
-                    placeholder="Search conflicts by name, SKU, barcode, brand, category..."
+                    placeholder="Search name, barcode, SKU, brand, category..."
                     autoComplete="off"
                   />
                   <div className="flex flex-wrap gap-1.5 text-xs">
@@ -658,6 +681,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       ['all', `All (${conflicts.length})`],
                       ['same_name', `Same name (${conflictGroups.sameName})`],
                       ['identifier', `SKU/barcode (${conflictGroups.identifier})`],
+                      ['barcode', `Barcode (${conflictGroups.barcode})`],
+                      ['sku', `SKU (${conflictGroups.sku})`],
                     ].map(([value, label]) => (
                       <button
                         key={value}
@@ -693,49 +718,21 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   ))}
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('clear_imported')}>Clear duplicate SKU/barcode</button>
                   <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('allow_duplicate')}>Allow same SKU/barcode</button>
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  {[
-                    ['category', 'Category'],
-                    ['brand', 'Brand'],
-                    ['unit', 'Unit'],
-                    ['supplier', 'Supplier'],
-                    ['description', 'Description'],
-                    ['selling_price_usd', 'Sell USD'],
-                    ['selling_price_khr', 'Sell KHR'],
-                    ['special_price_usd', 'Special USD'],
-                    ['special_price_khr', 'Special KHR'],
-                    ['discount_enabled', 'Discount enabled'],
-                    ['discount_type', 'Discount type'],
-                    ['discount_percent', 'Discount %'],
-                    ['discount_amount_usd', 'Discount USD'],
-                    ['discount_amount_khr', 'Discount KHR'],
-                    ['discount_label', 'Discount label'],
-                    ['discount_badge_color', 'Badge color'],
-                    ['discount_starts_at', 'Discount start'],
-                    ['discount_ends_at', 'Discount end'],
-                    ['purchase_price_usd', 'Buy USD'],
-                    ['purchase_price_khr', 'Buy KHR'],
-                    ['low_stock_threshold', 'Threshold'],
-                    ['parent_id', 'Parent ID'],
-                    ['is_group', 'Is Group'],
-                  ].map(([field, label]) => (
-                    <div key={field}>
-                      <label htmlFor={`products-field-rule-${field}`} className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</label>
-                      <select
-                        id={`products-field-rule-${field}`}
-                        className="input text-xs"
-                        value={fieldRules[field] || 'merge_blank_only'}
-                        onChange={(event) => setFieldRules((current) => ({ ...current, [field]: event.target.value }))}
-                      >
-                        <option value="merge_blank_only">Fill blanks only</option>
-                        <option value="use_imported">Use imported value</option>
-                        <option value="keep_existing">Keep existing value</option>
-                        <option value="append_unique">Append unique values</option>
-                        <option value="clear_value">Clear value</option>
-                      </select>
-                    </div>
-                  ))}
+                  <label className="ml-auto inline-flex min-w-[13rem] items-center gap-2">
+                    <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
+                    <select
+                      className="input h-8 min-w-[11rem] py-1 text-xs"
+                      value={fieldRules.__preset || 'merge_blank_only'}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        applyFieldRulePreset(value)
+                      }}
+                    >
+                      <option value="merge_blank_only">Fill blanks only</option>
+                      <option value="keep_existing">Keep existing</option>
+                      <option value="use_imported">Use imported</option>
+                    </select>
+                  </label>
                 </div>
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
@@ -749,10 +746,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
-                      {conflictType === 'identifier' ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
-                      <span className={`rounded px-1.5 py-0.5 ${sameBasic ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Basic: {sameBasic ? 'Same' : 'Different'}</span>
-                      <span className={`rounded px-1.5 py-0.5 ${samePricing ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>Pricing: {samePricing ? 'Same' : 'Different'}</span>
-                      <span className={`rounded px-1.5 py-0.5 ${sameImages ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>Images: {sameImages ? 'Same' : 'Different'}</span>
+                      {String(conflictType || '').includes('same_name') ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">Same name</span> : null}
+                      {conflictFields.length ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
+                      {!sameBasic || !samePricing ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">Different details</span> : <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">Same details</span>}
+                      {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
                     </div>
                   </div>
 
@@ -763,7 +760,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     </div>
                   ) : null}
 
-                  {conflictType === 'identifier' ? (
+                  {conflictFields.length ? (
                     <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
                       <div className="font-semibold">Identifier conflict</div>
                       <div>Imported: SKU {row.sku || '-'} / Barcode {row.barcode || '-'}</div>

@@ -1,37 +1,57 @@
 # Business OS
 
-Business OS is meant to run like a normal Windows business app.
+Business OS is designed for a normal Windows business laptop: one setup, one start button, and one public Cloudflare link for other devices.
 
-## Everyday Use
+## Blank Laptop Setup
 
-1. Run `run\setup.bat` once on a new laptop.
-2. Run `run\start-server.bat` whenever you want to open the app. This now starts the Docker app/runtime by default.
-3. Open the local URL printed by the start window, usually `http://localhost:4000`.
-4. Use `https://admin.leangcosmetics.dpdns.org` for staff/admin access once the admin hostname is added in Cloudflare.
-5. Use `https://leangcosmetics.dpdns.org/public` for the public customer portal.
-6. Run `run\stop-server.bat` to stop the app.
+Start here if the laptop has nothing installed.
 
-That is the normal workflow. You do not need to run Redis, Postgres, MinIO, Docker Compose, or import workers by hand.
+1. Download or copy the Business OS folder onto the laptop.
+2. Right-click `run\setup.bat` and choose **Run as administrator**.
+3. Let setup install or check Docker Desktop, Node.js, Git, OpenSSL, and Cloudflare support files.
+4. If Windows asks for a restart, restart the laptop and run `run\setup.bat` again.
+5. When setup finishes, run `run\start-server.bat`.
+6. Open the URL printed in the start window.
 
-If the start window says the public URL check failed, the app still started locally, but Cloudflare Tunnel is not connected to the custom domain yet. Check the tunnel token file and Cloudflare tunnel health before using public devices. In the Cloudflare Tunnel dashboard, the public hostname origin should be `http://127.0.0.1:4000` when the tunnel runs on Windows, or `http://app:4000` when the tunnel connector runs inside Docker.
+Normal URLs:
 
-Cloudflare setup details are in `ops\docs\cloudflare-ready-setup.md`.
+- Local/admin on the server laptop: `http://localhost:4000`
+- Staff/admin from other devices: `https://admin.leangcosmetics.dpdns.org`
+- Public customer portal: `https://leangcosmetics.dpdns.org/public`
 
-## What Setup Does
+You do not need to run Docker Compose, Redis, Postgres, MinIO, workers, or Cloudflare commands by hand. The start script owns that.
 
-`run\setup.bat` checks for Node.js, Docker Desktop, Git, and OpenSSL. When Windows allows it, missing tools are installed with `winget`. If Windows needs administrator approval or a restart, the script tells you what to do and stops clearly.
+## Daily Use
 
-Docker Desktop is required because Business OS uses Redis, Postgres, and MinIO for large imports and future scale features. The live business database still stays local SQLite until an admin explicitly runs the in-app migration wizard.
+1. Turn on the server laptop.
+2. Open Docker Desktop if Windows did not start it automatically.
+3. Run `run\start-server.bat`.
+4. Use the admin or public Cloudflare URL on phones/tablets/other computers.
+5. Run `run\stop-server.bat` before shutting the laptop down.
+
+If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. The tunnel origin should point to `http://127.0.0.1:4000` for the Windows-host runtime, or `http://app:4000` for the Docker-only private release.
 
 ## Data Safety
 
-Your business data remains on this computer by default:
+Your live business data currently stays on the server laptop under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Backups, uploaded files, imports, and the SQLite database live under that organization folder. The app does not silently switch your live data to Postgres or MinIO.
+Backups, uploaded files, imports, and the live SQLite database are stored there. Backup and reset actions cancel running imports first so old background jobs cannot keep writing after a destructive action.
 
-In Settings > Backup, the Data migration panel has a one-button safety step. It automatically creates a local safety backup beside `business-os-data`, then syncs the same live data to Google Drive when Drive is connected. No live data is moved during that step, and the app keeps using SQLite/local files until the verified migration runner is enabled and explicitly confirmed.
+Google Drive sync is managed in Settings > Backup. Use it as a backup/sync target, not as the only copy of the business database.
+
+## Large Imports
+
+Large product, inventory, sales, customer, supplier, and delivery imports run as background jobs.
+
+- Uploading returns quickly with a job tracker at the top of the app.
+- CSV/TSV parsing preserves Khmer text and rounds money/percent values upward to two decimals.
+- Product conflicts are grouped by same name and identifier conflicts such as same SKU/barcode.
+- Imports wait for review before applying large changes.
+- Cancel, retry, failed-row download, and remove are available from the top tracker.
+
+Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so uploaded temp files are cleaned.
 
 ## Support Commands
 
@@ -61,6 +81,6 @@ Business/user machine:
 3. Run `run\docker\start.bat`.
 4. Run `run\docker\update.bat` whenever a new version is published.
 
-The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into the runtime containers. It also refuses to silently run SQLite in production release mode.
+The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into runtime containers. It also refuses to silently run SQLite in production release mode.
 
 Important: the current source app still contains SQLite-specific route code. The Docker-only release tooling and migrator are in place, but production serving remains guarded until the route-level Postgres data-layer cutover is completed. This prevents accidental data loss or a hidden throwaway SQLite database inside Docker.

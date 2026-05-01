@@ -1510,8 +1510,6 @@ export default function Inventory() {
         </div>
       </div>
 
-      <ActionHistoryBar history={actionHistory} className="mb-3" />
-
       {selectedMovementGroups.length > 0 ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} movement group{selectedMovementGroups.length === 1 ? '' : 's'} selected</span>
@@ -1705,6 +1703,7 @@ export default function Inventory() {
             onClear={clearInventoryFilters}
             compact
           />
+          <ActionHistoryBar history={actionHistory} className="shrink-0" />
         </div>
       </div>
 
