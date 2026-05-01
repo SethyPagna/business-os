@@ -4,7 +4,6 @@ import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
 import { useApp } from '../../AppContext'
-import { parseCsvRows } from '../../utils/csvImport'
 
 /**
  * 1. useContactSelection
@@ -244,63 +243,33 @@ export function ContactTable({
 /**
  * 5. ImportModal
  * 5.1 Shared CSV import surface for customers/suppliers/delivery contacts.
- * 5.2 Enforces explicit conflict mode before submit.
+ * 5.2 Uses the server import-job pipeline so large files do not render thousands of rows.
  */
-function parseCsvText(text) {
-  return parseCsvRows(text)
-    .map((row, index) => ({ row, rowNumber: Number(row._rowNumber || index + 2) }))
-    .filter((entry) => String(entry.row?.name || '').trim())
+function countCsvDataRows(text) {
+  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim())
+  return Math.max(0, lines.length - 1)
 }
 
 const CONTACT_IMPORT_CONFIG = {
   customer: {
     label: 'Customers',
-    importer: () => window.api.bulkImportCustomers,
-    loader: () => window.api.getCustomers,
+    jobType: 'customers',
     fields: ['name', 'membership_number', 'contact_options', 'phone', 'email', 'address', 'company', 'notes'],
-    match(existingRows, incoming) {
-      const incomingMembership = String(incoming.membership_number || '').trim().toLowerCase()
-      const incomingPhone = String(incoming.phone || '').trim()
-      const incomingName = String(incoming.name || '').trim().toLowerCase()
-      return existingRows.find((row) => (
-        (incomingMembership && String(row.membership_number || '').trim().toLowerCase() === incomingMembership)
-        || (incomingPhone && String(row.phone || '').trim() === incomingPhone)
-        || (incomingName && String(row.name || '').trim().toLowerCase() === incomingName)
-      )) || null
-    },
   },
   supplier: {
     label: 'Suppliers',
-    importer: () => window.api.bulkImportSuppliers,
-    loader: () => window.api.getSuppliers,
+    jobType: 'suppliers',
     fields: ['name', 'contact_options', 'phone', 'email', 'address', 'company', 'contact_person', 'notes'],
-    match(existingRows, incoming) {
-      const incomingName = String(incoming.name || '').trim().toLowerCase()
-      const incomingPhone = String(incoming.phone || '').trim()
-      return existingRows.find((row) => (
-        (incomingName && String(row.name || '').trim().toLowerCase() === incomingName)
-        || (incomingPhone && String(row.phone || '').trim() === incomingPhone)
-      )) || null
-    },
   },
   deliveryContact: {
     label: 'Delivery',
-    importer: () => window.api.bulkImportDeliveryContacts,
-    loader: () => window.api.getDeliveryContacts,
+    jobType: 'delivery_contacts',
     fields: ['name', 'contact_options', 'phone', 'area', 'address', 'notes'],
-    match(existingRows, incoming) {
-      const incomingName = String(incoming.name || '').trim().toLowerCase()
-      const incomingPhone = String(incoming.phone || '').trim()
-      return existingRows.find((row) => (
-        (incomingName && String(row.name || '').trim().toLowerCase() === incomingName)
-        || (incomingPhone && String(row.phone || '').trim() === incomingPhone)
-      )) || null
-    },
   },
 }
 
 export function ImportModal({ type, onClose, onDone }) {
-  const { user, notify, t } = useApp()
+  const { notify, t } = useApp()
   const config = CONTACT_IMPORT_CONFIG[type]
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
@@ -309,62 +278,31 @@ export function ImportModal({ type, onClose, onDone }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [filesOpen, setFilesOpen] = useState(false)
-  const [previewRows, setPreviewRows] = useState([])
-  const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
-  const [rowModes, setRowModes] = useState({})
+  const [rowCount, setRowCount] = useState(0)
+  const aliveRef = useRef(true)
+  const inFlightRef = useRef(false)
 
   const typeLabel = config?.label || 'Contacts'
-  const importer = config?.importer?.()
-  const loadExisting = config?.loader?.()
   const fieldList = config?.fields || []
-  const conflictRows = useMemo(() => previewRows.filter((entry) => !!entry.existing), [previewRows])
 
-  const analyzeCsv = async (text, name) => {
-    if (!config) return
-    const parsedRows = parseCsvText(text)
-    setCsvText(String(text || ''))
+  useEffect(() => () => {
+    aliveRef.current = false
+  }, [])
+
+  const loadCsvText = (text, name) => {
+    const nextText = String(text || '')
+    const nextCount = countCsvDataRows(nextText)
+    setCsvText(nextText)
     setFileName(String(name || 'contacts.csv'))
+    setRowCount(nextCount)
     setResult(null)
-    setPreviewRows([])
-    setSelectedConflictIds(new Set())
-    setRowModes({})
-
-    if (!parsedRows.length) {
-      notify('Choose a CSV with at least one data row.', 'error')
-      return
-    }
-
-    setLoading(true)
-    try {
-      const existingRows = await loadExisting()
-      const safeExistingRows = Array.isArray(existingRows) ? existingRows : []
-      const nextPreview = parsedRows.map((entry, index) => {
-        const existing = config.match(safeExistingRows, entry.row)
-        return {
-          id: index,
-          rowNumber: entry.rowNumber,
-          row: entry.row,
-          existing,
-        }
-      })
-      const nextRowModes = {}
-      nextPreview.forEach((entry) => {
-        nextRowModes[entry.id] = entry.existing ? conflictMode : 'new'
-      })
-      setPreviewRows(nextPreview)
-      setRowModes(nextRowModes)
-      setSelectedConflictIds(new Set(nextPreview.filter((entry) => entry.existing).map((entry) => entry.id)))
-    } catch (error) {
-      notify(error?.message || 'Failed to analyze import file', 'error')
-    } finally {
-      setLoading(false)
-    }
+    if (!nextCount) notify('Choose a CSV with at least one data row.', 'error')
   }
 
   const handlePickFile = async () => {
     const picked = await window.api.openCSVDialog?.()
     if (!picked?.content) return
-    await analyzeCsv(picked.content, picked.name || 'contacts.csv')
+    loadCsvText(picked.content, picked.name || 'contacts.csv')
   }
 
   const handleChooseExistingFile = async (publicPath, asset) => {
@@ -381,7 +319,7 @@ export function ImportModal({ type, onClose, onDone }) {
       if (authToken) headers['x-auth-session'] = authToken
       const response = await fetch(`${baseUrl}${path}`, { headers })
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
-      await analyzeCsv(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
+      loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
     } catch (error) {
       notify(error?.message || 'Failed to load CSV from Files', 'error')
     }
@@ -391,76 +329,61 @@ export function ImportModal({ type, onClose, onDone }) {
     window.api.downloadImportTemplate(type)
   }
 
-  const toggleConflictSelection = (rowId) => {
-    setSelectedConflictIds((previous) => {
-      const next = new Set(previous)
-      if (next.has(rowId)) next.delete(rowId)
-      else next.add(rowId)
-      return next
-    })
-  }
-
-  const applyModeToSelected = (mode) => {
-    setRowModes((previous) => {
-      const next = { ...previous }
-      previewRows.forEach((entry) => {
-        if (entry.existing && selectedConflictIds.has(entry.id)) next[entry.id] = mode
-      })
-      return next
-    })
-  }
-
-  const toggleSelectAllConflicts = (checked) => {
-    if (!checked) {
-      setSelectedConflictIds(new Set())
-      return
-    }
-    setSelectedConflictIds(new Set(conflictRows.map((entry) => entry.id)))
-  }
-
   const handleImport = async () => {
-    if (!importer) {
+    if (!config?.jobType) {
       notify('Unsupported import type', 'error')
       return
     }
-    if (!previewRows.length) {
+    if (!rowCount) {
       notify('Choose a CSV file first.', 'error')
       return
     }
+    if (inFlightRef.current) return
 
+    inFlightRef.current = true
     setLoading(true)
     try {
-      const response = await importer({
-        rows: previewRows.map((entry) => ({
-          ...entry.row,
-          _rowNumber: entry.rowNumber,
-          _conflict_mode: rowModes[entry.id] || (entry.existing ? conflictMode : 'merge'),
-          _field_rules: entry.existing ? fieldRules : {},
-        })),
-        conflictMode,
-        userId: user?.id,
-        userName: user?.name,
+      const created = await window.api.createImportJob({
+        type: config.jobType,
+        policy: {
+          source: 'contacts_modal',
+          conflictMode,
+          fieldRules,
+        },
       })
-      setResult(response || null)
-      if (response?.success !== false) {
-        notify('Import finished', 'success')
-        onDone?.()
+      const job = created?.job || created
+      if (!job?.id) throw new Error('Import job was not created')
+      await window.api.uploadImportJobCsv({
+        jobId: job.id,
+        text: csvText,
+        fileName: fileName || `${config.jobType}.csv`,
+      })
+      await window.api.startImportJob(job.id)
+      const response = {
+        imported: 0,
+        updated: 0,
+        failed: 0,
+        queued: rowCount,
+        jobId: job.id,
+        errors: [],
+        conflictMode,
       }
+      setResult(response || null)
+      notify(`Import job started: ${rowCount} row(s) queued. You can keep using the app.`, 'success')
+      onDone?.()
     } catch (error) {
       notify(error?.message || 'Import failed', 'error')
     } finally {
+      inFlightRef.current = false
       setLoading(false)
     }
   }
-
-  const selectedConflictCount = selectedConflictIds.size
-  const unresolvedConflicts = conflictRows.filter((entry) => !rowModes[entry.id] || rowModes[entry.id] === 'ask').length
 
   return (
     <Modal title={`Import ${typeLabel}`} onClose={onClose} wide>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Review matched rows, select the conflicts you want to change together, then apply row actions and field rules before importing.
+          Large files are processed in the background. Choose a conflict policy now; the server will validate, match, import, and report row errors without rendering every row.
         </p>
 
         <div className="flex flex-wrap gap-2">
@@ -477,6 +400,23 @@ export function ImportModal({ type, onClose, onDone }) {
             {fileName || 'No file selected'}
           </div>
         </div>
+
+        {rowCount ? (
+          <div className="grid gap-2 text-center text-xs sm:grid-cols-3">
+            <div className="rounded-lg bg-slate-50 p-2 dark:bg-zinc-800/70">
+              <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{rowCount}</div>
+              <div className="text-slate-500 dark:text-slate-400">Rows queued</div>
+            </div>
+            <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
+              <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{conflictMode}</div>
+              <div className="text-blue-600 dark:text-blue-400">Default conflict action</div>
+            </div>
+            <div className="rounded-lg bg-emerald-50 p-2 dark:bg-emerald-900/20">
+              <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300">Job</div>
+              <div className="text-emerald-600 dark:text-emerald-400">Background import</div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-3 md:grid-cols-2">
           <div>
@@ -517,118 +457,13 @@ export function ImportModal({ type, onClose, onDone }) {
           </div>
         </div>
 
-        {previewRows.length ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              <div className="rounded-lg bg-slate-50 p-2 dark:bg-zinc-800/70">
-                <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{previewRows.length}</div>
-                <div className="text-slate-500 dark:text-slate-400">Rows</div>
-              </div>
-              <div className="rounded-lg bg-yellow-50 p-2 dark:bg-yellow-900/20">
-                <div className="text-lg font-bold text-yellow-700 dark:text-yellow-300">{conflictRows.length}</div>
-                <div className="text-yellow-600 dark:text-yellow-400">Matches</div>
-              </div>
-              <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
-                <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{selectedConflictCount}</div>
-                <div className="text-blue-600 dark:text-blue-400">Selected conflicts</div>
-              </div>
-            </div>
-
-            {conflictRows.length ? (
-              <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={selectedConflictCount > 0 && selectedConflictCount === conflictRows.length}
-                      onChange={(event) => toggleSelectAllConflicts(event.target.checked)}
-                    />
-                    All matches
-                  </label>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyModeToSelected('skip')}>Skip selected</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyModeToSelected('merge')}>Merge selected</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyModeToSelected('overwrite')}>Overwrite selected</button>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="max-h-[46vh] overflow-auto rounded-xl border border-gray-200 dark:border-zinc-700">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
-                  <tr>
-                    <th className="w-10 px-3 py-2" />
-                    <th className="px-3 py-2">Row</th>
-                    <th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2">Match</th>
-                    <th className="px-3 py-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                  {previewRows.map((entry) => (
-                    <tr key={entry.id} className="align-top">
-                      <td className="px-3 py-2">
-                        {entry.existing ? (
-                          <input
-                            type="checkbox"
-                            checked={selectedConflictIds.has(entry.id)}
-                            onChange={() => toggleConflictSelection(entry.id)}
-                            aria-label={`Select conflict row ${entry.rowNumber}`}
-                          />
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{entry.rowNumber}</td>
-                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
-                        <div>{entry.row.name}</div>
-                        {type === 'customer' && entry.row.membership_number ? (
-                          <div className="font-mono text-[11px] text-gray-400">{entry.row.membership_number}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                        {entry.existing ? (
-                          <div>
-                            <div>{entry.existing.name || '-'}</div>
-                            {type === 'customer' && entry.existing.membership_number ? (
-                              <div className="font-mono text-[11px]">{entry.existing.membership_number}</div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="text-emerald-600 dark:text-emerald-400">New</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {entry.existing ? (
-                          <select
-                            className="input text-sm"
-                            value={rowModes[entry.id] || conflictMode}
-                            onChange={(event) => setRowModes((current) => ({ ...current, [entry.id]: event.target.value }))}
-                          >
-                            <option value="skip">Skip</option>
-                            <option value="merge">Merge</option>
-                            <option value="overwrite">Overwrite</option>
-                          </select>
-                        ) : (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
-                            Create
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {unresolvedConflicts > 0 ? (
-              <div className="rounded-lg bg-yellow-50 p-2 text-xs text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300">
-                {unresolvedConflicts} conflict row(s) still need an action.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
         {result ? (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-800/70">
+            {result?.queued ? <div>Queued: {Number(result.queued || 0)} row(s). Progress is shown at the top of the app.</div> : null}
             <div>Imported: {Number(result?.imported || 0)}</div>
+            <div>Updated: {Number(result?.updated || 0)}</div>
+            <div>Failed: {Number(result?.failed || 0)}</div>
+            {result?.jobId ? <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Job: {result.jobId}</div> : null}
             {Array.isArray(result?.errors) && result.errors.length ? (
               <div className="mt-2 max-h-32 overflow-y-auto rounded border border-red-200 bg-red-50 p-2 text-xs text-red-600 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-300">
                 {result.errors.map((message, index) => <div key={`${message}-${index}`}>{message}</div>)}
@@ -638,7 +473,7 @@ export function ImportModal({ type, onClose, onDone }) {
         ) : null}
 
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={loading || unresolvedConflicts > 0 || !previewRows.length} onClick={handleImport}>
+          <button type="button" className="btn-primary flex-1" disabled={loading || !rowCount} onClick={handleImport}>
             {loading ? 'Importing...' : 'Import'}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>Close</button>

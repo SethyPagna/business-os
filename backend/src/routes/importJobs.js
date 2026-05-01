@@ -6,7 +6,7 @@ const express = require('express')
 const multer = require('multer')
 const { IMPORTS_PATH, IMPORT_MAX_CSV_MB, IMPORT_MAX_ZIP_MB } = require('../config')
 const { ok, err } = require('../helpers')
-const { authToken, requirePermission, routeRateLimit, getAuditActor } = require('../middleware')
+const { authToken, hasPermission, routeRateLimit, getAuditActor } = require('../middleware')
 const { sanitizeOriginalFileName } = require('../fileAssets')
 const {
   addJobFile,
@@ -22,8 +22,43 @@ const {
 } = require('../services/importJobs')
 
 const router = express.Router()
-const ALLOWED_TYPES = new Set(['products'])
+const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'sales'])
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
+
+function permissionForImportType(type) {
+  const normalized = String(type || 'products').trim().toLowerCase()
+  if (['customers', 'suppliers', 'delivery_contacts'].includes(normalized)) return 'contacts'
+  if (normalized === 'inventory') return 'inventory'
+  if (normalized === 'sales') return 'sales'
+  return 'products'
+}
+
+function requireImportPermission(req, res, next) {
+  const existingJob = req.params?.id ? getImportJob(req.params.id) : null
+  const type = existingJob?.type || req.body?.type || req.query?.type || 'products'
+  const permission = permissionForImportType(type)
+  if (hasPermission(req.user, permission)) return next()
+  return res.status(403).json({
+    success: false,
+    error: 'No permission',
+    code: 'forbidden',
+    permission,
+  })
+}
+
+function hasAnyImportPermission(user) {
+  return ['products', 'contacts', 'inventory', 'sales'].some((permission) => hasPermission(user, permission))
+}
+
+function requireAnyImportPermission(req, res, next) {
+  if (hasAnyImportPermission(req.user)) return next()
+  return res.status(403).json({
+    success: false,
+    error: 'No permission',
+    code: 'forbidden',
+    permission: 'imports',
+  })
+}
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
@@ -104,18 +139,20 @@ function parseRelativePaths(req) {
   }
 }
 
-router.get('/queue/status', authToken, requirePermission('products'), (_req, res) => {
+router.get('/queue/status', authToken, requireAnyImportPermission, (_req, res) => {
   ok(res, { queue: getQueueStatus() })
 })
 
-router.get('/', authToken, requirePermission('products'), (req, res) => {
-  ok(res, { jobs: listImportJobs({ limit: req.query?.limit || 50 }) })
+router.get('/', authToken, requireAnyImportPermission, (req, res) => {
+  const jobs = listImportJobs({ limit: req.query?.limit || 50 })
+    .filter((job) => hasPermission(req.user, permissionForImportType(job.type)))
+  ok(res, { jobs })
 })
 
-router.post('/', authToken, requirePermission('products'), routeRateLimit({ name: 'import_jobs:create', max: 30, windowMs: 15 * 60 * 1000, message: 'Too many import jobs.' }), (req, res) => {
+router.post('/', authToken, requireImportPermission, routeRateLimit({ name: 'import_jobs:create', max: 30, windowMs: 15 * 60 * 1000, message: 'Too many import jobs.' }), (req, res) => {
   try {
     const type = String(req.body?.type || 'products').trim().toLowerCase()
-    if (!ALLOWED_TYPES.has(type)) return err(res, 'Only product import jobs are supported right now')
+    if (!ALLOWED_TYPES.has(type)) return err(res, 'Unsupported import job type')
     const actor = getAuditActor(req)
     const job = createImportJob({
       type,
@@ -129,7 +166,7 @@ router.post('/', authToken, requirePermission('products'), routeRateLimit({ name
   }
 })
 
-router.get('/:id', authToken, requirePermission('products'), (req, res) => {
+router.get('/:id', authToken, requireImportPermission, (req, res) => {
   const job = getJobOr404(req, res)
   if (!job) return
   ok(res, {
@@ -147,7 +184,7 @@ router.get('/:id', authToken, requirePermission('products'), (req, res) => {
   })
 })
 
-router.post('/:id/csv', authToken, requirePermission('products'), importUpload.single('file'), (req, res) => {
+router.post('/:id/csv', authToken, requireImportPermission, importUpload.single('file'), (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
@@ -161,10 +198,11 @@ router.post('/:id/csv', authToken, requirePermission('products'), importUpload.s
   }
 })
 
-router.post('/:id/zip', authToken, requirePermission('products'), importUpload.single('file'), (req, res) => {
+router.post('/:id/zip', authToken, requireImportPermission, importUpload.single('file'), (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
+    if (job.type !== 'products') return err(res, 'Image ZIP imports are only supported for products')
     if (!req.file) return err(res, 'ZIP file required')
     const ext = path.extname(String(req.file.originalname || '')).toLowerCase()
     if (ext !== '.zip') return err(res, 'Upload a ZIP file for images')
@@ -175,10 +213,11 @@ router.post('/:id/zip', authToken, requirePermission('products'), importUpload.s
   }
 })
 
-router.post('/:id/images', authToken, requirePermission('products'), importUpload.array('files', 200), (req, res) => {
+router.post('/:id/images', authToken, requireImportPermission, importUpload.array('files', 200), (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
+    if (job.type !== 'products') return err(res, 'Image imports are only supported for products')
     const files = Array.isArray(req.files) ? req.files : []
     const relativePaths = parseRelativePaths(req)
     const saved = files.map((file, index) => addJobFile(job.id, file, 'image', relativePaths[index] || file.originalname))
@@ -188,7 +227,7 @@ router.post('/:id/images', authToken, requirePermission('products'), importUploa
   }
 })
 
-router.post('/:id/start', authToken, requirePermission('products'), routeRateLimit({ name: 'import_jobs:start', max: 20, windowMs: 15 * 60 * 1000, message: 'Too many import starts.' }), async (req, res) => {
+router.post('/:id/start', authToken, requireImportPermission, routeRateLimit({ name: 'import_jobs:start', max: 20, windowMs: 15 * 60 * 1000, message: 'Too many import starts.' }), async (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
@@ -200,13 +239,13 @@ router.post('/:id/start', authToken, requirePermission('products'), routeRateLim
   }
 })
 
-router.post('/:id/cancel', authToken, requirePermission('products'), (req, res) => {
+router.post('/:id/cancel', authToken, requireImportPermission, (req, res) => {
   const job = getJobOr404(req, res)
   if (!job) return
   ok(res, { job: markJobCancelled(job.id) })
 })
 
-router.post('/:id/retry', authToken, requirePermission('products'), async (req, res) => {
+router.post('/:id/retry', authToken, requireImportPermission, async (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
@@ -217,7 +256,7 @@ router.post('/:id/retry', authToken, requirePermission('products'), async (req, 
   }
 })
 
-router.get('/:id/errors.csv', authToken, requirePermission('products'), (req, res) => {
+router.get('/:id/errors.csv', authToken, requireImportPermission, (req, res) => {
   const job = getJobOr404(req, res)
   if (!job) return
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')

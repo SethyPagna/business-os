@@ -7,6 +7,7 @@ import WriteConflictModal from './components/shared/WriteConflictModal'
 import PageHelpButton from './components/shared/PageHelpButton'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import NotificationCenter from './components/shared/NotificationCenter'
+import BackgroundImportTracker from './components/shared/BackgroundImportTracker'
 import Users from './components/users/Users'
 import AuditLog from './components/utils-settings/AuditLog'
 import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
@@ -753,6 +754,7 @@ export default function App() {
           <div className="flex min-w-0 items-center gap-3">
           </div>
           {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
+          <BackgroundImportTracker />
           {mountedPages.map((mountedPage) => (
             <PageSlot
               key={mountedPage}

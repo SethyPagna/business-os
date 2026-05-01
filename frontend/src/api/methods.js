@@ -719,6 +719,10 @@ async function apiFormPost(path, form, channel = 'importJobs:upload') {
 }
 
 export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', d), null, true)
+export const listImportJobs = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`importJobs:list:${q}`, () => apiFetch('GET', `/api/import-jobs${q ? `?${q}` : ''}`), null)
+}
 export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
 export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
 export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
@@ -746,7 +750,8 @@ export async function downloadImportJobErrors(jobId) {
 
 export async function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }) {
   const form = new FormData()
-  form.append('file', new Blob([String(text || '')], { type: 'text/csv;charset=utf-8' }), fileName)
+  const source = String(text || '')
+  form.append('file', new Blob([source.startsWith('\uFEFF') ? '' : '\uFEFF', source], { type: 'text/csv;charset=utf-8' }), fileName)
   return apiFormPost(`/api/import-jobs/${jobId}/csv`, form, 'importJobs:csv')
 }
 
@@ -833,7 +838,7 @@ export async function deleteFileAsset(id, payload = {}) {
  * is a base64 data-URL (set by Products.jsx browser file-picker), OR a native
  * file system path (Electron). Converts to FormData and POSTs as multipart.
  */
-export async function uploadProductImage({ productId, filePath, fileName }) {
+export async function uploadProductImage({ productId, file, filePath, fileName }) {
   void productId
   requireLiveServerWrite('products:uploadImage', {
     offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
@@ -846,7 +851,9 @@ export async function uploadProductImage({ productId, filePath, fileName }) {
 
   const fd = new FormData()
 
-  if (filePath && filePath.startsWith('data:')) {
+  if (file instanceof File) {
+    fd.append('image', file, file.name || fileName || 'product.jpg')
+  } else if (filePath && filePath.startsWith('data:')) {
     // Browser: convert base64 data-URL → Blob
     const [meta, b64] = filePath.split(',')
     const mime        = meta.match(/:(.*?);/)?.[1] || 'image/jpeg'
@@ -856,7 +863,7 @@ export async function uploadProductImage({ productId, filePath, fileName }) {
     // Electron path — should never reach browser, but handle gracefully
     throw new Error('Native file path upload not supported in browser mode')
   } else {
-    throw new Error('No image data provided')
+    throw new Error('No image file provided')
   }
 
   const res = await fetch(`${base}/api/products/upload-image`, { method: 'POST', headers, body: fd })
@@ -912,7 +919,7 @@ export function openCSVDialog() {
   return new Promise((resolve) => {
     const input  = document.createElement('input')
     input.type   = 'file'
-    input.accept = '.csv,text/csv'
+    input.accept = '.csv,.tsv,text/csv,text/tab-separated-values'
     input.onchange = async (e) => {
       const file = e.target.files?.[0]
       if (!file) { resolve(null); return }
@@ -994,6 +1001,7 @@ export const deleteCustomer = async (id) => {
 }
 export const bulkImportCustomers = d        => route('customers:bulkImport', () => apiFetch('POST', '/api/customers/bulk-import', d),      null, true)
 export const downloadCustomerTemplate = ()  => buildCSVTemplate([
+  '_conflict_mode','_field_rules',
   'name','membership_number','phone','email','address','company','notes',
   'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
   'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
@@ -1016,6 +1024,7 @@ export const deleteSupplier = async (id) => {
 }
 export const bulkImportSuppliers = d        => route('suppliers:bulkImport', () => apiFetch('POST', '/api/suppliers/bulk-import', d),      null, true)
 export const downloadSupplierTemplate = ()  => buildCSVTemplate([
+  '_conflict_mode','_field_rules',
   'name','phone','email','address','company','contact_person','notes',
   'contact_label_1','contact_name_1','contact_phone_1','contact_email_1','contact_address_1',
   'contact_label_2','contact_name_2','contact_phone_2','contact_email_2','contact_address_2',
@@ -1206,6 +1215,7 @@ export function downloadImportTemplate(type) {
   // 3) `image_conflict_mode` controls keep/replace/append behavior during bulk import.
   if (type === 'customer') return downloadCustomerTemplate()
   if (type === 'deliveryContact') return buildCSVTemplate([
+    '_conflict_mode', '_field_rules',
     'name', 'phone', 'area', 'address', 'notes',
     'contact_label_1','contact_name_1','contact_phone_1','contact_area_1',
     'contact_label_2','contact_name_2','contact_phone_2','contact_area_2',
@@ -1214,6 +1224,7 @@ export function downloadImportTemplate(type) {
   if (type === 'supplier') return downloadSupplierTemplate()
   if (type === 'sales') {
     return buildCSVTemplate([
+      '_conflict_mode',
       'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency',
       'branch', 'customer_name', 'customer_phone', 'customer_address',
       'cashier_name', 'name', 'sku', 'barcode', 'quantity',
@@ -1222,11 +1233,13 @@ export function downloadImportTemplate(type) {
   }
   if (type === 'inventory') {
     return buildCSVTemplate([
+      '_conflict_mode',
       'date', 'action', 'branch', 'name', 'sku', 'barcode', 'quantity',
       'unit_cost_usd', 'unit_cost_khr', 'reason',
     ], 'inventory-template.csv')
   }
   buildCSVTemplate([
+    '_action','_target_product_id','_parent_id','_field_rules',
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',
     'special_price_usd','special_price_khr',

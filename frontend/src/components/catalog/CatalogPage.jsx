@@ -1414,36 +1414,83 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
 ]
 
 const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
+const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
+const PORTAL_TRANSLATE_RELOAD_KEY = 'business-os:portal-translate-last-reload'
+
+function getPortalTranslateCookieTarget(sourceLang) {
+  if (typeof document === 'undefined') return ''
+  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
+  const cookie = document.cookie
+    .split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith('googtrans='))
+  if (!cookie) return ''
+  const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
+  const parts = cookieValue.split('/').filter(Boolean)
+  const target = String(parts[1] || '').trim().toLowerCase()
+  return target && target !== from ? target : ''
+}
+
+function hasPortalTranslatedMarker() {
+  if (typeof document === 'undefined') return false
+  const markerText = `${document.documentElement?.className || ''} ${document.body?.className || ''}`
+  return /\btranslated-(ltr|rtl)\b/i.test(markerText)
+}
+
+function clearGoogleTranslateCookies() {
+  if (typeof document === 'undefined') return
+  const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
+  const pathName = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/'
+  const paths = Array.from(new Set(['/', pathName || '/']))
+  const domains = ['', host, host && host.includes('.') ? `.${host}` : ''].filter(Boolean)
+  const targets = paths.flatMap((pathValue) => [
+    `path=${pathValue}; SameSite=Lax`,
+    ...domains.map((domain) => `domain=${domain}; path=${pathValue}; SameSite=Lax`),
+  ])
+  targets.forEach((suffix) => {
+    document.cookie = `googtrans=; ${suffix}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  })
+}
 
 function applyGoogleTranslateSelection(sourceLang, targetLang) {
   if (typeof document === 'undefined') return false
   const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
   const target = String(targetLang || 'original').trim().toLowerCase()
-  const cookieValue = target === 'original' || target === from ? '' : `/auto/${target}`
-  const cookieTargets = [
-    'path=/; SameSite=Lax',
-    typeof window !== 'undefined' && window.location?.hostname?.includes('.')
-      ? `domain=.${window.location.hostname}; path=/; SameSite=Lax`
-      : '',
-  ].filter(Boolean)
-  cookieTargets.forEach((suffix) => {
-    document.cookie = cookieValue
-      ? `googtrans=${cookieValue}; ${suffix}`
-      : `googtrans=; ${suffix}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-  })
+  const cookieValue = target === 'original' || target === from ? '' : `/${from}/${target}`
+  if (!cookieValue) clearGoogleTranslateCookies()
+  else {
+    const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
+    const suffixes = [
+      'path=/; SameSite=Lax',
+      host && host.includes('.') ? `domain=.${host}; path=/; SameSite=Lax` : '',
+    ].filter(Boolean)
+    suffixes.forEach((suffix) => {
+      document.cookie = `googtrans=${cookieValue}; ${suffix}`
+    })
+  }
   try {
-    window.localStorage?.setItem('business-os:portal-translate-target', target)
+    window.localStorage?.setItem(PORTAL_TRANSLATE_STORAGE_KEY, target)
   } catch (_) {}
 
   const selects = Array.from(document.querySelectorAll('.goog-te-combo'))
   if (!selects.length) return false
   const nextValue = target === 'original' ? '' : target
   selects.forEach((select) => {
-    if (String(select.value || '').toLowerCase() === nextValue) return
     select.value = nextValue
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const EventCtor = (typeof window !== 'undefined' && window.Event) ? window.Event : Event
+    select.dispatchEvent(new EventCtor('input', { bubbles: true }))
+    select.dispatchEvent(new EventCtor('change', { bubbles: true }))
   })
   return true
+}
+
+function isPortalTranslateApplied(sourceLang, targetLang) {
+  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
+  const target = String(targetLang || 'original').trim().toLowerCase()
+  if (target === 'original' || target === from) {
+    return !getPortalTranslateCookieTarget(from) && !hasPortalTranslatedMarker()
+  }
+  return getPortalTranslateCookieTarget(from) === target && hasPortalTranslatedMarker()
 }
 
 function readStoredTranslateTarget(sourceLang) {
@@ -1462,7 +1509,7 @@ function readStoredTranslateTarget(sourceLang) {
   }
   if (typeof window !== 'undefined') {
     try {
-      const stored = String(window.localStorage?.getItem('business-os:portal-translate-target') || '').trim().toLowerCase()
+      const stored = String(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY) || '').trim().toLowerCase()
       if (stored) return stored
     } catch (_) {}
   }
@@ -1516,6 +1563,8 @@ export default function CatalogPage({ publicView = false }) {
   const [aiProviders, setAiProviders] = useState([])
   const [translateReady, setTranslateReady] = useState(false)
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
+  const [translateApplyState, setTranslateApplyState] = useState('idle')
+  const [translateApplyMessage, setTranslateApplyMessage] = useState('')
   const [productGalleryView, setProductGalleryView] = useState({ open: false, title: '', items: [], index: 0 })
   const [portalImageView, setPortalImageView] = useState({ open: false, title: '', images: [], index: 0 })
   const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
@@ -1693,24 +1742,41 @@ export default function CatalogPage({ publicView = false }) {
     })
   }
 
-  /** Apply selected language via Google Translate widget and fallback refresh. */
-  function changeTranslateTarget(nextTarget) {
-    setTranslateTarget(nextTarget)
+  /** Apply selected language via Google Translate and confirm the page changed. */
+  async function changeTranslateTarget(nextTarget) {
+    const target = String(nextTarget || 'original').trim().toLowerCase() || 'original'
+    setTranslateTarget(target)
+    setTranslateApplyMessage('')
     if (!publicView || !previewConfig.translateWidgetEnabled) return
-    if (!translateReady) return
-    const applied = applyGoogleTranslateSelection(language, nextTarget)
+    if (!translateReady) {
+      setTranslateApplyState('pending')
+      setTranslateApplyMessage(copy('preparingTranslations', 'Preparing translation tools...'))
+      return
+    }
     if (typeof window === 'undefined') return
-    window.setTimeout(() => {
-      const reapplied = applyGoogleTranslateSelection(language, nextTarget)
-      if (!applied && !reapplied) {
-        const markerKey = 'business-os:portal-translate-last-reload'
-        const lastReload = Number(window.sessionStorage?.getItem(markerKey) || 0)
-        if (Date.now() - lastReload > 5000) {
-          window.sessionStorage?.setItem(markerKey, String(Date.now()))
-          window.location.reload()
-        }
+    setTranslateApplyState('pending')
+    const firstAttempt = applyGoogleTranslateSelection(language, target)
+    const maxAttempts = target === 'original' || target === language ? 8 : 24
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (attempt > 0 || !firstAttempt) applyGoogleTranslateSelection(language, target)
+      if (isPortalTranslateApplied(language, target)) {
+        setTranslateApplyState('applied')
+        setTranslateApplyMessage(target === 'original' || target === language
+          ? copy('translationOriginalApplied', 'Original language restored')
+          : copy('translationApplied', 'Translation applied'))
+        return
       }
-    }, 120)
+      await new Promise((resolve) => window.setTimeout(resolve, 180))
+    }
+
+    const lastReload = Number(window.sessionStorage?.getItem(PORTAL_TRANSLATE_RELOAD_KEY) || 0)
+    if (Date.now() - lastReload > 5000) {
+      window.sessionStorage?.setItem(PORTAL_TRANSLATE_RELOAD_KEY, String(Date.now()))
+      window.location.reload()
+      return
+    }
+    setTranslateApplyState('failed')
+    setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
   }
 
   function isPortalLoadCurrent(requestId) {
@@ -2045,13 +2111,21 @@ export default function CatalogPage({ publicView = false }) {
     const maxTries = 60
     const timer = window.setInterval(() => {
       tries += 1
-      const applied = applyGoogleTranslateSelection(language, translateTarget)
-      if (applied || tries >= maxTries) {
+      applyGoogleTranslateSelection(language, translateTarget)
+      if (isPortalTranslateApplied(language, translateTarget)) {
+        setTranslateApplyState('applied')
+        setTranslateApplyMessage('')
+        window.clearInterval(timer)
+      } else if (tries >= maxTries) {
+        setTranslateApplyState('failed')
+        setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
         window.clearInterval(timer)
       }
     }, 150)
-    const firstAttemptApplied = applyGoogleTranslateSelection(language, translateTarget)
-    if (firstAttemptApplied) {
+    applyGoogleTranslateSelection(language, translateTarget)
+    if (isPortalTranslateApplied(language, translateTarget)) {
+      setTranslateApplyState('applied')
+      setTranslateApplyMessage('')
       window.clearInterval(timer)
     }
     return () => window.clearInterval(timer)
@@ -3919,7 +3993,7 @@ export default function CatalogPage({ publicView = false }) {
                                   {copy('publicTranslation', 'Language tools')}
                                 </div>
                                 {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => {
-                                  const active = translateTarget === option.value
+                                  const active = translateTarget === option.value && translateApplyState !== 'pending' && translateApplyState !== 'failed'
                                   return (
                                     <button
                                       key={option.value}
@@ -3939,6 +4013,15 @@ export default function CatalogPage({ publicView = false }) {
                                     </button>
                                   )
                                 })}
+                                {translateApplyMessage ? (
+                                  <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
+                                    translateApplyState === 'failed'
+                                      ? 'text-rose-600 dark:text-rose-300'
+                                      : 'text-slate-500 dark:text-slate-400'
+                                  }`}>
+                                    {translateApplyMessage}
+                                  </div>
+                                ) : null}
                                 {!translateReady ? (
                                   <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                                     {copy('preparingTranslations', 'Preparing translation tools...')}
@@ -3965,14 +4048,14 @@ export default function CatalogPage({ publicView = false }) {
               </div>
 
               {showPortalToolsBar ? (
-                <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-8">
+                <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-950/80 sm:px-8">
                   <div className="portal-tools-bar flex flex-col items-end gap-2">
-                    <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                    <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
                       <Globe className="h-4 w-4 shrink-0 text-slate-500" />
                       <select
                         id="portal-language-tools-bar"
                         name="portal_language_tools"
-                        className="min-w-[132px] bg-transparent text-sm text-slate-700 outline-none"
+                        className="min-w-[132px] bg-transparent text-sm text-slate-700 outline-none dark:text-slate-100"
                         value={translateTarget}
                         onChange={(event) => changeTranslateTarget(event.target.value)}
                       >
@@ -3983,10 +4066,10 @@ export default function CatalogPage({ publicView = false }) {
                         ))}
                       </select>
                     </label>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      {translateReady
+                    <div className={`text-xs ${translateApplyState === 'failed' ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>
+                      {translateApplyMessage || (translateReady
                         ? copy('translationReady', 'Translation tools are ready')
-                        : copy('preparingTranslations', 'Preparing translation tools...')}
+                        : copy('preparingTranslations', 'Preparing translation tools...'))}
                     </div>
                   </div>
                 </div>

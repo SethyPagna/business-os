@@ -149,15 +149,6 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('Failed to read image file'))
-    reader.readAsDataURL(file)
-  })
-}
-
 function loadImageElement(src) {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -298,6 +289,7 @@ export default function UserProfileModal({ onClose }) {
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
   const avatarFileInputRef = useRef(null)
+  const avatarObjectUrlRef = useRef('')
   const loadProfileRequestRef = useRef(0)
   const saveSessionInFlightRef = useRef(false)
   const oauthRequestInFlightRef = useRef(false)
@@ -376,7 +368,13 @@ export default function UserProfileModal({ onClose }) {
   }
 
   useEffect(() => { loadProfile() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => invalidateTrackedRequest(loadProfileRequestRef), [])
+  useEffect(() => () => {
+    invalidateTrackedRequest(loadProfileRequestRef)
+    if (avatarObjectUrlRef.current) {
+      URL.revokeObjectURL(avatarObjectUrlRef.current)
+      avatarObjectUrlRef.current = ''
+    }
+  }, [])
 
   useEffect(() => {
     const preferred = String(settings?.login_session_duration || '').trim()
@@ -543,6 +541,10 @@ export default function UserProfileModal({ onClose }) {
 
   const closeAvatarEditor = () => {
     setAvatarEditorOpen(false)
+    if (avatarObjectUrlRef.current && avatarEditorSrc === avatarObjectUrlRef.current) {
+      URL.revokeObjectURL(avatarObjectUrlRef.current)
+      avatarObjectUrlRef.current = ''
+    }
     setAvatarEditorSrc('')
     resetAvatarEditor()
   }
@@ -631,7 +633,7 @@ export default function UserProfileModal({ onClose }) {
 
   /**
    * 6. Avatar Upload
-   * 6.1 Read image as data URL.
+   * 6.1 Preview the picked image with an object URL.
    * 6.2 Upload through backend media endpoint.
    */
   const handleAvatarSelected = async (event) => {
@@ -643,8 +645,12 @@ export default function UserProfileModal({ onClose }) {
       return
     }
     try {
-      const src = await readFileAsDataUrl(file)
-      openAvatarEditor(src)
+      if (avatarObjectUrlRef.current) {
+        URL.revokeObjectURL(avatarObjectUrlRef.current)
+      }
+      const objectUrl = URL.createObjectURL(file)
+      avatarObjectUrlRef.current = objectUrl
+      openAvatarEditor(objectUrl)
     } catch (error) {
       notify(error?.message || tr('choose_image_file', 'Please choose an image file'), 'error')
     }

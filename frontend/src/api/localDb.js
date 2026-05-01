@@ -9,6 +9,8 @@
  */
 
 import Dexie from 'dexie'
+import { parseCsvRows } from '../utils/csvImport.js'
+import { UTF8_BOM } from '../utils/csv.js'
 
 // ─── Schema (must stay in sync with sw.js) ────────────────────────────────────
 export const dexieDb = new Dexie('BusinessOS')
@@ -216,16 +218,7 @@ export async function clearLocalMirrorTables(tableNames = []) {
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 export function parseCSV(text) {
-  if (!text) return []
-  const lines = text.trim().split('\n').filter(Boolean)
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, '').toLowerCase())
-  return lines.slice(1).map(line => {
-    const vals = splitCSVLine(line)
-    const obj  = {}
-    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim().replace(/^"|"$/g, '') })
-    return obj
-  })
+  return parseCsvRows(text)
 }
 
 function splitCSVLine(line) {
@@ -240,7 +233,7 @@ function splitCSVLine(line) {
 }
 
 export function buildCSVTemplate(headers, filename) {
-  const blob = new Blob([headers.join(',') + '\n'], { type: 'text/csv' })
+  const blob = new Blob([UTF8_BOM, headers.join(','), '\n'], { type: 'text/csv;charset=utf-8' })
   const a    = document.createElement('a')
   a.href     = URL.createObjectURL(blob)
   a.download = filename

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
-import { normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../../utils/csvImport'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -9,29 +8,13 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 
-function normalizeBranchMap(branches = []) {
-  const map = new Map()
-  branches.forEach((branch) => {
-    const nameKey = normalizeCsvKey(branch?.name)
-    if (nameKey) map.set(nameKey, branch)
-    const idKey = normalizeCsvKey(branch?.id)
-    if (idKey) map.set(idKey, branch)
-  })
-  return map
-}
-
-function findProduct(row, productMaps) {
-  const sku = normalizeCsvKey(row.sku)
-  if (sku && productMaps.bySku.has(sku)) return productMaps.bySku.get(sku)
-  const barcode = normalizeCsvKey(row.barcode)
-  if (barcode && productMaps.byBarcode.has(barcode)) return productMaps.byBarcode.get(barcode)
-  const name = normalizeCsvKey(row.name)
-  if (name && productMaps.byName.has(name)) return productMaps.byName.get(name)
-  return null
+function countCsvDataRows(text) {
+  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim())
+  return Math.max(0, lines.length - 1)
 }
 
 export default function SalesImportModal({ onClose, onDone }) {
-  const { user, notify, t } = useApp()
+  const { notify, t } = useApp()
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -46,7 +29,7 @@ export default function SalesImportModal({ onClose, onDone }) {
     return isKhmer ? fallbackKm : fallbackEn
   }
 
-  const previewRows = useMemo(() => parseCsvRows(csvText), [csvText])
+  const previewRowCount = useMemo(() => countCsvDataRows(csvText), [csvText])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -67,8 +50,8 @@ export default function SalesImportModal({ onClose, onDone }) {
 
   const handleImport = async () => {
     if (importInFlightRef.current) return
-    const rows = parseCsvRows(csvText)
-    if (!rows.length) {
+    const rowCount = countCsvDataRows(csvText)
+    if (!rowCount) {
       notify(tr('sales_import_choose_rows', 'Choose a CSV file with at least one sale row.', 'សូមជ្រើសឯកសារ CSV ដែលមានយ៉ាងហោចណាស់មួយជួរលក់។'), 'error')
       return
     }
@@ -77,139 +60,21 @@ export default function SalesImportModal({ onClose, onDone }) {
     importInFlightRef.current = true
     setLoading(true)
     try {
-      const [products, branches] = await withLoaderTimeout(
-        () => Promise.all([
-          window.api.getProducts(),
-          window.api.getBranches(),
-        ]),
-        'Sales import setup',
+      const created = await withLoaderTimeout(
+        () => window.api.createImportJob({ type: 'sales', policy: { source: 'sales_modal' } }),
+        'Sales import job',
       )
       if (!isTrackedRequestCurrent(importRequestRef, requestId)) return
-
-      const productMaps = {
-        bySku: new Map(),
-        byBarcode: new Map(),
-        byName: new Map(),
-      }
-      ;(Array.isArray(products) ? products : []).forEach((product) => {
-        const sku = normalizeCsvKey(product?.sku)
-        const barcode = normalizeCsvKey(product?.barcode)
-        const name = normalizeCsvKey(product?.name)
-        if (sku) productMaps.bySku.set(sku, product)
-        if (barcode) productMaps.byBarcode.set(barcode, product)
-        if (name) productMaps.byName.set(name, product)
-      })
-
-      const activeBranches = (Array.isArray(branches) ? branches : []).filter((branch) => branch?.is_active)
-      const defaultBranch = activeBranches.find((branch) => branch?.is_default) || activeBranches[0] || null
-      const branchMap = normalizeBranchMap(activeBranches)
-      const grouped = new Map()
-
-      rows.forEach((row, index) => {
-        const product = findProduct(row, productMaps)
-        if (!product) {
-          throw new Error(
-            tr('sales_import_row_product_not_found', 'Row {row}: product not found for "{value}"', 'ជួរ {row}: រកមិនឃើញផលិតផលសម្រាប់ "{value}"')
-              .replace('{row}', index + 2)
-              .replace('{value}', row.name || row.sku || row.barcode || 'unknown'),
-          )
-        }
-
-        const quantity = parseCsvNumber(row.quantity, 0)
-        if (quantity <= 0) {
-          throw new Error(tr('sales_import_row_quantity_invalid', 'Row {row}: quantity must be greater than 0', 'ជួរ {row}: បរិមាណត្រូវតែធំជាង 0').replace('{row}', index + 2))
-        }
-
-        const receiptNumber = String(row.receipt_number || '').trim() || `IMP-SALE-${Date.now()}-${index + 1}`
-        const branchValue = String(row.branch || '').trim()
-        const rowBranch = branchValue ? branchMap.get(normalizeCsvKey(branchValue)) : defaultBranch
-        if (branchValue && !rowBranch) {
-          throw new Error(
-            tr('sales_import_row_branch_not_found', 'Row {row}: branch "{branch}" not found', 'ជួរ {row}: មិនឃើញសាខា "{branch}"')
-              .replace('{row}', index + 2)
-              .replace('{branch}', branchValue),
-          )
-        }
-        if (!rowBranch && activeBranches.length > 1) {
-          throw new Error(tr('sales_import_row_branch_required', 'Row {row}: branch is required when multiple branches are active', 'ជួរ {row}: ត្រូវការសាខា នៅពេលមានសាខាសកម្មច្រើន').replace('{row}', index + 2))
-        }
-
-        const sale = grouped.get(receiptNumber) || {
-          receipt_number: receiptNumber,
-          created_at: String(row.sale_date || row.date || '').trim() || null,
-          sale_status: String(row.sale_status || '').trim() || 'completed',
-          payment_method: String(row.payment_method || '').trim() || 'Cash',
-          payment_currency: String(row.payment_currency || '').trim() || 'USD',
-          customer_name: String(row.customer_name || '').trim() || '',
-          customer_phone: String(row.customer_phone || '').trim() || '',
-          customer_address: String(row.customer_address || '').trim() || '',
-          cashier_name: String(row.cashier_name || '').trim() || user?.name || '',
-          notes: String(row.notes || '').trim() || '',
-          items: [],
-          subtotal_usd: 0,
-          subtotal_khr: 0,
-          total_usd: 0,
-          total_khr: 0,
-        }
-
-        const appliedPriceUsd = normalizeCsvMoney(row.unit_price_usd, 0)
-        const appliedPriceKhr = normalizeCsvMoney(row.unit_price_khr, 0)
-        sale.items.push({
-          id: product.id,
-          product_id: product.id,
-          name: product.name,
-          product_name: product.name,
-          quantity,
-          applied_price_usd: appliedPriceUsd,
-          applied_price_khr: appliedPriceKhr,
-          cost_price_usd: normalizeCsvMoney(product.cost_price_usd ?? product.purchase_price_usd, 0),
-          cost_price_khr: normalizeCsvMoney(product.cost_price_khr ?? product.purchase_price_khr, 0),
-          branch_id: rowBranch?.id || null,
-          branch_name: rowBranch?.name || null,
-        })
-        sale.subtotal_usd += appliedPriceUsd * quantity
-        sale.subtotal_khr += appliedPriceKhr * quantity
-        sale.total_usd += appliedPriceUsd * quantity
-        sale.total_khr += appliedPriceKhr * quantity
-        grouped.set(receiptNumber, sale)
-      })
-
-      let imported = 0
-      let duplicates = 0
-      const errors = []
-
-      for (const sale of grouped.values()) {
-        try {
-          const response = await window.api.createSale({
-            ...sale,
-            userId: user?.id || null,
-            userName: user?.name || '',
-          })
-          if (response?.duplicate) duplicates += 1
-          else imported += 1
-        } catch (error) {
-          errors.push(`${sale.receipt_number}: ${error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')}`)
-        }
-      }
-
-      const nextResult = {
-        imported,
-        duplicates,
-        errors,
-      }
+      const job = created?.job || created
+      if (!job?.id) throw new Error('Import job was not created')
+      await window.api.uploadImportJobCsv({ jobId: job.id, text: csvText, fileName: fileName || 'sales.csv' })
+      await window.api.startImportJob(job.id)
+      const queuedResult = { imported: 0, duplicates: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
-      setResult(nextResult)
-      if (imported > 0 || duplicates > 0) {
-        notify(
-          tr('sales_import_finished', 'Sales import finished: {imported} imported, {duplicates} duplicates skipped.', 'ការនាំចូលការលក់បានបញ្ចប់៖ បាននាំចូល {imported} និងរំលងស្ទួន {duplicates}។')
-            .replace('{imported}', imported)
-            .replace('{duplicates}', duplicates),
-          imported > 0 ? 'success' : 'warning',
-        )
-        onDone?.()
-      } else {
-        notify(tr('sales_import_none', 'No sales were imported.', 'មិនមានការលក់ណាមួយត្រូវបាននាំចូលទេ។'), 'warning')
-      }
+      setResult(queuedResult)
+      notify(tr('sales_import_started', 'Sales import started: {count} row(s) queued. You can keep using the app.').replace('{count}', rowCount), 'success')
+      onDone?.()
+      return
     } catch (error) {
       const nextResult = { imported: 0, duplicates: 0, errors: [error?.message || tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ')] }
       if (isTrackedRequestCurrent(importRequestRef, requestId) && aliveRef.current) {
@@ -255,13 +120,15 @@ export default function SalesImportModal({ onClose, onDone }) {
           placeholder={tr('csv_paste_placeholder', 'Paste CSV here if you do not want to pick a file.', 'បិទភ្ជាប់ CSV នៅទីនេះ ប្រសិនបើអ្នកមិនចង់ជ្រើសឯកសារ។')}
         />
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-          {tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRows.length)}
+          {tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', previewRowCount)}
         </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
-              {tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', result.imported)}
-              {result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', result.duplicates)}` : ''}
+              {result.queued
+                ? tr('import_job_queued_count', '{count} row(s) queued. Progress is shown at the top of the app.').replace('{count}', result.queued)
+                : tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', result.imported)}
+              {!result.queued && result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', result.duplicates)}` : ''}
             </div>
             {result.errors?.length ? (
               <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">

@@ -256,43 +256,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     ].join('\n')
   }
 
-  const formatJobResult = (jobPayload = {}) => {
-    const job = jobPayload.job || jobPayload
-    const summary = job?.summary || {}
-    const errors = Array.isArray(jobPayload.errors)
-      ? jobPayload.errors.map((item) => item?.error_message || item?.message || String(item)).filter(Boolean)
-      : []
-    if (job?.last_error && !errors.includes(job.last_error)) errors.unshift(job.last_error)
-    return {
-      imported: Number(summary.imported || summary.created || 0),
-      updated: Number(summary.updated || summary.merged || summary.variants || 0),
-      images_matched: Number(summary.images_matched || job?.processed_images || 0),
-      errors,
-      job,
-    }
-  }
-
-  const waitForImportJob = async (jobId) => {
-    const terminal = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'cancel_requested'])
-    const started = Date.now()
-    let lastPayload = null
-    while (Date.now() - started < 60 * 60 * 1000) {
-      const payload = await window.api.getImportJob(jobId)
-      const job = payload?.job || payload
-      lastPayload = payload
-      setCurrentJob(job)
-      const total = Math.max(1, Number(job?.total_rows || 0) + Number(job?.total_images || 0))
-      const done = Number(job?.processed_rows || 0) + Number(job?.processed_images || 0)
-      setAnalysisProgress({
-        progress: Math.min(100, Math.round((done / total) * 100)),
-        label: `${job?.phase || job?.status || 'processing'} (${done} / ${total})`,
-      })
-      if (terminal.has(String(job?.status || '').toLowerCase())) return payload
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-    }
-    return lastPayload || { job: { status: 'failed', summary: {}, errors: ['Import job timed out'] } }
-  }
-
   const handleCancelCurrentJob = async () => {
     if (!currentJob?.id) return
     try {
@@ -341,11 +304,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
       }
       await window.api.startImportJob(jobId)
-      const finalPayload = await waitForImportJob(jobId)
-      const response = formatJobResult(finalPayload)
-      setResult(response)
+      setResult({ imported: 0, updated: 0, images_matched: 0, queued: Object.keys(imageFiles).length, jobId, errors: [] })
       setStep(3)
-      if ((response?.images_matched || 0) > 0 || (response?.updated || 0) > 0 || (response?.imported || 0) > 0) onDone()
+      onDone?.()
+      return
     } catch (error) {
       setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
       setStep(3)
@@ -439,11 +401,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
       }
       await window.api.startImportJob(jobId)
-      const finalPayload = await waitForImportJob(jobId)
-      const response = formatJobResult(finalPayload)
-      setResult(response)
+      setResult({ imported: 0, updated: 0, queued: totalCount, jobId, errors: [] })
       setStep(3)
-      if ((response?.imported || 0) > 0 || (response?.updated || 0) > 0) onDone()
+      onDone?.()
+      return
     } catch (error) {
       setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
       setStep(3)
@@ -782,11 +743,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
       {step === 3 && result ? (
         <div className="space-y-4">
-          <div className={`rounded-xl p-4 ${(result.imported || 0) + (result.updated || 0) > 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+          <div className={`rounded-xl p-4 ${result.queued ? 'bg-blue-50 dark:bg-blue-900/20' : (result.imported || 0) + (result.updated || 0) > 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+            {result.queued ? <p className="text-sm font-medium">{T('import_job_started_background', '{n} item(s) queued. The import is running in the background.').replace('{n}', String(result.queued))}</p> : null}
+            {result.jobId ? <p className="mt-1 text-xs opacity-70">Job: {result.jobId}</p> : null}
             {result.imported > 0 ? <p className="text-sm">{T('n_products_created', '{n} new products created').replace('{n}', String(result.imported))}</p> : null}
             {result.updated > 0 ? <p className="text-sm">{T('n_products_updated', '{n} products updated').replace('{n}', String(result.updated))}</p> : null}
             {result.images_matched > 0 ? <p className="text-sm">{T('n_images_matched', '{n} images matched').replace('{n}', String(result.images_matched))}</p> : null}
-            {result.imported === 0 && result.updated === 0 && (result.images_matched || 0) === 0 ? <p className="text-sm">No changes applied.</p> : null}
+            {!result.queued && result.imported === 0 && result.updated === 0 && (result.images_matched || 0) === 0 ? <p className="text-sm">No changes applied.</p> : null}
           </div>
           {Array.isArray(result.errors) && result.errors.length ? (
             <div>

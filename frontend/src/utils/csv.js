@@ -1,6 +1,8 @@
 // ── CSV Export Utility ─────────────────────────────────────────────────────────
 // Shared CSV download helper used across Dashboard, Products, Contacts, and Utils.
 
+export const UTF8_BOM = '\uFEFF'
+
 function escapeCsvValue(value) {
   if (value == null) return ''
   let text = String(value)
@@ -38,7 +40,7 @@ export function downloadBlob(filename, blob) {
 export function downloadCSV(filename, rows) {
   const csv = buildCSV(rows)
   if (!csv) return
-  downloadBlob(filename, new Blob([csv], { type: 'text/csv' }))
+  downloadBlob(filename, new Blob([UTF8_BOM, csv], { type: 'text/csv;charset=utf-8' }))
 }
 
 const CRC32_TABLE = (() => {

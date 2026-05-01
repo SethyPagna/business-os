@@ -21,7 +21,8 @@ const { validateUploadedPath } = require('../uploadSecurity')
 const { isSafeExternalImageReference } = require('../netSecurity')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
-const { parseCsvRows } = require('../importCsv')
+const { normalizeCsvKey, parseCsvRows } = require('../importCsv')
+const { buildImportedContactState, cleanText } = require('../contactOptions')
 const {
   hasImportValue,
   normalizeImageConflictMode,
@@ -1006,6 +1007,487 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
   return { imported: 0, updated: 0, images_matched: imagesMatched, failed, cancelled: false }
 }
 
+function normalizeContactMode(value) {
+  const mode = String(value || 'merge').trim().toLowerCase()
+  return ['skip', 'merge', 'overwrite'].includes(mode) ? mode : 'merge'
+}
+
+function resolveContactValue(existingValue, incomingValue, rule, defaultRule = 'merge_blank_only') {
+  const mode = String(rule || defaultRule || '').trim().toLowerCase()
+  if (mode === 'clear_value') return null
+  if (mode === 'use_imported') return incomingValue ?? null
+  if (mode === 'keep_existing') return existingValue ?? null
+  return existingValue || incomingValue || null
+}
+
+function parseFieldRules(row = {}) {
+  const raw = row._field_rules
+  if (raw && typeof raw === 'object') return raw
+  return safeJson(raw, {})
+}
+
+async function processContactRows({ jobId, rows, actor, type }) {
+  const isCustomer = type === 'customers'
+  const isSupplier = type === 'suppliers'
+  const table = isCustomer ? 'customers' : isSupplier ? 'suppliers' : 'delivery_contacts'
+  const jobPolicy = getImportJob(jobId)?.policy || {}
+  const defaultConflictMode = normalizeContactMode(jobPolicy.conflictMode || jobPolicy.conflict_mode || 'merge')
+  const policyFieldRules = jobPolicy.fieldRules || jobPolicy.field_rules || {}
+  let imported = 0
+  let updated = 0
+  let failed = 0
+  const batchSize = IMPORT_ROW_BATCH_SIZE
+
+  const findCustomerByMembership = db.prepare('SELECT * FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1')
+  const findCustomerByPhone = db.prepare("SELECT * FROM customers WHERE trim(coalesce(phone,'')) != '' AND trim(phone) = trim(?) LIMIT 1")
+  const findCustomerByName = db.prepare('SELECT * FROM customers WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1')
+  const findSupplierByName = db.prepare('SELECT * FROM suppliers WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1')
+  const findSupplierByPhone = db.prepare("SELECT * FROM suppliers WHERE trim(coalesce(phone,'')) != '' AND trim(phone) = trim(?) LIMIT 1")
+  const findDeliveryByName = db.prepare('SELECT * FROM delivery_contacts WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1')
+  const findDeliveryByPhone = db.prepare("SELECT * FROM delivery_contacts WHERE trim(coalesce(phone,'')) != '' AND trim(phone) = trim(?) LIMIT 1")
+
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    if (isCancelled(jobId)) {
+      updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+      return { imported, updated, failed, cancelled: true }
+    }
+    const batchRows = rows.slice(offset, offset + batchSize)
+    const batchIndex = Math.floor(offset / batchSize)
+    const batchResult = db.prepare(`
+      INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
+      VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
+      ON CONFLICT(job_id, batch_index) DO UPDATE SET
+        status = 'running',
+        attempts = attempts + 1,
+        started_at = datetime('now'),
+        updated_at = datetime('now')
+    `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
+    const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
+
+    db.transaction(() => {
+      for (const row of batchRows) {
+        try {
+          const mode = normalizeContactMode(row._conflict_mode || row.conflict_mode || defaultConflictMode)
+          const fieldRules = { ...policyFieldRules, ...parseFieldRules(row) }
+          const defaultRule = mode === 'overwrite' ? 'use_imported' : 'merge_blank_only'
+          const contactState = buildImportedContactState(row, { mode: type === 'delivery_contacts' ? 'area' : 'address' })
+          let incoming
+          let existing = null
+
+          if (isCustomer) {
+            incoming = {
+              name: cleanText(row.name),
+              membership_number: cleanText(row.membership_number),
+              phone: cleanText(contactState.primary.phone || row.phone),
+              email: cleanText(contactState.primary.email || row.email),
+              address: contactState.serialized || cleanText(row.address),
+              company: cleanText(row.company),
+              notes: cleanText(row.notes),
+            }
+            if (!incoming.name) throw new Error('name is required')
+            if (!incoming.membership_number) throw new Error('membership number is required')
+            existing = findCustomerByMembership.get(incoming.membership_number)
+              || (incoming.phone ? findCustomerByPhone.get(incoming.phone) : null)
+              || findCustomerByName.get(incoming.name)
+            if (!existing) {
+              db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+                .run(incoming.name, incoming.membership_number, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.notes)
+              imported += 1
+            } else if (mode !== 'skip') {
+              db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+                .run(
+                  resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
+                  resolveContactValue(existing.membership_number, incoming.membership_number, fieldRules.membership_number, defaultRule),
+                  resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
+                  resolveContactValue(existing.email, incoming.email, fieldRules.email, defaultRule),
+                  resolveContactValue(existing.address, incoming.address, fieldRules.address || fieldRules.contact_options, defaultRule),
+                  resolveContactValue(existing.company, incoming.company, fieldRules.company, defaultRule),
+                  resolveContactValue(existing.notes, incoming.notes, fieldRules.notes, defaultRule),
+                  existing.id,
+                )
+              updated += 1
+            }
+          } else if (isSupplier) {
+            incoming = {
+              name: cleanText(row.name),
+              phone: cleanText(contactState.primary.phone || row.phone),
+              email: cleanText(contactState.primary.email || row.email),
+              address: contactState.serialized || cleanText(row.address),
+              company: cleanText(row.company),
+              contact_person: cleanText(contactState.primary.name || row.contact_person),
+              notes: cleanText(row.notes),
+            }
+            if (!incoming.name) throw new Error('name is required')
+            existing = findSupplierByName.get(incoming.name) || (incoming.phone ? findSupplierByPhone.get(incoming.phone) : null)
+            if (!existing) {
+              db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+                .run(incoming.name, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.contact_person, incoming.notes)
+              imported += 1
+            } else if (mode !== 'skip') {
+              db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+                .run(
+                  resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
+                  resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
+                  resolveContactValue(existing.email, incoming.email, fieldRules.email, defaultRule),
+                  resolveContactValue(existing.address, incoming.address, fieldRules.address || fieldRules.contact_options, defaultRule),
+                  resolveContactValue(existing.company, incoming.company, fieldRules.company, defaultRule),
+                  resolveContactValue(existing.contact_person, incoming.contact_person, fieldRules.contact_person, defaultRule),
+                  resolveContactValue(existing.notes, incoming.notes, fieldRules.notes, defaultRule),
+                  existing.id,
+                )
+              updated += 1
+            }
+          } else {
+            const rawName = cleanText(contactState.primary.name || row.name)
+            const phone = cleanText(contactState.primary.phone || row.phone)
+            const finalName = rawName || (phone ? `Driver ${phone}` : '')
+            incoming = {
+              name: finalName,
+              phone,
+              area: cleanText(contactState.primary.area || row.area),
+              address: contactState.serialized || cleanText(row.address),
+              notes: cleanText(row.notes),
+            }
+            if (!incoming.name && !incoming.phone) throw new Error('driver name or phone is required')
+            existing = findDeliveryByName.get(incoming.name) || (incoming.phone ? findDeliveryByPhone.get(incoming.phone) : null)
+            if (!existing) {
+              db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
+                .run(incoming.name, incoming.phone, incoming.area, incoming.address, incoming.notes)
+              imported += 1
+            } else if (mode !== 'skip') {
+              db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+                .run(
+                  resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
+                  resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
+                  resolveContactValue(existing.area, incoming.area, fieldRules.area, defaultRule),
+                  resolveContactValue(existing.address, incoming.address, fieldRules.address || fieldRules.contact_options, defaultRule),
+                  resolveContactValue(existing.notes, incoming.notes, fieldRules.notes, defaultRule),
+                  existing.id,
+                )
+              updated += 1
+            }
+          }
+        } catch (error) {
+          failed += 1
+          addJobError(jobId, {
+            batchId,
+            rowNumber: row?._rowNumber || null,
+            code: 'row_failed',
+            message: `${row?.name || table} row: ${error?.message || 'Import failed'}`,
+            raw: row,
+          })
+        }
+      }
+    })()
+
+    updateJob(jobId, {
+      processed_rows: Math.min(rows.length, offset + batchRows.length),
+      failed_rows: failed,
+      summary_json: stringify({ imported, updated, failed }),
+    })
+    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+  }
+
+  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type, imported, updated, failed })
+  broadcast(isCustomer ? 'customers' : isSupplier ? 'suppliers' : 'deliveryContacts')
+  return { imported, updated, failed, cancelled: false }
+}
+
+function normalizeInventoryAction(value) {
+  const action = normalizeCsvKey(value)
+  if (['add', 'remove', 'set'].includes(action)) return action
+  if (action === 'adjustment') return 'add'
+  return 'add'
+}
+
+async function processInventoryRows({ jobId, rows, actor }) {
+  const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
+  const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
+  const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const productMap = new Map()
+  products.forEach((product) => {
+    ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
+      const key = normalizeCsvKey(value)
+      if (key && !productMap.has(key)) productMap.set(key, product)
+    })
+  })
+  const branchMap = new Map()
+  branches.forEach((branch) => {
+    ;[branch.name, branch.id].forEach((value) => {
+      const key = normalizeCsvKey(value)
+      if (key) branchMap.set(key, branch)
+    })
+  })
+
+  let imported = 0
+  let failed = 0
+  const batchSize = IMPORT_ROW_BATCH_SIZE
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    if (isCancelled(jobId)) {
+      updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+      return { imported, updated: 0, failed, cancelled: true }
+    }
+    const batchRows = rows.slice(offset, offset + batchSize)
+    db.transaction(() => {
+      for (const row of batchRows) {
+        try {
+          const product = productMap.get(normalizeCsvKey(row.sku))
+            || productMap.get(normalizeCsvKey(row.barcode))
+            || productMap.get(normalizeCsvKey(row.name))
+          if (!product) throw new Error('product not found')
+          const qty = parseImportNumber(row, 'quantity', 0)
+          if (!(qty > 0)) throw new Error('quantity must be greater than 0')
+          const action = normalizeInventoryAction(row.action || row.type || row.movement_type)
+          const branchValue = normalizeCsvKey(row.branch || row.branch_id)
+          const branch = branchValue ? branchMap.get(branchValue) : defaultBranch
+          if (!branch) throw new Error('active branch required')
+          db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 0)').run(product.id, branch.id)
+          if (action === 'set') {
+            db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(qty, product.id, branch.id)
+          } else if (action === 'remove') {
+            const currentQty = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(product.id, branch.id)?.quantity || 0
+            if (qty > currentQty) throw new Error(`cannot remove ${qty}; only ${currentQty} available`)
+            db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?').run(qty, product.id, branch.id)
+          } else {
+            db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?').run(qty, product.id, branch.id)
+          }
+          recalcProductStock(product.id)
+          const unitCostUsd = normalizePriceValue(parseImportNumber(row, 'unit_cost_usd', product.purchase_price_usd || product.cost_price_usd || 0))
+          const unitCostKhr = normalizePriceValue(parseImportNumber(row, 'unit_cost_khr', product.purchase_price_khr || product.cost_price_khr || 0))
+          db.prepare(`
+            INSERT INTO inventory_movements
+              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            product.id,
+            product.name,
+            branch.id,
+            branch.name,
+            action,
+            qty,
+            unitCostUsd,
+            unitCostKhr,
+            qty * unitCostUsd,
+            qty * unitCostKhr,
+            normalizeText(row.reason) || 'CSV import - inventory',
+            actor.userId || null,
+            actor.userName || null,
+          )
+          imported += 1
+        } catch (error) {
+          failed += 1
+          addJobError(jobId, {
+            rowNumber: row?._rowNumber || null,
+            code: 'row_failed',
+            message: `Inventory row: ${error?.message || 'Import failed'}`,
+            raw: row,
+          })
+        }
+      }
+    })()
+    updateJob(jobId, {
+      processed_rows: Math.min(rows.length, offset + batchRows.length),
+      failed_rows: failed,
+      summary_json: stringify({ imported, updated: 0, failed }),
+    })
+  }
+  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'inventory', imported, failed })
+  broadcast('products')
+  broadcast('inventory')
+  return { imported, updated: 0, failed, cancelled: false }
+}
+
+async function processSalesRows({ jobId, rows, actor }) {
+  const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
+  const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
+  const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const productMap = new Map()
+  products.forEach((product) => {
+    ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
+      const key = normalizeCsvKey(value)
+      if (key && !productMap.has(key)) productMap.set(key, product)
+    })
+  })
+  const branchMap = new Map()
+  branches.forEach((branch) => {
+    ;[branch.name, branch.id].forEach((value) => {
+      const key = normalizeCsvKey(value)
+      if (key) branchMap.set(key, branch)
+    })
+  })
+
+  const grouped = new Map()
+  let failed = 0
+  rows.forEach((row, index) => {
+    try {
+      const product = productMap.get(normalizeCsvKey(row.sku))
+        || productMap.get(normalizeCsvKey(row.barcode))
+        || productMap.get(normalizeCsvKey(row.name))
+      if (!product) throw new Error(`Row ${row._rowNumber || index + 2}: product not found`)
+      const qty = parseImportNumber(row, 'quantity', 0)
+      if (!(qty > 0)) throw new Error(`Row ${row._rowNumber || index + 2}: quantity must be greater than 0`)
+      const branchValue = normalizeCsvKey(row.branch || row.branch_id)
+      const branch = branchValue ? branchMap.get(branchValue) : defaultBranch
+      if (!branch) throw new Error(`Row ${row._rowNumber || index + 2}: active branch required`)
+      const receiptNumber = normalizeText(row.receipt_number) || `IMP-SALE-${Date.now()}-${index + 1}`
+      const sale = grouped.get(receiptNumber) || {
+        receiptNumber,
+        createdAt: normalizeText(row.sale_date || row.date || row.created_at) || null,
+        status: normalizeText(row.sale_status) || 'completed',
+        paymentMethod: normalizeText(row.payment_method) || 'Cash',
+        paymentCurrency: normalizeText(row.payment_currency) || 'USD',
+        customerName: normalizeText(row.customer_name) || null,
+        customerPhone: normalizeText(row.customer_phone) || null,
+        customerAddress: normalizeText(row.customer_address) || null,
+        cashierName: normalizeText(row.cashier_name) || actor.userName || null,
+        notes: normalizeText(row.notes) || null,
+        branchId: branch.id,
+        branchName: branch.name,
+        items: [],
+        subtotalUsd: 0,
+        subtotalKhr: 0,
+      }
+      const priceUsd = normalizePriceValue(parseImportNumber(row, 'unit_price_usd', product.selling_price_usd || 0))
+      const priceKhr = normalizePriceValue(parseImportNumber(row, 'unit_price_khr', product.selling_price_khr || 0))
+      sale.items.push({
+        product,
+        branch,
+        quantity: qty,
+        applied_price_usd: priceUsd,
+        applied_price_khr: priceKhr,
+      })
+      sale.subtotalUsd += priceUsd * qty
+      sale.subtotalKhr += priceKhr * qty
+      grouped.set(receiptNumber, sale)
+    } catch (error) {
+      failed += 1
+      addJobError(jobId, {
+        rowNumber: row?._rowNumber || null,
+        code: 'row_failed',
+        message: error?.message || 'Sales row failed',
+        raw: row,
+      })
+    }
+  })
+
+  let imported = 0
+  let duplicates = 0
+  for (const sale of grouped.values()) {
+    if (isCancelled(jobId)) {
+      updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+      return { imported, updated: duplicates, failed, cancelled: true }
+    }
+    try {
+      db.transaction(() => {
+        const existing = db.prepare('SELECT id FROM sales WHERE receipt_number = ? LIMIT 1').get(sale.receiptNumber)
+        if (existing) {
+          duplicates += 1
+          return
+        }
+        const saleId = db.prepare(`
+          INSERT INTO sales (
+            receipt_number, cashier_id, cashier_name, customer_name, customer_phone, customer_address,
+            branch_id, branch_name, subtotal_usd, subtotal_khr, total_usd, total_khr,
+            payment_method, payment_currency, amount_paid_usd, amount_paid_khr,
+            sale_status, notes, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, datetime('now')), datetime('now'))
+        `).run(
+          sale.receiptNumber,
+          actor.userId || null,
+          sale.cashierName,
+          sale.customerName,
+          sale.customerPhone,
+          sale.customerAddress,
+          sale.branchId,
+          sale.branchName,
+          normalizePriceValue(sale.subtotalUsd),
+          normalizePriceValue(sale.subtotalKhr),
+          normalizePriceValue(sale.subtotalUsd),
+          normalizePriceValue(sale.subtotalKhr),
+          sale.paymentMethod,
+          sale.paymentCurrency,
+          normalizePriceValue(sale.subtotalUsd),
+          normalizePriceValue(sale.subtotalKhr),
+          sale.status,
+          sale.notes,
+          sale.createdAt,
+        ).lastInsertRowid
+        for (const item of sale.items) {
+          const product = item.product
+          const totalUsd = normalizePriceValue(item.applied_price_usd * item.quantity)
+          const totalKhr = normalizePriceValue(item.applied_price_khr * item.quantity)
+          db.prepare(`
+            INSERT INTO sale_items
+              (sale_id, product_id, product_name, sku, quantity, unit,
+               applied_price_usd, applied_price_khr, price_mode,
+               cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            saleId,
+            product.id,
+            product.name,
+            product.sku || null,
+            item.quantity,
+            product.unit || null,
+            item.applied_price_usd,
+            item.applied_price_khr,
+            'import',
+            product.cost_price_usd || product.purchase_price_usd || 0,
+            product.cost_price_khr || product.purchase_price_khr || 0,
+            totalUsd,
+            totalKhr,
+            item.branch.id,
+          )
+          db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 0)').run(product.id, item.branch.id)
+          db.prepare('UPDATE branch_stock SET quantity = MAX(0, quantity - ?) WHERE product_id = ? AND branch_id = ?')
+            .run(item.quantity, product.id, item.branch.id)
+          recalcProductStock(product.id)
+          db.prepare(`
+            INSERT INTO inventory_movements
+              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            product.id,
+            product.name,
+            item.branch.id,
+            item.branch.name,
+            'sale',
+            item.quantity,
+            product.cost_price_usd || product.purchase_price_usd || 0,
+            product.cost_price_khr || product.purchase_price_khr || 0,
+            item.quantity * (product.cost_price_usd || product.purchase_price_usd || 0),
+            item.quantity * (product.cost_price_khr || product.purchase_price_khr || 0),
+            `CSV import - sale ${sale.receiptNumber}`,
+            saleId,
+            actor.userId || null,
+            actor.userName || null,
+          )
+        }
+        audit(actor.userId, actor.userName, 'create', 'sale', saleId, { receiptNumber: sale.receiptNumber, source: 'import_job' })
+        imported += 1
+      })()
+    } catch (error) {
+      failed += 1
+      addJobError(jobId, {
+        code: 'sale_failed',
+        message: `${sale.receiptNumber}: ${error?.message || 'Sale import failed'}`,
+      })
+    }
+    updateJob(jobId, {
+      processed_rows: Math.min(rows.length, rows.length),
+      failed_rows: failed,
+      summary_json: stringify({ imported, updated: duplicates, duplicates, failed }),
+    })
+  }
+  audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: 'sales', imported, duplicates, failed })
+  broadcast('sales')
+  broadcast('products')
+  broadcast('inventory')
+  return { imported, updated: duplicates, duplicates, failed, cancelled: false }
+}
+
 async function extractZipImages(jobId, zipFile) {
   if (!zipFile?.stored_path || !fs.existsSync(zipFile.stored_path)) return []
   const zipSize = fs.statSync(zipFile.stored_path).size
@@ -1100,15 +1582,25 @@ async function processImportJob(jobId) {
     const csvText = fs.readFileSync(csvFile.stored_path, 'utf8')
     const rows = parseCsvRows(csvText)
     updateJob(jobId, { total_rows: rows.length, phase: 'processing_rows', processed_rows: 0, failed_rows: 0 })
-    if (job.type !== 'products') throw new Error(`Import type "${job.type}" is not implemented in the job pipeline yet`)
-    const result = rows.length
-      ? await processProductRows({
-          jobId,
-          rows,
-          imageLookup: buildImageLookup(imageFiles),
-          actor,
-        })
-      : await processImageOnlyFiles({ jobId, imageFiles, actor })
+    let result
+    if (job.type === 'products') {
+      result = rows.length
+        ? await processProductRows({
+            jobId,
+            rows,
+            imageLookup: buildImageLookup(imageFiles),
+            actor,
+          })
+        : await processImageOnlyFiles({ jobId, imageFiles, actor })
+    } else if (['customers', 'suppliers', 'delivery_contacts'].includes(job.type)) {
+      result = await processContactRows({ jobId, rows, actor, type: job.type })
+    } else if (job.type === 'inventory') {
+      result = await processInventoryRows({ jobId, rows, actor })
+    } else if (job.type === 'sales') {
+      result = await processSalesRows({ jobId, rows, actor })
+    } else {
+      throw new Error(`Import type "${job.type}" is not implemented in the job pipeline yet`)
+    }
     if (result.cancelled) return getImportJob(jobId)
     updateJob(jobId, {
       status: result.failed > 0 ? 'completed_with_errors' : 'completed',
@@ -1119,8 +1611,10 @@ async function processImportJob(jobId) {
       finished_at: nowIso(),
     })
     audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: job.type, ...result })
-    broadcast('products')
-    broadcast('inventory')
+    if (job.type === 'products') {
+      broadcast('products')
+      broadcast('inventory')
+    }
     return getImportJob(jobId)
   } catch (error) {
     updateJob(jobId, {
@@ -1228,7 +1722,7 @@ function buildErrorsCsv(jobId) {
   const errors = getJobErrors(jobId, { limit: 5000 })
   const escape = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
   return [
-    ['row_number', 'file_name', 'code', 'message'].map(escape).join(','),
+    `\uFEFF${['row_number', 'file_name', 'code', 'message'].map(escape).join(',')}`,
     ...errors.map((error) => [
       error.row_number || '',
       error.file_name || '',

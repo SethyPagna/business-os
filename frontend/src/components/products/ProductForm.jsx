@@ -54,15 +54,6 @@ function pickImageFiles(maxCount = 1, options = {}) {
   })
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('Failed to read the selected image.'))
-    reader.readAsDataURL(file)
-  })
-}
-
 export default function ProductForm({
   product,
   categories,
@@ -140,6 +131,7 @@ export default function ProductForm({
   const [scannerField, setScannerField] = useState('')
   const [scannerLaunchingField, setScannerLaunchingField] = useState('')
   const [saving, setSaving] = useState(false)
+  const [imageUploading, setImageUploading] = useState(false)
   const supplierRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -215,25 +207,32 @@ export default function ProductForm({
   }
 
   async function addImages() {
-    if (saving) return
+    if (saving || imageUploading) return
     await uploadPickedImages({})
   }
 
   async function addPhoto() {
-    if (saving) return
+    if (saving || imageUploading) return
     await uploadPickedImages({ capture: 'environment' })
   }
 
   async function uploadPickedImages(options = {}) {
+    if (imageUploading) return
     try {
       const remaining = Math.max(0, 5 - imageList.length)
       if (!remaining) return
       const files = await pickImageFiles(remaining, options)
       if (!files.length) return
+      setImageUploading(true)
       const stagedImages = []
       for (const file of files) {
-        const dataUrl = await readFileAsDataUrl(file)
-        if (dataUrl) stagedImages.push(dataUrl)
+        const uploaded = await window.api.uploadProductImage({
+          productId: currentProductId || null,
+          file,
+          fileName: file.name || 'product.jpg',
+        })
+        const publicPath = uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
+        if (publicPath) stagedImages.push(publicPath)
       }
       setImageList((current) => {
         const next = [...current]
@@ -244,6 +243,8 @@ export default function ProductForm({
       })
     } catch (error) {
       alert(error?.message || tr('image_upload_failed', 'Image upload failed', 'ការបង្ហោះរូបភាពបានបរាជ័យ'))
+    } finally {
+      setImageUploading(false)
     }
   }
 
@@ -385,13 +386,13 @@ export default function ProductForm({
               <p className="text-xs text-gray-400">{imageList.length}/5</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving}>
-                {tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
+              <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving || imageUploading}>
+                {imageUploading ? tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...') : tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={addPhoto} disabled={saving}>
+              <button type="button" className="btn-secondary text-sm" onClick={addPhoto} disabled={saving || imageUploading}>
                 {tr('take_photo', 'Take Photo', 'ថតរូប')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)} disabled={saving}>
+              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)} disabled={saving || imageUploading}>
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>

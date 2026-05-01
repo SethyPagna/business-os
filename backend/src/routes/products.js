@@ -673,6 +673,18 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const errors = []
   let imported = 0, updated = 0, images_matched = 0
   const normalizeLookup = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const legacyProductCount = Array.isArray(products) ? products.length : 0
+  const legacyImageEntries = imageFiles && typeof imageFiles === 'object' ? Object.entries(imageFiles) : []
+  const legacyBase64ImageBytes = legacyImageEntries.reduce((sum, [, value]) => (
+    sum + (/^data:image\//i.test(String(value || '')) ? String(value || '').length : 0)
+  ), 0)
+  if (
+    legacyProductCount > 500
+    || legacyImageEntries.length > 100
+    || legacyBase64ImageBytes > 10 * 1024 * 1024
+  ) {
+    return err(res, 'Large product imports must use the import job pipeline so rows and images are processed safely in the background.', 413)
+  }
 
   // Image-only mode: match uploaded images to products by filename ??product name
   if (imageOnly) {
