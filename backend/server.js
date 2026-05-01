@@ -102,6 +102,11 @@ function mountStaticAssets(target) {
   target.use('/uploads', express.static(UPLOADS_PATH, { maxAge: '7d', setHeaders: setUploadStaticHeaders }))
   if (!FRONTEND_DIST_EXISTS) return
 
+  target.get(['/', '/index.html'], (req, res, next) => {
+    if (!isConfiguredCustomerPortalHost(req)) return next()
+    return res.redirect(302, '/public')
+  })
+
   target.use(express.static(FRONTEND_DIST, {
     maxAge: 0,
     etag: true,
@@ -177,11 +182,6 @@ function mountSpaFallback(target) {
   // confusing "stylesheet MIME type text/html" failure mode on stale tabs.
   target.get('/assets/*', (_req, res) => {
     res.status(404).type('text/plain; charset=utf-8').send('Asset not found')
-  })
-
-  target.get(['/', '/index.html'], (req, res, next) => {
-    if (!isConfiguredCustomerPortalHost(req)) return next()
-    return res.redirect(302, '/public')
   })
 
   target.get('*', (req, res, next) => {
