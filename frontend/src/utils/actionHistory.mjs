@@ -67,16 +67,29 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
     const action = direction === 'undo' ? entry.undo : entry.redo
     if (typeof action !== 'function') return false
     setBusy(direction)
+    let serverTransitioned = false
     try {
+      if (entry.serverId && typeof window !== 'undefined') {
+        const transition = direction === 'undo' ? window.api?.undoActionHistory : window.api?.redoActionHistory
+        if (typeof transition === 'function') {
+          await transition(entry.serverId)
+          serverTransitioned = true
+          refreshServerItems()
+        } else if (window.api?.updateActionHistory) {
+          await window.api.updateActionHistory(entry.serverId, { status: direction === 'undo' ? 'redoable' : 'undoable' })
+          serverTransitioned = true
+          refreshServerItems()
+        }
+      }
       await Promise.resolve(action())
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).then(refreshServerItems).catch(() => {})
+        if (entry.serverId && !serverTransitioned && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).then(refreshServerItems).catch(() => {})
       } else {
         setRedoStack((current) => current.filter((item) => item.id !== entry.id))
         setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).then(refreshServerItems).catch(() => {})
+        if (entry.serverId && !serverTransitioned && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).then(refreshServerItems).catch(() => {})
       }
       return true
     } catch (error) {

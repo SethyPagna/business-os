@@ -257,6 +257,7 @@ function updateJob(id, patch = {}) {
     'processed_images',
     'failed_images',
     'warning_count',
+    'policy_json',
     'summary_json',
     'cancel_requested',
     'last_error',
@@ -285,6 +286,313 @@ function getJobErrors(jobId, { limit = 500 } = {}) {
     ORDER BY id ASC
     LIMIT ?
   `).all(jobId, Math.max(1, Math.min(5000, Number(limit || 500))))
+}
+
+function normalizeReviewText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function hasReviewQueryMatch(row = {}, conflict = {}, query = '') {
+  const needle = normalizeReviewText(query)
+  if (!needle) return true
+  const haystack = [
+    row.name,
+    row.sku,
+    row.barcode,
+    row.phone,
+    row.email,
+    row.membership_number,
+    row.product,
+    row.product_name,
+    row.branch,
+    conflict.type,
+    ...(conflict.fields || []),
+    ...(conflict.labels || []),
+  ].join(' ').toLowerCase()
+  return haystack.includes(needle)
+}
+
+function normalizeReviewFilter(value) {
+  const filter = normalizeReviewText(value || 'all')
+  if (['same_name', 'same-name', 'name'].includes(filter)) return 'same_name'
+  if (['identifier', 'sku_barcode', 'sku/barcode'].includes(filter)) return 'identifier'
+  if (['barcode', 'sku', 'errors', 'issues', 'membership', 'phone', 'email'].includes(filter)) return filter
+  return 'all'
+}
+
+function matchesReviewFilter(conflict = {}, filter = 'all') {
+  if (filter === 'all') return true
+  if (filter === 'errors' || filter === 'issues') return !!conflict.issue
+  if (filter === 'same_name') return String(conflict.type || '').includes('same_name')
+  if (filter === 'identifier') return (conflict.fields || []).some((field) => ['sku', 'barcode'].includes(field))
+  return (conflict.fields || []).includes(filter) || String(conflict.type || '').includes(filter)
+}
+
+function buildProductReviewIndex() {
+  const products = db.prepare(`
+    SELECT id, name, sku, barcode, category, brand, unit, description, supplier,
+           selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
+           purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
+           parent_id, is_group, created_at
+    FROM products
+    WHERE is_active = 1
+    ORDER BY id ASC
+  `).all()
+  const byName = new Map()
+  const bySku = new Map()
+  const byBarcode = new Map()
+  for (const product of products) {
+    const nameKey = normalizeReviewText(product.name)
+    if (nameKey) {
+      if (!byName.has(nameKey)) byName.set(nameKey, [])
+      byName.get(nameKey).push(product)
+    }
+    const skuKey = normalizeReviewText(product.sku)
+    if (skuKey && !bySku.has(skuKey)) bySku.set(skuKey, product)
+    const barcodeKey = normalizeReviewText(product.barcode)
+    if (barcodeKey && !byBarcode.has(barcodeKey)) byBarcode.set(barcodeKey, product)
+  }
+  return { byName, bySku, byBarcode }
+}
+
+function getProductConflictForReview(row = {}, index) {
+  const normalized = normalizeRowForProduct(row)
+  const store = index || buildProductReviewIndex()
+  const sameName = store.byName.get(normalizeReviewText(normalized.name)) || []
+  const skuConflict = normalized.sku ? store.bySku.get(normalizeReviewText(normalized.sku)) || null : null
+  const barcodeConflict = normalized.barcode ? store.byBarcode.get(normalizeReviewText(normalized.barcode)) || null : null
+  const fields = []
+  if (skuConflict) fields.push('sku')
+  if (barcodeConflict && (!skuConflict || barcodeConflict.id !== skuConflict.id || barcodeConflict.barcode === normalized.barcode)) fields.push('barcode')
+  const matching = sameName.find((product) => normalizeProductSignature(product) === normalizeProductSignature(normalized)) || null
+  const selectedParent = chooseParentProduct(sameName)
+  const hasIdentifier = fields.length > 0
+  const sameNameType = sameName.length
+    ? (hasIdentifier ? 'same_name_identifier' : (matching ? 'same_name_same_details' : 'same_name_different_details'))
+    : ''
+  const type = sameNameType || (hasIdentifier ? 'identifier' : 'new')
+  const plannedAction = sameName.length
+    ? (matching ? 'merge_stock' : 'create_variant')
+    : 'new'
+  const conflictTarget = skuConflict || barcodeConflict || matching || sameName[0] || null
+  return {
+    issue: !normalized.name,
+    type,
+    fields,
+    labels: [
+      sameName.length ? 'same name' : '',
+      fields.includes('sku') ? 'same sku' : '',
+      fields.includes('barcode') ? 'same barcode' : '',
+      !matching && sameName.length ? 'different details' : '',
+    ].filter(Boolean),
+    plannedAction,
+    target_product_id: matching?.id || conflictTarget?.id || null,
+    parent_id: plannedAction === 'create_variant' ? (selectedParent?.parent_id || selectedParent?.id || null) : null,
+    existing: conflictTarget ? {
+      id: conflictTarget.id,
+      name: conflictTarget.name,
+      sku: conflictTarget.sku,
+      barcode: conflictTarget.barcode,
+      parent_id: conflictTarget.parent_id || null,
+    } : null,
+    decisionDefaults: {
+      _action: plannedAction,
+      _identifier_conflict_mode: hasIdentifier ? 'clear_imported' : '',
+      _target_product_id: matching?.id || '',
+      _parent_id: plannedAction === 'create_variant' ? (selectedParent?.parent_id || selectedParent?.id || '') : '',
+    },
+  }
+}
+
+function buildContactReviewIndex(type) {
+  const table = type === 'suppliers' ? 'suppliers' : type === 'delivery_contacts' ? 'delivery_contacts' : 'customers'
+  const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id ASC`).all()
+  const byName = new Map()
+  const byPhone = new Map()
+  const byEmail = new Map()
+  const byMembership = new Map()
+  for (const row of rows) {
+    const nameKey = normalizeReviewText(row.name)
+    if (nameKey && !byName.has(nameKey)) byName.set(nameKey, row)
+    const phoneKey = normalizeReviewText(row.phone)
+    if (phoneKey && !byPhone.has(phoneKey)) byPhone.set(phoneKey, row)
+    const emailKey = normalizeReviewText(row.email)
+    if (emailKey && !byEmail.has(emailKey)) byEmail.set(emailKey, row)
+    const membershipKey = normalizeReviewText(row.membership_number)
+    if (membershipKey && !byMembership.has(membershipKey)) byMembership.set(membershipKey, row)
+  }
+  return { byName, byPhone, byEmail, byMembership }
+}
+
+function getContactConflictForReview(row = {}, type, index) {
+  const store = index || buildContactReviewIndex(type)
+  const contactState = buildImportedContactState(row, { mode: type === 'delivery_contacts' ? 'area' : 'address' })
+  const incoming = {
+    name: cleanText(contactState.primary.name || row.name),
+    phone: cleanText(contactState.primary.phone || row.phone),
+    email: cleanText(contactState.primary.email || row.email),
+    membership_number: cleanText(row.membership_number),
+  }
+  const sameName = incoming.name ? store.byName.get(normalizeReviewText(incoming.name)) || null : null
+  const samePhone = incoming.phone ? store.byPhone.get(normalizeReviewText(incoming.phone)) || null : null
+  const sameEmail = incoming.email ? store.byEmail.get(normalizeReviewText(incoming.email)) || null : null
+  const sameMembership = incoming.membership_number ? store.byMembership.get(normalizeReviewText(incoming.membership_number)) || null : null
+  const fields = []
+  if (sameMembership) fields.push('membership')
+  if (samePhone) fields.push('phone')
+  if (sameEmail) fields.push('email')
+  const target = sameMembership || samePhone || sameEmail || sameName || null
+  const sameNameDifferentContact = !!(sameName && (fields.length || normalizeReviewText(sameName.phone) !== normalizeReviewText(incoming.phone) || normalizeReviewText(sameName.email) !== normalizeReviewText(incoming.email)))
+  const typeName = sameNameDifferentContact
+    ? 'same_name_contact'
+    : fields.length
+      ? 'contact_identifier'
+      : sameName
+        ? 'same_name'
+        : 'new'
+  return {
+    issue: !incoming.name && type !== 'delivery_contacts',
+    type: typeName,
+    fields,
+    labels: [
+      sameName ? 'same name' : '',
+      sameMembership ? 'same membership' : '',
+      samePhone ? 'same phone' : '',
+      sameEmail ? 'same email' : '',
+    ].filter(Boolean),
+    plannedAction: target ? 'merge' : 'new',
+    existing: target ? {
+      id: target.id,
+      name: target.name,
+      phone: target.phone,
+      email: target.email,
+      membership_number: target.membership_number,
+    } : null,
+    decisionDefaults: {
+      _conflict_mode: target ? 'merge' : 'new',
+      _field_rules: '{}',
+    },
+  }
+}
+
+function getGenericImportConflictForReview(row = {}, type) {
+  const issue = !Object.entries(row).some(([key, value]) => key !== '_rowNumber' && String(value || '').trim())
+  return {
+    issue,
+    type: issue ? 'empty_row' : type || 'row',
+    fields: [],
+    labels: issue ? ['empty row'] : [],
+    plannedAction: issue ? 'skip' : 'apply',
+    existing: null,
+    decisionDefaults: {},
+  }
+}
+
+function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
+  const rowNumber = String(row?._rowNumber || '')
+  const zeroBased = String(Math.max(0, Number(row?._rowNumber || 2) - 2))
+  const decision = decisionsByRow[rowNumber] || decisionsByRow[zeroBased] || null
+  if (!decision || typeof decision !== 'object') return row
+  const next = { ...row }
+  ;['_action', '_target_product_id', '_parent_id', '_identifier_conflict_mode', 'image_conflict_mode', '_conflict_mode'].forEach((key) => {
+    if (decision[key] != null) next[key] = decision[key]
+  })
+  if (decision.field_rules || decision._field_rules) {
+    next._field_rules = typeof (decision.field_rules || decision._field_rules) === 'string'
+      ? (decision.field_rules || decision._field_rules)
+      : stringify(decision.field_rules || decision._field_rules)
+  }
+  return next
+}
+
+function getImportDecisionMap(jobId) {
+  const policy = getImportJob(jobId)?.policy || {}
+  const decisions = policy.decisionsByRowNumber || policy.decisions_by_row_number || policy.decisions || {}
+  return decisions && typeof decisions === 'object' ? decisions : {}
+}
+
+async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'all', query = '' } = {}) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const csvFile = getJobFiles(jobId, 'csv')[0]
+  if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) {
+    return { job, page: 1, pageSize: 50, total: 0, rows: [], counts: {} }
+  }
+  const normalizedFilter = normalizeReviewFilter(filter)
+  const safePage = Math.max(1, Number(page || 1))
+  const safePageSize = Math.max(10, Math.min(100, Number(pageSize || 50)))
+  const offsetStart = (safePage - 1) * safePageSize
+  const rows = []
+  const counts = { total: 0, visible: 0, same_name: 0, identifier: 0, barcode: 0, sku: 0, membership: 0, phone: 0, email: 0, issues: 0, new: 0 }
+  const productIndex = job.type === 'products' ? buildProductReviewIndex() : null
+  const contactIndex = ['customers', 'suppliers', 'delivery_contacts'].includes(job.type) ? buildContactReviewIndex(job.type) : null
+  const decisionsByRow = getImportDecisionMap(jobId)
+  let matched = 0
+  for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(200, IMPORT_ROW_BATCH_SIZE) })) {
+    for (const sourceRow of batchRows) {
+      const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
+      let conflict
+      try {
+        conflict = job.type === 'products'
+          ? getProductConflictForReview(row, productIndex)
+          : contactIndex
+            ? getContactConflictForReview(row, job.type, contactIndex)
+            : getGenericImportConflictForReview(row, job.type)
+      } catch (error) {
+        conflict = {
+          issue: true,
+          type: 'row_error',
+          fields: ['errors'],
+          labels: ['error'],
+          plannedAction: 'skip',
+          existing: null,
+          decisionDefaults: {},
+          error: error?.message || 'Unable to review row',
+        }
+      }
+      counts.total += 1
+      if (String(conflict.type || '').includes('same_name')) counts.same_name += 1
+      if ((conflict.fields || []).some((field) => ['sku', 'barcode'].includes(field))) counts.identifier += 1
+      ;['barcode', 'sku', 'membership', 'phone', 'email'].forEach((field) => {
+        if ((conflict.fields || []).includes(field)) counts[field] += 1
+      })
+      if (conflict.issue) counts.issues += 1
+      if (conflict.type === 'new') counts.new += 1
+      if (!matchesReviewFilter(conflict, normalizedFilter)) continue
+      if (!hasReviewQueryMatch(row, conflict, query)) continue
+      matched += 1
+      if (matched <= offsetStart) continue
+      if (rows.length >= safePageSize) continue
+      rows.push({
+        rowNumber: row._rowNumber || null,
+        row,
+        conflict,
+      })
+    }
+    await yieldImportWorker()
+  }
+  counts.visible = matched
+  return {
+    job: getImportJob(jobId),
+    page: safePage,
+    pageSize: safePageSize,
+    total: matched,
+    counts,
+    rows,
+  }
+}
+
+function updateImportJobDecisions(jobId, decisions = {}) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const policy = { ...(job.policy || {}) }
+  const current = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+    ? policy.decisionsByRowNumber
+    : {}
+  const incoming = decisions && typeof decisions === 'object' ? decisions : {}
+  policy.decisionsByRowNumber = { ...current, ...incoming }
+  updateJob(jobId, { policy_json: stringify(policy) })
+  return getImportJob(jobId)
 }
 
 function addJobFile(jobId, file = {}, kind = 'csv', relativePath = '') {
@@ -1157,6 +1465,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
 async function processProductRowBatches({ jobId, rowBatches, totalRows = null, imageLookup, actor }) {
   const ctx = createProductContext()
   const imageAssetCache = new Map()
+  const decisionsByRow = getImportDecisionMap(jobId)
   let imported = 0
   let updated = 0
   let failed = 0
@@ -1194,7 +1503,8 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
         updated_at = datetime('now')
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
-    for (const row of batchRows) {
+    for (const sourceRow of batchRows) {
+      const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
       if (isCancelled(jobId)) {
         flushProgress()
         updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
@@ -1373,6 +1683,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
   const isSupplier = type === 'suppliers'
   const table = isCustomer ? 'customers' : isSupplier ? 'suppliers' : 'delivery_contacts'
   const jobPolicy = getImportJob(jobId)?.policy || {}
+  const decisionsByRow = getImportDecisionMap(jobId)
   const defaultConflictMode = normalizeContactMode(jobPolicy.conflictMode || jobPolicy.conflict_mode || 'merge')
   const policyFieldRules = jobPolicy.fieldRules || jobPolicy.field_rules || {}
   let imported = 0
@@ -1407,7 +1718,8 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
 
     db.transaction(() => {
-      for (const row of batchRows) {
+      for (const sourceRow of batchRows) {
+        const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
         try {
           const mode = normalizeContactMode(row._conflict_mode || row.conflict_mode || defaultConflictMode)
           const fieldRules = { ...policyFieldRules, ...parseFieldRules(row) }
@@ -1556,6 +1868,7 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const decisionsByRow = getImportDecisionMap(jobId)
   const productMap = new Map()
   products.forEach((product) => {
     ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
@@ -1581,7 +1894,8 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
     const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
     const offset = Number(batch?.startIndex || 0)
     db.transaction(() => {
-      for (const row of batchRows) {
+      for (const sourceRow of batchRows) {
+        const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
         try {
           const product = productMap.get(normalizeCsvKey(row.sku))
             || productMap.get(normalizeCsvKey(row.barcode))
@@ -1664,6 +1978,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
   const products = db.prepare('SELECT * FROM products WHERE is_active = 1').all()
   const branches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultBranch = branches.find((branch) => branch.is_default) || branches[0] || null
+  const decisionsByRow = getImportDecisionMap(jobId)
   const productMap = new Map()
   products.forEach((product) => {
     ;[product.sku, product.barcode, product.name, product.id].forEach((value) => {
@@ -1689,7 +2004,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
     }
     const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
     for (let index = 0; index < batchRows.length; index += 1) {
-      const row = batchRows[index]
+      const row = applyImportDecisionToRow(batchRows[index], decisionsByRow)
       const absoluteIndex = Number(batch?.startIndex || 0) + index
       try {
         const product = productMap.get(normalizeCsvKey(row.sku))
@@ -2484,6 +2799,7 @@ module.exports = {
   deleteImportJob,
   enqueueImportJob,
   getImportJob,
+  getImportJobReview,
   getJobErrors,
   getJobFiles,
   getQueueStatus,
@@ -2493,5 +2809,6 @@ module.exports = {
   processImportJob,
   recoverImportJobs,
   startImportWorkers,
+  updateImportJobDecisions,
   updateJob,
 }

@@ -21,8 +21,10 @@ const {
   deleteAllImportJobs,
   deleteImportJob,
   getImportJob,
+  getImportJobReview,
   getJobFiles,
   processImportJob,
+  updateImportJobDecisions,
   updateJob,
 } = require('../src/services/importJobs')
 const { processMediaOptimizationJob } = require('../src/services/mediaQueue')
@@ -141,6 +143,32 @@ async function main() {
     assert.deepEqual(result, { deleted: true, id: job.id })
     assert.equal(getImportJob(job.id), null)
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM import_job_files WHERE job_id = ?').get(job.id).count, 0)
+  })
+
+  await runTest('import review surfaces barcode conflicts and stores row decisions', async () => {
+    db.prepare(`
+      INSERT INTO products (name, sku, barcode, brand, unit, selling_price_usd, stock_quantity, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `).run('Existing Balm', 'BALM-1', 'BAR-100', 'Leang', 'pcs', 2.5, 5)
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeJobFile(job.id, 'review-products.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,selling_price_usd,stock_quantity',
+      'Different Balm,BALM-NEW,BAR-100,Leang,pcs,2.50,3',
+      'Existing Balm,BALM-1,BAR-100,Leang,pcs,2.50,4',
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'review-products.csv', mimetype: 'text/csv' }, 'csv', 'review-products.csv')
+
+    const review = await getImportJobReview(job.id, { filter: 'barcode', pageSize: 20 })
+
+    assert.equal(review.counts.barcode >= 2, true)
+    assert.equal(review.rows.length, 2)
+    assert.equal(review.rows[0].conflict.fields.includes('barcode'), true)
+
+    const updated = updateImportJobDecisions(job.id, {
+      [review.rows[0].rowNumber]: { _identifier_conflict_mode: 'clear_imported', _action: 'new' },
+    })
+
+    assert.equal(updated.policy.decisionsByRowNumber[String(review.rows[0].rowNumber)]._identifier_conflict_mode, 'clear_imported')
   })
 
   await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {

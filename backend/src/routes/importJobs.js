@@ -17,10 +17,12 @@ const {
   deleteImportJob,
   enqueueImportJob,
   getImportJob,
+  getImportJobReview,
   getJobErrors,
   getJobFiles,
   getQueueStatus,
   listImportJobs,
+  updateImportJobDecisions,
 } = require('../services/importJobs')
 
 const router = express.Router()
@@ -189,6 +191,33 @@ router.get('/:id', authToken, requireImportPermission, (req, res) => {
     })),
     errors: getJobErrors(job.id, { limit: 200 }),
   })
+})
+
+router.get('/:id/review', authToken, requireImportPermission, async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    const review = await getImportJobReview(job.id, {
+      page: req.query?.page,
+      pageSize: req.query?.pageSize,
+      filter: req.query?.type || req.query?.filter,
+      query: req.query?.query || req.query?.q,
+    })
+    ok(res, review)
+  } catch (error) {
+    err(res, error?.message || 'Failed to load import review')
+  }
+})
+
+router.patch('/:id/decisions', authToken, requireImportPermission, (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    const decisions = req.body?.decisions || req.body?.rows || {}
+    ok(res, { job: updateImportJobDecisions(job.id, decisions) })
+  } catch (error) {
+    err(res, error?.message || 'Failed to save import decisions')
+  }
 })
 
 router.post('/:id/csv', authToken, requireImportPermission, importUpload.single('file'), (req, res) => {

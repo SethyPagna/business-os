@@ -46,6 +46,19 @@ function getOwnedHistoryRow(req, id) {
   return db.prepare('SELECT * FROM action_history WHERE id = ? AND created_by_id = ?').get(actionId, req.user?.id || 0)
 }
 
+function canOperateHistoryRow(req, row) {
+  if (!row) return false
+  if (Number(row.created_by_id || 0) === Number(req.user?.id || 0)) return true
+  return hasPermission(req.user, 'settings') || hasPermission(req.user, 'backup')
+}
+
+function getHistoryRow(req, id) {
+  const actionId = Number(id || 0)
+  if (!Number.isInteger(actionId) || actionId <= 0) return null
+  const row = db.prepare('SELECT * FROM action_history WHERE id = ?').get(actionId)
+  return canOperateHistoryRow(req, row) ? row : null
+}
+
 function mapRow(row) {
   return {
     ...row,
@@ -145,5 +158,46 @@ router.patch('/:id', authToken, (req, res) => {
     err(res, error.message || 'Failed to update action history')
   }
 })
+
+function completeServerHistoryTransition(req, res, direction) {
+  const actor = getAuditActor(req, req.body || {})
+  try {
+    const existing = getHistoryRow(req, req.params.id)
+    if (!existing) return err(res, 'Action history item not found', 404)
+    if (!Number(existing.reversible || 0)) return err(res, 'This action is recorded only and cannot be reversed', 400)
+    const currentStatus = String(existing.status || '').toLowerCase()
+    const expected = direction === 'undo' ? 'undoable' : 'redoable'
+    const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
+    if (currentStatus !== expected) {
+      return err(res, `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, 409)
+    }
+    db.prepare(`
+      UPDATE action_history
+      SET status = ?, last_error = NULL, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(nextStatus, existing.id)
+    audit(
+      actor.userId,
+      actor.userName,
+      direction === 'undo' ? 'action_undo' : 'action_redo',
+      existing.entity || 'action_history',
+      existing.entity_id || existing.id,
+      {
+        actionHistoryId: existing.id,
+        scope: existing.scope,
+        label: existing.label,
+        status: nextStatus,
+        serverPayloadOnly: true,
+      },
+    )
+    const row = db.prepare('SELECT * FROM action_history WHERE id = ?').get(existing.id)
+    ok(res, { item: mapRow(row), payload: direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload) })
+  } catch (error) {
+    err(res, error.message || `Failed to ${direction} action history`)
+  }
+}
+
+router.post('/:id/undo', authToken, (req, res) => completeServerHistoryTransition(req, res, 'undo'))
+router.post('/:id/redo', authToken, (req, res) => completeServerHistoryTransition(req, res, 'redo'))
 
 module.exports = router

@@ -77,10 +77,24 @@ Developer machine:
 Business/user machine:
 
 1. Run `run\docker\install.bat` once.
-2. Put the Cloudflare Tunnel token in the generated file under `ops\runtime\docker-release\secrets`.
-3. Run `run\docker\start.bat`.
-4. Run `run\docker\update.bat` whenever a new version is published.
+2. Put a Cloudflare API token with Tunnel write permission in `ops\runtime\secrets\cloudflare-api-token.txt`.
+3. Run `run\docker\rotate-cloudflare.bat --disconnect-old` if the tunnel token was pasted, shared, or may be compromised.
+4. Run `run\docker\start.bat`.
+5. Run `run\docker\update.bat` whenever a new version is published.
 
 The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into runtime containers. It also refuses to silently run SQLite in production release mode.
 
 Important: the current source app still contains SQLite-specific route code. The Docker-only release tooling and migrator are in place, but production serving remains guarded until the route-level Postgres data-layer cutover is completed. This prevents accidental data loss or a hidden throwaway SQLite database inside Docker.
+
+## Cloudflare Safety
+
+Business OS now uses Cloudflare for the public/admin links. Tailscale is legacy support only and is not part of normal setup.
+
+If a Cloudflare tunnel token, origin private key, or API token was pasted into chat or sent to anyone, treat it as compromised:
+
+1. Create or confirm a Cloudflare API token with Cloudflare Tunnel write permission.
+2. Save it locally only in `ops\runtime\secrets\cloudflare-api-token.txt`.
+3. Run `run\docker\rotate-cloudflare.bat --disconnect-old`.
+4. Restart with `run\docker\start.bat`.
+
+The rotation script updates the tunnel to route `leangcosmetics.dpdns.org` and `admin.leangcosmetics.dpdns.org` to the Docker app service (`http://app:4000`) and writes the new connector token only into ignored runtime secret files.

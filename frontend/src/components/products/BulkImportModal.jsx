@@ -518,11 +518,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const applyFieldRulePreset = (preset) => {
     const fields = [
-      'category', 'brand', 'unit', 'supplier', 'description',
-      'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr',
-      'discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr',
-      'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
-      'purchase_price_usd', 'purchase_price_khr', 'low_stock_threshold',
+      'category', 'brand', 'unit', 'supplier', 'description', 'low_stock_threshold',
     ]
     const rule = preset === 'use_imported'
       ? 'use_imported'

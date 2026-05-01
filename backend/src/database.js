@@ -1573,9 +1573,19 @@ try {
 
 runDatabaseMaintenance({ checkpoint: 'PASSIVE', optimize: true })
 
+function closeDatabase({ checkpoint = 'TRUNCATE', optimize = true } = {}) {
+  try {
+    runDatabaseMaintenance({ checkpoint, optimize })
+  } catch (_) {}
+  try {
+    db.close()
+  } catch (_) {}
+}
+
 module.exports = {
   db,
   applyDatabasePragmas,
+  closeDatabase,
   ensureCoreDataInvariants,
   ensureDefaultOrganizationAndGroup,
   ensurePrimaryAdminRoleAndUser,

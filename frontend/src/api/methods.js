@@ -724,6 +724,12 @@ export const listImportJobs = (params = {}) => {
   return route(`importJobs:list:${q}`, () => apiFetch('GET', `/api/import-jobs${q ? `?${q}` : ''}`), null)
 }
 export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
+export const getImportJobReview = (id, params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`importJobs:review:${id}:${q}`, () => apiFetch('GET', `/api/import-jobs/${encodeURIComponent(id)}/review${q ? `?${q}` : ''}`), null)
+}
+export const updateImportJobDecisions = (id, decisions = {}) =>
+  route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, { decisions }), null, true)
 export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
 export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
 export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
@@ -980,6 +986,10 @@ export const createActionHistory = payload =>
   route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
 export const updateActionHistory = (id, payload) =>
   route('actionHistory:update', () => apiFetch('PATCH', `/api/action-history/${id}`, { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+export const undoActionHistory = id =>
+  route(`actionHistory:undo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/undo`, getDeviceInfo()), null, true)
+export const redoActionHistory = id =>
+  route(`actionHistory:redo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/redo`, getDeviceInfo()), null, true)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
 
