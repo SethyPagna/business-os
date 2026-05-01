@@ -49,6 +49,23 @@ function getConfiguredPublicHosts() {
     .filter(Boolean)
 }
 
+function getConfiguredCustomerPortalHosts() {
+  return [CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL]
+    .map(normalizeConfiguredHost)
+    .filter(Boolean)
+    .filter((host, index, list) => list.indexOf(host) === index)
+}
+
+function isConfiguredCustomerPortalHost(req) {
+  const requestHost = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '')
+    .split(',')[0]
+    .trim()
+    .replace(/:\d+$/, '')
+    .toLowerCase()
+  if (!requestHost) return false
+  return getConfiguredCustomerPortalHosts().includes(requestHost)
+}
+
 function isAllowedRequestOrigin(origin) {
   if (!origin) return true
   const host = parseOriginHost(origin)
@@ -344,6 +361,7 @@ module.exports = {
   sanitizeStringValue,
   sanitizeRequestPayload,
   sanitizeDeepStrings,
+  isConfiguredCustomerPortalHost,
   isApiOrHealthPath,
   isSpaFallbackEligible,
   setNoStoreHeaders,

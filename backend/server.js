@@ -40,6 +40,7 @@ const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('
 const {
   CORS_OPTIONS,
   sanitizeRequestPayload,
+  isConfiguredCustomerPortalHost,
   isApiOrHealthPath,
   isSpaFallbackEligible,
   setNoStoreHeaders,
@@ -176,6 +177,11 @@ function mountSpaFallback(target) {
   // confusing "stylesheet MIME type text/html" failure mode on stale tabs.
   target.get('/assets/*', (_req, res) => {
     res.status(404).type('text/plain; charset=utf-8').send('Asset not found')
+  })
+
+  target.get(['/', '/index.html'], (req, res, next) => {
+    if (!isConfiguredCustomerPortalHost(req)) return next()
+    return res.redirect(302, '/public')
   })
 
   target.get('*', (req, res, next) => {

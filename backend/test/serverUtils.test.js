@@ -9,6 +9,7 @@ const {
   isSpaFallbackEligible,
   isAllowedRequestOrigin,
   isAllowedWebSocketOrigin,
+  isConfiguredCustomerPortalHost,
   mapServerError,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
@@ -99,6 +100,18 @@ runTest('origin policy allows configured Cloudflare public origin for module scr
 runTest('origin policy allows configured Cloudflare admin origin', () => {
   if (!CLOUDFLARE_ADMIN_URL) return
   assert.equal(isAllowedRequestOrigin(CLOUDFLARE_ADMIN_URL), true)
+})
+
+runTest('customer portal host detector separates public and admin Cloudflare hosts', () => {
+  const publicUrl = PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL
+  if (publicUrl) {
+    const publicHost = new URL(publicUrl).host
+    assert.equal(isConfiguredCustomerPortalHost({ headers: { host: publicHost } }), true)
+  }
+  if (CLOUDFLARE_ADMIN_URL) {
+    const adminHost = new URL(CLOUDFLARE_ADMIN_URL).host
+    assert.equal(isConfiguredCustomerPortalHost({ headers: { host: adminHost } }), false)
+  }
 })
 
 runTest('websocket origin policy accepts same-host and rejects mismatched origins', () => {
