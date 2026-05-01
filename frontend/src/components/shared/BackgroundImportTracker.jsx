@@ -281,10 +281,13 @@ export default function BackgroundImportTracker() {
     if (!job?.id || busyJobId) return
     const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
     if (!okToRemove) return
-    setBusyJobId(job.id)
+    const removedId = String(job.id)
+    setBusyJobId(removedId)
     try {
-      await window.api.deleteImportJob(job.id)
-      jobsSignatureRef.current = ''
+      await window.api.deleteImportJob(removedId)
+      const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== removedId)
+      jobsSignatureRef.current = buildJobsSignature(filteredJobs)
+      startTransition(() => setJobs(filteredJobs))
       await loadJobs()
       notify(t('import_removed') || 'Import removed', 'success')
     } catch (error) {

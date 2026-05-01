@@ -9,7 +9,7 @@ REM  Shutdown flow:
 REM    1. stop PM2-managed app if present
 REM    2. kill listeners on the configured port
 REM    3. kill stray node server.js processes
-REM    4. stop Tailscale Funnel
+REM    4. stop Cloudflare/Tailscale tunnels
 REM    5. retry with elevation if the port is still busy
 REM ========================================================================
 
@@ -24,9 +24,11 @@ set "RUN_LOG=%LOG_DIR%\stop-server.log"
 set "ENV_FILE=%ROOT%\backend\.env"
 set "PORT=4000"
 set "TAILSCALE_CMD="
+set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
@@ -110,6 +112,11 @@ if defined TAILSCALE_CMD (
     powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
     echo [OK] Tailscale Funnel stopped.
 )
+
+echo.
+echo [INFO] Stopping Cloudflare Tunnel...
+powershell -NoProfile -Command "$tokenPath='%CLOUDFLARE_TUNNEL_TOKEN_FILE%'; Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | Where-Object { ([string]$_.CommandLine) -match [regex]::Escape($tokenPath) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+echo [OK] Cloudflare Tunnel stop command executed.
 
 if /I "%~1"=="--with-services" (
     echo.

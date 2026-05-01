@@ -62,7 +62,7 @@ const {
 } = require('../organizationContext')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
-const { TAILSCALE_URL } = require('../config')
+const { PUBLIC_BASE_URL, TAILSCALE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
 const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
 
@@ -140,6 +140,8 @@ function resolvePasswordResetRedirect(req, redirectTo) {
   const candidates = [
     redirectTo,
     process.env.SUPABASE_PASSWORD_RESET_REDIRECT_TO,
+    PUBLIC_BASE_URL,
+    process.env.CLOUDFLARE_PUBLIC_URL,
     process.env.TAILSCALE_URL,
     buildPublicBaseUrl(req),
     'http://localhost:4000',
@@ -363,7 +365,7 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
     serverStartTime: String(SERVER_START_TIME),
   }
   return {
-    syncServerUrl: TAILSCALE_URL || null,
+    syncServerUrl: PUBLIC_BASE_URL || TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,

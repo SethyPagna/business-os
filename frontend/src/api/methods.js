@@ -735,7 +735,7 @@ export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${
     return await apiFetch('DELETE', `/api/import-jobs/${encodedId}${force}`, {})
   } catch (error) {
     const message = String(error?.message || '')
-    if (Number(error?.status) === 404 && /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) {
+    if ((Number(error?.status) === 404 || /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) && !/\/delete<\/pre>/i.test(message)) {
       return apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, { force: !!options.force })
     }
     throw error

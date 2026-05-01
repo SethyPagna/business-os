@@ -9,7 +9,7 @@ REM  Runtime flow:
 REM    1. start/verify required Docker scale services
 REM    2. confirm backend deps and frontend build exist
 REM    3. start with PM2 when possible, otherwise fall back to background node
-REM    4. update Tailscale Funnel / stored URL when available
+REM    4. start Cloudflare Tunnel for the custom domain, then keep Tailscale as fallback
 REM    5. wait for /health, then print admin + customer portal URLs
 REM ========================================================================
 
@@ -27,8 +27,14 @@ set "PM2_HOME=%ROOT%\ops\runtime\pm2"
 set "PORT=4000"
 set "PM2_CMD="
 set "TAILSCALE_CMD="
+set "CLOUDFLARED_CMD="
 set "USING_PM2=0"
 set "TAILSCALE_URL_FOUND="
+set "PUBLIC_URL_FOUND="
+set "PUBLIC_URL_KIND="
+set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+set "PUBLIC_BASE_URL="
+set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
 set "TAILSCALE_NET_OK="
 set "LOCAL_API=http://127.0.0.1:4000"
 set "SERVER_ALREADY_RUNNING=0"
@@ -55,8 +61,13 @@ if not defined UPLOAD_CHUNK_MB set "UPLOAD_CHUNK_MB=12"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PUBLIC_BASE_URL="') do set "PUBLIC_BASE_URL=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_PUBLIC_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
+if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+if "%PUBLIC_BASE_URL%"=="" set "PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 if not exist "%PM2_HOME%" mkdir "%PM2_HOME%" >nul 2>&1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
@@ -83,6 +94,17 @@ for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
 if not defined TAILSCALE_CMD (
     for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
         if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+    )
+)
+
+for %%g in (cloudflared.exe cloudflared.cmd cloudflared.bat cloudflared) do (
+    if not defined CLOUDFLARED_CMD (
+        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined CLOUDFLARED_CMD set "CLOUDFLARED_CMD=%%p"
+    )
+)
+if not defined CLOUDFLARED_CMD (
+    for %%p in ("%ProgramFiles%\cloudflared\cloudflared.exe" "%ProgramFiles(x86)%\cloudflared\cloudflared.exe" "%LOCALAPPDATA%\cloudflared\cloudflared.exe") do (
+        if exist "%%~p" if not defined CLOUDFLARED_CMD set "CLOUDFLARED_CMD=%%~p"
     )
 )
 
@@ -157,7 +179,14 @@ if not defined PM2_CMD (
 )
 
 if "!SERVER_ALREADY_RUNNING!"=="1" (
-    echo [INFO] Reusing the running server instance.
+    call "!PM2_CMD!" describe business-os >nul 2>&1
+    if not errorlevel 1 (
+        echo [INFO] Restarting existing PM2 server so it picks up current code and environment...
+        call "!PM2_CMD!" restart business-os --update-env >nul 2>&1
+        set "USING_PM2=1"
+    ) else (
+        echo [INFO] Reusing the running server instance.
+    )
     goto :after_pm2_start
 )
 
@@ -226,6 +255,30 @@ if "!USING_PM2!"=="1" (
 )
 
 echo.
+echo [INFO] Checking Cloudflare Tunnel for custom public domain...
+if defined CLOUDFLARED_CMD (
+    if exist "!CLOUDFLARE_TUNNEL_TOKEN_FILE!" (
+        echo [INFO] Using cloudflared: !CLOUDFLARED_CMD!
+        powershell -NoProfile -Command "$tokenPath='!CLOUDFLARE_TUNNEL_TOKEN_FILE!'; Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | Where-Object { ([string]$_.CommandLine) -match [regex]::Escape($tokenPath) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+        powershell -NoProfile -Command "$envFile='%ENV_FILE%'; $public='!PUBLIC_BASE_URL!'; $cloud='!CLOUDFLARE_PUBLIC_URL!'; if(Test-Path $envFile){ $lines=Get-Content $envFile; foreach($pair in @(@('PUBLIC_BASE_URL',$public),@('CLOUDFLARE_PUBLIC_URL',$cloud))){ $key=$pair[0]; $value=$pair[1]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) } }; Set-Content -Encoding UTF8 $envFile $lines }" >nul 2>&1
+        powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','!CLOUDFLARE_TUNNEL_TOKEN_FILE!'); $p = Start-Process -FilePath '!CLOUDFLARED_CMD!' -ArgumentList $argsList -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
+        if errorlevel 1 (
+            echo [WARN] Cloudflare Tunnel could not be started. Tailscale fallback will be tried.
+        ) else (
+            set "PUBLIC_URL_FOUND=!PUBLIC_BASE_URL!"
+            set "PUBLIC_URL_KIND=cloudflare"
+            echo [OK] Cloudflare Tunnel requested: !PUBLIC_URL_FOUND!
+        )
+    ) else (
+        echo [WARN] Cloudflare tunnel token file is missing:
+        echo        !CLOUDFLARE_TUNNEL_TOKEN_FILE!
+        echo        Tailscale fallback will be tried.
+    )
+) else (
+    echo [WARN] cloudflared was not found. Tailscale fallback will be tried.
+)
+
+echo.
 echo [INFO] Checking Tailscale for remote access...
 if defined TAILSCALE_CMD (
     echo [INFO] Using Tailscale CLI: !TAILSCALE_CMD!
@@ -250,6 +303,10 @@ if defined TAILSCALE_CMD (
             if "!CLEAN_URL:~-1!"=="/" set "CLEAN_URL=!CLEAN_URL:~0,-1!"
             powershell -Command "$p='%ENV_FILE%'; if(Test-Path $p){$lines=Get-Content $p; if($lines -match '^TAILSCALE_URL='){ $lines=$lines -replace '^TAILSCALE_URL=.*','TAILSCALE_URL=!CLEAN_URL!' } else { $lines += 'TAILSCALE_URL=!CLEAN_URL!' }; Set-Content $p $lines }" >nul 2>&1
             echo [OK] Tailscale Funnel active: !CLEAN_URL!
+            if not defined PUBLIC_URL_FOUND (
+                set "PUBLIC_URL_FOUND=!CLEAN_URL!"
+                set "PUBLIC_URL_KIND=tailscale"
+            )
             echo [INFO] Checking Tailscale relay health...
             powershell -NoProfile -Command "$tailscale='!TAILSCALE_CMD!'; $out=@(& $tailscale netcheck 2>&1); $text=($out -join [Environment]::NewLine); if($text -match 'Nearest DERP:\s+unknown' -or $text -match 'no response to latency probes' -or $text -match 'could not connect') { $text | Set-Content -Encoding UTF8 '%TEMP%\bos_tailscale_netcheck.txt'; exit 1 }; exit 0" >nul 2>&1
             if errorlevel 1 (
@@ -374,47 +431,57 @@ if not "!CUSTOMER_PORTAL_PATH!"=="" if not "!CUSTOMER_PORTAL_PATH:~0,1!"=="/" se
 set "CUSTOMER_PUBLIC_URL="
 for /f "tokens=*" %%r in ('powershell -Command "try { $cfg = Invoke-RestMethod -Uri %LOCAL_API%/api/portal/config -UseBasicParsing -TimeoutSec 3; if ($cfg.publicUrl) { [Console]::WriteLine([string]$cfg.publicUrl) } } catch {}" 2^>nul') do set "CUSTOMER_PUBLIC_URL=%%r"
 set "PUBLIC_URL_OK="
-if not "!TAILSCALE_URL_FOUND!"=="" (
+if not "!PUBLIC_URL_FOUND!"=="" (
     echo [INFO] Verifying public URL with Node HTTPS...
     set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
-    node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
+    node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
     if not errorlevel 1 (
-        if defined TAILSCALE_NET_OK (
+        if /I "!PUBLIC_URL_KIND!"=="cloudflare" (
             set "PUBLIC_URL_OK=1"
             echo [OK] Public URL verification passed.
-            echo [%DATE% %TIME%] START verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+            echo [%DATE% %TIME%] START verified Cloudflare public URL !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
+        ) else if defined TAILSCALE_NET_OK (
+            set "PUBLIC_URL_OK=1"
+            echo [OK] Public URL verification passed.
+            echo [%DATE% %TIME%] START verified public URL !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
         ) else (
             echo [WARN] Public route responded locally, but Tailscale relay health failed.
             type "%TEMP%\bos_public_check.txt"
-            echo [%DATE% %TIME%] START warning: Tailscale relay health failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+            echo [%DATE% %TIME%] START warning: Tailscale relay health failed for !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
         )
     ) else (
         echo [WARN] Public URL verification failed.
         type "%TEMP%\bos_public_check.txt"
-        echo [INFO] Resetting stale Tailscale Serve/Funnel config and retrying...
-        if defined TAILSCALE_CMD (
-            powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
-            powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
-            set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
-            node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
-            if not errorlevel 1 (
-                if defined TAILSCALE_NET_OK (
-                    set "PUBLIC_URL_OK=1"
-                    echo [OK] Public URL verification passed after Tailscale reset.
-                    echo [%DATE% %TIME%] START repaired and verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        if /I "!PUBLIC_URL_KIND!"=="tailscale" (
+            if defined TAILSCALE_CMD (
+                echo [INFO] Resetting stale Tailscale Serve/Funnel config and retrying...
+                powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
+                powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
+                set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
+                node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!PUBLIC_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
+                if not errorlevel 1 (
+                    if defined TAILSCALE_NET_OK (
+                        set "PUBLIC_URL_OK=1"
+                        echo [OK] Public URL verification passed after Tailscale reset.
+                        echo [%DATE% %TIME%] START repaired and verified public URL !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
+                    ) else (
+                        echo [WARN] Public route responded after reset, but Tailscale relay health failed.
+                        type "%TEMP%\bos_public_check_retry.txt"
+                        echo [%DATE% %TIME%] START warning: Tailscale relay health failed after reset for !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
+                    )
                 ) else (
-                    echo [WARN] Public route responded after reset, but Tailscale relay health failed.
+                    echo [WARN] Public URL verification still failed after Tailscale reset.
                     type "%TEMP%\bos_public_check_retry.txt"
-                    echo [%DATE% %TIME%] START warning: Tailscale relay health failed after reset for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+                    echo [%DATE% %TIME%] START warning: public URL verification failed for !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
                 )
+                del "%TEMP%\bos_public_check_retry.txt" >nul 2>&1
             ) else (
-                echo [WARN] Public URL verification still failed after Tailscale reset.
-                type "%TEMP%\bos_public_check_retry.txt"
-                echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+                echo [WARN] Tailscale CLI is not available for automatic retry.
+                echo [%DATE% %TIME%] START warning: public URL verification failed for !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
             )
-            del "%TEMP%\bos_public_check_retry.txt" >nul 2>&1
         ) else (
-            echo [%DATE% %TIME%] START warning: public URL verification failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+            echo [INFO] For Cloudflare, check %LOG_DIR%\cloudflared.log and Cloudflare Tunnel health.
+            echo [%DATE% %TIME%] START warning: public URL verification failed for !PUBLIC_URL_FOUND!>>"%RUN_LOG%"
         )
     )
     del "%TEMP%\bos_public_check.txt" >nul 2>&1
@@ -427,19 +494,19 @@ echo ========================================================================
 echo.
 echo   Local Admin:  http://localhost:%PORT%
 echo   Local Portal: http://localhost:%PORT%!CUSTOMER_PORTAL_PATH!
-if not "!TAILSCALE_URL_FOUND!"=="" echo   Remote Admin: !TAILSCALE_URL_FOUND!
+if not "!PUBLIC_URL_FOUND!"=="" echo   Remote Admin: !PUBLIC_URL_FOUND!
 if not "!CUSTOMER_PUBLIC_URL!"=="" (
     echo   Customer URL: !CUSTOMER_PUBLIC_URL!
 ) else (
-    if not "!TAILSCALE_URL_FOUND!"=="" echo   Customer URL: !TAILSCALE_URL_FOUND!!CUSTOMER_PORTAL_PATH!
+    if not "!PUBLIC_URL_FOUND!"=="" echo   Customer URL: !PUBLIC_URL_FOUND!!CUSTOMER_PORTAL_PATH!
 )
 if defined PUBLIC_URL_OK (
     echo   Public URL check: passed
 ) else (
-    if not "!TAILSCALE_URL_FOUND!"=="" echo   Public URL check: warning - see log output above
+    if not "!PUBLIC_URL_FOUND!"=="" echo   Public URL check: warning - see log output above
 )
-if not defined PUBLIC_URL_OK if not "!TAILSCALE_URL_FOUND!"=="" (
-    echo   Multi-device note: same-tailnet devices may still work; public internet devices need Tailscale Funnel DNS/ingress enabled.
+if not defined PUBLIC_URL_OK if not "!PUBLIC_URL_FOUND!"=="" (
+    echo   Multi-device note: check the Cloudflare/Tailscale tunnel status if public devices cannot connect.
 )
 echo.
 echo   Factory-reset default login: admin / admin

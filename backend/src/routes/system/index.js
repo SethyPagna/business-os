@@ -28,6 +28,7 @@ const {
   DATA_LOCATION_FILE,
   writeDataLocation,
   normalizeSelectedDataDir,
+  PUBLIC_BASE_URL,
   TAILSCALE_URL,
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI,
   BUSINESS_OS_REQUIRE_SCALE_SERVICES,
@@ -186,7 +187,7 @@ function buildRequestBaseUrl(req) {
 function resolveDriveRedirectUri(req) {
   const configured = String(GOOGLE_DRIVE_OAUTH_REDIRECT_URI || '').trim()
   if (configured) return configured
-  const baseUrl = buildRequestBaseUrl(req)
+  const baseUrl = String(PUBLIC_BASE_URL || '').trim() || buildRequestBaseUrl(req)
   return baseUrl ? `${baseUrl}/api/system/drive-sync/oauth/callback` : ''
 }
 
@@ -735,7 +736,7 @@ router.get('/config', authToken, (req, res) => {
   const { hostUiAvailable } = getHostUiAvailability(req)
   const organization = getDefaultOrganization()
   res.json({
-    syncServerUrl: TAILSCALE_URL || null,
+    syncServerUrl: PUBLIC_BASE_URL || TAILSCALE_URL || null,
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,
