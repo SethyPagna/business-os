@@ -5,14 +5,14 @@ setlocal enabledelayedexpansion
 if defined BUSINESS_OS_REPO_ROOT (
   set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-  for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
+  for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 if "%~1"=="" (
   echo Usage: scale-services.bat up^|down^|status^|logs
   echo.
-  echo This is a support command. Everyday users should run start-server.bat.
+  echo This is a support command. Everyday users should run run\start-server.bat.
   exit /b 2
 )
 

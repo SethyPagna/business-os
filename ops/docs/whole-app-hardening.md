@@ -4,7 +4,7 @@ Last updated: 2026-04-30
 
 ## Baseline
 
-- `cmd /c verify-local.bat` passed on 2026-04-30 before Session 1 edits.
+- `cmd /c run\verify-local.bat` passed on 2026-04-30 before Session 1 edits.
 - Frontend build, frontend utility tests, i18n verification, UI verification, and backend utility/security/core tests were green.
 - Known local-only artifacts remain untracked and intentionally excluded from commits: `output/` and root `package.json`.
 - Browser-wrapper or extension errors that reference injected `vendor.js`, `content.js`, `VM####`, or Grammarly scripts are tracked separately from first-party app errors.

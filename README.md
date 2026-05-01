@@ -4,11 +4,11 @@ Business OS is meant to run like a normal Windows business app.
 
 ## Everyday Use
 
-1. Run `setup.bat` once on a new laptop.
-2. Run `start-server.bat` whenever you want to open the app.
+1. Run `run\setup.bat` once on a new laptop.
+2. Run `run\start-server.bat` whenever you want to open the app.
 3. Open the local URL printed by the start window, usually `http://localhost:4000`.
 4. Use the printed customer URL for phones or other devices when Tailscale Funnel is available.
-5. Run `stop-server.bat` to stop the app.
+5. Run `run\stop-server.bat` to stop the app.
 
 That is the normal workflow. You do not need to run Redis, Postgres, MinIO, Docker Compose, or import workers by hand.
 
@@ -16,7 +16,7 @@ If the start window says the public URL check failed, the app still started loca
 
 ## What Setup Does
 
-`setup.bat` checks for Node.js, Docker Desktop, Tailscale, Git, and OpenSSL. When Windows allows it, missing tools are installed with `winget`. If Windows needs administrator approval or a restart, the script tells you what to do and stops clearly.
+`run\setup.bat` checks for Node.js, Docker Desktop, Tailscale, Git, and OpenSSL. When Windows allows it, missing tools are installed with `winget`. If Windows needs administrator approval or a restart, the script tells you what to do and stops clearly.
 
 Docker Desktop is required because Business OS uses Redis, Postgres, and MinIO for large imports and future scale features. The live business database still stays local SQLite until an admin explicitly runs the in-app migration wizard.
 
@@ -34,8 +34,8 @@ In Settings > Backup, the Data migration panel has a one-button safety step. It 
 
 Only use these if support asks:
 
-- `run\bat\scale-services.bat status`
-- `run\bat\scale-services.bat logs`
-- `stop-server.bat --with-services`
+- `run\scale-services.bat status`
+- `run\scale-services.bat logs`
+- `run\stop-server.bat --with-services`
 
 Technical notes are in `ops\readme\README.md`.

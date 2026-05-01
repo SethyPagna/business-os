@@ -16,7 +16,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
     set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-    for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
+    for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
@@ -79,7 +79,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 if errorlevel 1 (
     echo.
     echo [ERROR] Required runtime services are not ready.
-    echo         Open Docker Desktop, finish any setup/restart prompts, then run start-server.bat again.
+    echo         Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.
     echo.
     pause
     echo [%DATE% %TIME%] START failed: runtime bootstrap failed>>"%RUN_LOG%"
@@ -111,7 +111,7 @@ if not defined CLOUDFLARED_CMD (
 if not exist "%ROOT%\backend\node_modules" (
     echo.
     echo [ERROR] Backend dependencies are missing.
-    echo         Run setup.bat first, then try again.
+    echo         Run run\setup.bat first, then try again.
     echo.
     pause
     echo [%DATE% %TIME%] START failed: missing backend node_modules>>"%RUN_LOG%"
@@ -121,7 +121,7 @@ if not exist "%ROOT%\backend\node_modules" (
 if not exist "%ROOT%\frontend\dist\index.html" (
     echo.
     echo [ERROR] Frontend build is missing.
-    echo         Run setup.bat first, then try again.
+    echo         Run run\setup.bat first, then try again.
     echo.
     pause
     echo [%DATE% %TIME%] START failed: missing frontend build>>"%RUN_LOG%"
@@ -173,7 +173,7 @@ for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
 
 if not defined PM2_CMD (
     echo [WARN] PM2 is not installed. Using background node mode.
-    echo [INFO] start-server.bat does not install global packages automatically.
+    echo [INFO] run\start-server.bat does not install global packages automatically.
     if "!SERVER_ALREADY_RUNNING!"=="1" goto :after_pm2_start
     goto :background_start
 )
@@ -519,7 +519,7 @@ if "!USING_PM2!"=="1" (
     echo     pm2 restart business-os --update-env
 ) else (
     echo   Process mode: Background node.exe
-    echo   Use stop-server.bat to stop the server.
+    echo   Use run\stop-server.bat to stop the server.
 )
 echo.
 echo ========================================================================

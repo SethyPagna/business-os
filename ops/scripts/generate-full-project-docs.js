@@ -341,7 +341,7 @@ function folderPurpose(folderPath) {
   if (p === 'backend') return 'Backend project root'
   if (p === 'scripts' || p === 'ops/scripts') return 'Project-level automation scripts'
   if (p === 'run') return 'Project run-script home for bat and sh launchers'
-  if (p === 'run/bat') return 'Windows run/build/verify scripts'
+  if (p === 'run-tailscale') return 'Compatibility wrappers for Tailscale-oriented run commands'
   if (p === 'run/sh') return 'POSIX run/setup/stop scripts'
   if (p.startsWith('frontend/src/components')) return 'UI pages/components domain'
   if (p.startsWith('frontend/src/api')) return 'Frontend API and sync transport'

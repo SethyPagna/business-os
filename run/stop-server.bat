@@ -16,7 +16,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
     set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-    for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
+    for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG_DIR=%ROOT%\ops\runtime\logs"

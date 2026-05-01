@@ -54,13 +54,13 @@ function Find-Executable($names, $fallbacks = @()) {
 function Install-WithWinget($id, $label) {
   $winget = Find-Executable @('winget.exe', 'winget')
   if (-not $winget) {
-    Fail "$label is missing and winget is not available. Install $label manually, then run setup.bat again."
+    Fail "$label is missing and winget is not available. Install $label manually, then run run\setup.bat again."
   }
 
   Write-Step "Installing $label with winget..."
   & $winget install --id $id --accept-source-agreements --accept-package-agreements --silent
   if ($LASTEXITCODE -ne 0) {
-    Fail "winget could not install $label. Install it manually, restart Windows if requested, then run setup.bat again."
+    Fail "winget could not install $label. Install it manually, restart Windows if requested, then run run\setup.bat again."
   }
 }
 
@@ -78,11 +78,11 @@ function Ensure-Tool($label, $ids, $fallbacks, $wingetId, [bool]$required = $tru
       Write-Ok "$label found after install: $path"
       return $path
     }
-    Write-Warn "$label was installed but is not available in this shell yet. Restart this terminal or Windows, then run setup.bat again."
+    Write-Warn "$label was installed but is not available in this shell yet. Restart this terminal or Windows, then run run\setup.bat again."
   }
 
   if ($required) {
-    $hint = if ($wingetId) { "Run setup.bat on a machine with winget, or install $label manually." } else { "Install $label manually, then run setup.bat again." }
+    $hint = if ($wingetId) { "Run run\setup.bat on a machine with winget, or install $label manually." } else { "Install $label manually, then run run\setup.bat again." }
     Fail "$label was not found. $hint"
   }
 
@@ -226,7 +226,7 @@ function Start-DockerDesktop($dockerExe) {
     'C:\Program Files\Docker Desktop\Docker Desktop.exe'
   )
   if (-not $dockerDesktop) {
-    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then run start-server.bat again.'
+    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then run run\start-server.bat again.'
   }
 
   Write-Step 'Starting Docker Desktop...'
@@ -256,7 +256,7 @@ function Wait-DockerEngine($dockerExe, $timeoutSeconds = 90) {
     }
     Start-Sleep -Seconds 3
   } while ((Get-Date) -lt $deadline)
-  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then run start-server.bat again.'
+  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.'
 }
 
 function Invoke-Compose($dockerExe, [string[]]$composeArgs) {
@@ -322,7 +322,7 @@ function Wait-ScaleServicesHealthy($dockerExe, $timeoutSeconds = 90) {
   foreach ($service in $services) {
     Write-Warn "$service health: $(Get-ServiceHealth $dockerExe $service)"
   }
-  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\bat\scale-services.bat status for support details.'
+  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\scale-services.bat status for support details.'
 }
 
 function Verify-ScaleServices($dockerExe) {

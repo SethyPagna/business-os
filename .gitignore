@@ -8,6 +8,7 @@ backend/frontend-dist/
 /release/
 /runtime/
 /ops/runtime/
+/ops/demo/
 _release_preserve/
 
 # Local app data
@@ -48,6 +49,8 @@ Thumbs.db
 
 # Local SDK unpack folders
 scanbot-web-sdk-*/
+/ops/scanbot-web-sdk-*/
 
 # Browser verification artifacts
 .playwright-cli/
+/ops/.playwright-cli/

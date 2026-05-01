@@ -17,7 +17,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
 set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "LOG=%ROOT%\ops\runtime\logs\build-release.log"
@@ -236,8 +236,8 @@ REM  Release output should only be produced from a known-good build.
 REM ============================================================
 echo [STEP 3B] Running shared verification checks...
 cd /d "%ROOT%"
-echo [INFO] Running: verify-local.bat --skip-frontend-build >> "%LOG%" 2>&1
-call "%ROOT%\verify-local.bat" --skip-frontend-build >> "%LOG%" 2>&1
+echo [INFO] Running: run\verify-local.bat --skip-frontend-build >> "%LOG%" 2>&1
+call "%ROOT%\run\verify-local.bat" --skip-frontend-build >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo.
     echo [ERROR] Shared local verification failed.
@@ -398,20 +398,20 @@ if errorlevel 1 (
 echo [OK] business-os-server.exe copied
 
 REM ---- Start / stop scripts - COPY THE RELEASE VERSIONS
-if not exist "%ROOT%\run\bat\release\start-server.bat" (
+if not exist "%ROOT%\run\release\start-server.bat" (
     echo [ERROR] Release start script template not found.
     pause
     exit /b 1
 )
-copy /y "%ROOT%\run\bat\release\start-server.bat" "%DIST_OUT%\start-server.bat" >nul
+copy /y "%ROOT%\run\release\start-server.bat" "%DIST_OUT%\start-server.bat" >nul
 echo [OK] start-server.bat (release version) added
 
-if not exist "%ROOT%\run\bat\release\stop-server.bat" (
+if not exist "%ROOT%\run\release\stop-server.bat" (
     echo [ERROR] Release stop script template not found.
     pause
     exit /b 1
 )
-copy /y "%ROOT%\run\bat\release\stop-server.bat" "%DIST_OUT%\stop-server.bat" >nul
+copy /y "%ROOT%\run\release\stop-server.bat" "%DIST_OUT%\stop-server.bat" >nul
 echo [OK] stop-server.bat (release version) added
 
 REM ---- Runtime bootstrap + Docker Compose service config

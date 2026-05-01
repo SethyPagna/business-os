@@ -1,6 +1,6 @@
 # Business OS Operator Guide
 
-This guide is for support, installers, and technical operators. Everyday users should read the root `README.md` and use only `setup.bat`, `start-server.bat`, and `stop-server.bat`.
+This guide is for support, installers, and technical operators. Everyday users should read the root `README.md` and use only `run\setup.bat`, `run\start-server.bat`, and `run\stop-server.bat`.
 
 ## Runtime Model
 
@@ -11,7 +11,7 @@ Business OS now starts as one application, but it depends on local scale service
 - MinIO for the future verified asset-storage target
 - SQLite and local files as the current authoritative business data source
 
-`start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Tailscale Funnel when installed, and prints the local and customer URLs.
+`run\start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Tailscale Funnel when installed, and prints the local and customer URLs.
 
 The app does not silently switch live business data to Postgres/MinIO. SQLite/local files stay authoritative until an admin uses Settings > Backup > Data migration and completes a verified migration workflow. The current one-button safety step does run automatically inside the app: it creates a local folder backup and then runs Google Drive sync when Drive is connected, without changing the live data source.
 
@@ -22,7 +22,7 @@ The public URL check intentionally verifies both the HTTPS routes and public DNS
 Run from the repo root or installed app folder:
 
 ```bat
-setup.bat
+run\setup.bat
 ```
 
 The setup flow uses `ops\scripts\powershell\runtime-bootstrap.ps1` before Node is required. It detects:
@@ -38,14 +38,14 @@ When `winget` is available, setup tries to install missing tools automatically. 
 ## Daily Start / Stop
 
 ```bat
-start-server.bat
-stop-server.bat
+run\start-server.bat
+run\stop-server.bat
 ```
 
 To stop the app and the scale services during support work:
 
 ```bat
-stop-server.bat --with-services
+run\stop-server.bat --with-services
 ```
 
 ## Support Service Commands
@@ -53,10 +53,10 @@ stop-server.bat --with-services
 These commands are hidden from normal user instructions:
 
 ```bat
-run\bat\scale-services.bat status
-run\bat\scale-services.bat logs
-run\bat\scale-services.bat up
-run\bat\scale-services.bat down
+run\scale-services.bat status
+run\scale-services.bat logs
+run\scale-services.bat up
+run\scale-services.bat down
 ```
 
 The batch wrapper delegates to the shared PowerShell bootstrapper and uses a project-local Docker config folder at `ops\runtime\docker-config` to avoid user profile Docker config permission issues.
@@ -114,7 +114,7 @@ The bootstrapper copies root `minio.license` into ignored runtime secret storage
 ## Release Build
 
 ```bat
-build-release.bat
+run\build-release.bat
 ```
 
 The release output includes:
@@ -131,7 +131,7 @@ The desktop shortcut and portable release both use the same one-button start flo
 ## Verification
 
 ```bat
-verify-local.bat
+run\verify-local.bat
 ```
 
 Verification now requires scale service health. It fails fast if Docker Desktop or Redis/Postgres/MinIO are unavailable.

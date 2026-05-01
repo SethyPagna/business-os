@@ -18,7 +18,7 @@ REM ========================================================================
 if defined BUSINESS_OS_REPO_ROOT (
     set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
-    for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
+    for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "DATA_DIR=%ROOT%\business-os-data"
@@ -30,7 +30,7 @@ echo   Business OS  ^|  Setup
 echo ========================================================================
 echo.
 echo   Run ONCE to install dependencies and build the frontend.
-echo   After setup, use start-server.bat to launch.
+echo   After setup, use run\start-server.bat to launch.
 echo.
 
 REM ---- Workstation/runtime bootstrap --------------------------------------
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 if errorlevel 1 (
     echo.
     echo [ERROR] Runtime bootstrap failed.
-    echo         Finish any installer, administrator, Docker Desktop, or restart prompt, then run setup.bat again.
+    echo         Finish any installer, administrator, Docker Desktop, or restart prompt, then run run\setup.bat again.
     echo.
     pause
     exit /b 1
@@ -321,7 +321,7 @@ if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
 echo.
 echo [INFO] Running shared local verification...
 cd /d "%ROOT%"
-call "%ROOT%\verify-local.bat"
+call "%ROOT%\run\verify-local.bat"
 if errorlevel 1 (
     echo [ERROR] Local verification failed.
     pause
@@ -347,7 +347,7 @@ echo   SETUP COMPLETE
 echo ========================================================================
 echo.
 echo   Next steps:
-echo     1. Run start-server.bat  to launch the server
+echo     1. Run run\start-server.bat  to launch the server
 echo     2. Open http://localhost:4000 in your browser
 echo     3. Default login: admin / admin  ^(change after first login^)
 echo.

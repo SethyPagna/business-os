@@ -8,15 +8,15 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Runtime dependency manifests | Pass | `cmd /c verify-local.bat` reached the runtime manifest check and passed it. |
-| Docker scale services | Pass | `cmd /c verify-local.bat` started and verified Docker Redis, Postgres, and MinIO health. |
+| Runtime dependency manifests | Pass | `cmd /c run\verify-local.bat` reached the runtime manifest check and passed it. |
+| Docker scale services | Pass | `cmd /c run\verify-local.bat` started and verified Docker Redis, Postgres, and MinIO health. |
 | Frontend build | Pass | `npm.cmd run build` completed successfully. Largest JS chunk: `vendor-zxing` about 447 KB, with scanner code split from startup. |
 | Frontend utility tests | Pass | `npm.cmd run test:utils` passed. |
 | Frontend i18n/UI/performance | Pass | `verify:i18n`, `verify:ui`, and `verify:performance` passed. |
 | Backend security/core/import/stock tests | Pass | `npm.cmd run test:utils` passed, including the streaming import smoke. |
 | Backend data integrity | Pass | `npm.cmd run verify:integrity` passed against the current SQLite data root. |
 | Worker queue smoke | Pass | Import and media workers started against Redis/BullMQ and reported active queues. |
-| Release build/start smoke | Pass | `cmd /c build-release.bat` passed, produced portable release and NSIS installer. |
+| Release build/start smoke | Pass | `cmd /c run\build-release.bat` passed, produced portable release and NSIS installer. |
 | Tailscale Funnel route check | Pass with ingress warnings | `node ops/scripts/runtime/check-public-url.mjs https://leangcosmetics.crane-qilin.ts.net /public` returned 200 for `/`, `/health`, `/public`, and `/api/portal/bootstrap`. Direct public ingress IP probes still timed out and are reported separately from app health. |
 
 ## High-Risk Findings Addressed In This Pass
@@ -31,8 +31,8 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 
 | Scenario | Required Result |
 | --- | --- |
-| `cmd /c verify-local.bat` | Build, frontend tests, i18n, UI, performance, Docker health, backend tests, and data integrity pass. |
-| `cmd /c build-release.bat` | Release package builds without exposing local secrets. |
+| `cmd /c run\verify-local.bat` | Build, frontend tests, i18n, UI, performance, Docker health, backend tests, and data integrity pass. |
+| `cmd /c run\build-release.bat` | Release package builds without exposing local secrets. |
 | Public `/public` route | Standards-mode HTML shell, no blank screen, fast English/Khmer first-party language switch, Google only as fallback. |
 | Internal app browser smoke | Dashboard, POS, Products, Inventory, Contacts, Sales, Returns, Branches, Users, Settings, Backup, Files, Server, and Portal Editor render without endless loading. |
 | Large import smoke | 10k and 50k CSV rows analyze/apply in background phases, awaiting approval before writes, with the app still usable. |
@@ -46,19 +46,19 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 - Import jobs analyze and apply CSV rows from streaming batches instead of `readFile` plus all-row parsing.
 - Import queues are split into `business-os-import-analyze` and `business-os-import-apply`; the web process only enqueues work, while `backend/src/workers/importWorker.js` owns processing.
 - Media optimization has a dedicated `business-os-media-optimize` queue and `backend/src/workers/mediaWorker.js`. Product import images are copied quickly, queued for optimization, and counted as complete only after the worker updates file/job status.
-- `start-server.bat` starts host Node import/media workers in SQLite mode. Release startup launches packaged worker roles from the same executable. Docker app/worker services are configured under the Postgres runtime profile.
+- `run\start-server.bat` starts host Node import/media workers in SQLite mode. Release startup launches packaged worker roles from the same executable. Docker app/worker services are configured under the Postgres runtime profile.
 - Docker Compose includes resource limits, health checks, restart policies, Redis memory limits/persistence, Postgres bulk-write tuning, and Docker log rotation.
 - `/api/runtime/queues/status` reports import and media queue status separately for support diagnostics.
 - The global import tracker compares primitive job signatures, uses React transitions for polling updates, polls less aggressively, and applies `content-visibility` to reduce repaint pressure.
 - Backend tests include a 10,000-row Khmer CSV smoke test by default and a 50,000-row smoke when `BUSINESS_OS_FULL_SCALE_SMOKE=1`.
 - Frontend performance verification now fails if backend import jobs reintroduce whole-file CSV parsing, missing streaming batch consumption, in-process import workers, missing worker scripts, missing background import tracker, base64 image import payloads, or missing UTF-8 BOM CSV exports.
-- `verify-local.bat` also runs backend data integrity verification after backend tests.
+- `run\verify-local.bat` also runs backend data integrity verification after backend tests.
 - Public URL checking treats direct ingress IP timeouts as warnings when normal HTTPS routes pass, avoiding false "public URL failed" results while still surfacing network instability.
 
 ## Latest Verification Evidence
 
-- `cmd /c verify-local.bat`: passed, including Docker Redis/Postgres/MinIO health, frontend build/tests/i18n/UI/performance, backend tests, and backend data integrity.
-- `cmd /c build-release.bat`: passed, including shared verification, packaged server build, portable release assembly, and NSIS installer build.
+- `cmd /c run\verify-local.bat`: passed, including Docker Redis/Postgres/MinIO health, frontend build/tests/i18n/UI/performance, backend tests, and backend data integrity.
+- `cmd /c run\build-release.bat`: passed, including shared verification, packaged server build, portable release assembly, and NSIS installer build.
 - `npm.cmd run test:utils` in `backend`: passed.
 - `npm.cmd run build`, `test:utils`, `verify:i18n`, `verify:ui`, `verify:performance` in `frontend`: passed.
 - `npm.cmd run verify:integrity` in `backend`: passed.
