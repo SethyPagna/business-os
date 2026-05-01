@@ -13,21 +13,27 @@ const CHART_COLORS = ['#2563eb','#16a34a','#ea580c','#7c3aed','#dc2626','#0891b2
 export default function LineChart({ data, lines }) {
   // ⚑ Hook must come before any early return (Rules of Hooks)
   const [tooltip, setTooltip] = useState(null)
-  if (!data?.length) return <NoData />
+  const safeLines = Array.isArray(lines) ? lines.filter((line) => line?.key) : []
+  if (!data?.length || !safeLines.length) return <NoData />
   const W = 560, H = 180, PAD_L = 48, PAD_B = 28, PAD_T = 16, PAD_R = 8
   const plotW = W - PAD_L - PAD_R
   const plotH = H - PAD_T - PAD_B
 
-  const allVals = lines.flatMap(l => data.map(d => Number(d[l.key]) || 0))
-  const max     = Math.max(...allVals, 0.01)
-  const rawStep = max / 4
+  const allVals = safeLines.flatMap(l => data.map(d => Number(d[l.key])).filter(Number.isFinite))
+  const rawMin = Math.min(...allVals, 0)
+  const rawMax = Math.max(...allVals, 0)
+  const span = Math.max(rawMax - rawMin, 0.01)
+  const rawStep = span / 4
   const mag     = Math.pow(10, Math.floor(Math.log10(rawStep || 1)))
   const step    = Math.ceil(rawStep / mag) * mag || 1
-  const yTicks  = [1,2,3,4].map(i => i * step)
-  const yMax    = yTicks[3]
+  const yMin = Math.min(0, Math.floor(rawMin / step) * step)
+  const yMax = Math.max(step, Math.ceil(rawMax / step) * step)
+  const yTicks  = []
+  for (let tick = yMin; tick <= yMax + step / 2; tick += step) yTicks.push(Number(tick.toFixed(8)))
+  const ySpan = Math.max(yMax - yMin, step)
 
   function xPx(i) { return PAD_L + (data.length === 1 ? plotW / 2 : (i / (data.length - 1)) * plotW) }
-  function yPx(v) { return PAD_T + plotH - (v / yMax) * plotH }
+  function yPx(v) { return PAD_T + ((yMax - v) / ySpan) * plotH }
 
   const maxLabels = Math.floor(plotW / 40)
   const stepLbl   = Math.max(1, Math.ceil(data.length / maxLabels))
@@ -43,9 +49,9 @@ export default function LineChart({ data, lines }) {
       const dist = Math.abs(xPx(i) - mouseX)
       if (dist < minDist) { minDist = dist; closest = d; closestIdx = i }
     })
-    if (closest && minDist < plotW / data.length) {
+    if (closest && minDist < Math.max(8, plotW / data.length)) {
       const tooltipX = xPx(closestIdx) / scale
-      const tooltipY = Math.min(...lines.map(l => yPx(Number(closest[l.key]) || 0))) / scale
+      const tooltipY = Math.min(...safeLines.map(l => yPx(Number(closest[l.key]) || 0))) / scale
       setTooltip({ x: tooltipX, y: Math.max(tooltipY - 8, 4), data: closest, idx: closestIdx })
     } else {
       setTooltip(null)
@@ -58,7 +64,7 @@ export default function LineChart({ data, lines }) {
         <div className="absolute z-20 pointer-events-none bg-gray-900 text-white text-xs rounded-lg px-2.5 py-1.5 shadow-xl whitespace-nowrap"
           style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -110%)' }}>
           <div className="font-semibold mb-0.5">{String(tooltip.data.period || '')}</div>
-          {lines.map((l, i) => (
+          {safeLines.map((l, i) => (
             <div key={l.key} className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: l.color || CHART_COLORS[i] }} />
               <span>{l.label || l.key}: {fmtShort(Number(tooltip.data[l.key]) || 0)}</span>
@@ -80,10 +86,10 @@ export default function LineChart({ data, lines }) {
         })}
         <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="#d1d5db" strokeWidth="1" />
 
-        {lines.map((l, li) => {
+        {safeLines.map((l, li) => {
           const col = l.color || CHART_COLORS[li]
           const pts = data.map((d, i) => `${xPx(i)},${yPx(Number(d[l.key]) || 0)}`).join(' ')
-          const baseY = PAD_T + plotH
+          const baseY = yPx(0)
           const areaPoints = `${xPx(0)},${baseY} ${pts} ${xPx(data.length-1)},${baseY}`
           return (
             <g key={l.key}>

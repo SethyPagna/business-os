@@ -24,6 +24,15 @@ export default function DonutChart({ data, valueKey }) {
   const slices = data.slice(0, 7).map((d, i) => {
     const val = Number(d[valueKey]) || 0
     const pct = val / total
+    if (pct >= 0.999999) {
+      return {
+        path: `M${cx},${cy - r} A${r},${r} 0 1,1 ${cx},${cy + r} A${r},${r} 0 1,1 ${cx},${cy - r} M${cx},${cy - inner} A${inner},${inner} 0 1,0 ${cx},${cy + inner} A${inner},${inner} 0 1,0 ${cx},${cy - inner} Z`,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+        pct,
+        raw: d,
+        val,
+      }
+    }
     const a0  = cum * 2 * Math.PI - Math.PI / 2
     cum += pct
     const a1  = cum * 2 * Math.PI - Math.PI / 2
@@ -52,6 +61,7 @@ export default function DonutChart({ data, valueKey }) {
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
         {slices.map((s, i) => (
           <path key={i} d={s.path} fill={s.color}
+            fillRule="evenodd"
             stroke={hoveredIdx === i ? '#fff' : 'white'}
             strokeWidth={hoveredIdx === i ? 2.5 : 1.5}
             opacity={hoveredIdx !== null && hoveredIdx !== i ? 0.65 : 1}

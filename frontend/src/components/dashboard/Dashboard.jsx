@@ -19,6 +19,7 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
+const DASHBOARD_CHART_POINT_LIMIT = 180
 
 function getDashboardFilterStorageKey(user) {
   const userKey = user?.id || user?.username || user?.email || 'guest'
@@ -47,6 +48,17 @@ function readDashboardFilterPrefs(storageKeys) {
   } catch {
     return null
   }
+}
+
+function downsampleChartRows(rows = [], limit = DASHBOARD_CHART_POINT_LIMIT) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : []
+  if (list.length <= limit) return list
+  const step = Math.ceil(list.length / limit)
+  const sampled = []
+  for (let index = 0; index < list.length; index += 1) {
+    if (index === 0 || index === list.length - 1 || index % step === 0) sampled.push(list[index])
+  }
+  return sampled
 }
 
 export default function Dashboard() {
@@ -265,6 +277,7 @@ export default function Dashboard() {
   const aSupplierReturns = analytics?.periodSupplierReturns?.return_count || 0
   const aSupplierLossUsd = analytics?.periodSupplierReturns?.loss_usd || 0
   const chartData = analytics?.periodData || []
+  const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
   const revenueFormulaText = 'Net revenue = Gross sales - Discounts - Refunds'
   const collectedFormulaText = 'Collected total = Net revenue + Tax + Delivery'
@@ -929,17 +942,17 @@ export default function Dashboard() {
             </div>
           </div>
           {aLoading ? <div className="h-36 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" />
-          : chartData.length === 0 ? <div className="h-36 flex items-center justify-center text-gray-400 text-sm">{t('no_data')}</div>
+          : chartRenderData.length === 0 ? <div className="h-36 flex items-center justify-center text-gray-400 text-sm">{t('no_data')}</div>
           : activeChart === 'revenue' ? (
             <>
-              <LineChart data={chartData} lines={[{ key:'revenue_usd', color:'#2563eb', label: t('revenue') }]} />
+              <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: t('revenue') }]} />
               <div className="flex items-center gap-3 mt-2">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-blue-600"/><span className="text-xs text-gray-500">{t('revenue')} (USD)</span></div>
               </div>
             </>
           ) : activeChart === 'profit' ? (
             <>
-              <LineChart data={chartData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
+              <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
               <div className="flex items-center gap-4 mt-2 flex-wrap">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-blue-600"/><span className="text-xs text-gray-500">{t('revenue')}</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-1 rounded bg-red-600"/><span className="text-xs text-gray-500">{t('cogs')}</span></div>
@@ -948,7 +961,7 @@ export default function Dashboard() {
             </>
           ) : (
             <>
-              <BarChart data={chartData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
+              <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
               <div className="flex items-center gap-1.5 mt-2"><div className="w-3 h-3 rounded bg-purple-600"/><span className="text-xs text-gray-500">{t('transactions')}</span></div>
             </>
           )}

@@ -224,6 +224,25 @@ export default function CatalogProductsSection(props) {
         </div>
       ) : null}
 
+      <PaginationControls
+        className="mb-4"
+        page={page}
+        pageSize={pageSize}
+        totalItems={letterFilteredProducts.length}
+        label={copy('products', 'products')}
+        t={(key) => ({
+          page: copy('page', 'Page'),
+          of: copy('of', 'of'),
+          showing: copy('showing', 'Showing'),
+          per_page: copy('perPage', 'per page'),
+        })[key] || key}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
+
       <div className={`grid gap-3 ${productGridClass}`}>
         {pagedProducts.map((product) => {
           const qty = getBranchQty(product, selectedStockBranch)
@@ -332,24 +351,26 @@ export default function CatalogProductsSection(props) {
         })}
       </div>
 
-      <PaginationControls
-        className="mt-4"
-        page={page}
-        pageSize={pageSize}
-        totalItems={letterFilteredProducts.length}
-        label={copy('products', 'products')}
-        t={(key) => ({
-          page: copy('page', 'Page'),
-          of: copy('of', 'of'),
-          showing: copy('showing', 'Showing'),
-          per_page: copy('perPage', 'per page'),
-        })[key] || key}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPageSize(size)
-          setPage(1)
-        }}
-      />
+      {letterFilteredProducts.length > pageSize ? (
+        <PaginationControls
+          className="mt-4"
+          page={page}
+          pageSize={pageSize}
+          totalItems={letterFilteredProducts.length}
+          label={copy('products', 'products')}
+          t={(key) => ({
+            page: copy('page', 'Page'),
+            of: copy('of', 'of'),
+            showing: copy('showing', 'Showing'),
+            per_page: copy('perPage', 'per page'),
+          })[key] || key}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size)
+            setPage(1)
+          }}
+        />
+      ) : null}
 
       {letterFilteredProducts.length === 0 ? (
         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">

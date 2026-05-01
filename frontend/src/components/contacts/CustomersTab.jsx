@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useDeferredValue } from 'react'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
@@ -226,12 +227,13 @@ function CustomersTab({ t, notify, active = true }) {
   const [sortDirection, setSortDirection] = useState('desc')
   const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify })
 
-  const filteredBySearch = customers.filter((customer) => {
-    const query = search.toLowerCase().trim()
+  const filteredBySearch = useMemo(() => customers.filter((customer) => {
+    const query = deferredSearch.toLowerCase().trim()
     if (!query) return true
     return (
       String(customer.name || '').toLowerCase().includes(query) ||
@@ -239,7 +241,7 @@ function CustomersTab({ t, notify, active = true }) {
       String(customer.phone || '').includes(query) ||
       String(customer.email || '').toLowerCase().includes(query)
     )
-  })
+  }), [customers, deferredSearch])
 
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const availableYears = useMemo(
@@ -634,6 +636,7 @@ function CustomersTab({ t, notify, active = true }) {
               setGroupMode('time')
             }}
             compact
+            mobileIconOnly
           />
           <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr(t, 'import_contacts', 'Import')}>
             <Download className="h-4 w-4" />

@@ -19,6 +19,7 @@ import {
   Plus,
   RotateCcw,
   Save,
+  Search,
   Send,
   ShoppingBag,
   Sparkles,
@@ -576,6 +577,7 @@ const DEFAULT_CONFIG = {
 }
 
 const PORTAL_CACHE_KEY = 'business-os.portal.cache.v2'
+const PORTAL_CACHE_PRODUCT_LIMIT = 80
 
 const PORTAL_KM_FALLBACKS = {
   studioTitle: 'កែសម្រួលផតថល',
@@ -981,10 +983,17 @@ function readPortalCache() {
   try {
     const raw = sessionStorage.getItem(PORTAL_CACHE_KEY)
     if (!raw) return null
+    if (raw.length > 1_500_000) {
+      sessionStorage.removeItem(PORTAL_CACHE_KEY)
+      return null
+    }
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
     const ageMs = Date.now() - Number(parsed.cachedAt || 0)
     if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > (1000 * 60 * 20)) return null
+    if (Array.isArray(parsed.products) && parsed.products.length > PORTAL_CACHE_PRODUCT_LIMIT) {
+      parsed.products = parsed.products.slice(0, PORTAL_CACHE_PRODUCT_LIMIT)
+    }
     return parsed
   } catch (_) {
     return null
@@ -995,11 +1004,16 @@ function readPortalCache() {
 function writePortalCache(payload) {
   if (typeof window === 'undefined') return
   try {
+    const lightweightPayload = {
+      ...payload,
+      products: Array.isArray(payload?.products) ? payload.products.slice(0, PORTAL_CACHE_PRODUCT_LIMIT) : [],
+      reviewItems: Array.isArray(payload?.reviewItems) ? payload.reviewItems.slice(0, 30) : [],
+    }
     sessionStorage.setItem(
       PORTAL_CACHE_KEY,
       JSON.stringify({
         cachedAt: Date.now(),
-        ...payload,
+        ...lightweightPayload,
       })
     )
   } catch (_) {}
@@ -1272,6 +1286,34 @@ function normalizeProductGallery(product) {
   return unique
 }
 
+function normalizePortalProductSearch(value) {
+  return String(value || '').normalize('NFC').toLocaleLowerCase('km').trim()
+}
+
+function buildRecommendedProductOption(product) {
+  const id = Number(product?.id)
+  return {
+    id,
+    name: String(product?.name || '').trim() || `#${id || ''}`,
+    subtitle: [product?.brand, product?.category, product?.barcode].filter(Boolean).join(' - '),
+    image: normalizeProductGallery(product)[0] || '',
+  }
+}
+
+function productMatchesRecommendedSearch(product, searchTerm) {
+  const query = normalizePortalProductSearch(searchTerm)
+  if (query.length < 2) return false
+  const tokens = query.split(/[\s,]+/).filter(Boolean)
+  const haystack = normalizePortalProductSearch([
+    product?.name,
+    product?.brand,
+    product?.category,
+    product?.barcode,
+    product?.sku,
+  ].filter(Boolean).join(' '))
+  return tokens.every((token) => haystack.includes(token))
+}
+
 /** Format date/time strings robustly for public and editor views. */
 function formatDateTime(value) {
   if (!value) return '-'
@@ -1531,6 +1573,8 @@ export default function CatalogPage({ publicView = false }) {
   const [assistantUsage, setAssistantUsage] = useState(null)
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState(null)
   const [expandedFaqId, setExpandedFaqId] = useState(null)
+  const [recommendedProductSearchInput, setRecommendedProductSearchInput] = useState('')
+  const [recommendedProductSearchTerm, setRecommendedProductSearchTerm] = useState('')
   const deferredSearch = useDeferredValue(search)
   const loadRequestRef = useRef(0)
   const syncReloadTimerRef = useRef(null)
@@ -2752,17 +2796,30 @@ export default function CatalogPage({ publicView = false }) {
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
-  const recommendedProductOptions = useMemo(() => (
-    [...products]
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
-      .map((product) => ({
-        id: Number(product.id),
-        name: String(product.name || '').trim() || `#${product.id}`,
-        subtitle: [product.brand, product.category].filter(Boolean).join(' • '),
-        image: normalizeProductGallery(product)[0] || '',
-      }))
+  const recommendedProductById = useMemo(() => {
+    const map = new Map()
+    for (const product of products || []) {
+      const id = Number(product?.id)
+      if (Number.isFinite(id) && id > 0) map.set(id, product)
+    }
+    return map
+  }, [products])
+  const selectedRecommendedProductOptions = useMemo(() => (
+    recommendedProductIds
+      .map((id) => recommendedProductById.get(Number(id)))
+      .filter(Boolean)
+      .map(buildRecommendedProductOption)
+  ), [recommendedProductById, recommendedProductIds])
+  const recommendedProductOptions = useMemo(() => {
+    const term = recommendedProductSearchTerm.trim()
+    if (term.length < 2) return []
+    return (products || [])
+      .filter((product) => productMatchesRecommendedSearch(product, term))
+      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'km'))
+      .slice(0, 30)
+      .map(buildRecommendedProductOption)
       .filter((product) => product.id > 0)
-  ), [products])
+  }, [products, recommendedProductSearchTerm])
 
   const catalogTabProps = {
     copy,
@@ -3053,27 +3110,74 @@ export default function CatalogPage({ publicView = false }) {
                   <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">{copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')}</p>
-                {recommendedProductOptions.length ? (
-                  <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                    {recommendedProductOptions.map((product) => {
-                      const checked = recommendedProductIds.includes(product.id)
-                      return (
-                        <label key={product.id} className={`flex items-center gap-3 rounded-2xl border px-3 py-2 transition ${checked ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50'}`}>
-                          <input type="checkbox" checked={checked} onChange={() => toggleRecommendedProduct(product.id)} />
-                          <div className="h-11 w-11 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800">
-                            {product.image ? <ProductImg src={product.image} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
-                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">{product.subtitle || `#${product.id}`}</div>
-                          </div>
-                        </label>
-                      )
-                    })}
+                {selectedRecommendedProductOptions.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedRecommendedProductOptions.map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        className="inline-flex max-w-full items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 transition hover:border-violet-300 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100"
+                        onClick={() => toggleRecommendedProduct(product.id)}
+                        title={`${copy('remove', 'Remove')} ${product.name}`}
+                      >
+                        <span className="truncate">{product.name}</span>
+                        <span aria-hidden="true">x</span>
+                      </button>
+                    ))}
                   </div>
+                ) : null}
+                <form
+                  className="mt-3 flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/50 sm:flex-row"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    setRecommendedProductSearchTerm(recommendedProductSearchInput.trim())
+                  }}
+                >
+                  <label htmlFor="portal-recommended-product-search" className="sr-only">{copy('search', 'Search products')}</label>
+                  <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-3 py-2 dark:bg-slate-950">
+                    <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                    <input
+                      id="portal-recommended-product-search"
+                      name="recommended_product_search"
+                      className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100"
+                      value={recommendedProductSearchInput}
+                      onChange={(event) => setRecommendedProductSearchInput(event.target.value)}
+                      placeholder={copy('searchPlaceholder', 'Search by product name, description, category, or brand')}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <button type="submit" className="btn-secondary inline-flex items-center justify-center gap-2 whitespace-nowrap">
+                    <Search className="h-4 w-4" />
+                    {copy('search', 'Search')}
+                  </button>
+                </form>
+                {recommendedProductSearchTerm.trim().length >= 2 ? (
+                  recommendedProductOptions.length ? (
+                    <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {recommendedProductOptions.map((product) => {
+                        const checked = recommendedProductIds.includes(product.id)
+                        return (
+                          <label key={product.id} className={`flex items-center gap-3 rounded-2xl border px-3 py-2 transition ${checked ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/50'}`}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleRecommendedProduct(product.id)} />
+                            <div className="h-11 w-11 overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-800">
+                              {product.image ? <ProductImg src={product.image} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
+                              <div className="truncate text-xs text-slate-500 dark:text-slate-400">{product.subtitle || `#${product.id}`}</div>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+                      {copy('noProducts', 'No products matched the current filters.')}
+                    </div>
+                  )
                 ) : (
                   <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    {copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
+                    {products.length ? copy('searchPlaceholder', 'Search by product name, description, category, or brand') : copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
                   </div>
                 )}
               </div>
