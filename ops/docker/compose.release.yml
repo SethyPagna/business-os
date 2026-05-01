@@ -1,0 +1,236 @@
+name: business-os-release
+
+x-log-policy: &log-policy
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: "4000"
+  BUSINESS_OS_RUNTIME: docker
+  BUSINESS_OS_DOCKER_RELEASE: "1"
+  BUSINESS_OS_ENFORCE_POSTGRES: "1"
+  BUSINESS_OS_REMOTE_PROVIDER: cloudflare
+  PUBLIC_BASE_URL: "${BUSINESS_OS_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
+  CLOUDFLARE_PUBLIC_URL: "${BUSINESS_OS_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
+  CLOUDFLARE_ADMIN_URL: "${BUSINESS_OS_ADMIN_URL:-https://admin.leangcosmetics.dpdns.org}"
+  DATABASE_DRIVER: postgres
+  DATABASE_URL: "postgres://${POSTGRES_USER:-business_os}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-business_os}"
+  OBJECT_STORAGE_DRIVER: minio
+  S3_ENDPOINT: http://minio:9000
+  S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
+  S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+  S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
+  JOB_QUEUE_DRIVER: bullmq
+  REDIS_URL: redis://redis-queue:6379
+  RUNTIME_CACHE_ENABLED: "1"
+  CACHE_REDIS_URL: redis://redis-cache:6379
+  IMPORT_QUEUE_CONCURRENCY: "${IMPORT_QUEUE_CONCURRENCY:-2}"
+  MEDIA_QUEUE_CONCURRENCY: "${MEDIA_QUEUE_CONCURRENCY:-3}"
+  IMPORT_ROW_BATCH_SIZE: "${IMPORT_ROW_BATCH_SIZE:-400}"
+  IMPORT_BATCH_PAUSE_MS: "${IMPORT_BATCH_PAUSE_MS:-20}"
+  MEDIA_IMAGE_MAX_WIDTH: "${MEDIA_IMAGE_MAX_WIDTH:-1600}"
+  MEDIA_IMAGE_QUALITY: "${MEDIA_IMAGE_QUALITY:-72}"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-business_os}"
+      POSTGRES_USER: "${POSTGRES_USER:-business_os}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-32MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
+      - -c
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-4GB}
+      - -c
+      - wal_compression=on
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - idle_in_transaction_session_timeout=60000
+    volumes:
+      - business_os_postgres:/var/lib/postgresql
+    networks: [business_os_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    shm_size: "${POSTGRES_SHM_SIZE:-1g}"
+    mem_limit: "${POSTGRES_MEMORY_LIMIT:-4608m}"
+    cpus: "${POSTGRES_CPUS:-4.0}"
+    logging: *log-policy
+
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "${REDIS_QUEUE_MAX_MEMORY:-1536mb}", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - business_os_redis_queue:/data
+    networks: [business_os_internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: "${REDIS_QUEUE_MEMORY_LIMIT:-1536m}"
+    cpus: "${REDIS_QUEUE_CPUS:-1.0}"
+    logging: *log-policy
+
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "${REDIS_CACHE_MAX_MEMORY:-768mb}", "--maxmemory-policy", "allkeys-lru"]
+    networks: [business_os_internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: "${REDIS_CACHE_MEMORY_LIMIT:-768m}"
+    cpus: "${REDIS_CACHE_CPUS:-0.5}"
+    logging: *log-policy
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-businessos}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+    volumes:
+      - business_os_minio:/data
+    networks: [business_os_internal]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    mem_limit: "${MINIO_MEMORY_LIMIT:-1536m}"
+    cpus: "${MINIO_CPUS:-1.5}"
+    logging: *log-policy
+
+  migrator:
+    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    restart: "no"
+    environment:
+      <<: *app-env
+      BUSINESS_OS_WORKER_ROLE: migrator
+      BUSINESS_OS_LEGACY_ROOT_IN_CONTAINER: /legacy
+    volumes:
+      - type: bind
+        source: ${BUSINESS_OS_LEGACY_ROOT:-../..}
+        target: /legacy
+        read_only: true
+    networks: [business_os_internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    profiles: ["migrate"]
+    logging: *log-policy
+
+  app:
+    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    ports:
+      - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-4000}:4000"
+    volumes:
+      - business_os_runtime:/runtime
+    networks: [business_os_internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    mem_limit: "${APP_MEMORY_LIMIT:-1024m}"
+    cpus: "${APP_CPUS:-1.5}"
+    logging: *log-policy
+
+  import-worker:
+    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      BUSINESS_OS_WORKER_ROLE: import-worker
+    volumes:
+      - business_os_runtime:/runtime
+    networks: [business_os_internal]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: "${IMPORT_WORKER_MEMORY_LIMIT:-2560m}"
+    cpus: "${IMPORT_WORKER_CPUS:-3.0}"
+    logging: *log-policy
+
+  media-worker:
+    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      BUSINESS_OS_WORKER_ROLE: media-worker
+    volumes:
+      - business_os_runtime:/runtime
+    networks: [business_os_internal]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: "${MEDIA_WORKER_MEMORY_LIMIT:-3072m}"
+    cpus: "${MEDIA_WORKER_CPUS:-3.5}"
+    logging: *log-policy
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token"]
+    volumes:
+      - type: bind
+        source: ${CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE:?CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE is required}
+        target: /run/secrets/cloudflare.token
+        read_only: true
+    networks: [business_os_internal]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: "${CLOUDFLARED_MEMORY_LIMIT:-256m}"
+    cpus: "${CLOUDFLARED_CPUS:-0.5}"
+    logging: *log-policy
+
+volumes:
+  business_os_postgres:
+  business_os_redis_queue:
+  business_os_minio:
+  business_os_runtime:
+
+networks:
+  business_os_internal:
+    name: business_os_release_internal
+    driver: bridge

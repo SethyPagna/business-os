@@ -35,6 +35,12 @@ if errorlevel 1 exit /b 1
 echo [OK] Runtime dependency manifest check passed
 echo.
 
+echo [1a/6] Verifying Docker-only release automation...
+node ops\scripts\verify-docker-release.js
+if errorlevel 1 exit /b 1
+echo [OK] Docker-only release automation check passed
+echo.
+
 echo [1b/6] Verifying required Docker scale services...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Verify -RequireServices
 if errorlevel 1 exit /b 1

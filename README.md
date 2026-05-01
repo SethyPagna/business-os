@@ -44,3 +44,23 @@ Only use these if support asks:
 - `run\stop-server.bat --with-services`
 
 Technical notes are in `ops\readme\README.md`.
+
+## Docker-Only Private Release
+
+Use this when you want another device to run Business OS without receiving the source repository.
+
+Developer machine:
+
+1. Run `run\docker\release.bat` to build the private Docker image.
+2. Run `run\docker\publish-release.bat` to push the image to the private registry.
+
+Business/user machine:
+
+1. Run `run\docker\install.bat` once.
+2. Put the Cloudflare Tunnel token in the generated file under `ops\runtime\docker-release\secrets`.
+3. Run `run\docker\start.bat`.
+4. Run `run\docker\update.bat` whenever a new version is published.
+
+The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into the runtime containers. It also refuses to silently run SQLite in production release mode.
+
+Important: the current source app still contains SQLite-specific route code. The Docker-only release tooling and migrator are in place, but production serving remains guarded until the route-level Postgres data-layer cutover is completed. This prevents accidental data loss or a hidden throwaway SQLite database inside Docker.

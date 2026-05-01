@@ -29,9 +29,17 @@ const {
   SQLITE_WAL_AUTOCHECKPOINT,
   SQLITE_JOURNAL_SIZE_LIMIT_MB,
   SQLITE_SYNCHRONOUS,
+  DATABASE_DRIVER,
 } = require('./config')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
+
+if (process.env.BUSINESS_OS_ENFORCE_POSTGRES === '1' || DATABASE_DRIVER !== 'sqlite') {
+  throw new Error(
+    'This runtime is configured for Postgres, but the application data layer still contains SQLite-only route code. ' +
+    'Run the Docker release migrator first, then finish the Postgres data-layer cutover before serving production traffic.'
+  )
+}
 
 // Ensure the DB directory exists before opening the file
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })

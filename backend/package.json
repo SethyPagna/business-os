@@ -54,5 +54,8 @@
   },
   "optionalDependencies": {
     "sharp": "^0.34.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.19.0"
   }
 }

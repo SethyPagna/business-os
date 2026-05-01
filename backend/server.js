@@ -16,6 +16,14 @@ if (process.env.BUSINESS_OS_WORKER_ROLE === 'media-worker') {
   return
 }
 
+if (process.env.BUSINESS_OS_WORKER_ROLE === 'migrator') {
+  require('./src/workers/migrationWorker').start().catch((error) => {
+    console.error(`[migrator] failed: ${error?.message || error}`)
+    process.exit(1)
+  })
+  return
+}
+
 /**
  * Backend runtime entrypoint.
  *

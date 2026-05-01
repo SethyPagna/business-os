@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm AS frontend-build
+WORKDIR /build/frontend
+COPY frontend/package*.json ./
+RUN npm ci --no-audit --loglevel=warn
+COPY frontend/ ./
+RUN npm run build
+
+FROM node:24-bookworm AS backend-build
+WORKDIR /build/backend
+COPY backend/package*.json ./
+RUN npm ci --no-audit --loglevel=warn
+COPY backend/ ./
+COPY --from=frontend-build /build/frontend/dist ./frontend-dist
+ENV PKG_CACHE_PATH=/root/.pkg-cache
+RUN --mount=type=cache,target=/root/.pkg-cache npm run build:linux
+
+FROM debian:bookworm-slim AS runtime
+LABEL org.opencontainers.image.title="Business OS"
+LABEL org.opencontainers.image.description="Business OS Docker runtime"
+LABEL org.opencontainers.image.source="private"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl tini ffmpeg \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin businessos
+
+WORKDIR /app
+COPY --from=backend-build /build/dist-bin/business-os-server-linux /app/business-os-server
+COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp
+COPY --from=backend-build /build/backend/node_modules/@img /app/@img
+RUN chmod 0555 /app/business-os-server \
+  && mkdir -p /runtime \
+  && chown -R businessos:businessos /runtime /app
+
+ENV NODE_ENV=production \
+    PORT=4000 \
+    BUSINESS_OS_RUNTIME_DIR=/runtime \
+    BUSINESS_OS_RUNTIME=docker \
+    BUSINESS_OS_DOCKER_RELEASE=1 \
+    BUSINESS_OS_ENFORCE_POSTGRES=1 \
+    DATABASE_DRIVER=postgres \
+    OBJECT_STORAGE_DRIVER=minio \
+    JOB_QUEUE_DRIVER=bullmq \
+    WORKER_RUNTIME=docker
+
+USER businessos
+EXPOSE 4000
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/business-os-server"]
