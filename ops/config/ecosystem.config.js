@@ -23,7 +23,23 @@
 
 const path = require('path')
 
-const PROJECT_ROOT = __dirname
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
+const DEFAULT_ENV = {
+  NODE_ENV: 'production',
+  PORT: 4000,
+  BUSINESS_OS_REQUIRE_SCALE_SERVICES: '1',
+  JOB_QUEUE_DRIVER: 'bullmq',
+  WORKER_RUNTIME: 'host',
+  REDIS_URL: 'redis://127.0.0.1:6379',
+  DATABASE_DRIVER: 'sqlite',
+  OBJECT_STORAGE_DRIVER: 'local',
+  IMPORT_QUEUE_CONCURRENCY: '2',
+  MEDIA_QUEUE_CONCURRENCY: '3',
+  IMPORT_ROW_BATCH_SIZE: '400',
+  IMPORT_BATCH_PAUSE_MS: '20',
+  IMPORT_IMAGE_CONCURRENCY: '3',
+  UPLOAD_CHUNK_MB: '12',
+}
 
 module.exports = {
   apps: [
@@ -32,10 +48,7 @@ module.exports = {
       script:  path.join(PROJECT_ROOT, 'backend', 'server.js'),
       cwd:     PROJECT_ROOT,
 
-      env: {
-        NODE_ENV: 'production',
-        PORT:     4000,
-      },
+      env: DEFAULT_ENV,
 
       // Node 24: --max-old-space-size still works; --no-deprecation silences
       // any noisy transitive-dep warnings without affecting functionality.
@@ -55,6 +68,44 @@ module.exports = {
       error_file: path.join(PROJECT_ROOT, 'logs', 'error.log'),
       merge_logs: true,
 
+      instances: 1,
+      exec_mode: 'fork',
+    },
+    {
+      name: 'business-os-import-worker',
+      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'importWorker.js'),
+      cwd: PROJECT_ROOT,
+      env: DEFAULT_ENV,
+      node_args: '--max-old-space-size=768 --no-deprecation',
+      restart_delay: 3000,
+      max_restarts: 10,
+      min_uptime: '10s',
+      exp_backoff_restart_delay: 100,
+      watch: false,
+      ignore_watch: ['node_modules', 'data', 'frontend/dist'],
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      out_file: path.join(PROJECT_ROOT, 'logs', 'import-worker.out.log'),
+      error_file: path.join(PROJECT_ROOT, 'logs', 'import-worker.error.log'),
+      merge_logs: true,
+      instances: 1,
+      exec_mode: 'fork',
+    },
+    {
+      name: 'business-os-media-worker',
+      script: path.join(PROJECT_ROOT, 'backend', 'src', 'workers', 'mediaWorker.js'),
+      cwd: PROJECT_ROOT,
+      env: DEFAULT_ENV,
+      node_args: '--max-old-space-size=1024 --no-deprecation',
+      restart_delay: 3000,
+      max_restarts: 10,
+      min_uptime: '10s',
+      exp_backoff_restart_delay: 100,
+      watch: false,
+      ignore_watch: ['node_modules', 'data', 'frontend/dist'],
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      out_file: path.join(PROJECT_ROOT, 'logs', 'media-worker.out.log'),
+      error_file: path.join(PROJECT_ROOT, 'logs', 'media-worker.error.log'),
+      merge_logs: true,
       instances: 1,
       exec_mode: 'fork',
     },

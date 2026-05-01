@@ -9,6 +9,7 @@ x-service-logging: &service-logging
 x-node-env: &node-env
   NODE_ENV: production
   PORT: "${PORT:-4000}"
+  NODE_OPTIONS: "${NODE_OPTIONS:---max-old-space-size=512}"
   BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
   JOB_QUEUE_DRIVER: bullmq
   REDIS_URL: redis://redis:6379
@@ -19,14 +20,14 @@ x-node-env: &node-env
   S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
   S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
   S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
-  IMPORT_QUEUE_CONCURRENCY: "${IMPORT_QUEUE_CONCURRENCY:-1}"
-  MEDIA_QUEUE_CONCURRENCY: "${MEDIA_QUEUE_CONCURRENCY:-2}"
-  IMPORT_ROW_BATCH_SIZE: "${IMPORT_ROW_BATCH_SIZE:-300}"
-  IMPORT_BATCH_PAUSE_MS: "${IMPORT_BATCH_PAUSE_MS:-50}"
-  IMPORT_IMAGE_CONCURRENCY: "${IMPORT_IMAGE_CONCURRENCY:-2}"
+  IMPORT_QUEUE_CONCURRENCY: "${IMPORT_QUEUE_CONCURRENCY:-2}"
+  MEDIA_QUEUE_CONCURRENCY: "${MEDIA_QUEUE_CONCURRENCY:-3}"
+  IMPORT_ROW_BATCH_SIZE: "${IMPORT_ROW_BATCH_SIZE:-400}"
+  IMPORT_BATCH_PAUSE_MS: "${IMPORT_BATCH_PAUSE_MS:-20}"
+  IMPORT_IMAGE_CONCURRENCY: "${IMPORT_IMAGE_CONCURRENCY:-3}"
   MEDIA_IMAGE_MAX_WIDTH: "${MEDIA_IMAGE_MAX_WIDTH:-1600}"
   MEDIA_IMAGE_QUALITY: "${MEDIA_IMAGE_QUALITY:-72}"
-  UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-8}"
+  UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-12}"
 
 services:
   redis:
@@ -35,10 +36,19 @@ services:
       - redis-server
       - --appendonly
       - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "60"
+      - "1000"
       - --maxmemory
-      - "${REDIS_MAX_MEMORY:-256mb}"
+      - "${REDIS_MAX_MEMORY:-512mb}"
       - --maxmemory-policy
       - allkeys-lru
+      - --tcp-keepalive
+      - "60"
+      - --timeout
+      - "0"
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -46,11 +56,16 @@ services:
       - business_os_redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 10
-    mem_limit: 384m
-    cpus: 0.5
+      start_period: 5s
+    mem_limit: 768m
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging: *service-logging
 
   postgres:
@@ -65,22 +80,43 @@ services:
       - -c
       - shared_buffers=256MB
       - -c
-      - max_wal_size=1GB
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
       - -c
       - synchronous_commit=off
       - -c
+      - random_page_cost=1.1
+      - -c
       - statement_timeout=300000
+      - -c
+      - idle_in_transaction_session_timeout=60000
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - business_os_postgres18:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 10
-    mem_limit: 768m
-    cpus: 1.0
+      start_period: 10s
+    mem_limit: 1536m
+    cpus: 1.5
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging: *service-logging
 
   minio:
@@ -91,6 +127,8 @@ services:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-businessos}"
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
       MINIO_LICENSE_FILE: "${MINIO_LICENSE_FILE:-/run/secrets/minio.license}"
+      MINIO_API_REQUESTS_MAX: "${MINIO_API_REQUESTS_MAX:-1600}"
+      MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-10s}"
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -102,11 +140,16 @@ services:
         read_only: true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 10
-    mem_limit: 768m
-    cpus: 0.75
+      start_period: 10s
+    mem_limit: 1024m
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging: *service-logging
 
   app:
@@ -117,7 +160,8 @@ services:
     environment:
       <<: *node-env
       WORKER_RUNTIME: docker
-    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run start"]
+      NODE_OPTIONS: "--max-old-space-size=512"
+    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
     ports:
       - "${PORT:-4000}:4000"
     volumes:
@@ -131,8 +175,9 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    mem_limit: 512m
-    cpus: 0.75
+    mem_limit: 768m
+    cpus: 1.0
+    stop_grace_period: 30s
     logging: *service-logging
 
   import-worker:
@@ -143,30 +188,8 @@ services:
     environment:
       <<: *node-env
       WORKER_RUNTIME: docker
-    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run worker:import"]
-    volumes:
-      - ../../:/app
-      - business_os_backend_node_modules:/app/backend/node_modules
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    mem_limit: 768m
-    cpus: 0.5
-    logging: *service-logging
-
-  media-worker:
-    image: node:24-alpine
-    profiles: ["postgres-runtime"]
-    restart: unless-stopped
-    working_dir: /app/backend
-    environment:
-      <<: *node-env
-      WORKER_RUNTIME: docker
-    command: ["sh", "-lc", "npm install --omit=dev --no-audit --loglevel=warn && npm run worker:media"]
+      NODE_OPTIONS: "--max-old-space-size=768"
+    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:import"]
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
@@ -178,7 +201,33 @@ services:
       minio:
         condition: service_healthy
     mem_limit: 1024m
-    cpus: 0.75
+    cpus: 1.0
+    stop_grace_period: 60s
+    logging: *service-logging
+
+  media-worker:
+    image: node:24-alpine
+    profiles: ["postgres-runtime"]
+    restart: unless-stopped
+    working_dir: /app/backend
+    environment:
+      <<: *node-env
+      WORKER_RUNTIME: docker
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    command: ["sh", "-lc", "if [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm install --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run worker:media"]
+    volumes:
+      - ../../:/app
+      - business_os_backend_node_modules:/app/backend/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    mem_limit: 1536m
+    cpus: 1.0
+    stop_grace_period: 60s
     logging: *service-logging
 
 volumes:
