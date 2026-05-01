@@ -2379,5 +2379,15 @@
   "search_users_placeholder": "Search users, phone, email, or role",
   "users_load_failed": "Failed to load users",
   "users_load_slow": "Users are taking longer than expected. Tap Refresh or revisit the page in a moment.",
-  "users_refresh_failed": "Unable to refresh users right now. Showing the latest loaded data."
+  "users_refresh_failed": "Unable to refresh users right now. Showing the latest loaded data.",
+  "analyzed": "Analyzed",
+  "analyzing_file": "Analyzing file",
+  "cancelled": "Cancelled",
+  "created": "created",
+  "duplicate": "duplicate",
+  "image_matched": "image matched",
+  "image_skipped": "image skipped",
+  "queued": "Queued",
+  "review_ready": "Review ready",
+  "row_issue": "row issue"
 }

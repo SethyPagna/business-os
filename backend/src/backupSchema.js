@@ -1,6 +1,6 @@
 'use strict'
 
-const BACKUP_VERSION = 10
+const BACKUP_VERSION = 11
 
 const BACKUP_TABLES = [
   'categories',
@@ -26,6 +26,7 @@ const BACKUP_TABLES = [
   'customer_share_submissions',
   'audit_logs',
   'file_assets',
+  'action_history',
   'import_jobs',
   'import_job_files',
   'import_job_batches',
@@ -55,6 +56,7 @@ const BACKUP_CLEAR_ORDER = [
   'roles',
   'settings',
   'file_assets',
+  'action_history',
   'import_job_errors',
   'import_job_batches',
   'import_job_files',

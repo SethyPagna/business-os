@@ -17,24 +17,80 @@ function isRecent(job, maxAgeMs = 2 * 60 * 60 * 1000) {
   return Date.now() - stamp <= maxAgeMs
 }
 
-function getJobProgress(job) {
+function getJobProgressDetails(job, labels = {}) {
   const status = normalizeJobStatus(job)
-  if (status === 'awaiting_review') return 60
+  const phase = String(job?.phase || '').toLowerCase()
+  const summary = job?.summary || {}
+  const analyzedRows = Number(summary?.analyzed_rows || summary?.rows || 0)
+  if (status === 'awaiting_review') {
+    return {
+      value: 60,
+      label: analyzedRows
+        ? `${labels.analyzed || 'Analyzed'} ${analyzedRows.toLocaleString()} ${labels.rows || 'rows'}`
+        : (labels.reviewReady || 'Review ready'),
+      indeterminate: false,
+    }
+  }
+  if (ACTIVE_STATUSES.has(status) && phase.includes('analyz')) {
+    return {
+      value: analyzedRows ? 35 : 12,
+      label: analyzedRows
+        ? `${labels.analyzed || 'Analyzed'} ${analyzedRows.toLocaleString()} ${labels.rows || 'rows'}`
+        : (labels.analyzingFile || 'Analyzing file'),
+      indeterminate: true,
+    }
+  }
   const rowsTotal = Number(job?.total_rows || 0)
   const rowsDone = Number(job?.processed_rows || 0)
   const imagesTotal = Number(job?.total_images || 0)
   const imagesDone = Number(job?.processed_images || 0)
   const total = rowsTotal + imagesTotal
   const done = rowsDone + imagesDone
-  if (total <= 0) return 0
+  if (status === 'completed' || status === 'completed_with_errors') {
+    return { value: 100, label: '100%', indeterminate: false }
+  }
+  if (status === 'cancelled') {
+    return { value: 100, label: labels.cancelled || 'Cancelled', indeterminate: false }
+  }
+  if (total <= 0) {
+    return { value: 0, label: labels.queued || 'Queued', indeterminate: ACTIVE_STATUSES.has(status) }
+  }
   const raw = Math.max(0, Math.min(100, Math.round((done / total) * 100)))
-  return ACTIVE_STATUSES.has(status) ? Math.min(95, raw) : raw
+  const value = ACTIVE_STATUSES.has(status) ? Math.min(95, raw) : raw
+  return { value, label: `${value}%`, indeterminate: false }
 }
 
 function getJobLabel(job) {
   const type = String(job?.type || 'import').replaceAll('_', ' ')
   const phase = String(job?.phase || job?.status || '').replaceAll('_', ' ')
   return `${type} import${phase ? ` - ${phase}` : ''}`
+}
+
+function getJobResultSummary(job, labels = {}) {
+  const summary = job?.summary || {}
+  const parts = []
+  const add = (key, label) => {
+    const value = Number(summary?.[key] || 0)
+    if (value > 0) parts.push(`${value.toLocaleString()} ${label}`)
+  }
+  add('imported', labels.created || 'created')
+  add('updated', labels.updated || 'updated')
+  add('duplicates', labels.duplicate || 'duplicate')
+  add('images_matched', labels.imageMatched || 'image matched')
+  add('skipped_images', labels.imageSkipped || 'image skipped')
+  add('failed', labels.rowIssue || 'row issue')
+  return parts.join(' - ')
+}
+
+function getRowsDisplay(job, rowsLabel, analyzedLabel = 'Analyzed') {
+  const status = normalizeJobStatus(job)
+  const phase = String(job?.phase || '').toLowerCase()
+  const summary = job?.summary || {}
+  const analyzedRows = Number(summary?.analyzed_rows || summary?.rows || 0)
+  if ((status === 'awaiting_review' || phase.includes('analyz')) && analyzedRows) {
+    return `${analyzedLabel} ${analyzedRows.toLocaleString()} ${rowsLabel}`
+  }
+  return `${Number(job?.processed_rows || 0).toLocaleString()} / ${Number(job?.total_rows || 0).toLocaleString()} ${rowsLabel}`
 }
 
 function buildJobsSignature(jobs = []) {
@@ -65,8 +121,8 @@ export default function BackgroundImportTracker() {
     jobs.filter((job) => {
       const status = normalizeJobStatus(job)
       if (ACTIVE_STATUSES.has(status) || REVIEW_STATUSES.has(status)) return true
-      return DONE_STATUSES.has(status) && isRecent(job, 10 * 60 * 1000)
-    }).slice(0, 5)
+      return DONE_STATUSES.has(status) && isRecent(job, 60 * 60 * 1000)
+    }).slice(0, 8)
   ), [jobs])
 
   const activeJobs = useMemo(() => visibleJobs.filter((job) => ACTIVE_STATUSES.has(normalizeJobStatus(job))), [visibleJobs])
@@ -107,7 +163,6 @@ export default function BackgroundImportTracker() {
   if (!primaryJob) return null
 
   const status = normalizeJobStatus(primaryJob)
-  const progress = getJobProgress(primaryJob)
   const hasAttention = reviewJobs.length > 0
   const isActive = ACTIVE_STATUSES.has(status)
   const title = hasAttention
@@ -122,6 +177,24 @@ export default function BackgroundImportTracker() {
   const errorsLabel = t('errors') || 'Errors'
   const retryLabel = t('retry') || 'Retry'
   const approveLabel = t('approve_import') || 'Approve import'
+  const progressLabels = {
+    analyzed: t('analyzed') || 'Analyzed',
+    rows: rowsLabel,
+    reviewReady: t('review_ready') || 'Review ready',
+    analyzingFile: t('analyzing_file') || 'Analyzing file',
+    cancelled: t('cancelled') || 'Cancelled',
+    queued: t('queued') || 'Queued',
+  }
+  const resultLabels = {
+    created: t('created') || 'created',
+    updated: t('updated') || 'updated',
+    duplicate: t('duplicate') || 'duplicate',
+    imageMatched: t('image_matched') || 'image matched',
+    imageSkipped: t('image_skipped') || 'image skipped',
+    rowIssue: t('row_issue') || 'row issue',
+  }
+  const primaryProgress = getJobProgressDetails(primaryJob, progressLabels)
+  const progress = primaryProgress.value
 
   const handleCancel = async (job) => {
     if (!job?.id || busyJobId) return
@@ -194,10 +267,13 @@ export default function BackgroundImportTracker() {
             <span className="font-semibold">{title}</span>
             <span className="ml-2 text-xs opacity-80">{getJobLabel(primaryJob)}</span>
           </span>
-          <span className="text-xs font-semibold">{progress}%</span>
+          <span className="text-xs font-semibold">{primaryProgress.label}</span>
         </button>
         <div className="h-1.5 overflow-hidden rounded-full bg-black/10 md:w-48 dark:bg-white/10">
-          <div className={`h-full rounded-full ${hasAttention ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
+          <div
+            className={`h-full rounded-full ${hasAttention ? 'bg-amber-500' : 'bg-blue-500'} ${primaryProgress.indeterminate ? 'animate-pulse' : ''}`}
+            style={{ width: `${Math.max(primaryProgress.indeterminate ? 28 : 0, progress)}%` }}
+          />
         </div>
       </div>
 
@@ -205,26 +281,28 @@ export default function BackgroundImportTracker() {
         <div className="mx-auto mt-2 grid max-w-screen-2xl gap-2">
           {visibleJobs.map((job) => {
             const jobStatus = normalizeJobStatus(job)
-            const jobProgress = getJobProgress(job)
+            const jobProgress = getJobProgressDetails(job, progressLabels)
             const isJobCancellable = CANCELLABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
             const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
             const failedImages = Number(job.failed_images || 0)
             const lastError = String(job.last_error || '').trim()
+            const resultSummary = getJobResultSummary(job, resultLabels)
             return (
               <div key={job.id} className="rounded-xl border border-current/15 bg-white/65 p-2 dark:bg-slate-950/45">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{getJobLabel(job)}</div>
                     <div className="text-xs opacity-75">
-                      {Number(job.processed_rows || 0)} / {Number(job.total_rows || 0)} {rowsLabel}
+                      {getRowsDisplay(job, rowsLabel, progressLabels.analyzed)}
                       {Number(job.total_images || 0) ? ` - ${Number(job.processed_images || 0)} / ${Number(job.total_images || 0)} ${imagesLabel}` : ''}
                       {(failedRows || failedImages) ? ` - ${failedRows + failedImages} ${issuesLabel}` : ''}
+                      {resultSummary ? ` - ${resultSummary}` : ''}
                       {lastError ? ` - ${lastError}` : ''}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-black/10 px-2 py-1 text-xs font-semibold dark:bg-white/10">{jobProgress}%</span>
+                    <span className="rounded-full bg-black/10 px-2 py-1 text-xs font-semibold dark:bg-white/10">{jobProgress.label}</span>
                     {isJobCancellable ? (
                       <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${cancelLabel} ${getJobLabel(job)}`} onClick={() => handleCancel(job)}>
                         <XCircle className="mr-1 inline h-3.5 w-3.5" /> {cancelLabel}

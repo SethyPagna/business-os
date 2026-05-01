@@ -14,6 +14,7 @@ process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 const { db } = require('../src/database')
 const {
   addJobFile,
+  cancelAllImportJobs,
   cancelImportJob,
   createImportJob,
   getJobFiles,
@@ -76,6 +77,20 @@ async function main() {
     await processMediaOptimizationJob({ storedName: 'missing-image.jpg', importJobId: job.id, importFileId: imageFile.id })
     const files = getJobFiles(job.id, 'image')
 
+    assert.equal(files[0].status, 'cancelled')
+  })
+
+  await runTest('destructive reset cancellation stops all active import jobs', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeImportFile('reset-products.csv', 'name,stock_quantity\nReset Product,1\n')
+    addJobFile(job.id, { path: csvPath, originalname: 'reset-products.csv', mimetype: 'text/csv' }, 'csv', 'reset-products.csv')
+    updateJob(job.id, { status: 'queued', phase: 'apply_queued' })
+
+    const summary = await cancelAllImportJobs({ reason: 'test reset', waitMs: 1000 })
+    const files = getJobFiles(job.id)
+
+    assert.equal(summary.cancelled >= 1, true)
+    assert.equal(summary.remaining.length, 0)
     assert.equal(files[0].status, 'cancelled')
   })
 }

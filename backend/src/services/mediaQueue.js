@@ -27,6 +27,7 @@ function queueDriverRequired() {
 function isImportJobCancelled(importJobId) {
   if (!importJobId) return false
   const row = db.prepare('SELECT cancel_requested, status FROM import_jobs WHERE id = ?').get(importJobId)
+  if (!row) return true
   return !!row?.cancel_requested || String(row?.status || '').toLowerCase() === 'cancelled'
 }
 

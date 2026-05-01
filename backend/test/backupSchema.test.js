@@ -25,6 +25,7 @@ function runTest(name, fn) {
 runTest('backup schema covers file assets and excludes ephemeral verification codes', () => {
   assert.equal(BACKUP_VERSION >= 10, true)
   assert.equal(BACKUP_TABLES.includes('file_assets'), true)
+  assert.equal(BACKUP_TABLES.includes('action_history'), true)
   assert.equal(BACKUP_TABLES.includes('verification_codes'), false)
   assert.deepEqual(NON_BACKUP_TABLES, ['verification_codes'])
 })
@@ -35,6 +36,7 @@ runTest('backup clear order contains the same tables as backup tables', () => {
   assert.deepEqual([...clearSet].sort(), [...backupSet].sort())
   assert.equal(BACKUP_CLEAR_ORDER[0], 'return_items')
   assert.equal(BACKUP_CLEAR_ORDER.includes('file_assets'), true)
+  assert.equal(BACKUP_CLEAR_ORDER.includes('action_history'), true)
 })
 
 runTest('buildBackupSummary returns row counts and totals', () => {

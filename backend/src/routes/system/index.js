@@ -66,7 +66,7 @@ const {
   saveDriveSyncPreferences,
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
-const { getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
+const { cancelAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 
 const router = express.Router()
@@ -92,6 +92,21 @@ function applyRouteRateLimit(req, res, options = {}) {
   res.setHeader('Retry-After', String(result.retryAfterSeconds))
   err(res, `Too many requests. Try again in ${result.retryAfterSeconds} seconds.`, 429)
   return false
+}
+
+async function stopImportsBeforeDestructiveAction(actionLabel) {
+  const summary = await cancelAllImportJobs({
+    reason: `${actionLabel} stopped this import before changing business data.`,
+    waitMs: 20_000,
+  })
+  if (summary.remaining?.length) {
+    const ids = summary.remaining.map((job) => job.id).join(', ')
+    const error = new Error(`Background imports are still stopping (${ids}). Try again after the top import tracker shows cancelled.`)
+    error.code = 'background_imports_still_stopping'
+    error.summary = summary
+    throw error
+  }
+  return summary
 }
 
 function runFsWorker(action, payload, timeoutMs = 10 * 60 * 1000) {
@@ -625,6 +640,7 @@ function normaliseBackupTables(backup) {
     customer_share_submissions: backup?.customer_share_submissions || [],
     audit_logs:          backup?.audit_logs          || [],
     file_assets:         backup?.file_assets         || [],
+    action_history:      backup?.action_history      || [],
   }
 }
 
@@ -937,7 +953,7 @@ router.post('/backup/export-folder', authToken, requirePermission('backup'), asy
 
 // ?€?€ Backup import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // Accepts any version >= 1. Unknown columns are dropped, missing columns default to NULL.
-router.post('/backup/import', authToken, requirePermission('backup'), (req, res) => {
+router.post('/backup/import', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import', max: 6, windowMs: 10 * 60 * 1000 })) return
   const backup = req.body
   if (!backup || typeof backup !== 'object') return err(res, 'Invalid backup ??expected a JSON object')
@@ -950,17 +966,18 @@ router.post('/backup/import', authToken, requirePermission('backup'), (req, res)
   const customTableRows = normaliseBackupCustomTableRows(backup)
 
   try {
+    await stopImportsBeforeDestructiveAction('Backup restore')
     restoreSnapshotTables({ tables, customTableRows, uploads: backup.uploads })
     bumpStorageVersion('backup-import')
   } catch (e) {
     return err(res, e.message)
   }
 
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'runtime'].forEach(broadcast)
+  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
   ok(res, { message: 'Backup imported successfully' })
 })
 
-router.post('/backup/import-folder', authToken, requirePermission('backup'), (req, res) => {
+router.post('/backup/import-folder', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import_folder', max: 6, windowMs: 10 * 60 * 1000 })) return
   const sourceDir = String(req.body?.sourceDir || '').trim()
   if (!sourceDir) return err(res, 'sourceDir is required')
@@ -976,6 +993,7 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), (re
   }
 
   try {
+    await stopImportsBeforeDestructiveAction('Folder backup restore')
     restoreSnapshotTables({
       tables: snapshot.tables,
       customTableRows: snapshot.customTableRows,
@@ -991,7 +1009,7 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), (re
     tableRows: snapshot.summary?.totals?.tableRowCount || 0,
   })
 
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'runtime'].forEach(broadcast)
+  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
   ok(res, {
     message: 'Folder backup restored successfully',
     sourceRoot: snapshot.root,
@@ -1002,11 +1020,12 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), (re
 // ?€?€ Reset business data ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // mode='sales' ??clear all transactional data (sales, RETURNS, stock movements); zero stock
 // mode='all'   ??also remove products, contacts, custom_fields; keep settings/users/branches
-router.post('/reset-data', authToken, requirePermission('backup'), (req, res) => {
+router.post('/reset-data', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:reset_data', max: 5, windowMs: 10 * 60 * 1000 })) return
   const { mode = 'sales' } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
   try {
+    const importStopSummary = await stopImportsBeforeDestructiveAction(mode === 'all' ? 'Full data reset' : 'Sales reset')
     db.transaction(() => {
       // Always clear transactional data (sales AND returns)
       db.prepare('DELETE FROM return_items').run()
@@ -1024,9 +1043,11 @@ router.post('/reset-data', authToken, requirePermission('backup'), (req, res) =>
         db.prepare('DELETE FROM suppliers').run()
         db.prepare('DELETE FROM delivery_contacts').run()
         db.prepare('DELETE FROM custom_fields').run()
+        db.prepare('DELETE FROM action_history').run()
         // Keep: branches, categories, units, settings, users
       } else {
         db.prepare('UPDATE products SET stock_quantity = 0').run()
+        db.prepare('DELETE FROM action_history').run()
       }
     })()
 
@@ -1034,8 +1055,11 @@ router.post('/reset-data', authToken, requirePermission('backup'), (req, res) =>
       ? 'Full data reset ??sales, returns, products, contacts cleared'
       : 'Sales reset ??sales, returns, and stock cleared'
     bumpStorageVersion(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
-    audit(actor.userId, actor.userName, 'reset_data', 'system', null, label)
-    ;['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard', 'runtime'].forEach(broadcast)
+    audit(actor.userId, actor.userName, 'reset_data', 'system', null, {
+      label,
+      cancelledImportJobs: importStopSummary.cancelled || 0,
+    })
+    ;['sales', 'returns', 'products', 'inventory', 'customers', 'dashboard', 'actionHistory', 'runtime'].forEach(broadcast)
     ok(res, {
       message: mode === 'all'
         ? 'Reset complete ??sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
@@ -1045,10 +1069,11 @@ router.post('/reset-data', authToken, requirePermission('backup'), (req, res) =>
 })
 
 // ?€?€ Factory reset (wipe everything; keep admin + rebuild defaults) ?€?€?€?€?€?€?€?€?€?€?€?€
-router.post('/factory-reset', authToken, requirePermission('backup'), (req, res) => {
+router.post('/factory-reset', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:factory_reset', max: 2, windowMs: 30 * 60 * 1000 })) return
   const actor = getAuditActor(req, req.body || {})
   try {
+    const importStopSummary = await stopImportsBeforeDestructiveAction('Factory reset')
     db.transaction(() => {
       // FK-safe deletion order ??returns and return_items included
       const existingCustomTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
@@ -1066,7 +1091,9 @@ router.post('/factory-reset', authToken, requirePermission('backup'), (req, res)
         'products', 'categories', 'units',
         'suppliers', 'customers', 'delivery_contacts',
         'branches', 'custom_fields', 'custom_tables',
+        'import_job_errors', 'import_job_batches', 'import_job_files', 'import_jobs',
         'file_assets', 'ai_response_logs', 'ai_provider_configs', 'google_drive_sync_entries',
+        'action_history',
         'roles', 'audit_logs', 'settings', 'users',
       ]
       tables.forEach(t => { try { db.prepare(`DELETE FROM "${t}"`).run() } catch (_) {} })
@@ -1077,9 +1104,12 @@ router.post('/factory-reset', authToken, requirePermission('backup'), (req, res)
     deleteAllUploads()
     ensureCoreDataInvariants()
     bumpStorageVersion('factory-reset')
-    audit(actor.userId, actor.userName, 'factory_reset', 'system', null, 'Factory reset completed')
+    audit(actor.userId, actor.userName, 'factory_reset', 'system', null, {
+      label: 'Factory reset completed',
+      cancelledImportJobs: importStopSummary.cancelled || 0,
+    })
 
-    ;['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard', 'settings', 'users', 'roles', 'files', 'customTables', 'runtime'].forEach(broadcast)
+    ;['products', 'sales', 'returns', 'customers', 'inventory', 'dashboard', 'settings', 'users', 'roles', 'files', 'customTables', 'actionHistory', 'runtime'].forEach(broadcast)
     ok(res, { message: 'Factory reset complete. All data and images wiped. Admin account and defaults restored.' })
   } catch (e) { err(res, e.message) }
 })

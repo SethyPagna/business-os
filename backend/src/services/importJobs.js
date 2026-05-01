@@ -63,13 +63,18 @@ async function countCsvRowsFromFile(csvFile, jobId) {
   let rows = 0
   let batches = 0
   for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(500, IMPORT_ROW_BATCH_SIZE) })) {
+    if (jobId && isCancelled(jobId)) return rows
     rows += batchRows.length
     batches += 1
     if (jobId && (batches % 4 === 0 || batchRows.length < IMPORT_ROW_BATCH_SIZE)) {
+      const currentSummary = getImportJob(jobId)?.summary || {}
       updateJob(jobId, {
         total_rows: rows,
-        processed_rows: rows,
         phase: 'analyzing_rows',
+        summary_json: stringify({
+          ...currentSummary,
+          analyzed_rows: rows,
+        }),
       })
     }
     await yieldImportWorker()
@@ -234,7 +239,9 @@ function markJobCancelled(jobId) {
 }
 
 function isCancelled(jobId) {
-  return !!db.prepare('SELECT cancel_requested FROM import_jobs WHERE id = ?').get(jobId)?.cancel_requested
+  const row = db.prepare('SELECT cancel_requested, status FROM import_jobs WHERE id = ?').get(jobId)
+  if (!row) return true
+  return !!row.cancel_requested || String(row.status || '').toLowerCase() === 'cancelled'
 }
 
 async function waitForQueuedImportMedia(jobId) {
@@ -262,6 +269,23 @@ async function waitForQueuedImportMedia(jobId) {
     }
     await wait(1000)
   }
+}
+
+function finalizeSkippedImportImages(jobId) {
+  const result = db.prepare(`
+    UPDATE import_job_files
+    SET status = 'skipped', error_message = COALESCE(error_message, 'Image was uploaded but not referenced by the applied import rows.'), updated_at = datetime('now')
+    WHERE job_id = ? AND kind = 'image' AND status = 'stored'
+  `).run(jobId)
+  const skipped = Number(result.changes || 0)
+  if (skipped > 0) {
+    db.prepare(`
+      UPDATE import_jobs
+      SET processed_images = processed_images + ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(skipped, jobId)
+  }
+  return skipped
 }
 
 function normalizeLookup(value) {
@@ -1478,6 +1502,10 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
   let failed = 0
   let groupedRows = 0
   for await (const batch of rowBatches) {
+    if (isCancelled(jobId)) {
+      updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+      return { imported: 0, updated: 0, duplicates: 0, failed, cancelled: true }
+    }
     const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
     for (let index = 0; index < batchRows.length; index += 1) {
       const row = batchRows[index]
@@ -1746,7 +1774,7 @@ async function extractZipImages(jobId, zipFile) {
 
 async function processImportJob(jobId, { mode = 'analyze' } = {}) {
   const job = getImportJob(jobId)
-  if (!job) throw new Error('Import job not found')
+  if (!job) return { id: jobId, status: 'cancelled', phase: 'missing_or_reset' }
   const currentStatus = String(job.status || '').toLowerCase()
   const normalizedMode = normalizeQueueMode(mode)
   if (job.cancel_requested || currentStatus === 'cancelling' || currentStatus === 'cancelled') {
@@ -1791,7 +1819,7 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
         status: 'awaiting_review',
         phase: 'awaiting_review',
         total_rows: totalRows,
-        processed_rows: totalRows,
+        processed_rows: 0,
         failed_rows: 0,
         total_images: imageFiles.length,
         summary_json: stringify(summary),
@@ -1837,6 +1865,13 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
       if (isCancelled(jobId)) {
         updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
         return getImportJob(jobId)
+      }
+      const skippedImages = finalizeSkippedImportImages(jobId)
+      if (skippedImages > 0) {
+        result = {
+          ...result,
+          skipped_images: skippedImages,
+        }
       }
     }
     updateJob(jobId, { phase: 'finalizing' })
@@ -2050,6 +2085,9 @@ async function cancelImportJob(jobId) {
 
   markJobCancelled(jobId)
   const removedQueued = await removeQueuedBullJobsForImport(jobId)
+  if (status === 'running' || status === 'cancelling') {
+    await waitForImportJobsToStop([jobId], 2_500)
+  }
   const fresh = getImportJob(jobId)
   const freshStatus = String(fresh?.status || '').toLowerCase()
   const canFinishNow = ['pending', 'queued', 'approved', 'awaiting_review', 'failed'].includes(status)
@@ -2068,6 +2106,70 @@ async function cancelImportJob(jobId) {
     `).run(jobId)
   }
   return getImportJob(jobId)
+}
+
+const CANCELLABLE_IMPORT_STATUSES = ['pending', 'queued', 'running', 'cancelling', 'approved', 'awaiting_review']
+
+function listCancellableImportJobs() {
+  return db.prepare(`
+    SELECT *
+    FROM import_jobs
+    WHERE lower(status) IN (${CANCELLABLE_IMPORT_STATUSES.map(() => '?').join(',')})
+    ORDER BY datetime(created_at) ASC, id ASC
+  `).all(...CANCELLABLE_IMPORT_STATUSES)
+}
+
+async function waitForImportJobsToStop(jobIds = [], timeoutMs = 15_000) {
+  const ids = Array.from(new Set((jobIds || []).map((id) => String(id || '').trim()).filter(Boolean)))
+  if (!ids.length) return []
+  const deadline = Date.now() + Math.max(0, Number(timeoutMs || 0))
+  while (Date.now() <= deadline) {
+    const placeholders = ids.map(() => '?').join(',')
+    const active = db.prepare(`
+      SELECT id, status, phase
+      FROM import_jobs
+      WHERE id IN (${placeholders}) AND lower(status) IN ('running', 'cancelling', 'queued')
+    `).all(...ids)
+    if (!active.length) return []
+    await wait(250)
+  }
+  const placeholders = ids.map(() => '?').join(',')
+  return db.prepare(`
+    SELECT id, status, phase
+    FROM import_jobs
+    WHERE id IN (${placeholders}) AND lower(status) IN ('running', 'cancelling', 'queued')
+  `).all(...ids)
+}
+
+async function cancelAllImportJobs({ reason = 'Background import cancelled by system maintenance.', waitMs = 15_000 } = {}) {
+  const jobs = listCancellableImportJobs()
+  if (!jobs.length) {
+    return { cancelled: 0, remaining: [], jobIds: [] }
+  }
+  const jobIds = jobs.map((job) => job.id)
+  for (const jobId of jobIds) {
+    await removeQueuedBullJobsForImport(jobId)
+  }
+  const placeholders = jobIds.map(() => '?').join(',')
+  db.prepare(`
+    UPDATE import_jobs
+    SET cancel_requested = 1,
+        status = CASE WHEN lower(status) = 'running' THEN 'cancelling' ELSE 'cancelled' END,
+        phase = CASE WHEN lower(status) = 'running' THEN 'cancel_requested' ELSE 'cancelled' END,
+        last_error = ?,
+        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE datetime('now') END,
+        updated_at = datetime('now')
+    WHERE id IN (${placeholders})
+  `).run(reason, ...jobIds)
+  db.prepare(`
+    UPDATE import_job_files
+    SET status = 'cancelled',
+        error_message = COALESCE(error_message, ?),
+        updated_at = datetime('now')
+    WHERE job_id IN (${placeholders}) AND status IN ('stored', 'queued_media')
+  `).run(reason, ...jobIds)
+  const remaining = await waitForImportJobsToStop(jobIds, waitMs)
+  return { cancelled: jobs.length, remaining, jobIds }
 }
 
 async function approveImportJob(jobId) {
@@ -2151,6 +2253,7 @@ module.exports = {
   addJobFile,
   approveImportJob,
   buildErrorsCsv,
+  cancelAllImportJobs,
   cancelImportJob,
   createImportJob,
   enqueueImportJob,
