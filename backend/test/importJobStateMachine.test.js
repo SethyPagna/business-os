@@ -12,11 +12,15 @@ process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES = '0'
 process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 
 const { db } = require('../src/database')
+const { IMPORTS_PATH } = require('../src/config')
 const {
   addJobFile,
   cancelAllImportJobs,
   cancelImportJob,
   createImportJob,
+  deleteAllImportJobs,
+  deleteImportJob,
+  getImportJob,
   getJobFiles,
   processImportJob,
   updateJob,
@@ -38,6 +42,13 @@ async function runTest(name, fn) {
 
 function writeImportFile(name, content) {
   const filePath = path.join(tempRoot, name)
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, content, 'utf8')
+  return filePath
+}
+
+function writeJobFile(jobId, name, content) {
+  const filePath = path.join(IMPORTS_PATH, jobId, name)
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, content, 'utf8')
   return filePath
@@ -92,6 +103,43 @@ async function main() {
     assert.equal(summary.cancelled >= 1, true)
     assert.equal(summary.remaining.length, 0)
     assert.equal(files[0].status, 'cancelled')
+  })
+
+  await runTest('deleteImportJob removes database rows and import runtime files', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeJobFile(job.id, 'delete-products.csv', 'name,stock_quantity\nDelete Product,1\n')
+    addJobFile(job.id, { path: csvPath, originalname: 'delete-products.csv', mimetype: 'text/csv' }, 'csv', 'delete-products.csv')
+    updateJob(job.id, { status: 'completed', phase: 'completed' })
+
+    const jobRoot = path.join(IMPORTS_PATH, job.id)
+    assert.equal(fs.existsSync(jobRoot), true)
+
+    const result = await deleteImportJob(job.id)
+
+    assert.deepEqual(result, { deleted: true, id: job.id })
+    assert.equal(getImportJob(job.id), null)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM import_job_files WHERE job_id = ?').get(job.id).count, 0)
+    assert.equal(fs.existsSync(jobRoot), false)
+  })
+
+  await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {
+    const jobs = [
+      createImportJob({ type: 'products', actor: { userName: 'test' } }),
+      createImportJob({ type: 'contacts', actor: { userName: 'test' } }),
+    ]
+    for (const job of jobs) {
+      const csvPath = writeJobFile(job.id, `${job.type}.csv`, 'name,stock_quantity\nBulk Product,1\n')
+      addJobFile(job.id, { path: csvPath, originalname: `${job.type}.csv`, mimetype: 'text/csv' }, 'csv', `${job.type}.csv`)
+      updateJob(job.id, { status: 'completed_with_errors', phase: 'completed_with_errors' })
+      assert.equal(fs.existsSync(path.join(IMPORTS_PATH, job.id)), true)
+    }
+
+    const result = await deleteAllImportJobs({ removeFiles: true })
+
+    assert.equal(result.deleted >= jobs.length, true)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM import_jobs').get().count, 0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM import_job_files').get().count, 0)
+    assert.deepEqual(fs.readdirSync(IMPORTS_PATH), [])
   })
 }
 

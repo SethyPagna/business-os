@@ -14,6 +14,7 @@ const {
   buildErrorsCsv,
   cancelImportJob,
   createImportJob,
+  deleteImportJob,
   enqueueImportJob,
   getImportJob,
   getJobErrors,
@@ -258,6 +259,17 @@ router.post('/:id/cancel', authToken, requireImportPermission, async (req, res) 
     ok(res, { job: await cancelImportJob(job.id) })
   } catch (error) {
     err(res, error?.message || 'Failed to cancel import job')
+  }
+})
+
+router.delete('/:id', authToken, requireImportPermission, async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    ok(res, await deleteImportJob(job.id))
+  } catch (error) {
+    const status = error?.code === 'import_still_stopping' ? 409 : 400
+    err(res, error?.message || 'Failed to remove import job', status)
   }
 })
 

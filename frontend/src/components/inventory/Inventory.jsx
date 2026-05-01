@@ -12,6 +12,7 @@ import { formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
@@ -64,6 +65,8 @@ export default function Inventory() {
   const [search,        setSearch]        = useState('')
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
+  const [inventoryProductPage, setInventoryProductPage] = useState(1)
+  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(50)
   const [tab,           setTab]           = useState('products')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementYearFilter, setMovementYearFilter] = useState('all')
@@ -387,6 +390,15 @@ export default function Inventory() {
     if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 0)
     return true
   })
+
+  useEffect(() => {
+    setInventoryProductPage(1)
+  }, [branchFilter, brandFilter, search, searchMode, stockFilter, tab])
+
+  const pagedSummary = useMemo(
+    () => paginateItems(filteredSummary, inventoryProductPage, inventoryProductPageSize),
+    [filteredSummary, inventoryProductPage, inventoryProductPageSize],
+  )
 
   const filteredMovements = movements.filter(m => {
     if (movFilter !== 'all' && m.movement_type !== movFilter) return false
@@ -1691,13 +1703,26 @@ export default function Inventory() {
       ???????????????????????????????????????? */}
       {tab === 'products' && (
         <>
+          <PaginationControls
+            className="mb-3"
+            page={inventoryProductPage}
+            pageSize={inventoryProductPageSize}
+            totalItems={filteredSummary.length}
+            label={t('products') || 'products'}
+            t={t}
+            onPageChange={setInventoryProductPage}
+            onPageSizeChange={(size) => {
+              setInventoryProductPageSize(size)
+              setInventoryProductPage(1)
+            }}
+          />
           {/* Mobile cards */}
           <div className="space-y-2 sm:hidden">
             {loading ? (
               <div className="text-center py-10 text-gray-400">{t('loading')}</div>
             ) : filteredSummary.length === 0 ? (
               <div className="text-center py-10 text-gray-400">{t('no_data')}</div>
-            ) : filteredSummary.map(p => {
+            ) : pagedSummary.map(p => {
               const qty   = getStockQty(p)
               const isLow = qty > 0 && qty <= p.low_stock_threshold
               const isOut = qty <= (p.out_of_stock_threshold || 0)
@@ -1770,7 +1795,7 @@ export default function Inventory() {
                     <tr><td colSpan={12} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
                   ) : filteredSummary.length === 0 ? (
                     <tr><td colSpan={12} className="text-center py-8 text-gray-400">{t('no_data')}</td></tr>
-                  ) : filteredSummary.map(p => {
+                  ) : pagedSummary.map(p => {
                     const qty    = getStockQty(p)
                     const isLow  = qty > 0 && qty <= p.low_stock_threshold
                     const isOut  = qty <= (p.out_of_stock_threshold || 0)

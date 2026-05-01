@@ -66,7 +66,7 @@ const {
   saveDriveSyncPreferences,
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
-const { cancelAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
+const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 
 const router = express.Router()
@@ -1043,6 +1043,10 @@ router.post('/reset-data', authToken, requirePermission('backup'), async (req, r
         db.prepare('DELETE FROM suppliers').run()
         db.prepare('DELETE FROM delivery_contacts').run()
         db.prepare('DELETE FROM custom_fields').run()
+        db.prepare('DELETE FROM import_job_errors').run()
+        db.prepare('DELETE FROM import_job_batches').run()
+        db.prepare('DELETE FROM import_job_files').run()
+        db.prepare('DELETE FROM import_jobs').run()
         db.prepare('DELETE FROM action_history').run()
         // Keep: branches, categories, units, settings, users
       } else {
@@ -1050,6 +1054,10 @@ router.post('/reset-data', authToken, requirePermission('backup'), async (req, r
         db.prepare('DELETE FROM action_history').run()
       }
     })()
+
+    if (mode === 'all') {
+      await deleteAllImportJobs({ removeFiles: true })
+    }
 
     const label = mode === 'all'
       ? 'Full data reset ??sales, returns, products, contacts cleared'
@@ -1102,6 +1110,7 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
 
     // Remove all uploaded images ??factory reset = clean slate
     deleteAllUploads()
+    await deleteAllImportJobs({ removeFiles: true })
     ensureCoreDataInvariants()
     bumpStorageVersion('factory-reset')
     audit(actor.userId, actor.userName, 'factory_reset', 'system', null, {

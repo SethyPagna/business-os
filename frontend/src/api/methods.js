@@ -728,6 +728,7 @@ export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFet
 export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
 export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
 export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/retry`, {}), null, true)
+export const deleteImportJob = id => route(`importJobs:delete:${id}`, () => apiFetch('DELETE', `/api/import-jobs/${id}`), null, true)
 export const getImportQueueStatus = () => route('importJobs:queueStatus', () => apiFetch('GET', '/api/import-jobs/queue/status'), null)
 
 export async function downloadImportJobErrors(jobId) {

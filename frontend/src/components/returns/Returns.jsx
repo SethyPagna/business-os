@@ -5,6 +5,7 @@ import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import ReturnDetailModal from './ReturnDetailModal'
 import EditReturnModal from './EditReturnModal'
@@ -82,6 +83,8 @@ export default function Returns() {
   const [loadError, setLoadError] = useState(null)
   const [returnGroupMode, setReturnGroupMode] = useState('time')
   const [returnSortDirection, setReturnSortDirection] = useState('desc')
+  const [returnPage, setReturnPage] = useState(1)
+  const [returnPageSize, setReturnPageSize] = useState(50)
   const [collapsedReturnSections, setCollapsedReturnSections] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
@@ -214,7 +217,7 @@ export default function Returns() {
     return searchTerms.every((term) => hay.includes(term.toLowerCase()))
   }), [monthFilter, rows, searchTerms, typeFilter, yearFilter])
 
-  const returnSections = useMemo(() => buildTimeActionSections(filtered, {
+  const allReturnSections = useMemo(() => buildTimeActionSections(filtered, {
     getDate: (ret) => ret?.created_at,
     getItemId: (ret) => Number(ret?.id),
     getActionKey: (ret) => getReturnTypeKey(ret),
@@ -225,6 +228,32 @@ export default function Returns() {
     groupMode: returnGroupMode,
     sortDirection: returnSortDirection,
   }), [filtered, monthFilter, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
+
+  const allVisibleReturns = useMemo(
+    () => allReturnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+    [allReturnSections],
+  )
+
+  useEffect(() => {
+    setReturnPage(1)
+  }, [monthFilter, returnGroupMode, returnSortDirection, scope, search, typeFilter, yearFilter])
+
+  const pagedReturns = useMemo(
+    () => paginateItems(allVisibleReturns, returnPage, returnPageSize),
+    [allVisibleReturns, returnPage, returnPageSize],
+  )
+
+  const returnSections = useMemo(() => buildTimeActionSections(pagedReturns, {
+    getDate: (ret) => ret?.created_at,
+    getItemId: (ret) => Number(ret?.id),
+    getActionKey: (ret) => getReturnTypeKey(ret),
+    getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
+    year: yearFilter,
+    month: monthFilter,
+    timeMode,
+    groupMode: returnGroupMode,
+    sortDirection: returnSortDirection,
+  }), [monthFilter, pagedReturns, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -536,6 +565,20 @@ export default function Returns() {
       )}
 
       <p className="mb-2 text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
+
+      <PaginationControls
+        className="mb-3"
+        page={returnPage}
+        pageSize={returnPageSize}
+        totalItems={allVisibleReturns.length}
+        label={tr('returns_count', 'returns')}
+        t={t}
+        onPageChange={setReturnPage}
+        onPageSizeChange={(size) => {
+          setReturnPageSize(size)
+          setReturnPage(1)
+        }}
+      />
 
       <div className="card hidden overflow-hidden sm:block">
         <div className="overflow-x-auto">

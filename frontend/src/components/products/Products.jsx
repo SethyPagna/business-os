@@ -10,6 +10,7 @@ import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilterMenu from '../shared/FilterMenu'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
 import ManageCategoriesModal from './ManageCategoriesModal'
 import ManageBrandsModal from './ManageBrandsModal'
@@ -114,6 +115,8 @@ export default function Products() {
   const [productSortDirection, setProductSortDirection] = useState('desc')
   const [search,       setSearch]       = useState('')
   const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
+  const [productPage, setProductPage] = useState(1)
+  const [productPageSize, setProductPageSize] = useState(50)
   const [selectedIds,    setSelectedIds]    = useState(new Set())
   const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
   const [bulkEditMode,   setBulkEditMode]   = useState(null)  // 'info'|'pricing'|'stock'|'branch'
@@ -673,12 +676,34 @@ export default function Products() {
     [products],
   )
 
-  const productSections = useMemo(
+  const allProductSections = useMemo(
     () => buildProductGroupSections(filtered, {
       productsById,
       sortDirection: productSortDirection,
     }),
     [filtered, productSortDirection, productsById],
+  )
+
+  const allVisibleProducts = useMemo(
+    () => allProductSections.flatMap((section) => section.items),
+    [allProductSections],
+  )
+
+  useEffect(() => {
+    setProductPage(1)
+  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+
+  const pagedProducts = useMemo(
+    () => paginateItems(allVisibleProducts, productPage, productPageSize),
+    [allVisibleProducts, productPage, productPageSize],
+  )
+
+  const productSections = useMemo(
+    () => buildProductGroupSections(pagedProducts, {
+      productsById,
+      sortDirection: productSortDirection,
+    }),
+    [pagedProducts, productSortDirection, productsById],
   )
 
   const visibleProducts = useMemo(
@@ -1679,6 +1704,20 @@ export default function Products() {
         </div>
       ) : null}
 
+      <PaginationControls
+        className="mb-3"
+        page={productPage}
+        pageSize={productPageSize}
+        totalItems={allVisibleProducts.length}
+        label={t('products') || 'products'}
+        t={t}
+        onPageChange={setProductPage}
+        onPageSizeChange={(size) => {
+          setProductPageSize(size)
+          setProductPage(1)
+        }}
+      />
+
       {/* Desktop table */}
       <div className="card sm:flex-1 sm:overflow-hidden flex-col hidden sm:flex">
         <div className="overflow-auto sm:flex-1">
@@ -1791,7 +1830,9 @@ export default function Products() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-400 dark:border-gray-700">{visibleProducts.length} {t('products')}</div>
+        <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-400 dark:border-gray-700">
+          {visibleProducts.length} / {allVisibleProducts.length} {t('products')}
+        </div>
       </div>
 
       {/* Mobile card list */}

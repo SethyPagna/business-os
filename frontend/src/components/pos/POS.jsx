@@ -32,6 +32,7 @@ import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,
@@ -84,6 +85,8 @@ export default function POS() {
   const [stockFilter,     setStockFilter]     = useState(() => sessionStorage.getItem('pos_stock')    || 'all')
   const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
+  const [productPage, setProductPage] = useState(1)
+  const [productPageSize, setProductPageSize] = useState(50)
   const [quickFilters, setQuickFilters] = useState(() => {
     const defaults = { category: true, brand: true, branch: true, stock: true, supplier: false }
     try {
@@ -671,6 +674,15 @@ export default function POS() {
     [filteredProducts, productsById],
   )
 
+  useEffect(() => {
+    setProductPage(1)
+  }, [branchFilter, brandFilter, categoryFilter, search, searchMode, stockFilter, supplierFilter])
+
+  const pagedProductCards = useMemo(
+    () => paginateItems(visibleProductCards, productPage, productPageSize),
+    [productPage, productPageSize, visibleProductCards],
+  )
+
   const getVariantChoices = useCallback((product) => {
     return getVariantChoicesForProduct(product, variantChildrenByParentId)
   }, [variantChildrenByParentId])
@@ -1139,8 +1151,21 @@ export default function POS() {
 
           {/* Product grid */}
           <div className={`flex-1 overflow-y-auto overflow-x-hidden p-3 ${filterOpen ? 'pt-[20.5rem] sm:pt-[18rem]' : ''}`}>
+            <PaginationControls
+              className="mb-3"
+              page={productPage}
+              pageSize={productPageSize}
+              totalItems={visibleProductCards.length}
+              label={t('products') || 'products'}
+              t={t}
+              onPageChange={setProductPage}
+              onPageSizeChange={(size) => {
+                setProductPageSize(size)
+                setProductPage(1)
+              }}
+            />
             <div className="pos-product-grid">
-              {visibleProductCards.map(p => {
+              {pagedProductCards.map(p => {
                 const variants = getVariantChoices(p)
                 const groupProduct = hasVariantChoices(p)
                 const groupMeta = p.__groupMeta || null

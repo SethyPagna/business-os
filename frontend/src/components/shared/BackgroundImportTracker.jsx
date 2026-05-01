@@ -1,11 +1,12 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
 const CANCELLABLE_STATUSES = new Set(['pending', 'queued', 'running', 'approved'])
+const REMOVABLE_STATUSES = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
 
 function normalizeJobStatus(job) {
   return String(job?.status || '').trim().toLowerCase()
@@ -177,6 +178,7 @@ export default function BackgroundImportTracker() {
   const errorsLabel = t('errors') || 'Errors'
   const retryLabel = t('retry') || 'Retry'
   const approveLabel = t('approve_import') || 'Approve import'
+  const removeLabel = t('remove_import') || t('remove') || 'Remove'
   const progressLabels = {
     analyzed: t('analyzed') || 'Analyzed',
     rows: rowsLabel,
@@ -250,6 +252,23 @@ export default function BackgroundImportTracker() {
     }
   }
 
+  const handleRemove = async (job) => {
+    if (!job?.id || busyJobId) return
+    const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
+    if (!okToRemove) return
+    setBusyJobId(job.id)
+    try {
+      await window.api.deleteImportJob(job.id)
+      jobsSignatureRef.current = ''
+      await loadJobs()
+      notify(t('import_removed') || 'Import removed', 'success')
+    } catch (error) {
+      notify(error?.message || (t('import_remove_failed') || 'Could not remove import'), 'error')
+    } finally {
+      setBusyJobId('')
+    }
+  }
+
   return (
     <div className={`sticky top-0 z-40 border-b px-3 py-2 text-sm shadow-sm backdrop-blur [content-visibility:auto] ${
       hasAttention
@@ -283,6 +302,7 @@ export default function BackgroundImportTracker() {
             const jobStatus = normalizeJobStatus(job)
             const jobProgress = getJobProgressDetails(job, progressLabels)
             const isJobCancellable = CANCELLABLE_STATUSES.has(jobStatus)
+            const isJobRemovable = REMOVABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
             const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
             const failedImages = Number(job.failed_images || 0)
@@ -322,6 +342,11 @@ export default function BackgroundImportTracker() {
                           <RotateCcw className="mr-1 inline h-3.5 w-3.5" /> {retryLabel}
                         </button>
                       </>
+                    ) : null}
+                    {isJobRemovable ? (
+                      <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${removeLabel} ${getJobLabel(job)}`} onClick={() => handleRemove(job)}>
+                        <Trash2 className="mr-1 inline h-3.5 w-3.5" /> {removeLabel}
+                      </button>
                     ) : null}
                   </div>
                 </div>

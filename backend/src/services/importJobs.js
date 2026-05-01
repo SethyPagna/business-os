@@ -125,6 +125,33 @@ function getJobRoot(jobId) {
   return path.join(IMPORTS_PATH, String(jobId || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
 }
 
+function assertSafeImportPath(targetPath) {
+  const root = path.resolve(IMPORTS_PATH)
+  const target = path.resolve(targetPath || '')
+  if (!target || target === root || !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Refusing to delete an unsafe import path')
+  }
+  return target
+}
+
+function deleteImportJobFiles(jobId) {
+  const target = assertSafeImportPath(getJobRoot(jobId))
+  try {
+    fs.rmSync(target, { recursive: true, force: true })
+  } catch (_) {}
+}
+
+function clearImportRuntimeFiles() {
+  ensureImportRoot()
+  const root = path.resolve(IMPORTS_PATH)
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const target = assertSafeImportPath(path.join(root, entry.name))
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+    } catch (_) {}
+  }
+}
+
 function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriver = 'sqlite' } = {}) {
   ensureImportRoot()
   const id = `imp_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`
@@ -2172,6 +2199,48 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
   return { cancelled: jobs.length, remaining, jobIds }
 }
 
+async function deleteImportJob(jobId, { force = false } = {}) {
+  const job = getImportJob(jobId)
+  if (!job) return { deleted: false, missing: true, id: jobId }
+  const status = String(job.status || '').toLowerCase()
+  const busy = ['running', 'queued', 'cancelling', 'approved'].includes(status)
+  if (busy && !force) {
+    await cancelImportJob(jobId)
+    const remaining = await waitForImportJobsToStop([jobId], 5000)
+    if (remaining.length) {
+      const error = new Error('Import is still stopping. Try remove again after it changes to cancelled.')
+      error.code = 'import_still_stopping'
+      throw error
+    }
+  }
+  await removeQueuedBullJobsForImport(jobId)
+  db.transaction(() => {
+    db.prepare('DELETE FROM import_job_errors WHERE job_id = ?').run(jobId)
+    db.prepare('DELETE FROM import_job_batches WHERE job_id = ?').run(jobId)
+    db.prepare('DELETE FROM import_job_files WHERE job_id = ?').run(jobId)
+    db.prepare('DELETE FROM import_jobs WHERE id = ?').run(jobId)
+  })()
+  deleteImportJobFiles(jobId)
+  broadcast('runtime')
+  return { deleted: true, id: jobId }
+}
+
+async function deleteAllImportJobs({ removeFiles = true } = {}) {
+  const ids = db.prepare('SELECT id FROM import_jobs').all().map((row) => row.id)
+  for (const jobId of ids) {
+    await removeQueuedBullJobsForImport(jobId)
+  }
+  db.transaction(() => {
+    db.prepare('DELETE FROM import_job_errors').run()
+    db.prepare('DELETE FROM import_job_batches').run()
+    db.prepare('DELETE FROM import_job_files').run()
+    db.prepare('DELETE FROM import_jobs').run()
+  })()
+  if (removeFiles) clearImportRuntimeFiles()
+  broadcast('runtime')
+  return { deleted: ids.length }
+}
+
 async function approveImportJob(jobId) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
@@ -2256,6 +2325,8 @@ module.exports = {
   cancelAllImportJobs,
   cancelImportJob,
   createImportJob,
+  deleteAllImportJobs,
+  deleteImportJob,
   enqueueImportJob,
   getImportJob,
   getJobErrors,

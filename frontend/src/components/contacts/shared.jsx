@@ -3,6 +3,7 @@ import { MoreHorizontal, X } from 'lucide-react'
 import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useApp } from '../../AppContext'
 
 /**
@@ -174,13 +175,26 @@ export function ContactTable({
   selectAll,
   renderRow,
   renderCard,
+  totalCount,
+  t,
 }) {
   const selectAllRef = useRef(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const totalItems = Number.isFinite(Number(totalCount)) ? Number(totalCount) : rows.length
+  const pagedRows = useMemo(
+    () => paginateItems(rows, page, pageSize),
+    [page, pageSize, rows],
+  )
 
   useEffect(() => {
     if (!selectAllRef.current) return
     selectAllRef.current.indeterminate = !!selectAll?.indeterminate
   }, [selectAll?.indeterminate])
+
+  useEffect(() => {
+    setPage(1)
+  }, [rows, totalItems])
 
   if (loading && !rows.length) {
     return (
@@ -200,6 +214,19 @@ export function ContactTable({
 
   return (
     <>
+      <PaginationControls
+        className="mb-2"
+        page={page}
+        pageSize={pageSize}
+        totalItems={totalItems}
+        label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
+        t={t}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
       {loading ? (
         <div className="mb-2 rounded-xl border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-blue-600 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
           Refreshing...
@@ -229,12 +256,12 @@ export function ContactTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-            {rows.map((row) => renderRow?.(row))}
+            {pagedRows.map((row) => renderRow?.(row))}
           </tbody>
         </table>
       </div>
       <div className="space-y-2 md:hidden">
-        {rows.map((row) => renderCard?.(row))}
+        {pagedRows.map((row) => renderCard?.(row))}
       </div>
     </>
   )

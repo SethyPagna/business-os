@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
+import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
 
@@ -60,6 +61,17 @@ export default function CatalogProductsSection(props) {
     formatPortalPrice,
     replaceVars,
   } = props
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+
+  useEffect(() => {
+    setPage(1)
+  }, [brandFilter, branchFilter, categoryFilter, search, stockFilter])
+
+  const pagedProducts = useMemo(
+    () => paginateItems(filteredProducts, page, pageSize),
+    [filteredProducts, page, pageSize],
+  )
 
   return (
     <SectionShell
@@ -172,7 +184,7 @@ export default function CatalogProductsSection(props) {
       ) : null}
 
       <div className={`grid gap-3 ${productGridClass}`}>
-        {filteredProducts.map((product) => {
+        {pagedProducts.map((product) => {
           const qty = getBranchQty(product, selectedStockBranch)
           const status = getStockStatus(product, qty, previewConfig)
           const gallery = normalizeProductGallery(product)
@@ -278,6 +290,25 @@ export default function CatalogProductsSection(props) {
           )
         })}
       </div>
+
+      <PaginationControls
+        className="mt-4"
+        page={page}
+        pageSize={pageSize}
+        totalItems={filteredProducts.length}
+        label={copy('products', 'products')}
+        t={(key) => ({
+          page: copy('page', 'Page'),
+          of: copy('of', 'of'),
+          showing: copy('showing', 'Showing'),
+          per_page: copy('perPage', 'per page'),
+        })[key] || key}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
 
       {filteredProducts.length === 0 ? (
         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
