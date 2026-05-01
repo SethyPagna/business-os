@@ -5,7 +5,6 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
-import { getPreferredScannerMode, scanBarcodeWithScanbot } from './scanbotScanner.mjs'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import {
   beginTrackedRequest,
@@ -311,24 +310,7 @@ export default function ProductForm({
 
   async function openScanner(field) {
     if (saving || scannerLaunchingField) return
-    const preferredScanner = await getPreferredScannerMode()
-    if (preferredScanner.mode === 'fallback') {
-      setScannerField(field)
-      return
-    }
-    setScannerLaunchingField(field)
-    try {
-      const value = await scanBarcodeWithScanbot({ allowArOverlay: true })
-      if (!String(value || '').trim()) return
-      setField(field, String(value || '').trim())
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn('[ProductForm] Scanbot launch failed, using fallback scanner:', error)
-      }
-      setScannerField(field)
-    } finally {
-      setScannerLaunchingField('')
-    }
+    setScannerField(field)
   }
 
   function closeScanner() {

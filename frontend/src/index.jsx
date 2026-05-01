@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { AppProvider } from './AppContext'
 import './styles/main.css'
+import {
+  isGuardableStyleSheetError,
+  shouldSuppressRuntimeError,
+  shouldSuppressSecurityPolicyViolation,
+} from './runtime/runtimeErrorClassifier.mjs'
 
 function disableServiceWorkerCaching() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -100,46 +105,6 @@ function installFormFieldAccessibility() {
 
 // Keep known browser-extension and CSS-injection noise away from React startup.
 if (typeof window !== 'undefined') {
-  const ignoredRuntimePatterns = [
-    'No Listener:',
-    'tabs:outgoing',
-    'capacitor',
-    'plugin_not_implemented',
-    'cssRules',
-    'insertRule',
-    'unsafe-eval',
-    'Content Security Policy',
-    'Evaluating a string as JavaScript violates',
-  ]
-  const extensionOrigins = [
-    'chrome-extension://',
-    'moz-extension://',
-    'safari-extension://',
-    'ms-browser-extension://',
-  ]
-  const valueIncludesExtensionSource = (value) => {
-    const text = String(value || '')
-    return extensionOrigins.some((origin) => text.includes(origin))
-  }
-  const valueIncludesLikelyInjectedBundle = (value) => {
-    const text = String(value || '')
-    if (valueIncludesExtensionSource(text)) return true
-    return /(^|[\\/])(vendor|content|inpage)\.js(?::\d+)?$/i.test(text)
-      || /content\.js/i.test(text)
-      || /tabs:outgoing\.message\.ready/i.test(text)
-  }
-  const shouldIgnoreRuntimeValue = (value) => {
-    const message = String(value?.message || value || '')
-    if (!ignoredRuntimePatterns.some((pattern) => message.includes(pattern))) return false
-    const stack = String(value?.stack || '')
-    return valueIncludesLikelyInjectedBundle(message)
-      || valueIncludesLikelyInjectedBundle(stack)
-      || /content\.js/i.test(stack)
-  }
-  const isIgnoredRuntimeMessage = (value) => {
-    return shouldIgnoreRuntimeValue(value)
-  }
-
   const sheetPrototype = window.CSSStyleSheet?.prototype
   const nativeInsertRule = sheetPrototype?.insertRule
   if (typeof nativeInsertRule === 'function' && !nativeInsertRule.__businessOsGuarded) {
@@ -147,7 +112,7 @@ if (typeof window !== 'undefined') {
       try {
         return nativeInsertRule.call(this, rule, index)
       } catch (error) {
-        if (isIgnoredRuntimeMessage(error)) return -1
+        if (isGuardableStyleSheetError(error)) return -1
         throw error
       }
     }
@@ -164,7 +129,7 @@ if (typeof window !== 'undefined') {
       try {
         return nativeCssRulesGetter.call(this) || []
       } catch (error) {
-        if (isIgnoredRuntimeMessage(error)) return []
+        if (isGuardableStyleSheetError(error)) return []
         throw error
       }
     }
@@ -179,8 +144,11 @@ if (typeof window !== 'undefined') {
   const stopKnownStartupNoise = (event, value) => {
     const filename = String(event?.filename || '')
     const source = String(event?.target?.src || event?.target?.href || '')
-    const stackSource = valueIncludesLikelyInjectedBundle(filename) || valueIncludesLikelyInjectedBundle(source)
-    if (!isIgnoredRuntimeMessage(value) && !stackSource) return false
+    const error = value && typeof value === 'object' ? value : null
+    const message = String(error?.message || value || '')
+    const stack = String(error?.stack || '')
+    const baseOrigin = window.location?.origin || ''
+    if (!shouldSuppressRuntimeError({ message, error, filename: filename || source, stack, baseOrigin })) return false
     event.preventDefault()
     event.stopImmediatePropagation()
     return true
@@ -195,20 +163,13 @@ if (typeof window !== 'undefined') {
   }, true)
 
   window.addEventListener('securitypolicyviolation', (event) => {
-    const directive = String(event?.violatedDirective || '')
-    const blockedURI = String(event?.blockedURI || '')
-    const sourceFile = String(event?.sourceFile || '')
-    const sample = String(event?.sample || '')
-    const looksLikeKnownRuntimeNoise = (
-      directive.includes('script-src')
-      && (
-        blockedURI === 'eval'
-        || sample.includes('unsafe-eval')
-        || sample.includes('tabs:outgoing')
-        || valueIncludesLikelyInjectedBundle(sourceFile)
-      )
-    )
-    if (!looksLikeKnownRuntimeNoise) return
+    if (!shouldSuppressSecurityPolicyViolation({
+      violatedDirective: event?.violatedDirective,
+      blockedURI: event?.blockedURI,
+      sourceFile: event?.sourceFile,
+      sample: event?.sample,
+      baseOrigin: window.location?.origin || '',
+    })) return
     event.stopImmediatePropagation()
   }, true)
 }

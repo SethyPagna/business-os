@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
+import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import WriteConflictModal from './components/shared/WriteConflictModal'
@@ -462,6 +463,9 @@ class PageErrorBoundary extends Component {
     // Page-level crashes should be isolated to the current route, not the
     // entire shell, while still leaving a useful console breadcrumb.
     console.error(`[PageErrorBoundary] Page "${this.props.pageId}" crashed:`, error.message, info.componentStack)
+    if (shouldAttemptPublicDomRecovery(this.props.pageId, error) && typeof window !== 'undefined') {
+      window.location.reload()
+    }
   }
 
   render() {
@@ -471,6 +475,8 @@ class PageErrorBoundary extends Component {
 
     const message = this.state.error?.message || String(this.state.error)
     const retryable = isRetryableImportError(this.state.error)
+    const publicDomMutation = this.props.pageId === 'catalog-public' && isPublicDomMutationError(this.state.error)
+    const buttonLabel = publicDomMutation ? 'Reload public page' : (retryable ? 'Reload page' : 'Retry')
 
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -482,14 +488,14 @@ class PageErrorBoundary extends Component {
         <button
           className="btn-primary"
           onClick={() => {
-            if (retryable && typeof window !== 'undefined') {
+            if ((retryable || publicDomMutation) && typeof window !== 'undefined') {
               window.location.reload()
               return
             }
             this.setState({ error: null })
           }}
         >
-          {retryable ? 'Reload page' : 'Retry'}
+          {buttonLabel}
         </button>
       </div>
     )
@@ -515,7 +521,7 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
   const title = blocked ? 'Write blocked - server unavailable: ' : 'Write failed - data not saved: '
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg">
+    <div className="fixed left-0 right-0 top-16 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg md:top-14">
       <span className="text-lg flex-shrink-0">!</span>
       <div className="flex-1 min-w-0">
         <span className="font-semibold text-sm">{title}</span>
@@ -574,7 +580,8 @@ function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }) {
       key={pageId}
       style={{
         display: isActive ? 'flex' : 'none',
-        height: '100%',
+        flex: '1 1 0%',
+        overflow: 'hidden',
         flexDirection: 'column',
         minHeight: 0,
       }}

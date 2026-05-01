@@ -53,6 +53,15 @@ import {
 } from './portalCatalogDisplay.mjs'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import { ProductImg } from '../products/primitives'
+import {
+  applyGoogleTranslateSelection,
+  ensurePortalTranslateWidgetHost,
+  isPortalTranslateApplied,
+  readStoredTranslateTarget,
+  removePortalTranslateWidgetHost,
+  requestPortalTranslateReload,
+  writePortalTranslateTarget,
+} from './portalTranslateController.mjs'
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
 const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))
@@ -1413,109 +1422,6 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
   { value: 'ta', label: 'Tamil' },
 ]
 
-const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
-const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
-const PORTAL_TRANSLATE_RELOAD_KEY = 'business-os:portal-translate-last-reload'
-
-function getPortalTranslateCookieTarget(sourceLang) {
-  if (typeof document === 'undefined') return ''
-  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
-  const cookie = document.cookie
-    .split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith('googtrans='))
-  if (!cookie) return ''
-  const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
-  const parts = cookieValue.split('/').filter(Boolean)
-  const target = String(parts[1] || '').trim().toLowerCase()
-  return target && target !== from ? target : ''
-}
-
-function hasPortalTranslatedMarker() {
-  if (typeof document === 'undefined') return false
-  const markerText = `${document.documentElement?.className || ''} ${document.body?.className || ''}`
-  return /\btranslated-(ltr|rtl)\b/i.test(markerText)
-}
-
-function clearGoogleTranslateCookies() {
-  if (typeof document === 'undefined') return
-  const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
-  const pathName = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/'
-  const paths = Array.from(new Set(['/', pathName || '/']))
-  const domains = ['', host, host && host.includes('.') ? `.${host}` : ''].filter(Boolean)
-  const targets = paths.flatMap((pathValue) => [
-    `path=${pathValue}; SameSite=Lax`,
-    ...domains.map((domain) => `domain=${domain}; path=${pathValue}; SameSite=Lax`),
-  ])
-  targets.forEach((suffix) => {
-    document.cookie = `googtrans=; ${suffix}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-  })
-}
-
-function applyGoogleTranslateSelection(sourceLang, targetLang) {
-  if (typeof document === 'undefined') return false
-  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
-  const target = String(targetLang || 'original').trim().toLowerCase()
-  const cookieValue = target === 'original' || target === from ? '' : `/${from}/${target}`
-  if (!cookieValue) clearGoogleTranslateCookies()
-  else {
-    const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
-    const suffixes = [
-      'path=/; SameSite=Lax',
-      host && host.includes('.') ? `domain=.${host}; path=/; SameSite=Lax` : '',
-    ].filter(Boolean)
-    suffixes.forEach((suffix) => {
-      document.cookie = `googtrans=${cookieValue}; ${suffix}`
-    })
-  }
-  try {
-    window.localStorage?.setItem(PORTAL_TRANSLATE_STORAGE_KEY, target)
-  } catch (_) {}
-
-  const selects = Array.from(document.querySelectorAll('.goog-te-combo'))
-  if (!selects.length) return false
-  const nextValue = target === 'original' ? '' : target
-  selects.forEach((select) => {
-    select.value = nextValue
-    const EventCtor = (typeof window !== 'undefined' && window.Event) ? window.Event : Event
-    select.dispatchEvent(new EventCtor('input', { bubbles: true }))
-    select.dispatchEvent(new EventCtor('change', { bubbles: true }))
-  })
-  return true
-}
-
-function isPortalTranslateApplied(sourceLang, targetLang) {
-  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
-  const target = String(targetLang || 'original').trim().toLowerCase()
-  if (target === 'original' || target === from) {
-    return !getPortalTranslateCookieTarget(from) && !hasPortalTranslatedMarker()
-  }
-  return getPortalTranslateCookieTarget(from) === target && hasPortalTranslatedMarker()
-}
-
-function readStoredTranslateTarget(sourceLang) {
-  const from = String(sourceLang || 'en').trim().toLowerCase() || 'en'
-  if (typeof document !== 'undefined') {
-    const cookie = document.cookie
-      .split(';')
-      .map((entry) => entry.trim())
-      .find((entry) => entry.startsWith('googtrans='))
-    if (cookie) {
-      const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
-      const parts = cookieValue.split('/').filter(Boolean)
-      const target = String(parts[1] || '').trim().toLowerCase()
-      if (target && !['auto', from].includes(target)) return target
-    }
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = String(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY) || '').trim().toLowerCase()
-      if (stored) return stored
-    } catch (_) {}
-  }
-  return 'original'
-}
-
 function isDocumentVisible() {
   if (typeof document === 'undefined') return true
   return document.visibilityState !== 'hidden'
@@ -1748,13 +1654,18 @@ export default function CatalogPage({ publicView = false }) {
     setTranslateTarget(target)
     setTranslateApplyMessage('')
     if (!publicView || !previewConfig.translateWidgetEnabled) return
+    writePortalTranslateTarget(language, target)
     if (!translateReady) {
       setTranslateApplyState('pending')
       setTranslateApplyMessage(copy('preparingTranslations', 'Preparing translation tools...'))
+      requestPortalTranslateReload('user-change', 800)
       return
     }
     if (typeof window === 'undefined') return
     setTranslateApplyState('pending')
+    if (requestPortalTranslateReload('user-change', 800)) {
+      return
+    }
     const firstAttempt = applyGoogleTranslateSelection(language, target)
     const maxAttempts = target === 'original' || target === language ? 8 : 24
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -1769,10 +1680,7 @@ export default function CatalogPage({ publicView = false }) {
       await new Promise((resolve) => window.setTimeout(resolve, 180))
     }
 
-    const lastReload = Number(window.sessionStorage?.getItem(PORTAL_TRANSLATE_RELOAD_KEY) || 0)
-    if (Date.now() - lastReload > 5000) {
-      window.sessionStorage?.setItem(PORTAL_TRANSLATE_RELOAD_KEY, String(Date.now()))
-      window.location.reload()
+    if (requestPortalTranslateReload('retry', 5000)) {
       return
     }
     setTranslateApplyState('failed')
@@ -2020,9 +1928,10 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || typeof window === 'undefined' || typeof document === 'undefined') {
+      removePortalTranslateWidgetHost()
       return undefined
     }
-    const container = document.getElementById(PORTAL_TRANSLATE_WIDGET_HOST_ID)
+    const container = ensurePortalTranslateWidgetHost()
     if (!container) return undefined
 
     let cancelled = false
@@ -2041,7 +1950,7 @@ export default function CatalogPage({ publicView = false }) {
             autoDisplay: false,
             layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
           },
-          PORTAL_TRANSLATE_WIDGET_HOST_ID,
+          container.id,
         )
         let widgetChecks = 0
         const waitForWidget = () => {
@@ -3993,7 +3902,10 @@ export default function CatalogPage({ publicView = false }) {
                                   {copy('publicTranslation', 'Language tools')}
                                 </div>
                                 {PUBLIC_TRANSLATE_LANG_OPTIONS.map((option) => {
-                                  const active = translateTarget === option.value && translateApplyState !== 'pending' && translateApplyState !== 'failed'
+                                  const active = translateTarget === option.value && (
+                                    translateApplyState === 'applied'
+                                    || (option.value === 'original' && translateApplyState === 'idle')
+                                  )
                                   return (
                                     <button
                                       key={option.value}
@@ -4072,25 +3984,6 @@ export default function CatalogPage({ publicView = false }) {
                         : copy('preparingTranslations', 'Preparing translation tools...'))}
                     </div>
                   </div>
-                </div>
-              ) : null}
-
-              {previewConfig.translateWidgetEnabled ? (
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: 'fixed',
-                    left: '12px',
-                    bottom: '12px',
-                    width: '180px',
-                    height: '44px',
-                    overflow: 'hidden',
-                    opacity: 0.01,
-                    pointerEvents: 'none',
-                    zIndex: -1,
-                  }}
-                >
-                  <div id={PORTAL_TRANSLATE_WIDGET_HOST_ID} className="notranslate" translate="no" />
                 </div>
               ) : null}
 

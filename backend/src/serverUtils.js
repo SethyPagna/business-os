@@ -197,6 +197,7 @@ function setNoStoreHeaders(res) {
 }
 
 function setHtmlNoCacheHeaders(res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
   res.setHeader('Pragma', 'no-cache')
   res.setHeader('Expires', '0')
@@ -279,9 +280,8 @@ function setFrontendStaticHeaders(res, filePath) {
     return
   }
 
-  // Route chunks use stable names so stale tabs can survive a rebuild. Cache
-  // them briefly to keep Tailscale/Funnel page transitions fast while still
-  // allowing same-day app updates to refresh without a hard cache clear.
+  // Non-hashed assets are cached briefly only. Built app chunks should carry a
+  // content hash so entry/shared chunk export contracts cannot drift.
   res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
 }
 
@@ -341,4 +341,5 @@ module.exports = {
   mapServerError,
   isAllowedRequestOrigin,
   isAllowedWebSocketOrigin,
+  isCustomerPortalRoutePath,
 }

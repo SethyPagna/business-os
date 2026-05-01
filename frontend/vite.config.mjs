@@ -18,9 +18,9 @@ import react from '@vitejs/plugin-react'
  *    before vendor.js is parsed, so it catches the Capacitor unhandledrejection
  *    BEFORE React's scheduler can pick it up.
  *
- * 3. chunk names are stable (no content hash on chunk filenames, only on
- *    asset filenames) so browser cache invalidation works correctly when only
- *    one chunk changes.
+ * 3. Every JS/CSS chunk uses a content hash. This prevents Funnel/mobile
+ *    browsers from combining a fresh entry bundle with an older cached shared
+ *    chunk such as app-shared.js, which causes missing export boot failures.
  *
  * 4. assetsInlineLimit = 0 prevents base64-inlining of small assets, which
  *    can cause "data:..." URLs to be treated as cross-origin by strict browsers.
@@ -83,18 +83,14 @@ export default defineConfig({
     assetsInlineLimit: 1,
     rollupOptions: {
       output: {
-        // Stable chunk names ensure proper cache invalidation
         manualChunks,
-        // Keep lazy route chunk names stable so public Funnel sessions do not
-        // break when an older shell requests a page bundle after a deploy.
-        chunkFileNames: 'assets/[name].js',
+        // Hashed chunks keep the entry bundle and shared chunks in lockstep
+        // after rebuilds. Stale tabs heal through lazy chunk reload handling.
+        chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
         assetFileNames(assetInfo) {
-          // Keep CSS asset names stable too so an already-open shell can keep
-          // finding styles across a deploy instead of requesting an old hashed
-          // stylesheet that no longer exists on disk.
           const name = String(assetInfo?.name || '')
-          if (name.endsWith('.css')) return 'assets/[name].css'
+          if (name.endsWith('.css')) return 'assets/[name]-[hash][extname]'
           return 'assets/[name]-[hash][extname]'
         },
       },

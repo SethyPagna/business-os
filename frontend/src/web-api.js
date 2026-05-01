@@ -19,6 +19,10 @@ import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
 import { STORAGE_KEYS }            from './constants.js'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.js'
+import {
+  shouldSuppressRuntimeError,
+  shouldSuppressSecurityPolicyViolation,
+} from './runtime/runtimeErrorClassifier.mjs'
 
 function getStoredAuthToken() {
   try {
@@ -40,39 +44,13 @@ function getStoredAuthToken() {
 // no longer exists in that error-path, which manifests as
 // "TypeError: r is not a function" in minified builds.
 if (typeof window !== 'undefined') {
-  const extensionOrigins = [
-    'chrome-extension://',
-    'moz-extension://',
-    'safari-extension://',
-    'ms-browser-extension://',
-  ]
-  const hasExtensionSource = (value) => extensionOrigins.some((origin) => String(value || '').includes(origin))
-  const isLikelyInjectedBundle = (value) => {
-    const text = String(value || '')
-    return hasExtensionSource(text)
-      || /(^|[\\/])(vendor|content|inpage)\.js(?::\d+)?$/i.test(text)
-      || /content\.js/i.test(text)
-      || /tabs:outgoing\.message\.ready/i.test(text)
-  }
-  const isSuppressedRuntimeMessage = (message) => {
-    const msg = String(message || '')
-    return (
-      msg.includes('No Listener:')
-      || msg.includes('tabs:outgoing')
-      || msg.includes('capacitor')
-      || msg.includes('plugin_not_implemented')
-      || msg.includes('Receiving end does not exist')
-      || msg.includes('Could not establish connection')
-      || msg.includes('cssRules')
-      || msg.includes("Content Security Policy of your site blocks the use of 'eval' in JavaScript")
-      || msg.includes("Evaluating a string as JavaScript violates the following Content Security Policy directive")
-      || msg.includes("'unsafe-eval' is not an allowed source of script")
-    )
-  }
-
   window.addEventListener('unhandledrejection', (e) => {
-    const msg = e?.reason?.message || String(e?.reason || '')
-    if (isSuppressedRuntimeMessage(msg)) {
+    if (shouldSuppressRuntimeError({
+      reason: e?.reason,
+      message: e?.reason?.message || String(e?.reason || ''),
+      stack: e?.reason?.stack,
+      baseOrigin: window.location?.origin || '',
+    })) {
       e.preventDefault()
       e.stopImmediatePropagation()
     }
@@ -82,33 +60,26 @@ if (typeof window !== 'undefined') {
     const message = String(event?.message || '')
     const fileName = String(event?.filename || '')
     const stack = String(event?.error?.stack || '')
-    const isExtensionError = (
-      hasExtensionSource(fileName)
-      || isLikelyInjectedBundle(fileName)
-      || isLikelyInjectedBundle(stack)
-    )
-    if (!isExtensionError) return
-    if (isSuppressedRuntimeMessage(message)) {
+    if (shouldSuppressRuntimeError({
+      message,
+      error: event?.error,
+      filename: fileName,
+      stack,
+      baseOrigin: window.location?.origin || '',
+    })) {
       event.preventDefault()
       event.stopImmediatePropagation()
     }
   }, true)
 
   window.addEventListener('securitypolicyviolation', (event) => {
-    const directive = String(event?.violatedDirective || '')
-    const blockedURI = String(event?.blockedURI || '')
-    const sourceFile = String(event?.sourceFile || '')
-    const sample = String(event?.sample || '')
-    const isSuppressedViolation = (
-      directive.includes('script-src')
-      && (
-        blockedURI === 'eval'
-        || sample.includes('unsafe-eval')
-        || sample.includes('tabs:outgoing')
-        || isLikelyInjectedBundle(sourceFile)
-      )
-    )
-    if (!isSuppressedViolation) return
+    if (!shouldSuppressSecurityPolicyViolation({
+      violatedDirective: event?.violatedDirective,
+      blockedURI: event?.blockedURI,
+      sourceFile: event?.sourceFile,
+      sample: event?.sample,
+      baseOrigin: window.location?.origin || '',
+    })) return
     event.stopImmediatePropagation()
   }, true)
 }

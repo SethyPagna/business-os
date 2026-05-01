@@ -168,6 +168,10 @@ export function isWriteBlockedError(error) {
   return !!(error && error.code === 'write_requires_live_server')
 }
 
+export function isInvalidSessionError(error) {
+  return !!(error && (error.code === 'invalid_session' || (Number(error.status) === 401 && /sign in again|invalid session/i.test(String(error.message || '')))))
+}
+
 export function requireLiveServerWrite(channel, options = {}) {
   if (!syncServerUrl) {
     const message = options.notConfiguredMessage || 'Server is not connected. Changes are invalid until a live server is configured.'
@@ -767,6 +771,9 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           },
         }))
       }
+      throw e
+    }
+    if (isInvalidSessionError(e)) {
       throw e
     }
     window.dispatchEvent(new CustomEvent('sync:error', {

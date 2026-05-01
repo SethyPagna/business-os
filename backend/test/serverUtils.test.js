@@ -11,6 +11,8 @@ const {
   mapServerError,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
+  setHtmlNoCacheHeaders,
+  isCustomerPortalRoutePath,
 } = require('../src/serverUtils')
 
 let failed = 0
@@ -69,6 +71,14 @@ runTest('isSpaFallbackEligible only allows browser navigation paths', () => {
   assert.equal(isSpaFallbackEligible('/api/products'), false)
   assert.equal(isSpaFallbackEligible('/uploads/image.jpg'), false)
   assert.equal(isSpaFallbackEligible('/assets/app.js'), false)
+})
+
+runTest('customer portal route detector covers public portal paths only', () => {
+  assert.equal(isCustomerPortalRoutePath('/public'), true)
+  assert.equal(isCustomerPortalRoutePath('/public/products'), true)
+  assert.equal(isCustomerPortalRoutePath('/customer-portal'), true)
+  assert.equal(isCustomerPortalRoutePath('/dashboard'), false)
+  assert.equal(isCustomerPortalRoutePath('/api/portal/config'), false)
 })
 
 runTest('origin policy allows localhost and denies unknown web origins', () => {
@@ -190,9 +200,12 @@ runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for t
   const html = collectHeaders('C:/app/frontend/dist/index.html')
   assert.equal(html.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
 
-  const pageChunk = collectHeaders('C:/app/frontend/dist/assets/CatalogPage.js')
+  const pageChunk = collectHeaders('C:/app/frontend/dist/assets/CatalogPage-BUILD1234.js')
   assert.equal(pageChunk.get('Content-Type'), 'application/javascript; charset=utf-8')
-  assert.match(pageChunk.get('Cache-Control'), /max-age=3600/)
+  assert.equal(pageChunk.get('Cache-Control'), 'public, max-age=31536000, immutable')
+
+  const legacyStableChunk = collectHeaders('C:/app/frontend/dist/assets/CatalogPage.js')
+  assert.match(legacyStableChunk.get('Cache-Control'), /max-age=3600/)
 
   const hashedEntry = collectHeaders('C:/app/frontend/dist/assets/index-CUAKXD3j.js')
   assert.equal(hashedEntry.get('Cache-Control'), 'public, max-age=31536000, immutable')
@@ -200,6 +213,20 @@ runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for t
   const scannerEngine = collectHeaders('C:/app/frontend/dist/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm.wasm')
   assert.equal(scannerEngine.get('Content-Type'), 'application/wasm')
   assert.equal(scannerEngine.get('Cache-Control'), 'public, max-age=31536000, immutable')
+})
+
+runTest('setHtmlNoCacheHeaders serves SPA shell in standards UTF-8 HTML mode', () => {
+  const headers = new Map()
+  const res = {
+    setHeader(name, value) {
+      headers.set(String(name), String(value))
+    },
+  }
+
+  setHtmlNoCacheHeaders(res)
+
+  assert.equal(headers.get('Content-Type'), 'text/html; charset=utf-8')
+  assert.equal(headers.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
 })
 
 if (failed > 0) {

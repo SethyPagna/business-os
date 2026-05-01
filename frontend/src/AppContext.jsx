@@ -609,6 +609,9 @@ export function AppProvider({ children }) {
             }
           } catch (_) {}
           authRecoveryRef.current = false
+          if (Date.now() - authEstablishedAtRef.current < 20000) {
+            return
+          }
           await finalizeUnauthorized(message)
         }, 180)
         return

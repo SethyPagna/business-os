@@ -81,6 +81,7 @@ assert(!/readAsDataURL|buildImagePayloadForImport/.test(bulkImport), 'Bulk impor
 assert(!/bulkImportProducts\(/.test(bulkImport), 'Product import UI must use import jobs instead of the legacy single-request bulk import.')
 assert(!/waitForImportJob/.test(bulkImport + inventoryImport + salesImport + contactImport), 'Import modals must not block while waiting for background jobs.')
 assert(!/readAsDataURL/.test(productForm), 'Product/take-photo uploads must send File multipart data, not base64 data URLs.')
+assert(!/scanBarcodeWithScanbot|getPreferredScannerMode/.test(productForm), 'Product scan buttons must open the in-app scanner directly without flashing the imported SDK UI.')
 assert(!/readAsDataURL/.test(userProfile), 'Profile avatar previews must use object URLs and upload File multipart data.')
 assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'shared', 'BackgroundImportTracker.jsx')), 'Background import tracker is missing.')
 assert(appShell.includes('BackgroundImportTracker'), 'App shell must show non-blocking background import progress.')
