@@ -349,6 +349,25 @@ const UPLOADS_PATH = trim(process.env.UPLOADS_PATH)
   ? path.resolve(process.env.UPLOADS_PATH.trim())
   : path.join(DATA_ROOT, 'uploads')
 
+const IMPORTS_PATH = trim(process.env.IMPORTS_PATH)
+  ? path.resolve(process.env.IMPORTS_PATH.trim())
+  : path.join(DATA_ROOT, 'imports')
+
+const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'auto').toLowerCase()
+const REDIS_URL = trim(process.env.REDIS_URL || 'redis://127.0.0.1:6379')
+const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
+const DATABASE_URL = trim(process.env.DATABASE_URL)
+const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'local').toLowerCase()
+const S3_ENDPOINT = trim(process.env.S3_ENDPOINT || 'http://127.0.0.1:9000')
+const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_ROOT_USER)
+const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
+const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
+const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
+const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '200', 10) || 200))
+const IMPORT_IMAGE_CONCURRENCY = Math.min(8, Math.max(1, parseInt(process.env.IMPORT_IMAGE_CONCURRENCY || '3', 10) || 3))
+const IMPORT_MAX_CSV_MB = Math.min(512, Math.max(1, parseInt(process.env.IMPORT_MAX_CSV_MB || '80', 10) || 80))
+const IMPORT_MAX_ZIP_MB = Math.min(4096, Math.max(1, parseInt(process.env.IMPORT_MAX_ZIP_MB || '2048', 10) || 2048))
+
 const EXTERNAL_FRONTEND_DIST = path.join(RUNTIME_DIR, 'frontend', 'dist')
 const EMBEDDED_FRONTEND_DIST = path.resolve(__dirname, '../../frontend-dist')
 const FRONTEND_DIST = fs.existsSync(EXTERNAL_FRONTEND_DIST)
@@ -369,6 +388,7 @@ if (!process.env._BOS_CONFIG_LOGGED) {
   console.log(`[config] DATA_ROOT    : ${DATA_ROOT}`)
   console.log(`[config] DB_PATH      : ${DB_PATH}`)
   console.log(`[config] UPLOADS_PATH : ${UPLOADS_PATH}`)
+  console.log(`[config] IMPORTS_PATH : ${IMPORTS_PATH}`)
   console.log(`[config] FRONTEND_DIST: ${FRONTEND_DIST}`)
 }
 
@@ -391,7 +411,22 @@ module.exports = {
   TAILSCALE_URL,
   DB_PATH,
   UPLOADS_PATH,
+  IMPORTS_PATH,
   FRONTEND_DIST,
+  JOB_QUEUE_DRIVER,
+  REDIS_URL,
+  DATABASE_DRIVER,
+  DATABASE_URL,
+  OBJECT_STORAGE_DRIVER,
+  S3_ENDPOINT,
+  S3_ACCESS_KEY_ID,
+  S3_SECRET_ACCESS_KEY,
+  S3_BUCKET,
+  MINIO_LICENSE_FILE,
+  IMPORT_ROW_BATCH_SIZE,
+  IMPORT_IMAGE_CONCURRENCY,
+  IMPORT_MAX_CSV_MB,
+  IMPORT_MAX_ZIP_MB,
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI,

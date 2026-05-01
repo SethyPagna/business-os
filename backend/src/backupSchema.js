@@ -26,6 +26,10 @@ const BACKUP_TABLES = [
   'customer_share_submissions',
   'audit_logs',
   'file_assets',
+  'import_jobs',
+  'import_job_files',
+  'import_job_batches',
+  'import_job_errors',
 ]
 
 const BACKUP_CLEAR_ORDER = [
@@ -51,6 +55,10 @@ const BACKUP_CLEAR_ORDER = [
   'roles',
   'settings',
   'file_assets',
+  'import_job_errors',
+  'import_job_batches',
+  'import_job_files',
+  'import_jobs',
   'audit_logs',
 ]
 

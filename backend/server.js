@@ -117,6 +117,7 @@ function mountApiRoutes(target) {
   target.use('/api/units', unitsRouter)
   target.use('/api/branches', require('./src/routes/branches'))
   target.use('/api/products', require('./src/routes/products'))
+  target.use('/api/import-jobs', require('./src/routes/importJobs'))
   target.use('/api/files', require('./src/routes/files'))
   target.use('/api/ai', require('./src/routes/ai'))
   target.use('/api/catalog', require('./src/routes/catalog'))
@@ -240,6 +241,15 @@ function bootstrapServer() {
     const defaultOrganization = getDefaultOrganization()
     if (defaultOrganization) ensureOrganizationFilesystemLayout(defaultOrganization)
   } catch (_) {}
+  try {
+    const { initializeBullQueue, recoverImportJobs } = require('./src/services/importJobs')
+    initializeBullQueue().catch((error) => {
+      console.warn(`[import-jobs] Queue initialization skipped: ${error?.message || error}`)
+    })
+    recoverImportJobs()
+  } catch (error) {
+    console.warn(`[import-jobs] Recovery skipped: ${error?.message || error}`)
+  }
 
   const server = http.createServer(app)
   server.requestTimeout = 60 * 1000

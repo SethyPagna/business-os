@@ -23,6 +23,10 @@ frontend/.env
 .env
 .env.*
 backend/*firebase-admin*.json
+*.license
+minio.license
+ops/secrets/
+runtime/secrets/
 
 # Logs
 *.log

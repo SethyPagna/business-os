@@ -398,10 +398,30 @@ async function registerStoredAsset({
   const publicPath = `/uploads/${storedName}`
   const absPath = path.join(UPLOADS_PATH, storedName)
   const mediaType = getMediaType({ mimeType, fileName: storedName })
+  let imageOptimization = null
+  if (mediaType === 'image' && !optimization && fs.existsSync(absPath) && shouldCompressImage(storedName, mimeType || getMimeTypeFromName(storedName))) {
+    try {
+      const originalBuffer = fs.readFileSync(absPath)
+      imageOptimization = await compressBufferForAsset(originalBuffer, {
+        fileName: storedName,
+        mimeType: mimeType || getMimeTypeFromName(storedName),
+      })
+      if (imageOptimization?.buffer && imageOptimization.buffer !== originalBuffer) {
+        fs.writeFileSync(absPath, imageOptimization.buffer)
+      }
+    } catch (error) {
+      imageOptimization = {
+        original_byte_size: fs.existsSync(absPath) ? fs.statSync(absPath).size : null,
+        optimized_byte_size: fs.existsSync(absPath) ? fs.statSync(absPath).size : null,
+        optimization_status: 'failed',
+        optimization_note: error?.message || 'Image optimization failed',
+      }
+    }
+  }
   const videoOptimization = mediaType === 'video' && !optimization
     ? optimizeStoredVideo(absPath, { mimeType, fileName: storedName })
     : null
-  const effectiveOptimization = optimization || videoOptimization
+  const effectiveOptimization = optimization || imageOptimization || videoOptimization
   const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const dimensions = mediaType === 'image' ? await readImageDimensions(absPath) : { width: null, height: null }
   return serializeAssetRow(createFileAssetRecord({

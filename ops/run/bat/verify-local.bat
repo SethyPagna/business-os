@@ -35,6 +35,12 @@ if errorlevel 1 exit /b 1
 echo [OK] Runtime dependency manifest check passed
 echo.
 
+echo [1b/5] Verifying scale-service tooling and secret guards...
+node ops\scripts\verify-scale-services.js --advisory
+if errorlevel 1 exit /b 1
+echo [OK] Scale-service preflight passed
+echo.
+
 cd /d "%ROOT%\frontend"
 if "%SKIP_FRONTEND_BUILD%"=="0" (
   echo [2/5] Building frontend...

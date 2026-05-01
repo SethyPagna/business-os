@@ -687,6 +687,100 @@ export const createProductVariant = d => route('products:create', () => apiFetch
 
 export const bulkImportProducts = d        => route('products:bulkImport', () => apiFetch('POST', '/api/products/bulk-import', d),     null, true)
 
+function buildMultipartHeaders() {
+  const device = getDeviceInfo()
+  const headers = {
+    'bypass-tunnel-reminder': 'true',
+    'x-client-time': device.clientTime || '',
+    'x-device-tz': device.deviceTz || '',
+    'x-device-name': device.deviceName || '',
+  }
+  const authToken = getAuthSessionToken()
+  if (authToken) headers['x-auth-session'] = authToken
+  return headers
+}
+
+async function apiFormPost(path, form, channel = 'importJobs:upload') {
+  requireLiveServerWrite(channel, {
+    offlineMessage: 'Server is offline. Imports need the live server so large files can be processed safely.',
+    notConfiguredMessage: 'Server is not connected. Imports need a live server.',
+  })
+  const base = getSyncServerUrl().replace(/\/$/, '')
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: buildMultipartHeaders(),
+    body: form,
+  })
+  const text = await res.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch (_) {}
+  if (!res.ok) throw new Error(json?.error || text || `HTTP ${res.status}`)
+  return json?.data || json
+}
+
+export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', d), null, true)
+export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
+export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
+export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
+export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/retry`, {}), null, true)
+export const getImportQueueStatus = () => route('importJobs:queueStatus', () => apiFetch('GET', '/api/import-jobs/queue/status'), null)
+
+export async function downloadImportJobErrors(jobId) {
+  const base = getSyncServerUrl().replace(/\/$/, '')
+  const res = await fetch(`${base}/api/import-jobs/${encodeURIComponent(jobId)}/errors.csv`, {
+    method: 'GET',
+    headers: buildMultipartHeaders(),
+  })
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Failed to download import errors'))
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${jobId}-errors.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+  return { success: true }
+}
+
+export async function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }) {
+  const form = new FormData()
+  form.append('file', new Blob([String(text || '')], { type: 'text/csv;charset=utf-8' }), fileName)
+  return apiFormPost(`/api/import-jobs/${jobId}/csv`, form, 'importJobs:csv')
+}
+
+export async function uploadImportJobZip({ jobId, file }) {
+  if (!(file instanceof File)) throw new Error('Choose a ZIP file first')
+  const form = new FormData()
+  form.append('file', file, file.name || 'images.zip')
+  return apiFormPost(`/api/import-jobs/${jobId}/zip`, form, 'importJobs:zip')
+}
+
+export async function uploadImportJobImages({ jobId, files = [], onProgress, batchSize = 100 }) {
+  const browserFiles = (Array.isArray(files) ? files : [])
+    .filter((entry) => entry?.file instanceof File)
+  const uploaded = []
+  for (let offset = 0; offset < browserFiles.length; offset += batchSize) {
+    const batch = browserFiles.slice(offset, offset + batchSize)
+    const form = new FormData()
+    const relativePaths = []
+    batch.forEach((entry) => {
+      form.append('files', entry.file, entry.file.name)
+      relativePaths.push(entry.relativePath || entry.file.webkitRelativePath || entry.file.name)
+    })
+    form.append('relative_paths', JSON.stringify(relativePaths))
+    const result = await apiFormPost(`/api/import-jobs/${jobId}/images`, form, 'importJobs:images')
+    uploaded.push(...(result?.files || []))
+    onProgress?.({
+      progress: browserFiles.length ? Math.round(((offset + batch.length) / browserFiles.length) * 100) : 100,
+      label: `Uploading images ${Math.min(offset + batch.length, browserFiles.length)} / ${browserFiles.length}`,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  return uploaded
+}
+
 export async function getFiles(params = {}) {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   const result = await route(`files:get:${q}`, () => apiFetch('GET', `/api/files${q ? `?${q}` : ''}`), () => [])

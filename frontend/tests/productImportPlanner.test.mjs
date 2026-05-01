@@ -38,6 +38,19 @@ await runTest('same product name and different details plans variant creation', 
   assert.equal(analysis.summary.variantCount, 1)
 })
 
+await runTest('malformed existing product rows do not crash import analysis', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Safe Cream', sku: 'SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
+  ], [
+    null,
+    { id: 20, name: 'Safe Cream', sku: 'SAFE-1', image_gallery: null, selling_price_usd: 8.01 },
+    { id: 21, name: '', image_gallery: '{bad json' },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 20)
+})
+
 await runTest('duplicate imported same-name rows avoid unsafe temporary row ids', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', sku: 'C-1', selling_price_usd: '3.001', stock_quantity: '1' },

@@ -71,6 +71,12 @@ assert(fs.existsSync(path.join(SRC_ROOT, 'components', 'products', 'productImpor
 assert(bulkImport.includes('new Worker(new URL'), 'Product import analysis must use a Vite module worker.')
 assert(bulkImport.includes('visibleConflicts'), 'Product import preview must keep conflict rendering bounded.')
 assert(!/Promise\.all\(files\.map/.test(bulkImport), 'Image directory selection must not eagerly base64-read every file.')
+assert(!/readAsDataURL|buildImagePayloadForImport/.test(bulkImport), 'Bulk imports must not convert images to base64 payloads.')
+assert(!/bulkImportProducts\(/.test(bulkImport), 'Product import UI must use import jobs instead of the legacy single-request bulk import.')
+
+const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.js'))
+assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')
+assert(!/imageFiles:\s*imagePayload/.test(apiMethods + bulkImport), 'Bulk image imports must not send imageFiles JSON payloads.')
 
 const indexHtml = read(path.join(FRONTEND_ROOT, 'index.html'))
 const preconnectCount = (indexHtml.match(/rel=["']preconnect["']/g) || []).length

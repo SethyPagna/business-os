@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import Modal from '../shared/Modal'
-import { useApp } from '../../AppContext'
 import FilePickerModal from '../files/FilePickerModal'
 import { analyzeProductImportText } from './productImportPlanner.mjs'
 
@@ -84,8 +83,19 @@ function getIncomingImageFilenames(row = {}) {
 }
 
 function getExistingImageFilenames(product = {}) {
-  const gallery = Array.isArray(product.image_gallery) ? product.image_gallery : []
-  const fallback = product.image_path ? [product.image_path] : []
+  const safeProduct = product && typeof product === 'object' ? product : {}
+  let gallery = []
+  if (Array.isArray(safeProduct.image_gallery)) {
+    gallery = safeProduct.image_gallery
+  } else if (typeof safeProduct.image_gallery === 'string' && safeProduct.image_gallery.trim()) {
+    try {
+      const parsed = JSON.parse(safeProduct.image_gallery)
+      gallery = Array.isArray(parsed) ? parsed : []
+    } catch (_) {
+      gallery = safeProduct.image_gallery.split(/[|;\n]/)
+    }
+  }
+  const fallback = safeProduct.image_path ? [safeProduct.image_path] : []
   const source = gallery.length ? gallery : fallback
   const seen = new Set()
   const names = []
@@ -101,53 +111,33 @@ function getExistingImageFilenames(product = {}) {
   return names
 }
 
-function isBrowserFile(value) {
-  return typeof File !== 'undefined' && value instanceof File
+function csvEscape(value) {
+  const text = String(value ?? '')
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (event) => resolve(event.target.result)
-    reader.onerror = () => reject(new Error(`Failed to read ${file?.name || 'image file'}`))
-    reader.readAsDataURL(file)
-  })
+function buildImageOnlyCsv(imageFiles = {}) {
+  const rows = Object.keys(imageFiles || {})
+    .filter(Boolean)
+    .map((name) => [name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(), name])
+  return [
+    'name,image_filename_1,image_conflict_mode,_action',
+    ...rows.map(([name, fileName]) => [
+      csvEscape(name || fileName),
+      csvEscape(fileName),
+      'append_csv',
+      'merge_stock',
+    ].join(',')),
+  ].join('\n')
 }
 
-function getReferencedImageNames(rows = []) {
-  const names = new Set()
-  ;(Array.isArray(rows) ? rows : []).forEach((row) => {
-    getIncomingImageFilenames(row).forEach((name) => names.add(name))
-  })
-  return names
-}
-
-async function buildImagePayloadForImport({ rows = [], imageFiles = {}, includeAll = false, onProgress }) {
-  const sourceEntries = Object.entries(imageFiles || {})
-  if (!sourceEntries.length) return {}
-  const wanted = includeAll ? null : getReferencedImageNames(rows)
-  const entries = includeAll
-    ? sourceEntries
-    : sourceEntries.filter(([name]) => wanted.has(name))
-  const payload = {}
-  const batchSize = 4
-  for (let offset = 0; offset < entries.length; offset += batchSize) {
-    const batch = entries.slice(offset, offset + batchSize)
-    const resolved = await Promise.all(batch.map(async ([name, value]) => {
-      if (typeof value === 'string') return [name, value]
-      if (isBrowserFile(value)) return [name, await readFileAsDataUrl(value)]
-      return [name, null]
+function getBrowserImageEntries(imageFiles = {}) {
+  return Object.entries(imageFiles || {})
+    .filter(([, value]) => typeof File !== 'undefined' && value instanceof File)
+    .map(([relativePath, file]) => ({
+      relativePath: relativePath || file.webkitRelativePath || file.name,
+      file,
     }))
-    resolved.forEach(([name, value]) => {
-      if (value) payload[name] = value
-    })
-    onProgress?.({
-      progress: entries.length ? Math.round(((offset + batch.length) / entries.length) * 100) : 100,
-      label: `Preparing images ${Math.min(offset + batch.length, entries.length)} / ${entries.length}`,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  }
-  return payload
 }
 
 export default function BulkImportModal({ onClose, onDone, t }) {
@@ -156,6 +146,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [csvData, setCsvData] = useState(null)
   const [imageDir, setImageDir] = useState(null)
   const [imageFiles, setImageFiles] = useState({})
+  const [zipFile, setZipFile] = useState(null)
   const [conflicts, setConflicts] = useState([])
   const [cleanRows, setCleanRows] = useState([])
   const [importRows, setImportRows] = useState([])
@@ -166,9 +157,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
   const [fieldRules, setFieldRules] = useState({})
   const [result, setResult] = useState(null)
+  const [currentJob, setCurrentJob] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
-  const { user } = useApp()
 
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
 
@@ -183,6 +174,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setImageDecisions({})
     setSelectedConflictIds(new Set())
     setFieldRules({})
+    setZipFile(null)
+    setCurrentJob(null)
     setStep(1)
   }
 
@@ -201,11 +194,24 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (!files.length) return
       const map = {}
       files.forEach((file) => {
-        map[file.name] = file
+        map[file.webkitRelativePath || file.name] = file
       })
       setImageFiles(map)
       const folderName = files[0]?.webkitRelativePath?.split('/')[0] || 'Folder'
       setImageDir(`${folderName} (${files.length})`)
+    }
+    input.click()
+  }
+
+  const pickImageZip = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.zip,application/zip,application/x-zip-compressed'
+    input.onchange = (event) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+      setZipFile(file)
+      setImageDir(`${file.name} (${Math.ceil(file.size / 1024 / 1024)} MB ZIP)`)
     }
     input.click()
   }
@@ -226,23 +232,117 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     })
   }
 
-  const handleImageOnlyImport = async () => {
-    if (!Object.keys(imageFiles).length) return
-    setLoading(true)
-    setAnalysisProgress({ progress: 0, label: 'Preparing images' })
+  const buildCsvForImportJob = () => {
+    const rows = importRows.length ? importRows : analyzeProductImportText(csvData?.content || '', []).rows
+    const instructions = rows.map((row, index) => {
+      const rowIndex = Number(row?._import_row_index ?? index)
+      const action = decisions[rowIndex] || row?._planned_action || 'new'
+      return {
+        ...row,
+        _action: action,
+        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
+        _field_rules: JSON.stringify(fieldRules || {}),
+        _target_product_id: row?._target_product_id || '',
+        _parent_id: row?._parent_id || '',
+      }
+    })
+    const headers = Array.from(instructions.reduce((set, row) => {
+      Object.keys(row || {}).forEach((key) => set.add(key))
+      return set
+    }, new Set(['name', 'sku', 'barcode', '_action', '_target_product_id', '_parent_id', '_field_rules', 'image_conflict_mode'])))
+    return [
+      headers.join(','),
+      ...instructions.map((row) => headers.map((header) => csvEscape(row?.[header])).join(',')),
+    ].join('\n')
+  }
+
+  const formatJobResult = (jobPayload = {}) => {
+    const job = jobPayload.job || jobPayload
+    const summary = job?.summary || {}
+    const errors = Array.isArray(jobPayload.errors)
+      ? jobPayload.errors.map((item) => item?.error_message || item?.message || String(item)).filter(Boolean)
+      : []
+    if (job?.last_error && !errors.includes(job.last_error)) errors.unshift(job.last_error)
+    return {
+      imported: Number(summary.imported || summary.created || 0),
+      updated: Number(summary.updated || summary.merged || summary.variants || 0),
+      images_matched: Number(summary.images_matched || job?.processed_images || 0),
+      errors,
+      job,
+    }
+  }
+
+  const waitForImportJob = async (jobId) => {
+    const terminal = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'cancel_requested'])
+    const started = Date.now()
+    let lastPayload = null
+    while (Date.now() - started < 60 * 60 * 1000) {
+      const payload = await window.api.getImportJob(jobId)
+      const job = payload?.job || payload
+      lastPayload = payload
+      setCurrentJob(job)
+      const total = Math.max(1, Number(job?.total_rows || 0) + Number(job?.total_images || 0))
+      const done = Number(job?.processed_rows || 0) + Number(job?.processed_images || 0)
+      setAnalysisProgress({
+        progress: Math.min(100, Math.round((done / total) * 100)),
+        label: `${job?.phase || job?.status || 'processing'} (${done} / ${total})`,
+      })
+      if (terminal.has(String(job?.status || '').toLowerCase())) return payload
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+    return lastPayload || { job: { status: 'failed', summary: {}, errors: ['Import job timed out'] } }
+  }
+
+  const handleCancelCurrentJob = async () => {
+    if (!currentJob?.id) return
     try {
-      const imagePayload = await buildImagePayloadForImport({
-        imageFiles,
-        includeAll: true,
-        onProgress: setAnalysisProgress,
+      const payload = await window.api.cancelImportJob(currentJob.id)
+      setCurrentJob(payload?.job || payload || currentJob)
+      setAnalysisProgress((current) => ({
+        progress: current?.progress || 0,
+        label: T('cancel_requested', 'Cancel requested...'),
+      }))
+    } catch (error) {
+      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to cancel import job'] })
+      setStep(3)
+      setLoading(false)
+    }
+  }
+
+  const handleImageOnlyImport = async () => {
+    if (!Object.keys(imageFiles).length && !zipFile) return
+    setLoading(true)
+    setAnalysisProgress({ progress: 0, label: 'Creating import job' })
+    try {
+      const created = await window.api.createImportJob({
+        type: 'products',
+        policy: { mode: 'images_only', image_conflict_mode: 'append_csv' },
       })
-      const response = await window.api.bulkImportProducts({
-        products: [],
-        imageFiles: imagePayload,
-        imageOnly: true,
-        userId: user.id,
-        userName: user.name,
+      const job = created?.job || created
+      setCurrentJob(job)
+      const jobId = job?.id
+      if (!jobId) throw new Error('Import job was not created')
+
+      await window.api.uploadImportJobCsv({
+        jobId,
+        text: buildImageOnlyCsv(imageFiles),
+        fileName: 'image-only-import.csv',
       })
+      if (zipFile) {
+        setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
+        await window.api.uploadImportJobZip({ jobId, file: zipFile })
+      }
+      const browserImages = getBrowserImageEntries(imageFiles)
+      if (browserImages.length) {
+        await window.api.uploadImportJobImages({
+          jobId,
+          files: browserImages,
+          onProgress: setAnalysisProgress,
+        })
+      }
+      await window.api.startImportJob(jobId)
+      const finalPayload = await waitForImportJob(jobId)
+      const response = formatJobResult(finalPayload)
       setResult(response)
       setStep(3)
       if ((response?.images_matched || 0) > 0 || (response?.updated || 0) > 0 || (response?.imported || 0) > 0) onDone()
@@ -307,33 +407,40 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const handleImport = async () => {
     if (!csvData?.content) return
     setLoading(true)
-    setAnalysisProgress({ progress: 0, label: 'Preparing import' })
+    setAnalysisProgress({ progress: 0, label: 'Creating import job' })
     try {
-      const rows = importRows.length ? importRows : analyzeProductImportText(csvData.content, []).rows
-      const instructions = rows.map((row, index) => {
-        const rowIndex = Number(row?._import_row_index ?? index)
-        const action = decisions[rowIndex] || row?._planned_action || 'new'
-        return ({
-        ...row,
-        _action: action,
-        _image_action: imageDecisions[rowIndex] || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
-        _field_rules: fieldRules,
-        _target_product_id: row?._target_product_id || null,
-        _parent_id: row?._parent_id || null,
+      const created = await window.api.createImportJob({
+        type: 'products',
+        policy: {
+          source: 'products_modal',
+          field_rules: fieldRules,
+        },
       })
+      const job = created?.job || created
+      setCurrentJob(job)
+      const jobId = job?.id
+      if (!jobId) throw new Error('Import job was not created')
+
+      await window.api.uploadImportJobCsv({
+        jobId,
+        text: buildCsvForImportJob(),
+        fileName: csvData?.name || 'products-import.csv',
       })
-      const imagePayload = await buildImagePayloadForImport({
-        rows: instructions,
-        imageFiles,
-        includeAll: false,
-        onProgress: setAnalysisProgress,
-      })
-      const response = await window.api.bulkImportProducts({
-        products: instructions,
-        imageFiles: imagePayload,
-        userId: user.id,
-        userName: user.name,
-      })
+      if (zipFile) {
+        setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
+        await window.api.uploadImportJobZip({ jobId, file: zipFile })
+      }
+      const browserImages = getBrowserImageEntries(imageFiles)
+      if (browserImages.length) {
+        await window.api.uploadImportJobImages({
+          jobId,
+          files: browserImages,
+          onProgress: setAnalysisProgress,
+        })
+      }
+      await window.api.startImportJob(jobId)
+      const finalPayload = await waitForImportJob(jobId)
+      const response = formatJobResult(finalPayload)
       setResult(response)
       setStep(3)
       if ((response?.imported || 0) > 0 || (response?.updated || 0) > 0) onDone()
@@ -426,6 +533,21 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           </div>
         </div>
       ) : null}
+      {currentJob && step !== 1 ? (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <div><span className="font-semibold">{T('status', 'Status')}:</span> {currentJob.status || '-'}</div>
+            <div><span className="font-semibold">{T('rows', 'Rows')}:</span> {Number(currentJob.processed_rows || 0)} / {Number(currentJob.total_rows || 0)}</div>
+            <div><span className="font-semibold">{T('images', 'Images')}:</span> {Number(currentJob.processed_images || 0)} / {Number(currentJob.total_images || 0)}</div>
+            <div><span className="font-semibold">{T('errors', 'Errors')}:</span> {Number(currentJob.failed_rows || 0) + Number(currentJob.failed_images || 0)}</div>
+          </div>
+          {loading ? (
+            <button type="button" className="btn-secondary mt-3 text-xs" onClick={handleCancelCurrentJob}>
+              {T('cancel_import', 'Cancel import')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {step === 1 && mode === 'products' ? (
         <div className="space-y-4">
@@ -474,12 +596,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>
                 {T('browse', 'Browse')}
               </button>
+              <button type="button" className="btn-secondary text-sm" onClick={pickImageZip}>
+                {T('zip_images', 'ZIP')}
+              </button>
               <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>
                 {T('files', 'Files')}
               </button>
             </div>
           </div>
-          <button type="button" className="btn-primary w-full" onClick={handleImageOnlyImport} disabled={loading || !Object.keys(imageFiles).length}>
+          <button type="button" className="btn-primary w-full" onClick={handleImageOnlyImport} disabled={loading || (!Object.keys(imageFiles).length && !zipFile)}>
             {loading ? T('importing_images', 'Importing...') : T('match_import_images', 'Match and import {n} images').replace('{n}', String(Object.keys(imageFiles).length))}
           </button>
         </div>
@@ -635,6 +760,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             <div className="flex gap-2">
               <div className="input flex-1 truncate text-xs text-gray-500">{imageDir || T('no_folder', 'No folder')}</div>
               <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>{T('browse', 'Browse')}</button>
+              <button type="button" className="btn-secondary text-sm" onClick={pickImageZip}>{T('zip_images', 'ZIP')}</button>
               <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
             </div>
           </div>
@@ -668,6 +794,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <div className="max-h-40 space-y-1 overflow-auto rounded-lg bg-red-50 p-3 text-xs text-red-600 dark:bg-red-900/20">
                 {result.errors.map((message, index) => <div key={index}>{message}</div>)}
               </div>
+              {result.job?.id ? (
+                <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => window.api.downloadImportJobErrors?.(result.job.id)}>
+                  {T('download_failed_rows', 'Download failed rows')}
+                </button>
+              ) : null}
             </div>
           ) : null}
           <button type="button" className="btn-primary w-full" onClick={onClose}>{T('done', 'Done')}</button>

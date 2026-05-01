@@ -19,16 +19,6 @@
   !define APP_VERSION "6.0.0"
 !endif
 
-!ifndef GOOGLE_DRIVE_CLIENT_ID
-  !define GOOGLE_DRIVE_CLIENT_ID ""
-!endif
-!ifndef GOOGLE_DRIVE_CLIENT_SECRET
-  !define GOOGLE_DRIVE_CLIENT_SECRET ""
-!endif
-!ifndef GOOGLE_DRIVE_OAUTH_REDIRECT_URI
-  !define GOOGLE_DRIVE_OAUTH_REDIRECT_URI "https://leangcosmetics.crane-qilin.ts.net/api/system/drive-sync/oauth/callback"
-!endif
-
 ; ---- Output ------------------------------------------------------------
 Name              "${APP_NAME} v${APP_VERSION}"
 OutFile           "..\..\release\BusinessOS-Setup-v${APP_VERSION}.exe"
@@ -74,18 +64,11 @@ Section "Business OS" SecMain
   CreateDirectory "$0\organizations"
 
   ; ---- .env beside the exe (backend config reads RUNTIME_DIR\.env) ------
-  ; Only write on fresh install - never overwrite an existing .env.
+  ; Only copy the prepared release .env on fresh install - never overwrite an existing .env.
   SetOutPath "$INSTDIR"
   IfFileExists "$INSTDIR\.env" env_exists env_missing
   env_missing:
-    FileOpen  $1 "$INSTDIR\.env" w
-    FileWrite $1 "PORT=4000$\r$\n"
-    FileWrite $1 "TAILSCALE_URL=$\r$\n"
-    FileWrite $1 "SYNC_TOKEN=$\r$\n"
-    FileWrite $1 "GOOGLE_DRIVE_CLIENT_ID=${GOOGLE_DRIVE_CLIENT_ID}$\r$\n"
-    FileWrite $1 "GOOGLE_DRIVE_CLIENT_SECRET=${GOOGLE_DRIVE_CLIENT_SECRET}$\r$\n"
-    FileWrite $1 "GOOGLE_DRIVE_OAUTH_REDIRECT_URI=${GOOGLE_DRIVE_OAUTH_REDIRECT_URI}$\r$\n"
-    FileClose $1
+    File "${RELEASE_DIR}\.env"
   env_exists:
 
   ; ---- Registry entries -------------------------------------------------

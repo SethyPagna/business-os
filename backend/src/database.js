@@ -599,6 +599,78 @@ CREATE TABLE IF NOT EXISTS google_drive_sync_entries (
   local_modified_at TEXT,
   last_synced_at   TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS import_jobs (
+  id                 TEXT PRIMARY KEY,
+  type               TEXT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'pending',
+  phase              TEXT DEFAULT 'created',
+  queue_driver       TEXT DEFAULT 'sqlite',
+  total_rows         INTEGER DEFAULT 0,
+  processed_rows     INTEGER DEFAULT 0,
+  failed_rows        INTEGER DEFAULT 0,
+  total_images       INTEGER DEFAULT 0,
+  processed_images   INTEGER DEFAULT 0,
+  failed_images      INTEGER DEFAULT 0,
+  warning_count      INTEGER DEFAULT 0,
+  policy_json        TEXT DEFAULT '{}',
+  summary_json       TEXT DEFAULT '{}',
+  cancel_requested   INTEGER DEFAULT 0,
+  last_error         TEXT,
+  created_by_id      INTEGER,
+  created_by_name    TEXT,
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT DEFAULT (datetime('now')),
+  started_at         TEXT,
+  finished_at        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS import_job_files (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id          TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  original_name   TEXT,
+  stored_path     TEXT NOT NULL,
+  relative_path   TEXT,
+  mime_type       TEXT,
+  byte_size       INTEGER DEFAULT 0,
+  status          TEXT DEFAULT 'stored',
+  error_message   TEXT,
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_at      TEXT DEFAULT (datetime('now')),
+  UNIQUE(job_id, kind, relative_path, original_name),
+  FOREIGN KEY(job_id) REFERENCES import_jobs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS import_job_batches (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id         TEXT NOT NULL,
+  batch_index    INTEGER NOT NULL,
+  start_row      INTEGER DEFAULT 0,
+  end_row        INTEGER DEFAULT 0,
+  status         TEXT DEFAULT 'pending',
+  attempts       INTEGER DEFAULT 0,
+  error_message  TEXT,
+  started_at     TEXT,
+  finished_at    TEXT,
+  created_at     TEXT DEFAULT (datetime('now')),
+  updated_at     TEXT DEFAULT (datetime('now')),
+  UNIQUE(job_id, batch_index),
+  FOREIGN KEY(job_id) REFERENCES import_jobs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS import_job_errors (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id         TEXT NOT NULL,
+  batch_id       INTEGER,
+  row_number     INTEGER,
+  file_name      TEXT,
+  code           TEXT,
+  message        TEXT NOT NULL,
+  raw_json       TEXT DEFAULT '{}',
+  created_at     TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY(job_id) REFERENCES import_jobs(id) ON DELETE CASCADE
+);
 `)
 
 
@@ -1342,6 +1414,27 @@ try {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_ai_response_logs_surface
     ON ai_response_logs(surface, created_at DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_import_jobs_status_created
+    ON import_jobs(status, created_at DESC)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_import_job_files_job_kind
+    ON import_job_files(job_id, kind)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_import_job_errors_job_row
+    ON import_job_errors(job_id, row_number, id)
   `)
 } catch (_) {}
 

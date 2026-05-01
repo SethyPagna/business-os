@@ -1,0 +1,58 @@
+name: business-os-scale
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - business_os_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-business_os}"
+      POSTGRES_USER: "${POSTGRES_USER:-business_os}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-business_os_dev_password}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - business_os_postgres18:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-businessos}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
+      MINIO_LICENSE_FILE: "${MINIO_LICENSE_FILE:-/run/secrets/minio.license}"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - business_os_minio:/data
+      - type: bind
+        source: ${MINIO_LICENSE_HOST_FILE:-../../minio.license}
+        target: /run/secrets/minio.license
+        read_only: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  business_os_redis:
+  business_os_postgres18:
+  business_os_minio:

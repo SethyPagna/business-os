@@ -201,8 +201,33 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo GOOGLE_DRIVE_CLIENT_ID=!EXISTING_GOOGLE_DRIVE_CLIENT_ID!
     echo GOOGLE_DRIVE_CLIENT_SECRET=!EXISTING_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
+    echo.
+    echo # Scale import services ^(optional; use ops\run\bat\scale-services.bat up^)
+    echo JOB_QUEUE_DRIVER=auto
+    echo REDIS_URL=redis://127.0.0.1:6379
+    echo DATABASE_DRIVER=sqlite
+    echo DATABASE_URL=
+    echo OBJECT_STORAGE_DRIVER=local
+    echo S3_ENDPOINT=http://127.0.0.1:9000
+    echo S3_ACCESS_KEY_ID=
+    echo S3_SECRET_ACCESS_KEY=
+    echo S3_BUCKET=business-os-assets
+    echo MINIO_LICENSE_FILE=
+    echo IMPORT_ROW_BATCH_SIZE=200
+    echo IMPORT_IMAGE_CONCURRENCY=3
+    echo IMPORT_MAX_CSV_MB=80
+    echo IMPORT_MAX_ZIP_MB=2048
 ) > "%ENV_FILE%"
 echo [OK] Written: %ENV_FILE%
+
+echo.
+echo [INFO] Checking optional scale import services tooling...
+node ops\scripts\verify-scale-services.js --advisory
+if errorlevel 1 (
+    echo [ERROR] Scale-service preflight failed.
+    pause
+    exit /b 1
+)
 
 REM ---- Backend dependencies -----------------------------------------------
 echo.

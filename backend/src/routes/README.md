@@ -17,6 +17,7 @@ Route files sit behind the shared middleware stack from `server.js`, so by the t
 - `auth.js` - login, OTP, password reset, verification capabilities
 - `users.js` - users, roles, profile, contact verification
 - `products.js` - product CRUD, variants, images, bulk import
+- `importJobs.js` - asynchronous CSV/TSV and media import jobs
 - `inventory.js` - adjustments, movement history, inventory summaries
 - `sales.js` - sale creation, status changes, dashboard analytics
 - `returns.js` - customer and supplier return workflows

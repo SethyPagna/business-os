@@ -458,6 +458,21 @@ if exist "%PRESERVE_ENV%" (
     echo GOOGLE_DRIVE_CLIENT_ID=!RELEASE_GOOGLE_DRIVE_CLIENT_ID!
     echo GOOGLE_DRIVE_CLIENT_SECRET=!RELEASE_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
+    echo # Optional scale import services. Keep real secrets in backend\.env or machine environment.
+    echo JOB_QUEUE_DRIVER=auto
+    echo REDIS_URL=redis://127.0.0.1:6379
+    echo DATABASE_DRIVER=sqlite
+    echo DATABASE_URL=
+    echo OBJECT_STORAGE_DRIVER=local
+    echo S3_ENDPOINT=http://127.0.0.1:9000
+    echo S3_ACCESS_KEY_ID=
+    echo S3_SECRET_ACCESS_KEY=
+    echo S3_BUCKET=business-os-assets
+    echo MINIO_LICENSE_FILE=
+    echo IMPORT_ROW_BATCH_SIZE=200
+    echo IMPORT_IMAGE_CONCURRENCY=3
+    echo IMPORT_MAX_CSV_MB=80
+    echo IMPORT_MAX_ZIP_MB=2048
     ) > "%DIST_OUT%\.env"
     echo [OK] Default .env created
 )
@@ -544,7 +559,7 @@ if "!MAKENSIS_EXE!"=="" (
     echo [INFO] Found makensis: !MAKENSIS_EXE!
     cd /d "%ROOT%"
     echo [INFO] Running makensis...
-    "!MAKENSIS_EXE!" "/DAPP_VERSION=%APP_VERSION%" "/DGOOGLE_DRIVE_CLIENT_ID=!RELEASE_GOOGLE_DRIVE_CLIENT_ID!" "/DGOOGLE_DRIVE_CLIENT_SECRET=!RELEASE_GOOGLE_DRIVE_CLIENT_SECRET!" "/DGOOGLE_DRIVE_OAUTH_REDIRECT_URI=!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!" ops\config\installer.nsi
+    "!MAKENSIS_EXE!" "/DAPP_VERSION=%APP_VERSION%" ops\config\installer.nsi
     if errorlevel 1 (
         echo [WARN] NSIS build failed. Possible causes:
         echo        - installer.nsi references a file that does not exist
