@@ -6,12 +6,13 @@ REM ========================================================================
 REM  Business OS | Source Setup
 REM
 REM  One-time workstation bootstrap:
-REM    1. verify Node/npm exist
-REM    2. create the default business-os-data folders
-REM    3. write backend/.env while preserving important existing secrets
-REM    4. install backend/frontend dependencies
-REM    5. build the frontend
-REM    6. install PM2 when available
+REM    1. install/verify Windows prerequisites where possible
+REM    2. start required Docker scale services
+REM    3. create the default business-os-data folders
+REM    4. write backend/.env while preserving important existing secrets
+REM    5. install backend/frontend dependencies
+REM    6. build the frontend
+REM    7. install PM2 when available
 REM ========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
@@ -31,6 +32,18 @@ echo.
 echo   Run ONCE to install dependencies and build the frontend.
 echo   After setup, use start-server.bat to launch.
 echo.
+
+REM ---- Workstation/runtime bootstrap --------------------------------------
+echo [INFO] Preparing Windows prerequisites and required runtime services...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Setup -InstallMissing -StartServices -RequireServices
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Runtime bootstrap failed.
+    echo         Finish any installer, administrator, Docker Desktop, or restart prompt, then run setup.bat again.
+    echo.
+    pause
+    exit /b 1
+)
 
 REM ---- Node.js check -------------------------------------------------------
 where node >nul 2>&1
@@ -202,8 +215,9 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo GOOGLE_DRIVE_CLIENT_SECRET=!EXISTING_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
     echo.
-    echo # Scale import services ^(optional; use ops\run\bat\scale-services.bat up^)
-    echo JOB_QUEUE_DRIVER=auto
+    echo # Required local scale services ^(started automatically by setup/start^)
+    echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
+    echo JOB_QUEUE_DRIVER=bullmq
     echo REDIS_URL=redis://127.0.0.1:6379
     echo DATABASE_DRIVER=sqlite
     echo DATABASE_URL=
@@ -219,15 +233,6 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo IMPORT_MAX_ZIP_MB=2048
 ) > "%ENV_FILE%"
 echo [OK] Written: %ENV_FILE%
-
-echo.
-echo [INFO] Checking optional scale import services tooling...
-node ops\scripts\verify-scale-services.js --advisory
-if errorlevel 1 (
-    echo [ERROR] Scale-service preflight failed.
-    pause
-    exit /b 1
-)
 
 REM ---- Backend dependencies -----------------------------------------------
 echo.

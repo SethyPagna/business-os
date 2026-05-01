@@ -414,6 +414,13 @@ if not exist "%ROOT%\ops\run\bat\release\stop-server.bat" (
 copy /y "%ROOT%\ops\run\bat\release\stop-server.bat" "%DIST_OUT%\stop-server.bat" >nul
 echo [OK] stop-server.bat (release version) added
 
+REM ---- Runtime bootstrap + Docker Compose service config
+if not exist "%DIST_OUT%\ops\scripts\powershell" mkdir "%DIST_OUT%\ops\scripts\powershell" >nul 2>&1
+if not exist "%DIST_OUT%\ops\docker" mkdir "%DIST_OUT%\ops\docker" >nul 2>&1
+copy /y "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" "%DIST_OUT%\ops\scripts\powershell\runtime-bootstrap.ps1" >nul
+copy /y "%ROOT%\ops\docker\compose.scale.yml" "%DIST_OUT%\ops\docker\compose.scale.yml" >nul
+echo [OK] Runtime bootstrap and Docker Compose config added
+
 REM ---- Restore sharp / @img binaries
 if exist "%ROOT%\_img_tmp" (
     xcopy /e /i /q "%ROOT%\_img_tmp" "%DIST_OUT%\@img\" >nul 2>&1
@@ -458,8 +465,9 @@ if exist "%PRESERVE_ENV%" (
     echo GOOGLE_DRIVE_CLIENT_ID=!RELEASE_GOOGLE_DRIVE_CLIENT_ID!
     echo GOOGLE_DRIVE_CLIENT_SECRET=!RELEASE_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
-    echo # Optional scale import services. Keep real secrets in backend\.env or machine environment.
-    echo JOB_QUEUE_DRIVER=auto
+    echo # Required local scale services ^(started automatically by start-server.bat^). Keep real secrets in .env or machine environment.
+    echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
+    echo JOB_QUEUE_DRIVER=bullmq
     echo REDIS_URL=redis://127.0.0.1:6379
     echo DATABASE_DRIVER=sqlite
     echo DATABASE_URL=
@@ -476,6 +484,8 @@ if exist "%PRESERVE_ENV%" (
     ) > "%DIST_OUT%\.env"
     echo [OK] Default .env created
 )
+
+powershell -NoProfile -Command "$p='%DIST_OUT%\.env'; $pairs=[ordered]@{BUSINESS_OS_REQUIRE_SCALE_SERVICES='1'; JOB_QUEUE_DRIVER='bullmq'; REDIS_URL='redis://127.0.0.1:6379'; DATABASE_DRIVER='sqlite'; OBJECT_STORAGE_DRIVER='local'}; $lines=@(); if(Test-Path $p){$lines=Get-Content -LiteralPath $p}; foreach($key in $pairs.Keys){$value=$pairs[$key]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) }}; Set-Content -LiteralPath $p -Value $lines" >nul 2>&1
 
 if exist "%PRESERVE_DATA_LOCATION%" (
     copy /y "%PRESERVE_DATA_LOCATION%" "%DIST_OUT%\data-location.json" >nul
@@ -494,10 +504,11 @@ echo ================================
 echo.
 echo QUICK START:
 echo 1. Double-click start-server.bat
-echo 2. Open http://localhost:4000 in your browser
-echo 3. Login: admin / admin  ^(change password after first login^)
-echo 4. To stop: run stop-server.bat
-echo 5. Customer portal: use the public URL configured in Customer Portal, or the custom public path if no external URL is set
+echo 2. Docker Desktop, Redis, Postgres, and MinIO are started automatically
+echo 3. Open http://localhost:4000 in your browser
+echo 4. Login: admin / admin  ^(change password after first login^)
+echo 5. To stop the app: run stop-server.bat
+echo 6. Customer portal: use the public URL configured in Customer Portal, or the custom public path if no external URL is set
 echo.
 echo REMOTE ACCESS ^(Tailscale^):
 echo - start-server.bat handles Tailscale automatically if installed.
@@ -510,10 +521,11 @@ echo FILES:
 echo - business-os-server.exe   ^(main server, no Node.js required^)
 echo - start-server.bat         ^(launch script^)
 echo - stop-server.bat          ^(stop script^)
+echo - ops\docker\              ^(required Redis/Postgres/MinIO service config^)
 echo - .env                     ^(port and Tailscale config^)
 echo - business-os-data\        ^(created on first run and preserved across rebuilds^)
 echo.
-echo REQUIREMENTS: Windows 10+, port 4000 available.
+echo REQUIREMENTS: Windows 10+, Docker Desktop, port 4000 available.
 ) > "%DIST_OUT%\README.txt"
 echo [OK] README.txt created
 
@@ -581,6 +593,8 @@ echo   Contents:
 echo     business-os-server.exe   - main server (no Node.js needed^)
 echo     start-server.bat         - double-click to launch
 echo     stop-server.bat          - double-click to stop
+echo     ops\docker\              - Redis/Postgres/MinIO compose config
+echo     ops\scripts\powershell\  - one-button runtime bootstrap
 echo     .env                     - port + Tailscale config
 echo     @img\                    - sharp image binaries ^(if present^)
 echo     business-os-data\        - created automatically for persistent data

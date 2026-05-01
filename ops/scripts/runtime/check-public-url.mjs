@@ -1,4 +1,5 @@
 import https from 'node:https'
+import net from 'node:net'
 
 const DEFAULT_TIMEOUT_MS = 15000
 const PUBLIC_DNS_TIMEOUT_MS = 8000
@@ -46,6 +47,15 @@ function isPrivateIpv4(ip) {
     || (a === 192 && b === 168)
 }
 
+function isPrivateIpv6(ip) {
+  const normalized = String(ip || '').trim().toLowerCase()
+  if (!normalized || net.isIP(normalized) !== 6) return true
+  return normalized === '::1'
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd')
+    || normalized.startsWith('fe80:')
+}
+
 function shouldCheckPublicIngress(baseUrl) {
   try {
     const { hostname, protocol } = new URL(baseUrl)
@@ -73,29 +83,36 @@ async function fetchJsonWithTimeout(url, timeoutMs = PUBLIC_DNS_TIMEOUT_MS) {
   }
 }
 
-async function resolvePublicIpv4(hostname) {
+async function resolvePublicIngress(hostname) {
   const encoded = encodeURIComponent(hostname)
   const resolvers = [
-    `https://dns.google/resolve?name=${encoded}&type=A`,
-    `https://cloudflare-dns.com/dns-query?name=${encoded}&type=A`,
+    { url: `https://dns.google/resolve?name=${encoded}&type=A`, family: 4, dnsType: 1 },
+    { url: `https://cloudflare-dns.com/dns-query?name=${encoded}&type=A`, family: 4, dnsType: 1 },
+    { url: `https://dns.google/resolve?name=${encoded}&type=AAAA`, family: 6, dnsType: 28 },
+    { url: `https://cloudflare-dns.com/dns-query?name=${encoded}&type=AAAA`, family: 6, dnsType: 28 },
   ]
-  const answers = await Promise.allSettled(resolvers.map((url) => fetchJsonWithTimeout(url)))
-  const ips = new Set()
+  const answers = await Promise.allSettled(resolvers.map((resolver) => fetchJsonWithTimeout(resolver.url).then((json) => ({ ...resolver, json }))))
+  const endpoints = new Map()
   answers.forEach((result) => {
     if (result.status !== 'fulfilled') return
-    const rows = Array.isArray(result.value?.Answer) ? result.value.Answer : []
+    const { family, dnsType, json } = result.value
+    const rows = Array.isArray(json?.Answer) ? json.Answer : []
     rows.forEach((row) => {
-      if (Number(row?.type) !== 1) return
+      if (Number(row?.type) !== dnsType) return
       const ip = String(row?.data || '').trim()
-      if (ip && !isPrivateIpv4(ip)) ips.add(ip)
+      if (!ip) return
+      if (family === 4 && !isPrivateIpv4(ip)) endpoints.set(`4:${ip}`, { ip, family: 4 })
+      if (family === 6 && !isPrivateIpv6(ip)) endpoints.set(`6:${ip}`, { ip, family: 6 })
     })
   })
-  return [...ips]
+  return [...endpoints.values()]
 }
 
-function checkHttpsViaIp(rawUrl, ip, timeoutMs = PUBLIC_INGRESS_TIMEOUT_MS) {
+function checkHttpsViaIp(rawUrl, endpoint, timeoutMs = PUBLIC_INGRESS_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(rawUrl)
+    const ip = endpoint?.ip || endpoint
+    const family = endpoint?.family || 4
     const request = https.request({
       protocol: 'https:',
       hostname: parsed.hostname,
@@ -110,10 +127,10 @@ function checkHttpsViaIp(rawUrl, ip, timeoutMs = PUBLIC_INGRESS_TIMEOUT_MS) {
       },
       lookup: (_hostname, options, callback) => {
         if (options?.all) {
-          callback(null, [{ address: ip, family: 4 }])
+          callback(null, [{ address: ip, family }])
           return
         }
-        callback(null, ip, 4)
+        callback(null, ip, family)
       },
     }, (response) => {
       response.resume()
@@ -160,30 +177,30 @@ async function main() {
 
   if (shouldCheckPublicIngress(baseUrl)) {
     const hostname = new URL(baseUrl).hostname
-    let publicIps = []
+    let publicEndpoints = []
     try {
-      publicIps = await resolvePublicIpv4(hostname)
+      publicEndpoints = await resolvePublicIngress(hostname)
     } catch (error) {
       console.log(`[FAIL] DNS ${hostname} :: ${error?.message || error}`)
       hasFailure = true
     }
 
-    if (!publicIps.length) {
-      console.log(`[FAIL] DNS ${hostname} :: no public IPv4 ingress addresses resolved`)
+    if (!publicEndpoints.length) {
+      console.log(`[FAIL] DNS ${hostname} :: no public IPv4/IPv6 ingress addresses resolved`)
       hasFailure = true
     }
 
-    for (const ip of publicIps) {
+    for (const endpoint of publicEndpoints) {
       const url = `${baseUrl}/health`
       try {
-        const response = await checkHttpsViaIp(url, ip)
+        const response = await checkHttpsViaIp(url, endpoint)
         const ok = response.status >= 200 && response.status < 400
         const label = ok ? 'OK' : 'FAIL'
-        console.log(`[${label}] ${response.status} ${url} via ${ip}`)
+        console.log(`[${label}] ${response.status} ${url} via ${endpoint.ip}`)
         if (!ok) hasFailure = true
       } catch (error) {
         hasFailure = true
-        console.log(`[FAIL] ERR ${url} via ${ip} :: ${error?.code || error?.message || error}`)
+        console.log(`[FAIL] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}`)
       }
     }
   }

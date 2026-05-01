@@ -5,9 +5,9 @@ This project uses a layered documentation model to keep architecture, operations
 ## 1. Product-Level Docs
 
 - `README.md`
-  - user-facing project overview and quick-start instructions.
-- `README-build.md`
-  - release packaging and deployment workflow.
+- user-facing one-button setup/start instructions.
+- `ops/readme/README.md`
+  - technical operator, setup, release, and support workflow.
 
 ## 2. Architecture and Ownership Docs (`docs/`)
 

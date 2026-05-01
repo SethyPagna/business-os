@@ -157,6 +157,9 @@ runTest('sensitive system routes require backup or settings permission', async (
       ['POST', '/api/system/backup/export-folder'],
       ['GET', '/api/system/data-path'],
       ['DELETE', '/api/system/data-path'],
+      ['GET', '/api/system/scale-migration/status'],
+      ['POST', '/api/system/scale-migration/prepare'],
+      ['POST', '/api/system/scale-migration/run'],
     ]
 
     for (const [method, pathname] of guardedRequests) {
@@ -169,6 +172,40 @@ runTest('sensitive system routes require backup or settings permission', async (
       assert.equal(response.status, 403, `${method} ${pathname} should be permission-guarded`)
       assert.equal(json.code, 'forbidden')
     }
+
+    const status = await fetchJson(server.baseUrl, '/api/system/scale-migration/status', {
+      authToken: adminToken,
+    })
+    assert.equal(status.response.ok, true)
+    assert.equal(status.json.item.mode, 'sqlite_authoritative')
+    assert.equal(status.json.item.target.databaseDriver, 'sqlite')
+    assert.equal(status.json.item.backupRequired, true)
+
+    const prepare = await fetchJson(server.baseUrl, '/api/system/scale-migration/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken: adminToken,
+      body: JSON.stringify({}),
+    })
+    assert.equal(prepare.response.ok, true)
+    assert.equal(prepare.json.item.mode, 'sqlite_authoritative')
+    assert.equal(prepare.json.item.requiresFreshBackup, true)
+
+    const runWithoutConfirmation = await fetchJson(server.baseUrl, '/api/system/scale-migration/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken: adminToken,
+      body: JSON.stringify({}),
+    })
+    assert.equal(runWithoutConfirmation.response.status, 400)
+
+    const runLocked = await fetchJson(server.baseUrl, '/api/system/scale-migration/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      authToken: adminToken,
+      body: JSON.stringify({ confirmation: 'MIGRATE' }),
+    })
+    assert.equal(runLocked.response.status, 409)
   } finally {
     await stopServer(server?.child)
   }

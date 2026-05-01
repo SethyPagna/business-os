@@ -14,91 +14,91 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 | File | Size (KB) | Lines |
 |---|---:|---:|
-| `frontend/src/components/catalog/CatalogPage.jsx` | 219.7 | 4010 |
-| `frontend/src/lang/km.json` | 199.4 | 2310 |
-| `frontend/src/components/inventory/Inventory.jsx` | 118.4 | 2179 |
-| `frontend/src/lang/en.json` | 109.4 | 2302 |
-| `frontend/src/components/pos/POS.jsx` | 99.9 | 1693 |
-| `frontend/src/components/products/Products.jsx` | 76.7 | 1468 |
-| `frontend/src/components/utils-settings/Backup.jsx` | 64.3 | 1393 |
-| `frontend/src/components/dashboard/Dashboard.jsx` | 63.6 | 1244 |
-| `frontend/src/api/methods.js` | 60.9 | 1279 |
-| `frontend/src/components/utils-settings/Settings.jsx` | 59.5 | 1342 |
-| `frontend/src/components/users/UserProfileModal.jsx` | 55.8 | 1021 |
-| `frontend/src/AppContext.jsx` | 55.6 | 1361 |
-| `backend/src/routes/sales.js` | 55.4 | 1316 |
-| `backend/src/routes/products.js` | 50.5 | 1063 |
-| `backend/src/routes/system/index.js` | 49.5 | 1229 |
-| `backend/src/database.js` | 47.1 | 1273 |
-| `frontend/src/components/files/FilesPage.jsx` | 47.1 | 781 |
+| `frontend/src/components/catalog/CatalogPage.jsx` | 234.8 | 4193 |
+| `frontend/src/lang/km.json` | 205.9 | 2367 |
+| `frontend/src/components/inventory/Inventory.jsx` | 136.9 | 2422 |
+| `frontend/src/lang/en.json` | 112.4 | 2359 |
+| `frontend/src/components/products/Products.jsx` | 103.2 | 2021 |
+| `frontend/src/components/pos/POS.jsx` | 102.7 | 1747 |
+| `frontend/src/components/utils-settings/Backup.jsx` | 75.5 | 1644 |
+| `frontend/src/components/dashboard/Dashboard.jsx` | 67.6 | 1341 |
+| `frontend/src/api/methods.js` | 67.0 | 1395 |
+| `backend/src/routes/products.js` | 63.7 | 1306 |
+| `frontend/src/components/users/UserProfileModal.jsx` | 60.3 | 1112 |
+| `frontend/src/components/utils-settings/Settings.jsx` | 59.9 | 1342 |
+| `backend/src/routes/sales.js` | 56.4 | 1329 |
+| `frontend/src/AppContext.jsx` | 56.1 | 1373 |
+| `backend/src/routes/system/index.js` | 54.4 | 1350 |
+| `backend/src/database.js` | 53.6 | 1447 |
+| `frontend/src/components/files/FilesPage.jsx` | 52.8 | 886 |
+| `backend/src/services/importJobs.js` | 50.9 | 1256 |
 | `frontend/src/components/auth/Login.jsx` | 47.0 | 1028 |
+| `frontend/src/components/sales/Sales.jsx` | 45.3 | 912 |
 | `backend/src/routes/users.js` | 44.0 | 1060 |
-| `frontend/src/components/utils-settings/AuditLog.jsx` | 41.4 | 882 |
-| `frontend/src/components/sales/Sales.jsx` | 40.4 | 811 |
-| `backend/src/routes/auth.js` | 40.0 | 1119 |
-| `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 39.9 | 677 |
-| `frontend/src/components/users/Users.jsx` | 38.4 | 812 |
-| `frontend/src/components/returns/Returns.jsx` | 38.2 | 779 |
+| `frontend/src/components/products/ProductForm.jsx` | 43.8 | 893 |
+| `frontend/src/components/users/Users.jsx` | 43.6 | 914 |
+| `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 42.2 | 684 |
+| `frontend/src/components/contacts/CustomersTab.jsx` | 41.9 | 852 |
 
 ## 3. Largest Source Files (by lines)
 
 | File | Lines | Size (KB) |
 |---|---:|---:|
-| `frontend/src/components/catalog/CatalogPage.jsx` | 4010 | 219.7 |
-| `frontend/src/lang/km.json` | 2310 | 199.4 |
-| `frontend/src/lang/en.json` | 2302 | 109.4 |
-| `frontend/src/components/inventory/Inventory.jsx` | 2179 | 118.4 |
-| `frontend/src/components/pos/POS.jsx` | 1693 | 99.9 |
-| `frontend/src/components/products/Products.jsx` | 1468 | 76.7 |
-| `frontend/src/components/utils-settings/Backup.jsx` | 1393 | 64.3 |
-| `frontend/src/AppContext.jsx` | 1361 | 55.6 |
-| `frontend/src/components/utils-settings/Settings.jsx` | 1342 | 59.5 |
-| `backend/src/routes/sales.js` | 1316 | 55.4 |
-| `frontend/src/api/methods.js` | 1279 | 60.9 |
-| `backend/src/database.js` | 1273 | 47.1 |
-| `frontend/src/components/dashboard/Dashboard.jsx` | 1244 | 63.6 |
-| `backend/src/routes/system/index.js` | 1229 | 49.5 |
+| `frontend/src/components/catalog/CatalogPage.jsx` | 4193 | 234.8 |
+| `frontend/src/components/inventory/Inventory.jsx` | 2422 | 136.9 |
+| `frontend/src/lang/km.json` | 2367 | 205.9 |
+| `frontend/src/lang/en.json` | 2359 | 112.4 |
+| `frontend/src/components/products/Products.jsx` | 2021 | 103.2 |
+| `frontend/src/components/pos/POS.jsx` | 1747 | 102.7 |
+| `frontend/src/components/utils-settings/Backup.jsx` | 1644 | 75.5 |
+| `backend/src/database.js` | 1447 | 53.6 |
+| `frontend/src/api/methods.js` | 1395 | 67.0 |
+| `frontend/src/AppContext.jsx` | 1373 | 56.1 |
+| `backend/src/routes/system/index.js` | 1350 | 54.4 |
+| `frontend/src/components/utils-settings/Settings.jsx` | 1342 | 59.9 |
+| `frontend/src/components/dashboard/Dashboard.jsx` | 1341 | 67.6 |
+| `backend/src/routes/sales.js` | 1329 | 56.4 |
+| `backend/src/routes/products.js` | 1306 | 63.7 |
+| `backend/src/services/importJobs.js` | 1256 | 50.9 |
 | `backend/src/routes/auth.js` | 1119 | 40.0 |
-| `backend/src/routes/products.js` | 1063 | 50.5 |
+| `frontend/src/components/users/UserProfileModal.jsx` | 1112 | 60.3 |
 | `backend/src/routes/users.js` | 1060 | 44.0 |
 | `frontend/src/components/auth/Login.jsx` | 1028 | 47.0 |
-| `frontend/src/components/users/UserProfileModal.jsx` | 1021 | 55.8 |
+| `backend/src/routes/portal.js` | 975 | 37.2 |
 | `backend/src/services/googleDriveSync/index.js` | 917 | 31.6 |
-| `frontend/src/components/utils-settings/AuditLog.jsx` | 882 | 41.4 |
-| `frontend/src/utils/printReceipt.js` | 829 | 27.5 |
-| `frontend/src/components/users/Users.jsx` | 812 | 38.4 |
-| `frontend/src/components/sales/Sales.jsx` | 811 | 40.4 |
-| `backend/src/routes/portal.js` | 805 | 31.7 |
+| `frontend/src/components/users/Users.jsx` | 914 | 43.6 |
+| `frontend/src/components/sales/Sales.jsx` | 912 | 45.3 |
+| `frontend/src/components/products/ProductForm.jsx` | 893 | 43.8 |
 
 ## 4. Largest Built Chunks
 
 | Asset | Size (KB) |
 |---|---:|
 | `frontend/dist/assets/vendor.js` | 437.0 |
-| `frontend/dist/assets/index-BtEHmhXl.js` | 376.3 |
-| `frontend/dist/assets/lang-km.js` | 229.7 |
+| `frontend/dist/assets/index-dp6Xo5Nu.js` | 399.3 |
+| `frontend/dist/assets/lang-km.js` | 237.5 |
 | `frontend/dist/assets/vendor-react.js` | 207.2 |
-| `frontend/dist/assets/CatalogPage.js` | 152.0 |
-| `frontend/dist/assets/Products.js` | 136.1 |
-| `frontend/dist/assets/index.css` | 113.1 |
-| `frontend/dist/assets/lang-en.js` | 102.2 |
-| `frontend/dist/assets/app-shared.js` | 95.2 |
-| `frontend/dist/assets/Inventory.js` | 82.8 |
+| `frontend/dist/assets/Products.js` | 179.5 |
+| `frontend/dist/assets/CatalogPage.js` | 165.8 |
+| `frontend/dist/assets/index.css` | 123.3 |
+| `frontend/dist/assets/lang-en.js` | 105.0 |
+| `frontend/dist/assets/app-shared.js` | 101.6 |
+| `frontend/dist/assets/Inventory.js` | 96.1 |
 | `frontend/dist/assets/vendor-dexie.js` | 72.5 |
-| `frontend/dist/assets/POS.js` | 66.9 |
-| `frontend/dist/assets/Returns.js` | 65.8 |
-| `frontend/dist/assets/app-api.js` | 56.0 |
-| `frontend/dist/assets/Sales.js` | 49.5 |
-| `frontend/dist/assets/vendor-lucide.js` | 47.9 |
-| `frontend/dist/assets/Dashboard.js` | 43.3 |
-| `frontend/dist/assets/Contacts.js` | 42.5 |
-| `frontend/dist/assets/CustomersTab.js` | 40.4 |
-| `frontend/dist/assets/CatalogSecondaryTabs.js` | 29.4 |
-| `frontend/dist/assets/Branches.js` | 25.0 |
-| `frontend/dist/assets/LoyaltyPointsPage.js` | 24.4 |
+| `frontend/dist/assets/POS.js` | 69.0 |
+| `frontend/dist/assets/Returns.js` | 65.9 |
+| `frontend/dist/assets/app-api.js` | 61.5 |
+| `frontend/dist/assets/Sales.js` | 52.2 |
+| `frontend/dist/assets/vendor-lucide.js` | 51.4 |
+| `frontend/dist/assets/Contacts.js` | 48.9 |
+| `frontend/dist/assets/Dashboard.js` | 45.1 |
+| `frontend/dist/assets/CustomersTab.js` | 43.4 |
+| `frontend/dist/assets/CatalogSecondaryTabs.js` | 31.4 |
+| `frontend/dist/assets/Branches.js` | 29.8 |
+| `frontend/dist/assets/LoyaltyPointsPage.js` | 24.5 |
 | `frontend/dist/assets/exportPackage.js` | 15.4 |
 | `frontend/dist/assets/Receipt.js` | 15.1 |
-| `frontend/dist/assets/CatalogProductsSection.js` | 8.5 |
+| `frontend/dist/assets/CatalogProductsSection.js` | 10.3 |
 
 ## 5. Notes
 

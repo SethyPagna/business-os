@@ -353,6 +353,7 @@ const IMPORTS_PATH = trim(process.env.IMPORTS_PATH)
   ? path.resolve(process.env.IMPORTS_PATH.trim())
   : path.join(DATA_ROOT, 'imports')
 
+const BUSINESS_OS_REQUIRE_SCALE_SERVICES = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES || '').toLowerCase())
 const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'auto').toLowerCase()
 const REDIS_URL = trim(process.env.REDIS_URL || 'redis://127.0.0.1:6379')
 const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
@@ -413,6 +414,7 @@ module.exports = {
   UPLOADS_PATH,
   IMPORTS_PATH,
   FRONTEND_DIST,
+  BUSINESS_OS_REQUIRE_SCALE_SERVICES,
   JOB_QUEUE_DRIVER,
   REDIS_URL,
   DATABASE_DRIVER,

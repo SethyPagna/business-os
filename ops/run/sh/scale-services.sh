@@ -12,7 +12,13 @@ fi
 node ops/scripts/verify-scale-services.js --require --print-compose-command
 
 export DOCKER_CONFIG="$ROOT/ops/runtime/docker-config"
-mkdir -p "$DOCKER_CONFIG"
+mkdir -p "$DOCKER_CONFIG" "$ROOT/ops/runtime/secrets"
+if [ -f "$ROOT/minio.license" ]; then
+  cp "$ROOT/minio.license" "$ROOT/ops/runtime/secrets/minio.license"
+elif [ ! -f "$ROOT/ops/runtime/secrets/minio.license" ]; then
+  : > "$ROOT/ops/runtime/secrets/minio.license"
+fi
+export MINIO_LICENSE_HOST_FILE="$ROOT/ops/runtime/secrets/minio.license"
 
 DOCKER_EXE="${DOCKER_EXE:-docker}"
 COMPOSE="$ROOT/ops/docker/compose.scale.yml"

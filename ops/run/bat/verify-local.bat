@@ -35,10 +35,10 @@ if errorlevel 1 exit /b 1
 echo [OK] Runtime dependency manifest check passed
 echo.
 
-echo [1b/5] Verifying scale-service tooling and secret guards...
-node ops\scripts\verify-scale-services.js --advisory
+echo [1b/5] Verifying required Docker scale services...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Verify -RequireServices
 if errorlevel 1 exit /b 1
-echo [OK] Scale-service preflight passed
+echo [OK] Required scale services are ready
 echo.
 
 cd /d "%ROOT%\frontend"

@@ -11,6 +11,7 @@ const {
   IMPORT_IMAGE_CONCURRENCY,
   IMPORT_MAX_ZIP_MB,
   JOB_QUEUE_DRIVER,
+  BUSINESS_OS_REQUIRE_SCALE_SERVICES,
   REDIS_URL,
   UPLOADS_PATH,
 } = require('../config')
@@ -1166,7 +1167,7 @@ async function initializeBullQueue() {
   } catch (error) {
     bullStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable' }
     if (JOB_QUEUE_DRIVER === 'bullmq') {
-      console.warn(`[import-jobs] BullMQ unavailable, using SQLite fallback: ${bullStatus.reason}`)
+      console.warn(`[import-jobs] BullMQ unavailable: ${bullStatus.reason}`)
     }
   }
   return bullStatus
@@ -1184,6 +1185,15 @@ async function enqueueImportJob(jobId) {
       removeOnFail: 200,
     })
     return getImportJob(jobId)
+  }
+  if (BUSINESS_OS_REQUIRE_SCALE_SERVICES || JOB_QUEUE_DRIVER === 'bullmq') {
+    updateJob(jobId, {
+      status: 'failed',
+      phase: 'queue_unavailable',
+      last_error: `Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`,
+      finished_at: nowIso(),
+    })
+    throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
   }
   updateJob(jobId, { queue_driver: 'sqlite', status: 'queued', phase: 'queued' })
   setImmediate(() => { runLocalJob(jobId).catch(() => {}) })

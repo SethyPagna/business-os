@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **10**
+Total files documented: **14**
 
 ## 2. Symbol Count by File
 
@@ -13,13 +13,17 @@ Total files documented: **10**
 | 1 | `clean-generated.ps1` | 0 |
 | 2 | `ops/scripts/backend/verify-data-integrity.js` | 10 |
 | 3 | `ops/scripts/frontend/verify-i18n.js` | 6 |
-| 4 | `ops/scripts/generate-doc-reference.js` | 18 |
-| 5 | `ops/scripts/generate-full-project-docs.js` | 26 |
-| 6 | `ops/scripts/lib/fs-utils.js` | 8 |
-| 7 | `ops/scripts/performance-scan.js` | 3 |
-| 8 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
-| 9 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
-| 10 | `ops/scripts/verify-runtime-deps.js` | 4 |
+| 4 | `ops/scripts/frontend/verify-performance.js` | 4 |
+| 5 | `ops/scripts/frontend/verify-ui.js` | 13 |
+| 6 | `ops/scripts/generate-doc-reference.js` | 18 |
+| 7 | `ops/scripts/generate-full-project-docs.js` | 26 |
+| 8 | `ops/scripts/lib/fs-utils.js` | 8 |
+| 9 | `ops/scripts/performance-scan.js` | 3 |
+| 10 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
+| 11 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
+| 12 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
+| 13 | `ops/scripts/verify-runtime-deps.js` | 4 |
+| 14 | `ops/scripts/verify-scale-services.js` | 8 |
 
 ## 3. Detailed Function Commentary
 
@@ -53,7 +57,34 @@ Total files documented: **10**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.4 `ops/scripts/generate-doc-reference.js`
+### 3.4 `ops/scripts/frontend/verify-performance.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `read` | function | 15 |
+| 2 | `walk` | function | 19 |
+| 3 | `trackedFiles` | function | 37 |
+| 4 | `assert` | function | 47 |
+
+### 3.5 `ops/scripts/frontend/verify-ui.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `readText` | function | 61 |
+| 2 | `readJson` | function | 65 |
+| 3 | `flatten` | function | 69 |
+| 4 | `walkFiles` | function | 82 |
+| 5 | `isIntentionalLatin` | function | 94 |
+| 6 | `report` | function | 102 |
+| 7 | `checkKhmerQuality` | function | 108 |
+| 8 | `checkPortalDarkModeContracts` | function | 132 |
+| 9 | `checkPortalVisibleStrings` | function | 154 |
+| 10 | `checkFormControlLabels` | function | 176 |
+| 11 | `checkVerificationWiring` | function | 196 |
+| 12 | `printAuditSummary` | function | 209 |
+| 13 | `main` | function | 227 |
+
+### 3.6 `ops/scripts/generate-doc-reference.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -76,7 +107,7 @@ Total files documented: **10**
 | 17 | `writeProjectCodeReference` | function | 423 |
 | 18 | `main` | function | 464 |
 
-### 3.5 `ops/scripts/generate-full-project-docs.js`
+### 3.7 `ops/scripts/generate-full-project-docs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -107,7 +138,7 @@ Total files documented: **10**
 | 25 | `writeMainCoverageSummary` | function | 596 |
 | 26 | `main` | function | 625 |
 
-### 3.6 `ops/scripts/lib/fs-utils.js`
+### 3.8 `ops/scripts/lib/fs-utils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -120,7 +151,7 @@ Total files documented: **10**
 | 7 | `walkFilesRecursive` | function | 66 |
 | 8 | `collectRootFiles` | function | 93 |
 
-### 3.7 `ops/scripts/performance-scan.js`
+### 3.9 `ops/scripts/performance-scan.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -128,15 +159,21 @@ Total files documented: **10**
 | 2 | `topN` | function | 48 |
 | 3 | `main` | function | 56 |
 
-### 3.8 `ops/scripts/powershell/clean-generated.ps1`
+### 3.10 `ops/scripts/powershell/clean-generated.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.9 `ops/scripts/sync-firebase-release-env.ps1`
+### 3.11 `ops/scripts/powershell/runtime-bootstrap.ps1`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `Fail` | function | 25 |
+
+### 3.12 `ops/scripts/sync-firebase-release-env.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.10 `ops/scripts/verify-runtime-deps.js`
+### 3.13 `ops/scripts/verify-runtime-deps.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -144,4 +181,17 @@ Total files documented: **10**
 | 2 | `assertTrackedFile` | function | 26 |
 | 3 | `hasLockDependency` | function | 32 |
 | 4 | `main` | function | 38 |
+
+### 3.14 `ops/scripts/verify-scale-services.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `ensureDir` | function | 17 |
+| 2 | `run` | function | 21 |
+| 3 | `firstExisting` | function | 39 |
+| 4 | `whereDocker` | function | 43 |
+| 5 | `resolveDocker` | function | 56 |
+| 6 | `checkSecretIgnoreRules` | function | 66 |
+| 7 | `trackedLicenses` | const arrow | 67 |
+| 8 | `main` | function | 93 |
 

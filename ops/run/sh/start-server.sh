@@ -6,7 +6,7 @@ BACKEND_DIR="$ROOT/backend"
 FRONTEND_DIR="$ROOT/frontend"
 RUNTIME_DIR="$ROOT/ops/runtime"
 LOG_DIR="$RUNTIME_DIR/logs"
-DATA_DIR="$HOME/business-os-data"
+DATA_DIR="$ROOT/business-os-data"
 ENV_FILE="$BACKEND_DIR/.env"
 ECOSYSTEM="$ROOT/ops/config/ecosystem.config.js"
 PUBLIC_CHECK_SCRIPT="$ROOT/ops/scripts/runtime/check-public-url.mjs"
@@ -24,7 +24,7 @@ echo "=============================================================="
 echo ""
 
 info "Ensuring data directories exist..."
-mkdir -p "$DATA_DIR/db" "$DATA_DIR/uploads" "$LOG_DIR"
+mkdir -p "$DATA_DIR/organizations" "$LOG_DIR"
 ok "Data dirs ready"
 
 if ! command -v node &>/dev/null; then
@@ -33,6 +33,16 @@ if ! command -v node &>/dev/null; then
 fi
 NODE_VER=$(node -e "process.stdout.write(process.version)")
 ok "Node.js: $NODE_VER"
+
+export BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
+export JOB_QUEUE_DRIVER="${JOB_QUEUE_DRIVER:-bullmq}"
+export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
+export DATABASE_DRIVER="${DATABASE_DRIVER:-sqlite}"
+export OBJECT_STORAGE_DRIVER="${OBJECT_STORAGE_DRIVER:-local}"
+
+info "Starting required Docker scale services..."
+"$ROOT/ops/run/sh/scale-services.sh" up
+ok "Required scale services ready"
 
 if [ ! -d "$BACKEND_DIR/node_modules" ]; then
   info "Installing backend dependencies..."

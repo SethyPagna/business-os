@@ -1378,6 +1378,9 @@ export async function openFolderDialog(initialPath = '') {
 
 // ─── Data folder location ─────────────────────────────────────────────────────
 export const getDataPath   = ()    => route('system:dataPath',   () => apiFetch('GET',    '/api/system/data-path'),       () => ({}))
+export const getScaleMigrationStatus = () => route('system:scaleMigrationStatus', () => apiFetch('GET', '/api/system/scale-migration/status'), () => ({ item: null }))
+export const prepareScaleMigration = () => route('system:scaleMigrationPrepare', () => apiFetch('POST', '/api/system/scale-migration/prepare', {}, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
+export const runScaleMigration = (payload = {}) => route('system:scaleMigrationRun', () => apiFetch('POST', '/api/system/scale-migration/run', payload, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
 export async function setDataPath(dir) {
   const result = await route('system:setDataPath', () => apiFetch('POST', '/api/system/data-path', { dataDir: dir }, LONG_SYSTEM_ACTION_TIMEOUT_MS), null, true)
   await invalidateClientRuntimeState('data-path-update')

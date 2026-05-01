@@ -96,8 +96,19 @@ timeout /t 2 /nobreak >nul
 if defined TAILSCALE_CMD (
     echo.
     echo [INFO] Stopping Tailscale Funnel...
-    powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg 0" >nul 2>&1
+    powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
     echo [OK] Tailscale Funnel stopped.
+)
+
+if /I "%~1"=="--with-services" (
+    echo.
+    echo [INFO] Stopping Docker scale services...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Scale -ScaleAction down
+    if errorlevel 1 (
+        echo [WARN] Docker scale services could not be stopped automatically.
+    ) else (
+        echo [OK] Docker scale services stopped.
+    )
 )
 
 set "PORT_STILL_BUSY="

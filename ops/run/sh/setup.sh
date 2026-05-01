@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${BUSINESS_OS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-DATA_DIR="$HOME/business-os-data"
+DATA_DIR="$ROOT/business-os-data"
 ENV_FILE="$ROOT/backend/.env"
 
 echo ""
@@ -24,9 +24,9 @@ echo "[OK] Node.js $NODE_VER"
 
 echo ""
 echo "[INFO] Creating data directories..."
-mkdir -p "$DATA_DIR/db" "$DATA_DIR/uploads"
-echo "       DB:      $DATA_DIR/db/business.db"
-echo "       Uploads: $DATA_DIR/uploads"
+mkdir -p "$DATA_DIR/organizations"
+echo "       Storage root: $DATA_DIR"
+echo "       Organizations: $DATA_DIR/organizations"
 
 echo ""
 echo "[INFO] Writing backend configuration..."
@@ -48,10 +48,28 @@ TAILSCALE_URL=
 # Leave blank - Tailscale handles security.
 SYNC_TOKEN=$EXISTING_TOKEN
 
-DB_PATH=$DATA_DIR/db/business.db
-UPLOADS_PATH=$DATA_DIR/uploads
+BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
+JOB_QUEUE_DRIVER=bullmq
+REDIS_URL=redis://127.0.0.1:6379
+DATABASE_DRIVER=sqlite
+DATABASE_URL=
+OBJECT_STORAGE_DRIVER=local
+S3_ENDPOINT=http://127.0.0.1:9000
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
+S3_BUCKET=business-os-assets
+MINIO_LICENSE_FILE=
+IMPORT_ROW_BATCH_SIZE=200
+IMPORT_IMAGE_CONCURRENCY=3
+IMPORT_MAX_CSV_MB=80
+IMPORT_MAX_ZIP_MB=2048
 ENVEOF
 echo "[OK] Written: $ENV_FILE"
+
+echo ""
+echo "[INFO] Starting required Docker scale services..."
+"$ROOT/ops/run/sh/scale-services.sh" up
+echo "[OK] Required scale services ready"
 
 echo ""
 echo "[INFO] Installing backend dependencies..."

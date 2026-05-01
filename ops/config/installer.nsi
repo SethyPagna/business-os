@@ -49,8 +49,18 @@ Section "Business OS" SecMain
   File "${RELEASE_DIR}\${APP_EXE}"
   File "${RELEASE_DIR}\start-server.bat"
   File "${RELEASE_DIR}\stop-server.bat"
+  File "${RELEASE_DIR}\README.txt"
+
+  ; ---- Runtime automation and Compose config ----------------------------
+  SetOutPath "$INSTDIR\ops"
+  File /r "${RELEASE_DIR}\ops\*.*"
 
   ; ---- Sharp native binaries (optional - only if present) ---------------
+  !if /FileExists "${RELEASE_DIR}\@img\*.*"
+    SetOutPath "$INSTDIR\@img"
+    File /r "${RELEASE_DIR}\@img\*.*"
+  !endif
+
   !if /FileExists "${RELEASE_DIR}\sharp\*.*"
     SetOutPath "$INSTDIR\sharp"
     File /r "${RELEASE_DIR}\sharp\*.*"
@@ -110,7 +120,10 @@ Section "Uninstall"
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command Stop-Process -Name business-os-server -Force -ErrorAction SilentlyContinue' $0
 
   ; Remove app files only - NEVER remove the data folder
+  RMDir /r "$INSTDIR\ops"
+  RMDir /r "$INSTDIR\@img"
   RMDir /r "$INSTDIR\sharp"
+  Delete   "$INSTDIR\README.txt"
   Delete   "$INSTDIR\${APP_EXE}"
   Delete   "$INSTDIR\start-server.bat"
   Delete   "$INSTDIR\stop-server.bat"

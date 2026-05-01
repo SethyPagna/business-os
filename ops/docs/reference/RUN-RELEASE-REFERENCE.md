@@ -64,14 +64,14 @@ Total scripts documented: **25**
 ## ops/run/bat/setup.bat
 
 - File type: `.bat`
-- Total lines: **282**
+- Total lines: **307**
 - Labels: **0**
 - Step markers: **0**
 
 ## ops/run/bat/start-server.bat
 
 - File type: `.bat`
-- Total lines: **320**
+- Total lines: **364**
 - Labels: **5**
 - Step markers: **0**
 
@@ -79,16 +79,16 @@ Total scripts documented: **25**
 
 | Label | Line |
 |---|---:|
-| `after_pm2_start` | 168 |
-| `background_start` | 215 |
-| `foreground` | 227 |
-| `after_start` | 256 |
-| `after_health_done` | 273 |
+| `after_pm2_start` | 175 |
+| `background_start` | 222 |
+| `foreground` | 234 |
+| `after_start` | 263 |
+| `after_health_done` | 280 |
 
 ## ops/run/bat/stop-server.bat
 
 - File type: `.bat`
-- Total lines: **128**
+- Total lines: **139**
 - Labels: **1**
 - Step markers: **0**
 
@@ -101,7 +101,7 @@ Total scripts documented: **25**
 ## ops/run/bat/verify-local.bat
 
 - File type: `.bat`
-- Total lines: **74**
+- Total lines: **92**
 - Labels: **2**
 - Step markers: **0**
 
@@ -115,7 +115,7 @@ Total scripts documented: **25**
 ## ops/run/bat/build-release.bat
 
 - File type: `.bat`
-- Total lines: **588**
+- Total lines: **617**
 - Labels: **3**
 - Step markers: **12**
 
@@ -142,7 +142,7 @@ Total scripts documented: **25**
 | STEP 6 | Packaging backend to .exe with @yao-pkg/pkg... | 284 |
 | STEP 7 | Copying Sharp native binaries... | 329 |
 | STEP 8 | Assembling release\business-os folder... | 353 |
-| STEP 9 | Building installer... | 519 |
+| STEP 9 | Building installer... | 546 |
 
 ## ops/run/bat/clean-generated.bat
 
@@ -154,7 +154,7 @@ Total scripts documented: **25**
 ## ops/run/bat/release/start-server.bat
 
 - File type: `.bat`
-- Total lines: **277**
+- Total lines: **313**
 - Labels: **4**
 - Step markers: **0**
 
@@ -162,27 +162,27 @@ Total scripts documented: **25**
 
 | Label | Line |
 |---|---:|
-| `wait_for_proc` | 198 |
-| `proc_found` | 214 |
-| `health_retry` | 219 |
-| `health_done` | 243 |
+| `wait_for_proc` | 234 |
+| `proc_found` | 250 |
+| `health_retry` | 255 |
+| `health_done` | 279 |
 
 ## ops/run/bat/release/stop-server.bat
 
 - File type: `.bat`
-- Total lines: **135**
+- Total lines: **146**
 - Labels: **0**
 - Step markers: **0**
 
 ## ops/run/sh/setup.sh
 
 - File type: `.sh`
-- Total lines: **92**
+- Total lines: **110**
 
 ## ops/run/sh/start-server.sh
 
 - File type: `.sh`
-- Total lines: **98**
+- Total lines: **140**
 
 ## ops/run/sh/stop-server.sh
 

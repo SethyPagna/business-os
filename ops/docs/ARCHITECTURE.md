@@ -2,14 +2,15 @@
 
 ## Runtime Model
 
-Business OS is a single-process Node.js backend with an SPA frontend:
+Business OS is a Node.js backend with an SPA frontend and required local scale services:
 
 - Backend: Express + SQLite (`better-sqlite3`) + WebSocket (`ws`).
 - Frontend: React + Vite build artifacts served by backend.
-- Storage: local SQLite file and local uploads folder under `business-os-data`.
+- Storage: local SQLite file and local uploads folder under `business-os-data` remain authoritative by default.
+- Scale services: Docker Compose starts Redis, Postgres, and MinIO for import queues and verified future migration targets.
 - Sync/UI refresh: backend broadcasts channel updates via WebSocket `sync:update`.
 
-The backend is the source of truth for all business data. Frontend state is view/cache only.
+The backend is the source of truth for all business data. Frontend state is view/cache only. Postgres/MinIO are not used as the live data store until an admin explicitly completes the in-app migration wizard.
 
 ## Major Layers
 
@@ -27,8 +28,9 @@ The backend is the source of truth for all business data. Frontend state is view
 - `backend/src/config/index.js`
   - Resolves runtime directory (source vs packaged EXE).
   - Loads `.env`.
-  - Resolves data root via `data-location.json` or defaults.
-  - Exposes derived paths (`DB_PATH`, `UPLOADS_PATH`, `FRONTEND_DIST`).
+  - Resolves storage root via `data-location.json` or defaults.
+  - Resolves organization data under `business-os-data/organizations/<public_id> (<sanitized-name>)/`.
+  - Exposes derived paths (`DB_PATH`, `UPLOADS_PATH`, `IMPORTS_PATH`, `FRONTEND_DIST`) and scale service config.
 
 ### 3) Database and Schema
 
@@ -57,10 +59,12 @@ The backend is the source of truth for all business data. Frontend state is view
 
 ### 6) Services
 
-- `backend/src/services/firebaseAuth.js`
-  - Firebase auth-provider integration (identity provisioning, password sync, token verification).
 - `backend/src/services/verification.js`
   - Email/SMS verification capability abstraction and code lifecycle.
+- `backend/src/services/importJobs.js`
+  - Queue-backed large import jobs, BullMQ/Redis queue driver, and SQLite fallback for compatibility modes.
+- `backend/src/services/googleDriveSync.js`
+  - Google Drive OAuth and data sync integration.
 
 ### 7) Frontend
 
@@ -126,5 +130,7 @@ Returns write path updates:
 ## Release and Portability
 
 - `build-release.bat` assembles a portable folder and installer.
+- Release output includes the shared runtime bootstrapper and Docker Compose config.
+- `start-server.bat` is the one-button runtime path: it verifies scale service health before launching the app.
 - Existing `business-os-data` and `.env` in release folder are preserved on rebuild.
 - Data path can be relocated and persisted via `data-location.json`.

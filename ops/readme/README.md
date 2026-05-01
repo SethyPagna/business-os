@@ -1,179 +1,137 @@
-# Business OS
+# Business OS Operator Guide
 
-Business OS is an offline-first retail operating system with POS, inventory, sales, returns, reporting, user roles, backup, and a read-only customer portal.
+This guide is for support, installers, and technical operators. Everyday users should read the root `README.md` and use only `setup.bat`, `start-server.bat`, and `stop-server.bat`.
 
-## Technical Documentation
+## Runtime Model
 
-Detailed technical docs are in [`docs/`](docs/README.md):
+Business OS now starts as one application, but it depends on local scale services:
 
-- architecture and module boundaries
-- schema relationships and derived-data logic
-- backend route ownership map
-- backend/frontend file responsibility map
-- auto-generated per-file function/script/translation references
+- Redis for import queues
+- Postgres for the future verified migration target
+- MinIO for the future verified asset-storage target
+- SQLite and local files as the current authoritative business data source
 
-Regenerate code reference docs anytime with:
+`start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Tailscale Funnel when installed, and prints the local and customer URLs.
 
-```bash
-node scripts/generate-doc-reference.js
-node scripts/generate-full-project-docs.js
-node scripts/performance-scan.js
+The app does not silently migrate business data. SQLite/local files stay authoritative until an admin uses Settings > Backup > Data migration and completes a verified migration workflow.
+
+The public URL check intentionally verifies both the HTTPS routes and public DNS ingress. If the app routes return `200` but the DNS ingress check fails, the local app is healthy and the Funnel route may still be tailnet-only. Enable Funnel/public DNS in Tailscale admin before treating that URL as usable by non-tailnet devices.
+
+## New Laptop Setup
+
+Run from the repo root or installed app folder:
+
+```bat
+setup.bat
 ```
 
-## Quick Start
+The setup flow uses `ops\scripts\powershell\runtime-bootstrap.ps1` before Node is required. It detects:
 
-### From source
+- Node.js
+- Docker Desktop
+- Tailscale
+- Git
+- OpenSSL
 
-1. Run `setup.bat`
-2. Run `start-server.bat`
-3. Open `http://localhost:4000`
+When `winget` is available, setup tries to install missing tools automatically. If Windows needs administrator approval or a restart, setup stops with a clear message.
 
-### From a built release
+## Daily Start / Stop
 
-1. Go to `release\business-os`
-2. Run `start-server.bat`
-3. Open the local admin URL printed by the script
+```bat
+start-server.bat
+stop-server.bat
+```
 
-Use `stop-server.bat` from the same folder to stop the packaged server.
+To stop the app and the scale services during support work:
 
-Environment file locations:
+```bat
+stop-server.bat --with-services
+```
 
-- Source mode: `backend/.env`
-- Packaged release mode: `release/business-os/.env`
+## Support Service Commands
 
-## Login
+These commands are hidden from normal user instructions:
 
-- Username: `admin`
-- Password: `admin`
+```bat
+ops\run\bat\scale-services.bat status
+ops\run\bat\scale-services.bat logs
+ops\run\bat\scale-services.bat up
+ops\run\bat\scale-services.bat down
+```
 
-Change the password immediately after first login.
+The batch wrapper delegates to the shared PowerShell bootstrapper and uses a project-local Docker config folder at `ops\runtime\docker-config` to avoid user profile Docker config permission issues.
 
-Password reset is available on the login page using email verification codes.
+## Data Layout
 
-Login now supports:
+The storage container is `business-os-data`. Active organization data resolves to:
 
-- username/email + password
-- optional OTP app 2FA (TOTP)
-- passwordless one-time sign-in code via verified email
-- admin-created preset users, then self-service verification/password updates by each user
+```text
+business-os-data\organizations\<public_id> (<sanitized-name>)\
+```
 
-- Email providers supported: Resend, SendGrid, or `EMAIL_WEBHOOK_URL`
-- Provider credentials stay server-side only (in `.env`) and are never exposed to the customer portal.
-- If Resend returns sandbox `403 validation_error`, verify a sender domain in Resend first, then set `RESEND_FROM_EMAIL` to that verified domain sender.
+Typical organization contents:
 
-For OTP secret encryption at rest, set:
+- `db\business.db`
+- `uploads\`
+- `imports\`
+- `backups\`
+- `portal\`
 
-- `APP_ENCRYPTION_KEY` as a 32-byte key (64-char hex or base64)
-
-Optional external auth provider (Auth only, local SQLite data unchanged):
-
-- `SUPABASE_AUTH_ENABLED=true`
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- Optional feature flags:
-  - `SUPABASE_EMAIL_AUTH_ENABLED`
-  - `SUPABASE_MAGIC_LINK_ENABLED`
-  - `SUPABASE_INVITE_ENABLED`
-  - `SUPABASE_GOOGLE_OAUTH_ENABLED`
-  - `SUPABASE_FACEBOOK_OAUTH_ENABLED`
-  - `SUPABASE_MFA_TOTP_ENABLED`
-
-User lifecycle rules:
-
-- Only users with Users permission can create, disable, delete, or reset other users.
-- Non-admin users can only verify/change their own profile and password.
-- Inactive or deleted users cannot login or reset passwords.
-- Login duration selection (`session`, `7d`, `30d`) is persisted and applied for password login, OTP login, and code login.
-
-## Admin URL vs Customer URL
-
-Business OS now supports two separate entry points:
-
-- Internal admin URL: used by staff for POS, inventory, sales, settings, and management.
-- Public customer URL: used by customers for the read-only catalog, membership lookup, and customer submissions when enabled.
-
-How it works:
-
-- The admin app runs on the main server URL, usually `http://localhost:4000` locally.
-- The customer portal lives on a separate public path such as `/customer-portal` or another configured path.
-- In deployment, you can point a separate domain, Tailscale Funnel, reverse proxy rule, or path-based route to that customer portal path.
-- The app stores the public customer URL in Customer Portal settings, but domain or Funnel provisioning still happens outside the app.
-
-Practical examples:
-
-- Admin: `https://internal.example.com`
-- Customer: `https://shop.example.com`
-
-Or with path-based routing:
-
-- Admin: `https://internal.example.com`
-- Customer: `https://internal.example.com/customer-portal`
-
-If you do not want the admin URL to be guessable, use a separate customer-facing domain or Funnel hostname.
-
-## Customer Portal
-
-Customer Portal is managed inside Business OS and supports:
-
-- business profile and social/contact information
-- product catalog preview and public display
-- membership lookup
-- points and redemption rules display
-- customer engagement submission settings
-- internal preview inside the admin app
-
-The portal is read-only for customers. Staff apply membership discounts and point usage from POS.
-
-## Loyalty Points
-
-Loyalty Points is a separate internal management page for:
-
-- point earning basis and earn rate
-- minimum redemption points
-- USD / KHR redemption values
-- customer-facing membership note text
-- reward points for approved customer submissions
-
-This keeps Customer Portal focused on customer-facing layout and visibility, while point policy stays in a dedicated business-management page.
-
-## Data Storage
-
-Runtime data lives in `business-os-data`.
-
-Typical contents:
-
-- `business-os-data\db\business.db`
-- `business-os-data\uploads\`
-- `business-os-data\backups\`
-- `business-os-data\portal\` or other uploaded assets as used by the app
-
-For packaged releases, `build-release.bat` preserves existing release data:
+Packaged releases preserve:
 
 - `release\business-os\business-os-data`
 - `release\business-os\.env`
-- `release\business-os\data-location.json` if present
+- `release\business-os\data-location.json`
 
-That means rebuilding updates the app files without overwriting the user database or uploads.
+## Environment Defaults
 
-## Release Layout
+Setup and release templates default to required scale services while keeping SQLite/local data authoritative:
 
-Current release output:
+```env
+BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
+JOB_QUEUE_DRIVER=bullmq
+REDIS_URL=redis://127.0.0.1:6379
+DATABASE_DRIVER=sqlite
+OBJECT_STORAGE_DRIVER=local
+```
 
-- `release\business-os\business-os-server.exe`
-- `release\business-os\start-server.bat`
-- `release\business-os\stop-server.bat`
-- `release\BusinessOS-Setup-vX.X.X.exe`
+Postgres and MinIO are started and health-checked, but `DATABASE_DRIVER=sqlite` and `OBJECT_STORAGE_DRIVER=local` stay in place until the migration wizard is explicitly completed.
 
-The frontend is bundled into the packaged server for release builds. End users do not need the source tree.
+## Secrets
 
-## Tailscale / Public Access
+Do not commit local service secrets. The following remain ignored:
 
-`start-server.bat` can detect and print the local URL and, when configured, the customer portal URL. On machines with Tailscale installed, you can expose the app through Funnel or another Tailscale-hosted endpoint and save the resulting customer URL in the app.
+- `minio.license`
+- `*.license`
+- `ops\runtime\secrets\`
+- `runtime\secrets\`
+- `.env`
 
-## Troubleshooting
+The bootstrapper copies root `minio.license` into ignored runtime secret storage when present, or creates an empty placeholder so Compose can start without exposing the token.
 
-- If the app does not start, run `stop-server.bat` first, then start again.
-- If the local port is busy, update `PORT` in the relevant `.env`.
-- If the customer portal returns `404`, that machine is likely still running an older build.
-- If you move a built release to another PC, keep the existing `business-os-data` folder so data stays intact.
+## Release Build
+
+```bat
+build-release.bat
+```
+
+The release output includes:
+
+- `business-os-server.exe`
+- release `start-server.bat` / `stop-server.bat`
+- `ops\docker\compose.scale.yml`
+- `ops\scripts\powershell\runtime-bootstrap.ps1`
+- `.env` template with scale defaults
+- preserved data and data-location files
+
+The desktop shortcut and portable release both use the same one-button start flow.
+
+## Verification
+
+```bat
+verify-local.bat
+```
+
+Verification now requires scale service health. It fails fast if Docker Desktop or Redis/Postgres/MinIO are unavailable.
+
+Technical reference docs remain under `ops\docs\`. Generated references are under `ops\docs\reference\` and are not normal user reading.

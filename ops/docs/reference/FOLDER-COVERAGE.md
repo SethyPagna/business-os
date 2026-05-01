@@ -4,25 +4,25 @@ Auto-generated folder-level documentation coverage for all first-party project f
 
 ## 1. Coverage Summary
 
-Total folders documented: **59**
+Total folders documented: **60**
 
 ## 2. Folder Matrix
 
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
-| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 16 | 7 |
+| 1 | `.` | Project root (run files, setup, packaging, top-level config) | 15 | 7 |
 | 2 | `backend` | Backend project root | 5 | 2 |
-| 3 | `backend/src` | Backend runtime core | 24 | 7 |
+| 3 | `backend/src` | Backend runtime core | 27 | 7 |
 | 4 | `backend/src/config` | Backend runtime core | 1 | 0 |
 | 5 | `backend/src/dataPath` | Backend runtime core | 1 | 0 |
 | 6 | `backend/src/organizationContext` | Backend runtime core | 1 | 0 |
-| 7 | `backend/src/routes` | HTTP route modules | 19 | 1 |
+| 7 | `backend/src/routes` | HTTP route modules | 21 | 1 |
 | 8 | `backend/src/routes/system` | HTTP route modules | 1 | 0 |
 | 9 | `backend/src/runtimeState` | Backend runtime core | 1 | 0 |
-| 10 | `backend/src/services` | Provider/service integrations | 6 | 1 |
+| 10 | `backend/src/services` | Provider/service integrations | 7 | 1 |
 | 11 | `backend/src/services/googleDriveSync` | Provider/service integrations | 1 | 0 |
 | 12 | `backend/src/storage` | Backend runtime core | 1 | 0 |
-| 13 | `backend/test` | Project folder | 16 | 0 |
+| 13 | `backend/test` | Project folder | 18 | 0 |
 | 14 | `frontend` | Frontend project root | 7 | 3 |
 | 15 | `frontend/public` | Project folder | 4 | 1 |
 | 16 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
@@ -35,7 +35,7 @@ Total folders documented: **59**
 | 23 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 24 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
 | 25 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 26 | `frontend/src/components/catalog` | UI pages/components domain | 5 | 0 |
+| 26 | `frontend/src/components/catalog` | UI pages/components domain | 6 | 0 |
 | 27 | `frontend/src/components/contacts` | UI pages/components domain | 6 | 0 |
 | 28 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
 | 29 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
@@ -45,7 +45,7 @@ Total folders documented: **59**
 | 33 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
 | 34 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
 | 35 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
-| 36 | `frontend/src/components/products` | UI pages/components domain | 17 | 0 |
+| 36 | `frontend/src/components/products` | UI pages/components domain | 19 | 0 |
 | 37 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
 | 38 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
 | 39 | `frontend/src/components/returns` | UI pages/components domain | 5 | 0 |
@@ -60,22 +60,23 @@ Total folders documented: **59**
 | 48 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
 | 49 | `frontend/src/styles` | Project folder | 1 | 0 |
 | 50 | `frontend/src/utils` | Project folder | 18 | 0 |
-| 51 | `frontend/tests` | Project folder | 16 | 0 |
+| 51 | `frontend/tests` | Project folder | 19 | 0 |
 | 52 | `ops/run` | Project run-script home for bat and sh launchers | 0 | 2 |
-| 53 | `ops/run/bat` | Windows run/build/verify scripts | 6 | 0 |
-| 54 | `ops/run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
-| 55 | `ops/scripts` | Project-level automation scripts | 5 | 4 |
+| 53 | `ops/run/bat` | Windows run/build/verify scripts | 7 | 0 |
+| 54 | `ops/run/sh` | POSIX run/setup/stop scripts | 4 | 0 |
+| 55 | `ops/scripts` | Project-level automation scripts | 6 | 5 |
 | 56 | `ops/scripts/backend` | Project folder | 1 | 0 |
-| 57 | `ops/scripts/frontend` | Project folder | 1 | 0 |
+| 57 | `ops/scripts/frontend` | Project folder | 3 | 0 |
 | 58 | `ops/scripts/lib` | Project folder | 1 | 0 |
-| 59 | `ops/scripts/powershell` | Project folder | 1 | 0 |
+| 59 | `ops/scripts/powershell` | Project folder | 2 | 0 |
+| 60 | `ops/scripts/runtime` | Project folder | 1 | 0 |
 
 ## 3. Detailed Folder Commentary
 
 ### 3.1 Folder: `.`
 
 - Purpose: Project root (run files, setup, packaging, top-level config)
-- Direct files: **16**
+- Direct files: **15**
 - Direct subfolders: **7**
 
 #### 3.1.1 Subfolders
@@ -99,17 +100,16 @@ Total folders documented: **59**
 | 3 | `clean-generated.bat` | Project source/support file |
 | 4 | `clean-generated.ps1` | Project source/support file |
 | 5 | `package.json` | Configuration/data manifest |
-| 6 | `README-build.md` | Project documentation entrypoint |
-| 7 | `README.md` | Project documentation entrypoint |
-| 8 | `setup.bat` | Environment setup script |
-| 9 | `setup.sh` | Environment setup script |
-| 10 | `start-server-release.bat` | Server lifecycle launcher script |
-| 11 | `start-server.bat` | Server lifecycle launcher script |
-| 12 | `start-server.sh` | Server lifecycle launcher script |
-| 13 | `stop-server-release.bat` | Server lifecycle launcher script |
-| 14 | `stop-server.bat` | Server lifecycle launcher script |
-| 15 | `stop-server.sh` | Server lifecycle launcher script |
-| 16 | `verify-local.bat` | Project source/support file |
+| 6 | `README.md` | Project documentation entrypoint |
+| 7 | `setup.bat` | Environment setup script |
+| 8 | `setup.sh` | Environment setup script |
+| 9 | `start-server-release.bat` | Server lifecycle launcher script |
+| 10 | `start-server.bat` | Server lifecycle launcher script |
+| 11 | `start-server.sh` | Server lifecycle launcher script |
+| 12 | `stop-server-release.bat` | Server lifecycle launcher script |
+| 13 | `stop-server.bat` | Server lifecycle launcher script |
+| 14 | `stop-server.sh` | Server lifecycle launcher script |
+| 15 | `verify-local.bat` | Project source/support file |
 
 
 ### 3.2 Folder: `backend`
@@ -139,7 +139,7 @@ Total folders documented: **59**
 ### 3.3 Folder: `backend/src`
 
 - Purpose: Backend runtime core
-- Direct files: **24**
+- Direct files: **27**
 - Direct subfolders: **7**
 
 #### 3.3.1 Subfolders
@@ -167,21 +167,24 @@ Total folders documented: **59**
 | 7 | `fileAssets.js` | Project source/support file |
 | 8 | `helpers.js` | Project source/support file |
 | 9 | `idempotency.js` | Project source/support file |
-| 10 | `middleware.js` | Project source/support file |
-| 11 | `money.js` | Project source/support file |
-| 12 | `netSecurity.js` | Project source/support file |
-| 13 | `portalUtils.js` | Project source/support file |
-| 14 | `productImportPolicies.js` | Project source/support file |
-| 15 | `README.md` | Documentation |
-| 16 | `requestContext.js` | Project source/support file |
-| 17 | `security.js` | Project source/support file |
-| 18 | `serverUtils.js` | Project source/support file |
-| 19 | `sessionAuth.js` | Project source/support file |
-| 20 | `settingsSnapshot.js` | Project source/support file |
-| 21 | `systemFsWorker.js` | Project source/support file |
-| 22 | `uploadReferenceCleanup.js` | Project source/support file |
-| 23 | `uploadSecurity.js` | Project source/support file |
-| 24 | `websocket.js` | Project source/support file |
+| 10 | `importCsv.js` | Project source/support file |
+| 11 | `importParsing.js` | Project source/support file |
+| 12 | `middleware.js` | Project source/support file |
+| 13 | `money.js` | Project source/support file |
+| 14 | `netSecurity.js` | Project source/support file |
+| 15 | `portalUtils.js` | Project source/support file |
+| 16 | `productDiscounts.js` | Project source/support file |
+| 17 | `productImportPolicies.js` | Project source/support file |
+| 18 | `README.md` | Documentation |
+| 19 | `requestContext.js` | Project source/support file |
+| 20 | `security.js` | Project source/support file |
+| 21 | `serverUtils.js` | Project source/support file |
+| 22 | `sessionAuth.js` | Project source/support file |
+| 23 | `settingsSnapshot.js` | Project source/support file |
+| 24 | `systemFsWorker.js` | Project source/support file |
+| 25 | `uploadReferenceCleanup.js` | Project source/support file |
+| 26 | `uploadSecurity.js` | Project source/support file |
+| 27 | `websocket.js` | Project source/support file |
 
 
 ### 3.4 Folder: `backend/src/config`
@@ -226,7 +229,7 @@ Total folders documented: **59**
 ### 3.7 Folder: `backend/src/routes`
 
 - Purpose: HTTP route modules
-- Direct files: **19**
+- Direct files: **21**
 - Direct subfolders: **1**
 
 #### 3.7.1 Subfolders
@@ -239,25 +242,27 @@ Total folders documented: **59**
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `ai.js` | API route handler |
-| 2 | `auth.js` | API route handler |
-| 3 | `branches.js` | API route handler |
-| 4 | `catalog.js` | API route handler |
-| 5 | `categories.js` | API route handler |
-| 6 | `contacts.js` | API route handler |
-| 7 | `customTables.js` | API route handler |
-| 8 | `files.js` | API route handler |
-| 9 | `inventory.js` | API route handler |
-| 10 | `notifications.js` | API route handler |
-| 11 | `organizations.js` | API route handler |
-| 12 | `portal.js` | API route handler |
-| 13 | `products.js` | API route handler |
-| 14 | `README.md` | API route handler |
-| 15 | `returns.js` | API route handler |
-| 16 | `sales.js` | API route handler |
-| 17 | `settings.js` | API route handler |
-| 18 | `units.js` | API route handler |
-| 19 | `users.js` | API route handler |
+| 1 | `actionHistory.js` | API route handler |
+| 2 | `ai.js` | API route handler |
+| 3 | `auth.js` | API route handler |
+| 4 | `branches.js` | API route handler |
+| 5 | `catalog.js` | API route handler |
+| 6 | `categories.js` | API route handler |
+| 7 | `contacts.js` | API route handler |
+| 8 | `customTables.js` | API route handler |
+| 9 | `files.js` | API route handler |
+| 10 | `importJobs.js` | API route handler |
+| 11 | `inventory.js` | API route handler |
+| 12 | `notifications.js` | API route handler |
+| 13 | `organizations.js` | API route handler |
+| 14 | `portal.js` | API route handler |
+| 15 | `products.js` | API route handler |
+| 16 | `README.md` | API route handler |
+| 17 | `returns.js` | API route handler |
+| 18 | `sales.js` | API route handler |
+| 19 | `settings.js` | API route handler |
+| 20 | `units.js` | API route handler |
+| 21 | `users.js` | API route handler |
 
 
 ### 3.8 Folder: `backend/src/routes/system`
@@ -289,7 +294,7 @@ Total folders documented: **59**
 ### 3.10 Folder: `backend/src/services`
 
 - Purpose: Provider/service integrations
-- Direct files: **6**
+- Direct files: **7**
 - Direct subfolders: **1**
 
 #### 3.10.1 Subfolders
@@ -304,10 +309,11 @@ Total folders documented: **59**
 |---:|---|---|
 | 1 | `aiGateway.js` | Integration/service layer |
 | 2 | `firebaseAuth.js` | Integration/service layer |
-| 3 | `portalAi.js` | Integration/service layer |
-| 4 | `README.md` | Integration/service layer |
-| 5 | `supabaseAuth.js` | Integration/service layer |
-| 6 | `verification.js` | Integration/service layer |
+| 3 | `importJobs.js` | Integration/service layer |
+| 4 | `portalAi.js` | Integration/service layer |
+| 5 | `README.md` | Integration/service layer |
+| 6 | `supabaseAuth.js` | Integration/service layer |
+| 7 | `verification.js` | Integration/service layer |
 
 
 ### 3.11 Folder: `backend/src/services/googleDriveSync`
@@ -339,7 +345,7 @@ Total folders documented: **59**
 ### 3.13 Folder: `backend/test`
 
 - Purpose: Project folder
-- Direct files: **16**
+- Direct files: **18**
 - Direct subfolders: **0**
 
 #### 3.13.2 Files
@@ -356,12 +362,14 @@ Total folders documented: **59**
 | 8 | `dataPath.test.js` | Project source/support file |
 | 9 | `fileRouteSecurityFlow.test.js` | Project source/support file |
 | 10 | `idempotency.test.js` | Project source/support file |
-| 11 | `netSecurity.test.js` | Project source/support file |
-| 12 | `portalUtils.test.js` | Project source/support file |
-| 13 | `productImportPolicies.test.js` | Project source/support file |
-| 14 | `serverUtils.test.js` | Project source/support file |
-| 15 | `stockConsistency.test.js` | Project source/support file |
-| 16 | `uploadSecurity.test.js` | Project source/support file |
+| 11 | `importCsv.test.js` | Project source/support file |
+| 12 | `netSecurity.test.js` | Project source/support file |
+| 13 | `portalUtils.test.js` | Project source/support file |
+| 14 | `productImportPolicies.test.js` | Project source/support file |
+| 15 | `serverUtils.test.js` | Project source/support file |
+| 16 | `stockConsistency.test.js` | Project source/support file |
+| 17 | `systemRouteSecurity.test.js` | Project source/support file |
+| 18 | `uploadSecurity.test.js` | Project source/support file |
 
 
 ### 3.14 Folder: `frontend`
@@ -608,7 +616,7 @@ Total folders documented: **59**
 ### 3.26 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
-- Direct files: **5**
+- Direct files: **6**
 - Direct subfolders: **0**
 
 #### 3.26.2 Files
@@ -619,7 +627,8 @@ Total folders documented: **59**
 | 2 | `CatalogProductsSection.jsx` | UI component/page |
 | 3 | `CatalogSecondaryTabs.jsx` | UI component/page |
 | 4 | `catalogUi.jsx` | UI component/page |
-| 5 | `portalEditorUtils.mjs` | UI component/page |
+| 5 | `portalCatalogDisplay.mjs` | UI component/page |
+| 6 | `portalEditorUtils.mjs` | UI component/page |
 
 
 ### 3.27 Folder: `frontend/src/components/contacts`
@@ -768,7 +777,7 @@ Total folders documented: **59**
 ### 3.36 Folder: `frontend/src/components/products`
 
 - Purpose: UI pages/components domain
-- Direct files: **17**
+- Direct files: **19**
 - Direct subfolders: **0**
 
 #### 3.36.2 Files
@@ -789,9 +798,11 @@ Total folders documented: **59**
 | 12 | `ProductDetailModal.jsx` | UI component/page |
 | 13 | `ProductForm.jsx` | UI component/page |
 | 14 | `productHistoryHelpers.mjs` | UI component/page |
-| 15 | `Products.jsx` | UI component/page |
-| 16 | `scanbotScanner.mjs` | UI component/page |
-| 17 | `VariantFormModal.jsx` | UI component/page |
+| 15 | `productImportPlanner.mjs` | UI component/page |
+| 16 | `productImportWorker.mjs` | UI component/page |
+| 17 | `Products.jsx` | UI component/page |
+| 18 | `scanbotScanner.mjs` | UI component/page |
+| 19 | `VariantFormModal.jsx` | UI component/page |
 
 
 ### 3.37 Folder: `frontend/src/components/receipt`
@@ -1035,29 +1046,32 @@ Total folders documented: **59**
 ### 3.51 Folder: `frontend/tests`
 
 - Purpose: Project folder
-- Direct files: **16**
+- Direct files: **19**
 - Direct subfolders: **0**
 
 #### 3.51.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `appShellUtils.test.mjs` | Project source/support file |
-| 2 | `barcodeImageScanner.test.mjs` | Project source/support file |
-| 3 | `barcodeScannerState.test.mjs` | Project source/support file |
-| 4 | `csvImport.test.mjs` | Project source/support file |
-| 5 | `exportPackages.test.mjs` | Project source/support file |
-| 6 | `groupedRecords.test.mjs` | Project source/support file |
-| 7 | `historyHelpers.test.mjs` | Project source/support file |
-| 8 | `loaders.test.mjs` | Project source/support file |
-| 9 | `portalEditorUtils.test.mjs` | Project source/support file |
-| 10 | `posCore.test.mjs` | Project source/support file |
-| 11 | `pricingContacts.test.mjs` | Project source/support file |
-| 12 | `productGrouping.test.mjs` | Project source/support file |
-| 13 | `productHistoryHelpers.test.mjs` | Project source/support file |
-| 14 | `receiptTemplate.test.mjs` | Project source/support file |
-| 15 | `scanbotScanner.test.mjs` | Project source/support file |
-| 16 | `storagePolicy.test.mjs` | Project source/support file |
+| 1 | `apiHttp.test.mjs` | Project source/support file |
+| 2 | `appShellUtils.test.mjs` | Project source/support file |
+| 3 | `barcodeImageScanner.test.mjs` | Project source/support file |
+| 4 | `barcodeScannerState.test.mjs` | Project source/support file |
+| 5 | `csvImport.test.mjs` | Project source/support file |
+| 6 | `exportPackages.test.mjs` | Project source/support file |
+| 7 | `groupedRecords.test.mjs` | Project source/support file |
+| 8 | `historyHelpers.test.mjs` | Project source/support file |
+| 9 | `loaders.test.mjs` | Project source/support file |
+| 10 | `portalCatalogDisplay.test.mjs` | Project source/support file |
+| 11 | `portalEditorUtils.test.mjs` | Project source/support file |
+| 12 | `posCore.test.mjs` | Project source/support file |
+| 13 | `pricingContacts.test.mjs` | Project source/support file |
+| 14 | `productGrouping.test.mjs` | Project source/support file |
+| 15 | `productHistoryHelpers.test.mjs` | Project source/support file |
+| 16 | `productImportPlanner.test.mjs` | Project source/support file |
+| 17 | `receiptTemplate.test.mjs` | Project source/support file |
+| 18 | `scanbotScanner.test.mjs` | Project source/support file |
+| 19 | `storagePolicy.test.mjs` | Project source/support file |
 
 
 ### 3.52 Folder: `ops/run`
@@ -1077,7 +1091,7 @@ Total folders documented: **59**
 ### 3.53 Folder: `ops/run/bat`
 
 - Purpose: Windows run/build/verify scripts
-- Direct files: **6**
+- Direct files: **7**
 - Direct subfolders: **0**
 
 #### 3.53.2 Files
@@ -1086,32 +1100,34 @@ Total folders documented: **59**
 |---:|---|---|
 | 1 | `build-release.bat` | Project source/support file |
 | 2 | `clean-generated.bat` | Project source/support file |
-| 3 | `setup.bat` | Project source/support file |
-| 4 | `start-server.bat` | Project source/support file |
-| 5 | `stop-server.bat` | Project source/support file |
-| 6 | `verify-local.bat` | Project source/support file |
+| 3 | `scale-services.bat` | Project source/support file |
+| 4 | `setup.bat` | Project source/support file |
+| 5 | `start-server.bat` | Project source/support file |
+| 6 | `stop-server.bat` | Project source/support file |
+| 7 | `verify-local.bat` | Project source/support file |
 
 
 ### 3.54 Folder: `ops/run/sh`
 
 - Purpose: POSIX run/setup/stop scripts
-- Direct files: **3**
+- Direct files: **4**
 - Direct subfolders: **0**
 
 #### 3.54.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `setup.sh` | Project source/support file |
-| 2 | `start-server.sh` | Project source/support file |
-| 3 | `stop-server.sh` | Project source/support file |
+| 1 | `scale-services.sh` | Project source/support file |
+| 2 | `setup.sh` | Project source/support file |
+| 3 | `start-server.sh` | Project source/support file |
+| 4 | `stop-server.sh` | Project source/support file |
 
 
 ### 3.55 Folder: `ops/scripts`
 
 - Purpose: Project-level automation scripts
-- Direct files: **5**
-- Direct subfolders: **4**
+- Direct files: **6**
+- Direct subfolders: **5**
 
 #### 3.55.1 Subfolders
 
@@ -1121,6 +1137,7 @@ Total folders documented: **59**
 | 2 | `frontend` |
 | 3 | `lib` |
 | 4 | `powershell` |
+| 5 | `runtime` |
 
 #### 3.55.2 Files
 
@@ -1131,6 +1148,7 @@ Total folders documented: **59**
 | 3 | `performance-scan.js` | Project source/support file |
 | 4 | `sync-firebase-release-env.ps1` | Project source/support file |
 | 5 | `verify-runtime-deps.js` | Project source/support file |
+| 6 | `verify-scale-services.js` | Project source/support file |
 
 
 ### 3.56 Folder: `ops/scripts/backend`
@@ -1149,7 +1167,7 @@ Total folders documented: **59**
 ### 3.57 Folder: `ops/scripts/frontend`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **3**
 - Direct subfolders: **0**
 
 #### 3.57.2 Files
@@ -1157,6 +1175,8 @@ Total folders documented: **59**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `verify-i18n.js` | Project source/support file |
+| 2 | `verify-performance.js` | Project source/support file |
+| 3 | `verify-ui.js` | Project source/support file |
 
 
 ### 3.58 Folder: `ops/scripts/lib`
@@ -1175,7 +1195,7 @@ Total folders documented: **59**
 ### 3.59 Folder: `ops/scripts/powershell`
 
 - Purpose: Project folder
-- Direct files: **1**
+- Direct files: **2**
 - Direct subfolders: **0**
 
 #### 3.59.2 Files
@@ -1183,5 +1203,19 @@ Total folders documented: **59**
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `clean-generated.ps1` | Project source/support file |
+| 2 | `runtime-bootstrap.ps1` | Project source/support file |
+
+
+### 3.60 Folder: `ops/scripts/runtime`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.60.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `check-public-url.mjs` | Project source/support file |
 
 

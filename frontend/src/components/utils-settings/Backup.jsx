@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Cloud, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
+import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
@@ -1087,6 +1087,124 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   )
 }
 
+function ScaleMigrationSection({ t, notify, active = true }) {
+  const copy = useCopy(t)
+  const [status, setStatus] = useState(null)
+  const [prepared, setPrepared] = useState(null)
+  const [busy, setBusy] = useState('')
+  const requestRef = useRef(0)
+
+  const loadStatus = useCallback(async () => {
+    const requestId = beginTrackedRequest(requestRef)
+    try {
+      const result = await withLoaderTimeout(() => window.api.getScaleMigrationStatus?.(), 'Scale migration status', 10000)
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return
+      setStatus(result?.item || null)
+    } catch (error) {
+      if (!isTrackedRequestCurrent(requestRef, requestId)) return
+      notify(`${copy('migration_status_failed', 'Migration status failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    }
+  }, [copy, notify])
+
+  useEffect(() => {
+    if (!active) {
+      invalidateTrackedRequest(requestRef)
+      return
+    }
+    loadStatus()
+  }, [active, loadStatus])
+  useEffect(() => () => invalidateTrackedRequest(requestRef), [])
+
+  const prepare = async () => {
+    if (busy) return
+    setBusy('prepare')
+    try {
+      const result = await withLoaderTimeout(() => window.api.prepareScaleMigration?.(), 'Prepare migration check', 30000)
+      setPrepared(result?.item || null)
+      setStatus(result?.item || status)
+      notify(copy('migration_precheck_complete', 'Migration precheck complete. No data was moved.'), 'success')
+    } catch (error) {
+      notify(`${copy('migration_precheck_failed', 'Migration precheck failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const totalRows = status?.verification?.totalRows ?? prepared?.verification?.totalRows ?? 0
+  const queueStatus = status?.scaleServices?.queueStatus || {}
+  const queueReady = !!status?.verification?.queueReady || queueStatus.reason === 'ready'
+  const canRun = !!status?.canRunMigration && !!prepared
+
+  return (
+    <div className="card p-5 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <DatabaseZap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            {copy('scale_migration_title', 'Data migration')}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {copy('scale_migration_desc', 'SQLite and local files remain the live business data until an admin runs a verified migration. Docker services are used automatically for imports and scale jobs.')}
+          </p>
+        </div>
+        <button type="button" className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm" onClick={loadStatus} disabled={!!busy}>
+          <RefreshCw className="h-4 w-4" />
+          {copy('refresh', 'Refresh')}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('current_data_source', 'Current data')}</div>
+          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{copy('sqlite_local_files', 'SQLite / Local files')}</div>
+          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={status?.authoritativeData?.databasePath || ''}>
+            {status?.authoritativeData?.databasePath || copy('loading', 'Loading...')}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('scale_services', 'Scale services')}</div>
+          <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${queueReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            <CheckCircle2 className="h-4 w-4" />
+            {queueReady ? copy('ready', 'Ready') : copy('checking', 'Checking')}
+          </div>
+          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {copy('queue_driver', 'Queue')}: {queueStatus.driver || status?.scaleServices?.queueDriver || 'bullmq'}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('migration_readiness', 'Migration readiness')}</div>
+          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+            {Number(totalRows).toLocaleString()} {copy('rows', 'rows')}
+          </div>
+          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {status?.canRunMigration ? copy('ready_after_precheck', 'Ready after precheck') : copy('locked_for_safety', 'Locked for safety')}
+          </div>
+        </div>
+      </div>
+
+      {status?.blockedReason ? (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+          {status.blockedReason}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <PrimaryActionButton onClick={prepare} disabled={!!busy}>
+          <DatabaseZap className="h-4 w-4" />
+          {busy === 'prepare' ? copy('checking', 'Checking...') : copy('prepare_migration_check', 'Prepare migration check')}
+        </PrimaryActionButton>
+        <PathActionButton disabled={!canRun || !!busy} title={!canRun ? copy('migration_run_disabled', 'Run migration unlocks only after a passing verified migration precheck and enabled migration runner.') : undefined}>
+          <Upload className="h-4 w-4" />
+          {copy('run_verified_migration', 'Run verified migration')}
+        </PathActionButton>
+      </div>
+      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+        {copy('migration_no_auto_move', 'Nothing migrates automatically. Always export a backup first; the app must verify row counts before switching storage backends.')}
+      </p>
+    </div>
+  )
+}
+
 export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
@@ -1515,6 +1633,7 @@ export default function Backup() {
         </div>
 
         {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {isActive ? <ScaleMigrationSection t={t} notify={notify} active={isActive} /> : null}
         {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
         <ResetData actionHistory={actionHistory} />
         <FactoryReset actionHistory={actionHistory} />

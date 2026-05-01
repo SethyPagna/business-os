@@ -18,6 +18,8 @@ const express = require('express')
 const { db, ensureCoreDataInvariants } = require('../../database')
 const {
   UPLOADS_PATH,
+  DB_PATH,
+  IMPORTS_PATH,
   RUNTIME_DIR,
   STORAGE_ROOT,
   DATA_ROOT,
@@ -28,6 +30,14 @@ const {
   normalizeSelectedDataDir,
   TAILSCALE_URL,
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI,
+  BUSINESS_OS_REQUIRE_SCALE_SERVICES,
+  JOB_QUEUE_DRIVER,
+  REDIS_URL,
+  DATABASE_DRIVER,
+  DATABASE_URL,
+  OBJECT_STORAGE_DRIVER,
+  S3_ENDPOINT,
+  S3_BUCKET,
 } = require('../../config')
 const {
   summarizeDataRoot,
@@ -56,6 +66,7 @@ const {
   saveDriveSyncPreferences,
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
+const { getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 
 const router = express.Router()
@@ -164,6 +175,71 @@ function resolveDriveRedirectUri(req) {
 
 function getTableColumns(table) {
   return db.prepare(`PRAGMA table_info(${q(table)})`).all().map(col => col.name)
+}
+
+function getSafeTableCount(table) {
+  try {
+    return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${q(table)}`).get()?.count || 0)
+  } catch (_) {
+    return 0
+  }
+}
+
+function buildMigrationTableCounts() {
+  const counts = {}
+  BACKUP_TABLES.forEach((table) => {
+    counts[table] = getSafeTableCount(table)
+  })
+  return counts
+}
+
+function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
+  const organization = getDefaultOrganization()
+  const organizationStorage = organization ? ensureOrganizationFilesystemLayout(organization) : null
+  const queue = queueStatus || getQueueStatus()
+  const tableCounts = buildMigrationTableCounts()
+  const totalRows = Object.values(tableCounts).reduce((sum, value) => sum + (Number(value) || 0), 0)
+  const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
+  const migrationEngineReady = false
+  return {
+    mode: 'sqlite_authoritative',
+    authoritativeData: {
+      databaseDriver: 'sqlite',
+      databasePath: DB_PATH,
+      uploadsPath: UPLOADS_PATH,
+      importsPath: IMPORTS_PATH,
+      storageRoot: STORAGE_ROOT,
+      dataRoot: DATA_ROOT,
+      organizationStorage,
+    },
+    scaleServices: {
+      required: BUSINESS_OS_REQUIRE_SCALE_SERVICES,
+      queueDriver: JOB_QUEUE_DRIVER,
+      queueStatus: queue,
+      redisConfigured: !!REDIS_URL,
+      postgresConfigured: !!DATABASE_URL || DATABASE_DRIVER === 'postgres',
+      minioConfigured: OBJECT_STORAGE_DRIVER === 'minio',
+      s3EndpointConfigured: !!S3_ENDPOINT,
+      s3Bucket: S3_BUCKET || null,
+    },
+    target: {
+      databaseDriver: DATABASE_DRIVER || 'sqlite',
+      objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
+      postgresAvailableForMigration: !!DATABASE_URL && DATABASE_DRIVER === 'postgres',
+      minioAvailableForMigration: OBJECT_STORAGE_DRIVER === 'minio',
+    },
+    backupRequired: true,
+    canPrepareMigration: true,
+    canRunMigration: migrationEngineReady,
+    blockedReason: migrationEngineReady
+      ? ''
+      : 'SQLite/local files remain authoritative. The verified Postgres/MinIO migration runner is intentionally locked until adapter migration tests are enabled.',
+    verification: {
+      tableCounts,
+      totalRows,
+      queueReady,
+    },
+  }
 }
 
 function extractUploadPathsFromText(value) {
@@ -952,6 +1028,51 @@ router.get('/data-path', authToken, requireAnyPermission(['backup', 'settings'])
     organizationStorage,
     organizationStorageStatus,
   })
+})
+
+router.get('/scale-migration/status', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  try {
+    const queueStatus = await initializeBullQueue()
+    ok(res, { item: buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus }) })
+  } catch (e) {
+    err(res, `Scale migration status failed: ${e.message}`)
+  }
+})
+
+router.post('/scale-migration/prepare', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  if (!applyRouteRateLimit(req, res, { name: 'system:scale_migration_prepare', max: 12, windowMs: 10 * 60 * 1000 })) return
+  try {
+    const queueStatus = await initializeBullQueue()
+    const status = buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus })
+    audit(req.user?.id, req.user?.name, 'prepare_migration_check', 'system', null, {
+      mode: status.mode,
+      totalRows: status.verification?.totalRows || 0,
+      queueDriver: status.scaleServices?.queueStatus?.driver || status.scaleServices?.queueDriver,
+      canRunMigration: status.canRunMigration,
+    }, { deviceName: req.body?.device_name, deviceTz: req.body?.device_tz })
+    ok(res, {
+      item: {
+        ...status,
+        preparedAt: new Date().toISOString(),
+        requiresFreshBackup: true,
+        message: 'Migration precheck completed. No data was moved. SQLite/local files remain authoritative until a verified migration is explicitly run.',
+      },
+    })
+  } catch (e) {
+    err(res, `Scale migration precheck failed: ${e.message}`)
+  }
+})
+
+router.post('/scale-migration/run', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
+  if (!applyRouteRateLimit(req, res, { name: 'system:scale_migration_run', max: 3, windowMs: 60 * 60 * 1000 })) return
+  const confirmation = String(req.body?.confirmation || '').trim().toUpperCase()
+  if (confirmation !== 'MIGRATE') {
+    return err(res, 'Type MIGRATE to confirm a verified migration run.', 400)
+  }
+  audit(req.user?.id, req.user?.name, 'blocked_migration_run', 'system', null, {
+    reason: 'migration_runner_locked',
+  }, { deviceName: req.body?.device_name, deviceTz: req.body?.device_tz })
+  return err(res, 'Verified Postgres/MinIO migration is not enabled yet. Run Prepare migration check and keep using SQLite/local files until migration verification is available.', 409)
 })
 
 /**

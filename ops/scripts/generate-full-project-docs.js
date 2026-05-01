@@ -161,7 +161,7 @@ function inferPurpose(filePath) {
   if (p.startsWith('start-server') || p.startsWith('stop-server')) return 'Server lifecycle launcher script'
   if (p === 'installer.nsi' || p === 'ops/config/installer.nsi') return 'NSIS installer definition'
   if (p === 'ecosystem.config.js' || p === 'ops/config/ecosystem.config.js') return 'PM2 ecosystem process configuration'
-  if (p === 'README.md' || p === 'README-build.md' || p === 'ops/readme/README.md' || p === 'ops/readme/README-build.md') return 'Project documentation entrypoint'
+  if (p === 'README.md' || p === 'ops/readme/README.md') return 'Project documentation entrypoint'
   if (p.includes('/routes/')) return 'API route handler'
   if (p.includes('/services/')) return 'Integration/service layer'
   if (p.includes('/lang/')) return 'Localization dictionary'

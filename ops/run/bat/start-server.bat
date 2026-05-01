@@ -6,10 +6,11 @@ REM ========================================================================
 REM  Business OS | Source Runtime Launcher
 REM
 REM  Runtime flow:
-REM    1. confirm backend deps and frontend build exist
-REM    2. start with PM2 when possible, otherwise fall back to background node
-REM    3. update Tailscale Funnel / stored URL when available
-REM    4. wait for /health, then print admin + customer portal URLs
+REM    1. start/verify required Docker scale services
+REM    2. confirm backend deps and frontend build exist
+REM    3. start with PM2 when possible, otherwise fall back to background node
+REM    4. update Tailscale Funnel / stored URL when available
+REM    5. wait for /health, then print admin + customer portal URLs
 REM ========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
@@ -30,6 +31,11 @@ set "USING_PM2=0"
 set "TAILSCALE_URL_FOUND="
 set "LOCAL_API=http://127.0.0.1:4000"
 set "SERVER_ALREADY_RUNNING=0"
+set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
+set "JOB_QUEUE_DRIVER=bullmq"
+if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
+if not defined DATABASE_DRIVER set "DATABASE_DRIVER=sqlite"
+if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=local"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
@@ -39,6 +45,19 @@ set "LOCAL_API=http://127.0.0.1:%PORT%"
 if not exist "%PM2_HOME%" mkdir "%PM2_HOME%" >nul 2>&1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] START requested (port=%PORT%)>>"%RUN_LOG%"
+
+echo.
+echo [INFO] Starting required runtime services...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Start -StartServices -RequireServices
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Required runtime services are not ready.
+    echo         Open Docker Desktop, finish any setup/restart prompts, then run start-server.bat again.
+    echo.
+    pause
+    echo [%DATE% %TIME%] START failed: runtime bootstrap failed>>"%RUN_LOG%"
+    exit /b 1
+)
 
 for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
     if not defined TAILSCALE_CMD (

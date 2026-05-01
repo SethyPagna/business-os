@@ -43,7 +43,7 @@ services:
     volumes:
       - business_os_minio:/data
       - type: bind
-        source: ${MINIO_LICENSE_HOST_FILE:-../../minio.license}
+        source: ${MINIO_LICENSE_HOST_FILE:-../runtime/secrets/minio.license}
         target: /run/secrets/minio.license
         read_only: true
     healthcheck:

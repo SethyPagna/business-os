@@ -121,7 +121,7 @@ function main() {
     }
     const info = run(dockerExe, ['info', '--format', '{{.ServerVersion}}'])
     if (!info.ok) {
-      const message = 'Docker Desktop engine is not reachable. Start Docker Desktop before scale imports.'
+      const message = 'Docker Desktop engine is not reachable. Run start-server.bat or setup.bat so Business OS can start the required scale services.'
       if (requireServices) failures.push(message)
       else warnings.push(message)
     } else {
