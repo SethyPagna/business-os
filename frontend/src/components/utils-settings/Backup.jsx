@@ -1119,12 +1119,12 @@ function ScaleMigrationSection({ t, notify, active = true }) {
     if (busy) return
     setBusy('prepare')
     try {
-      const result = await withLoaderTimeout(() => window.api.prepareScaleMigration?.(), 'Prepare migration check', 30000)
+      const result = await withLoaderTimeout(() => window.api.prepareScaleMigration?.(), 'Migration safety automation', 10 * 60 * 1000)
       setPrepared(result?.item || null)
       setStatus(result?.item || status)
-      notify(copy('migration_precheck_complete', 'Migration precheck complete. No data was moved.'), 'success')
+      notify(copy('migration_precheck_complete', 'Safety backup complete. No live data was moved.'), 'success')
     } catch (error) {
-      notify(`${copy('migration_precheck_failed', 'Migration precheck failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+      notify(`${copy('migration_precheck_failed', 'Migration safety automation failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
       setBusy('')
     }
@@ -1134,6 +1134,11 @@ function ScaleMigrationSection({ t, notify, active = true }) {
   const queueStatus = status?.scaleServices?.queueStatus || {}
   const queueReady = !!status?.verification?.queueReady || queueStatus.reason === 'ready'
   const canRun = !!status?.canRunMigration && !!prepared
+  const automation = prepared?.automation || status?.automation || {}
+  const localBackup = automation.localBackup || {}
+  const driveSafety = automation.driveSync || {}
+  const driveSafetyOk = driveSafety.status === 'ok'
+  const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
 
   return (
     <div className="card p-5 sm:p-6">
@@ -1144,7 +1149,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
             {copy('scale_migration_title', 'Data migration')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('scale_migration_desc', 'SQLite and local files remain the live business data until an admin runs a verified migration. Docker services are used automatically for imports and scale jobs.')}
+            {copy('scale_migration_desc', 'SQLite and local files remain live until a verified migration is enabled. The safety step automatically creates a local backup and syncs Google Drive when connected.')}
           </p>
         </div>
         <button type="button" className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm" onClick={loadStatus} disabled={!!busy}>
@@ -1153,7 +1158,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
           <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('current_data_source', 'Current data')}</div>
           <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{copy('sqlite_local_files', 'SQLite / Local files')}</div>
@@ -1180,6 +1185,24 @@ function ScaleMigrationSection({ t, notify, active = true }) {
             {status?.canRunMigration ? copy('ready_after_precheck', 'Ready after precheck') : copy('locked_for_safety', 'Locked for safety')}
           </div>
         </div>
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('local_safety_backup', 'Local safety backup')}</div>
+          <div className={`mt-1 text-sm font-semibold ${localBackup.exists ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            {localBackup.exists ? copy('ready', 'Ready') : copy('not_created_yet', 'Not created yet')}
+          </div>
+          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={localBackup.backupRoot || ''}>
+            {localBackup.createdAt ? formatDateTime(localBackup.createdAt) : copy('run_safety_first', 'Run safety first')}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('drive_safety_sync', 'Drive safety sync')}</div>
+          <div className={`mt-1 text-sm font-semibold ${driveSafetyOk ? 'text-emerald-700 dark:text-emerald-300' : driveSafetySkipped ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>
+            {driveSafetyOk ? copy('synced', 'Synced') : driveSafetySkipped ? copy('optional', 'Optional') : copy('needs_attention', 'Needs attention')}
+          </div>
+          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={driveSafety.error || ''}>
+            {driveSafety.attemptedAt ? formatDateTime(driveSafety.attemptedAt) : copy('connect_drive_to_sync', 'Connect Drive to sync')}
+          </div>
+        </div>
       </div>
 
       {status?.blockedReason ? (
@@ -1191,7 +1214,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <PrimaryActionButton onClick={prepare} disabled={!!busy}>
           <DatabaseZap className="h-4 w-4" />
-          {busy === 'prepare' ? copy('checking', 'Checking...') : copy('prepare_migration_check', 'Prepare migration check')}
+          {busy === 'prepare' ? copy('checking', 'Checking...') : copy('prepare_migration_check', 'Run safety backup')}
         </PrimaryActionButton>
         <PathActionButton disabled={!canRun || !!busy} title={!canRun ? copy('migration_run_disabled', 'Run migration unlocks only after a passing verified migration precheck and enabled migration runner.') : undefined}>
           <Upload className="h-4 w-4" />
@@ -1199,7 +1222,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
         </PathActionButton>
       </div>
       <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-        {copy('migration_no_auto_move', 'Nothing migrates automatically. Always export a backup first; the app must verify row counts before switching storage backends.')}
+        {copy('migration_no_auto_move', 'Safety is automated: local backup first, Google Drive sync when connected, then verification. Live storage is not switched until the verified migration runner is available.')}
       </p>
     </div>
   )

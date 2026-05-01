@@ -193,6 +193,150 @@ function buildMigrationTableCounts() {
   return counts
 }
 
+const MIGRATION_SAFETY_KEYS = {
+  lastPreparedAt: 'scale_migration_last_prepared_at',
+  localBackupAt: 'scale_migration_local_backup_at',
+  localBackupRoot: 'scale_migration_local_backup_root',
+  localBackupDataRoot: 'scale_migration_local_backup_data_root',
+  localBackupSummaryJson: 'scale_migration_local_backup_summary_json',
+  driveSyncAt: 'scale_migration_drive_sync_at',
+  driveSyncStatus: 'scale_migration_drive_sync_status',
+  driveSyncError: 'scale_migration_drive_sync_error',
+  driveSyncSummaryJson: 'scale_migration_drive_sync_summary_json',
+}
+
+function safeJsonParse(value, fallback = null) {
+  if (!value) return fallback
+  try {
+    return JSON.parse(value)
+  } catch (_) {
+    return fallback
+  }
+}
+
+function readSystemSettings(keys = []) {
+  const safeKeys = (Array.isArray(keys) ? keys : []).filter(Boolean)
+  if (!safeKeys.length) return {}
+  const placeholders = safeKeys.map(() => '?').join(', ')
+  return db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`).all(...safeKeys)
+    .reduce((acc, row) => {
+      acc[row.key] = row.value
+      return acc
+    }, {})
+}
+
+function writeSystemSettings(updates = {}) {
+  const entries = Object.entries(updates || {}).filter(([key]) => key)
+  if (!entries.length) return
+  const upsert = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `)
+  db.transaction(() => {
+    entries.forEach(([key, value]) => {
+      if (value == null) db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+      else upsert.run(key, String(value))
+    })
+  })()
+}
+
+function getMigrationSafetyBackupDestination() {
+  return path.join(path.dirname(STORAGE_ROOT), 'business-os-safety-backups')
+}
+
+function getMigrationSafetyState() {
+  const settings = readSystemSettings(Object.values(MIGRATION_SAFETY_KEYS))
+  const localBackupRoot = settings[MIGRATION_SAFETY_KEYS.localBackupRoot] || ''
+  const localBackupDataRoot = settings[MIGRATION_SAFETY_KEYS.localBackupDataRoot] || ''
+  return {
+    lastPreparedAt: settings[MIGRATION_SAFETY_KEYS.lastPreparedAt] || '',
+    localBackup: {
+      createdAt: settings[MIGRATION_SAFETY_KEYS.localBackupAt] || '',
+      backupRoot: localBackupRoot,
+      dataRoot: localBackupDataRoot,
+      exists: !!localBackupRoot && fs.existsSync(localBackupRoot),
+      summary: safeJsonParse(settings[MIGRATION_SAFETY_KEYS.localBackupSummaryJson], null),
+    },
+    driveSync: {
+      attemptedAt: settings[MIGRATION_SAFETY_KEYS.driveSyncAt] || '',
+      status: settings[MIGRATION_SAFETY_KEYS.driveSyncStatus] || 'not_run',
+      error: settings[MIGRATION_SAFETY_KEYS.driveSyncError] || '',
+      summary: safeJsonParse(settings[MIGRATION_SAFETY_KEYS.driveSyncSummaryJson], null),
+    },
+  }
+}
+
+async function createMigrationSafetyBackup() {
+  const destinationDir = getMigrationSafetyBackupDestination()
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+  const result = await runFsWorker('export-folder', {
+    sourceRoot: STORAGE_ROOT,
+    destinationDir,
+    dataFolderName: DATA_FOLDER_NAME,
+    backupVersion: BACKUP_VERSION,
+  }, 20 * 60 * 1000)
+  writeSystemSettings({
+    [MIGRATION_SAFETY_KEYS.localBackupAt]: new Date().toISOString(),
+    [MIGRATION_SAFETY_KEYS.localBackupRoot]: result.backupRoot || '',
+    [MIGRATION_SAFETY_KEYS.localBackupDataRoot]: result.dataRoot || '',
+    [MIGRATION_SAFETY_KEYS.localBackupSummaryJson]: JSON.stringify(result.summary || {}),
+  })
+  return result
+}
+
+async function runMigrationSafetyDriveSync() {
+  const config = getDriveSyncConfig()
+  if (!config.enabled || !config.ready) {
+    const skipped = {
+      status: 'skipped',
+      reason: 'Google Drive is not connected or background sync is disabled.',
+    }
+    writeSystemSettings({
+      [MIGRATION_SAFETY_KEYS.driveSyncAt]: new Date().toISOString(),
+      [MIGRATION_SAFETY_KEYS.driveSyncStatus]: skipped.status,
+      [MIGRATION_SAFETY_KEYS.driveSyncError]: skipped.reason,
+      [MIGRATION_SAFETY_KEYS.driveSyncSummaryJson]: JSON.stringify({}),
+    })
+    return skipped
+  }
+
+  try {
+    const summary = await runDriveSync('migration-safety')
+    const completedAt = new Date().toISOString()
+    writeSystemSettings({
+      [MIGRATION_SAFETY_KEYS.driveSyncAt]: completedAt,
+      [MIGRATION_SAFETY_KEYS.driveSyncStatus]: 'ok',
+      [MIGRATION_SAFETY_KEYS.driveSyncError]: '',
+      [MIGRATION_SAFETY_KEYS.driveSyncSummaryJson]: JSON.stringify(summary || {}),
+    })
+    return { status: 'ok', completedAt, summary }
+  } catch (error) {
+    const message = error?.message || 'Google Drive sync failed'
+    writeSystemSettings({
+      [MIGRATION_SAFETY_KEYS.driveSyncAt]: new Date().toISOString(),
+      [MIGRATION_SAFETY_KEYS.driveSyncStatus]: 'error',
+      [MIGRATION_SAFETY_KEYS.driveSyncError]: message,
+      [MIGRATION_SAFETY_KEYS.driveSyncSummaryJson]: JSON.stringify({}),
+    })
+    return { status: 'error', error: message }
+  }
+}
+
+async function runMigrationSafetyAutomation({ includeDrive = true } = {}) {
+  const preparedAt = new Date().toISOString()
+  const localBackup = await createMigrationSafetyBackup()
+  const driveSync = includeDrive
+    ? await runMigrationSafetyDriveSync()
+    : { status: 'skipped', reason: 'Google Drive sync was not requested.' }
+  writeSystemSettings({ [MIGRATION_SAFETY_KEYS.lastPreparedAt]: preparedAt })
+  return {
+    preparedAt,
+    noDataMoved: true,
+    localBackup,
+    driveSync,
+  }
+}
+
 function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const organization = getDefaultOrganization()
   const organizationStorage = organization ? ensureOrganizationFilesystemLayout(organization) : null
@@ -229,11 +373,12 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       minioAvailableForMigration: OBJECT_STORAGE_DRIVER === 'minio',
     },
     backupRequired: true,
+    automation: getMigrationSafetyState(),
     canPrepareMigration: true,
     canRunMigration: migrationEngineReady,
     blockedReason: migrationEngineReady
       ? ''
-      : 'SQLite/local files remain authoritative. The verified Postgres/MinIO migration runner is intentionally locked until adapter migration tests are enabled.',
+      : 'SQLite/local files remain authoritative. The app can automate local backup and Google Drive safety sync now; switching live storage to Postgres/MinIO stays locked until verified adapter migration is enabled.',
     verification: {
       tableCounts,
       totalRows,
@@ -1043,23 +1188,29 @@ router.post('/scale-migration/prepare', authToken, requireAnyPermission(['backup
   if (!applyRouteRateLimit(req, res, { name: 'system:scale_migration_prepare', max: 12, windowMs: 10 * 60 * 1000 })) return
   try {
     const queueStatus = await initializeBullQueue()
+    const beforeStatus = buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus })
+    const safety = await runMigrationSafetyAutomation({ includeDrive: req.body?.includeDrive !== false })
     const status = buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus })
     audit(req.user?.id, req.user?.name, 'prepare_migration_check', 'system', null, {
       mode: status.mode,
       totalRows: status.verification?.totalRows || 0,
       queueDriver: status.scaleServices?.queueStatus?.driver || status.scaleServices?.queueDriver,
       canRunMigration: status.canRunMigration,
+      localBackupRoot: safety.localBackup?.backupRoot,
+      driveSyncStatus: safety.driveSync?.status,
+      previousSafetyBackup: beforeStatus.automation?.localBackup?.backupRoot || '',
     }, { deviceName: req.body?.device_name, deviceTz: req.body?.device_tz })
     ok(res, {
       item: {
         ...status,
-        preparedAt: new Date().toISOString(),
-        requiresFreshBackup: true,
-        message: 'Migration precheck completed. No data was moved. SQLite/local files remain authoritative until a verified migration is explicitly run.',
+        preparedAt: safety.preparedAt,
+        requiresFreshBackup: false,
+        safety,
+        message: 'Safety automation completed. A local backup was created, Google Drive sync was attempted when connected, and no live data was moved.',
       },
     })
   } catch (e) {
-    err(res, `Scale migration precheck failed: ${e.message}`)
+    err(res, `Scale migration safety automation failed: ${e.message}`)
   }
 })
 

@@ -10,7 +10,7 @@ Business OS is a Node.js backend with an SPA frontend and required local scale s
 - Scale services: Docker Compose starts Redis, Postgres, and MinIO for import queues and verified future migration targets.
 - Sync/UI refresh: backend broadcasts channel updates via WebSocket `sync:update`.
 
-The backend is the source of truth for all business data. Frontend state is view/cache only. Postgres/MinIO are not used as the live data store until an admin explicitly completes the in-app migration wizard.
+The backend is the source of truth for all business data. Frontend state is view/cache only. Postgres/MinIO are not used as the live data store until an admin explicitly completes the in-app migration wizard. The migration panel can automate the safety phase today: local backup first, Google Drive sync when connected, and no live storage switch until verified migration support is unlocked.
 
 ## Major Layers
 

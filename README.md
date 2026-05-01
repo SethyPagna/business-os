@@ -26,7 +26,9 @@ Your business data remains on this computer by default:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Backups, uploaded files, imports, and the SQLite database live under that organization folder. The app does not silently move data to Postgres or MinIO. In Settings > Backup, the Data migration panel shows the current storage status and only allows migration after a verified precheck.
+Backups, uploaded files, imports, and the SQLite database live under that organization folder. The app does not silently switch your live data to Postgres or MinIO.
+
+In Settings > Backup, the Data migration panel has a one-button safety step. It automatically creates a local safety backup beside `business-os-data`, then syncs the same live data to Google Drive when Drive is connected. No live data is moved during that step, and the app keeps using SQLite/local files until the verified migration runner is enabled and explicitly confirmed.
 
 ## Support Commands
 

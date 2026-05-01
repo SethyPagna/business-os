@@ -189,7 +189,10 @@ runTest('sensitive system routes require backup or settings permission', async (
     })
     assert.equal(prepare.response.ok, true)
     assert.equal(prepare.json.item.mode, 'sqlite_authoritative')
-    assert.equal(prepare.json.item.requiresFreshBackup, true)
+    assert.equal(prepare.json.item.requiresFreshBackup, false)
+    assert.equal(prepare.json.item.safety.noDataMoved, true)
+    assert.equal(prepare.json.item.automation.localBackup.exists, true)
+    assert.equal(prepare.json.item.automation.driveSync.status, 'skipped')
 
     const runWithoutConfirmation = await fetchJson(server.baseUrl, '/api/system/scale-migration/run', {
       method: 'POST',

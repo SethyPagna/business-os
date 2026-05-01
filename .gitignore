@@ -10,6 +10,7 @@ _release_preserve/
 
 # Local app data
 business-os-data/
+business-os-safety-backups/
 backend/uploads/
 backend/data/
 temp-*/
