@@ -12,6 +12,7 @@ assert.equal(isFirstPartyBuiltAssetSource('VM2289 vendor.js'), false)
 
 assert.equal(isLikelyInjectedRuntimeSource('chrome-extension://abc/content.js'), true)
 assert.equal(isLikelyInjectedRuntimeSource('VM2289 vendor.js'), true)
+assert.equal(isLikelyInjectedRuntimeSource('vendor.js:80'), true)
 assert.equal(isLikelyInjectedRuntimeSource('https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js'), false)
 
 assert.equal(shouldSuppressRuntimeError({
@@ -22,6 +23,11 @@ assert.equal(shouldSuppressRuntimeError({
 assert.equal(shouldSuppressRuntimeError({
   message: "Cannot read properties of null (reading 'cssRules')",
   filename: 'VM2289 vendor.js',
+}), true)
+
+assert.equal(shouldSuppressRuntimeError({
+  message: "Cannot read properties of null (reading 'cssRules')",
+  stack: "TypeError: Cannot read properties of null (reading 'cssRules')\n    at fe (vendor.js:27:48748)\n    at content.js:1:170212",
 }), true)
 
 assert.equal(shouldSuppressRuntimeError({

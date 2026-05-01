@@ -39,6 +39,7 @@ const MAX_ZIP_IMAGES = 25_000
 const MAX_ZIP_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
 const IMPORT_ANALYZE_QUEUE_NAME = process.env.IMPORT_ANALYZE_QUEUE_NAME || 'business-os-import-analyze'
 const IMPORT_APPLY_QUEUE_NAME = process.env.IMPORT_APPLY_QUEUE_NAME || 'business-os-import-apply'
+const IMPORT_MEDIA_WAIT_TIMEOUT_MS = Math.max(60_000, Number(process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS || 30 * 60 * 1000))
 const runningLocalJobs = new Set()
 let bullConnection = null
 let bullQueues = { analyze: null, apply: null }
@@ -238,6 +239,7 @@ function isCancelled(jobId) {
 
 async function waitForQueuedImportMedia(jobId) {
   let lastPending = -1
+  const startedAt = Date.now()
   while (!isCancelled(jobId)) {
     const pending = db.prepare(`
       SELECT COUNT(*) AS count
@@ -254,6 +256,9 @@ async function waitForQueuedImportMedia(jobId) {
           pending_media: pending,
         }),
       })
+    }
+    if (Date.now() - startedAt > IMPORT_MEDIA_WAIT_TIMEOUT_MS) {
+      throw new Error('Timed out waiting for queued media optimization. Check that the media worker is running, then retry failed images.')
     }
     await wait(1000)
   }
@@ -494,7 +499,7 @@ async function copyImageIntoAssets(sourcePath, originalName, actor = {}, { impor
   return { publicPath: asset.public_path, mediaQueued: !!importFileId }
 }
 
-async function resolveImageGallery(row, imageLookup, actor, jobId) {
+async function resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCache = new Map()) {
   const refs = parseIncomingImageRefs(row)
   const gallery = []
   for (const ref of refs) {
@@ -514,8 +519,15 @@ async function resolveImageGallery(row, imageLookup, actor, jobId) {
       })
       continue
     }
+    const cacheKey = file.id ? `file:${file.id}` : `path:${file.stored_path}`
+    if (imageAssetCache.has(cacheKey)) {
+      const cached = imageAssetCache.get(cacheKey)
+      if (cached?.publicPath) gallery.push(cached.publicPath)
+      continue
+    }
     try {
       const copied = await copyImageIntoAssets(file.stored_path, file.original_name || file.relative_path, actor, { importJobId: jobId, importFileId: file.id })
+      imageAssetCache.set(cacheKey, copied)
       gallery.push(copied.publicPath)
       if (!copied.mediaQueued) {
         db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
@@ -744,7 +756,7 @@ function seedBranchRows(productId, ctx) {
   ctx.activeBranches.forEach((branch) => insert.run(productId, branch.id))
 }
 
-async function processProductRow({ row, imageLookup, actor, ctx, jobId }) {
+async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache }) {
   const normalized = normalizeRowForProduct(row)
   if (!normalized.name) throw new Error('Product name required')
   normalized.category = ensureCategory(ctx, normalized.category)
@@ -752,7 +764,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId }) {
   normalized.brand = ensureBrand(ctx, normalized.brand)
   normalized.supplier = ensureSupplier(ctx, normalized.supplier)
 
-  const incomingGallery = await resolveImageGallery(row, imageLookup, actor, jobId)
+  const incomingGallery = await resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCache)
   const sameName = db.prepare(`
     SELECT *
     FROM products
@@ -964,6 +976,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId }) {
 
 async function processProductRowBatches({ jobId, rowBatches, totalRows = null, imageLookup, actor }) {
   const ctx = createProductContext()
+  const imageAssetCache = new Map()
   let imported = 0
   let updated = 0
   let failed = 0
@@ -988,7 +1001,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
     for (const row of batchRows) {
       try {
-        const result = await processProductRow({ row, imageLookup, actor, ctx, jobId })
+        const result = await processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache })
         imported += result.imported || 0
         updated += result.updated || 0
       } catch (error) {
@@ -1734,10 +1747,20 @@ async function extractZipImages(jobId, zipFile) {
 async function processImportJob(jobId, { mode = 'analyze' } = {}) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
-  if (job.status === 'running') return job
+  const currentStatus = String(job.status || '').toLowerCase()
+  const normalizedMode = normalizeQueueMode(mode)
+  if (job.cancel_requested || currentStatus === 'cancelling' || currentStatus === 'cancelled') {
+    updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
+    return getImportJob(jobId)
+  }
+  if (currentStatus === 'running') return job
+  if (normalizedMode === 'analyze' && ['awaiting_review', 'approved', 'completed', 'completed_with_errors'].includes(currentStatus)) {
+    return job
+  }
+  if (normalizedMode === 'apply' && currentStatus === 'completed') return job
   updateJob(jobId, {
     status: 'running',
-    phase: mode === 'apply' ? 'applying_rows' : 'analyzing',
+    phase: normalizedMode === 'apply' ? 'applying_rows' : 'analyzing',
     started_at: job.started_at || nowIso(),
     last_error: null,
   })
@@ -1745,16 +1768,16 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
   try {
     const csvFile = getJobFiles(jobId, 'csv')[0]
     if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) throw new Error('CSV file is required before starting import')
-    updateJob(jobId, { phase: mode === 'apply' ? 'preparing_files' : 'analyzing_files' })
+    updateJob(jobId, { phase: normalizedMode === 'apply' ? 'preparing_files' : 'analyzing_files' })
     const zipFiles = getJobFiles(jobId, 'zip').filter((file) => file.status !== 'processed')
     for (const zipFile of zipFiles) {
       await extractZipImages(jobId, zipFile)
       await yieldImportWorker(2)
     }
     const imageFiles = getJobFiles(jobId, 'image')
-    updateJob(jobId, { total_images: imageFiles.length, phase: mode === 'apply' ? 'reading_rows' : 'analyzing_rows' })
+    updateJob(jobId, { total_images: imageFiles.length, phase: normalizedMode === 'apply' ? 'reading_rows' : 'analyzing_rows' })
 
-    if (mode !== 'apply') {
+    if (normalizedMode !== 'apply') {
       const totalRows = await countCsvRowsFromFile(csvFile, jobId)
       const summary = {
         requiresApproval: true,
@@ -1818,13 +1841,18 @@ async function processImportJob(jobId, { mode = 'analyze' } = {}) {
     }
     updateJob(jobId, { phase: 'finalizing' })
     await yieldImportWorker(3)
+    const finalJob = getImportJob(jobId)
+    const failedRows = totalRows ? Number(result.failed || 0) : 0
+    const failedImages = Number(finalJob?.failed_images || 0)
+    const hasFailures = failedRows > 0 || failedImages > 0
     updateJob(jobId, {
-      status: result.failed > 0 ? 'completed_with_errors' : 'completed',
+      status: hasFailures ? 'completed_with_errors' : 'completed',
       phase: 'completed',
-      failed_rows: totalRows ? result.failed : 0,
-      failed_images: totalRows ? getImportJob(jobId).failed_images : result.failed,
+      failed_rows: failedRows,
+      failed_images: failedImages,
       summary_json: stringify(result),
       finished_at: nowIso(),
+      cancel_requested: 0,
     })
     audit(actor.userId, actor.userName, 'import_job_completed', 'import_job', null, { jobId, type: job.type, ...result })
     if (job.type === 'products') {
@@ -1875,6 +1903,29 @@ function hasBullProducer() {
 
 function hasBullWorkers() {
   return !!(bullWorkers.analyze || bullWorkers.apply)
+}
+
+async function removeQueuedBullJobsForImport(jobId) {
+  const removed = []
+  if (!jobId) return removed
+  const status = await initializeBullQueue()
+  if (!status.available || !hasBullProducer()) return removed
+  const states = ['waiting', 'delayed', 'prioritized', 'paused']
+  for (const mode of ['analyze', 'apply']) {
+    const queue = bullQueues[mode]
+    if (!queue) continue
+    try {
+      const jobs = await queue.getJobs(states, 0, 500, true)
+      for (const queuedJob of jobs) {
+        if (String(queuedJob?.data?.jobId || '') !== String(jobId)) continue
+        await queuedJob.remove()
+        removed.push({ mode, id: queuedJob.id })
+      }
+    } catch (error) {
+      console.warn(`[import-jobs] Could not remove queued ${mode} job for ${jobId}: ${error?.message || error}`)
+    }
+  }
+  return removed
 }
 
 async function getBullConnection() {
@@ -1988,6 +2039,37 @@ async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {})
   return getImportJob(jobId)
 }
 
+async function cancelImportJob(jobId) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const status = String(job.status || '').toLowerCase()
+  if (status === 'completed' || status === 'completed_with_errors') {
+    return job
+  }
+  if (status === 'cancelled') return job
+
+  markJobCancelled(jobId)
+  const removedQueued = await removeQueuedBullJobsForImport(jobId)
+  const fresh = getImportJob(jobId)
+  const freshStatus = String(fresh?.status || '').toLowerCase()
+  const canFinishNow = ['pending', 'queued', 'approved', 'awaiting_review', 'failed'].includes(status)
+    || (freshStatus === 'cancelling' && removedQueued.length > 0)
+  if (canFinishNow && !runningLocalJobs.has(`${jobId}:analyze`) && !runningLocalJobs.has(`${jobId}:apply`)) {
+    updateJob(jobId, {
+      status: 'cancelled',
+      phase: 'cancelled',
+      last_error: null,
+      finished_at: nowIso(),
+    })
+    db.prepare(`
+      UPDATE import_job_files
+      SET status = 'cancelled', updated_at = datetime('now')
+      WHERE job_id = ? AND status IN ('stored', 'queued_media')
+    `).run(jobId)
+  }
+  return getImportJob(jobId)
+}
+
 async function approveImportJob(jobId) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
@@ -2069,6 +2151,7 @@ module.exports = {
   addJobFile,
   approveImportJob,
   buildErrorsCsv,
+  cancelImportJob,
   createImportJob,
   enqueueImportJob,
   getImportJob,

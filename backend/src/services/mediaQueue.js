@@ -24,6 +24,12 @@ function queueDriverRequired() {
   return BUSINESS_OS_REQUIRE_SCALE_SERVICES || JOB_QUEUE_DRIVER === 'bullmq'
 }
 
+function isImportJobCancelled(importJobId) {
+  if (!importJobId) return false
+  const row = db.prepare('SELECT cancel_requested, status FROM import_jobs WHERE id = ?').get(importJobId)
+  return !!row?.cancel_requested || String(row?.status || '').toLowerCase() === 'cancelled'
+}
+
 async function getMediaConnection() {
   if (mediaConnection) return mediaConnection
   const IORedis = require('ioredis')
@@ -62,6 +68,12 @@ async function initializeMediaQueue() {
 async function processMediaOptimizationJob({ storedName, source = 'media_queue', importJobId = null, importFileId = null } = {}) {
   const safeStoredName = String(storedName || '').trim()
   if (!safeStoredName) throw new Error('Media optimization job missing storedName')
+  if (isImportJobCancelled(importJobId)) {
+    if (importFileId) {
+      db.prepare("UPDATE import_job_files SET status = 'cancelled', updated_at = datetime('now') WHERE id = ? AND status != 'processed'").run(importFileId)
+    }
+    return
+  }
   const {
     getFileAssetByPublicPath,
     getMimeTypeFromName,
@@ -130,7 +142,7 @@ async function enqueueMediaOptimization(payload = {}) {
       importJobId: payload.importJobId || null,
       importFileId: payload.importFileId || null,
     }, {
-      jobId: `media:${storedName}`,
+      jobId: `media:${payload.importFileId || storedName}:${Date.now()}`,
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
       removeOnComplete: 200,

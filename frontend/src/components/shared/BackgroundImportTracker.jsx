@@ -5,6 +5,7 @@ import { useApp } from '../../AppContext'
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
+const CANCELLABLE_STATUSES = new Set(['pending', 'queued', 'running', 'approved'])
 
 function normalizeJobStatus(job) {
   return String(job?.status || '').trim().toLowerCase()
@@ -205,10 +206,11 @@ export default function BackgroundImportTracker() {
           {visibleJobs.map((job) => {
             const jobStatus = normalizeJobStatus(job)
             const jobProgress = getJobProgress(job)
-            const isJobActive = ACTIVE_STATUSES.has(jobStatus)
+            const isJobCancellable = CANCELLABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
             const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
             const failedImages = Number(job.failed_images || 0)
+            const lastError = String(job.last_error || '').trim()
             return (
               <div key={job.id} className="rounded-xl border border-current/15 bg-white/65 p-2 dark:bg-slate-950/45">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -218,26 +220,27 @@ export default function BackgroundImportTracker() {
                       {Number(job.processed_rows || 0)} / {Number(job.total_rows || 0)} {rowsLabel}
                       {Number(job.total_images || 0) ? ` - ${Number(job.processed_images || 0)} / ${Number(job.total_images || 0)} ${imagesLabel}` : ''}
                       {(failedRows || failedImages) ? ` - ${failedRows + failedImages} ${issuesLabel}` : ''}
+                      {lastError ? ` - ${lastError}` : ''}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-black/10 px-2 py-1 text-xs font-semibold dark:bg-white/10">{jobProgress}%</span>
-                    {isJobActive ? (
-                      <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleCancel(job)}>
+                    {isJobCancellable ? (
+                      <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${cancelLabel} ${getJobLabel(job)}`} onClick={() => handleCancel(job)}>
                         <XCircle className="mr-1 inline h-3.5 w-3.5" /> {cancelLabel}
                       </button>
                     ) : null}
                     {isAwaitingReview ? (
-                      <button type="button" className="btn-primary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleApprove(job)}>
+                      <button type="button" className="btn-primary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${approveLabel} ${getJobLabel(job)}`} onClick={() => handleApprove(job)}>
                         <PlayCircle className="mr-1 inline h-3.5 w-3.5" /> {approveLabel}
                       </button>
                     ) : null}
                     {REVIEW_STATUSES.has(jobStatus) && !isAwaitingReview ? (
                       <>
-                        <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleDownloadErrors(job)}>
+                        <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${errorsLabel} ${getJobLabel(job)}`} onClick={() => handleDownloadErrors(job)}>
                           <FileDown className="mr-1 inline h-3.5 w-3.5" /> {errorsLabel}
                         </button>
-                        <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => handleRetry(job)}>
+                        <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${retryLabel} ${getJobLabel(job)}`} onClick={() => handleRetry(job)}>
                           <RotateCcw className="mr-1 inline h-3.5 w-3.5" /> {retryLabel}
                         </button>
                       </>

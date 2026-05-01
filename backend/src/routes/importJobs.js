@@ -12,6 +12,7 @@ const {
   addJobFile,
   approveImportJob,
   buildErrorsCsv,
+  cancelImportJob,
   createImportJob,
   enqueueImportJob,
   getImportJob,
@@ -19,7 +20,6 @@ const {
   getJobFiles,
   getQueueStatus,
   listImportJobs,
-  markJobCancelled,
 } = require('../services/importJobs')
 
 const router = express.Router()
@@ -251,10 +251,14 @@ router.post('/:id/approve', authToken, requireImportPermission, routeRateLimit({
   }
 })
 
-router.post('/:id/cancel', authToken, requireImportPermission, (req, res) => {
-  const job = getJobOr404(req, res)
-  if (!job) return
-  ok(res, { job: markJobCancelled(job.id) })
+router.post('/:id/cancel', authToken, requireImportPermission, async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    ok(res, { job: await cancelImportJob(job.id) })
+  } catch (error) {
+    err(res, error?.message || 'Failed to cancel import job')
+  }
 })
 
 router.post('/:id/retry', authToken, requireImportPermission, async (req, res) => {

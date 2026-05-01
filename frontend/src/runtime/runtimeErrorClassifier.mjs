@@ -40,7 +40,8 @@ export function isLikelyInjectedRuntimeSource(value, baseOrigin = '') {
   if (includesExtensionOrigin(text)) return true
   if (isFirstPartyBuiltAssetSource(text, baseOrigin)) return false
   return /\bVM\d+\s+(vendor|content|inpage)\.js\b/i.test(text)
-    || /(^|[\\/])(content|inpage|grammarly-check)\.js(?::\d+)?/i.test(text)
+    || /(^|\s)(vendor|content|components)\.js(?::\d+){0,2}(?=\s|$)/i.test(text)
+    || /(^|[\\/])(content|inpage|grammarly-check)\.js(?::\d+){0,2}/i.test(text)
     || /contentFunc\.js/i.test(text)
 }
 
