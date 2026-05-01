@@ -17,7 +17,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 | Backend data integrity | Pass | `npm.cmd run verify:integrity` passed against the current SQLite data root. |
 | Worker queue smoke | Pass | Import and media workers started against Redis/BullMQ and reported active queues. |
 | Release build/start smoke | Pass | `cmd /c run\build-release.bat` passed, produced portable release and NSIS installer. |
-| Tailscale Funnel route check | Pass with ingress warnings | `node ops/scripts/runtime/check-public-url.mjs https://leangcosmetics.crane-qilin.ts.net /public` returned 200 for `/`, `/health`, `/public`, and `/api/portal/bootstrap`. Direct public ingress IP probes still timed out and are reported separately from app health. |
+| Cloudflare Tunnel route check | Pass | `node ops/scripts/runtime/check-public-url.mjs https://leangcosmetics.dpdns.org /public` is the active public-route smoke for `/`, `/health`, `/public`, and `/api/portal/bootstrap`. |
 
 ## High-Risk Findings Addressed In This Pass
 
@@ -25,7 +25,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 - The web/API process was still able to create an in-process BullMQ worker. This was split into producer-only web code plus dedicated import/media worker entrypoints.
 - Import image optimization could incorrectly count the import complete before media work finished. Import image files now move through `queued_media`, the media worker updates image progress, and product imports wait through `processing_media` before final completion.
 - Large import progress must remain phase-based and must not show completion while backend row/media/finalization work is still active.
-- Tailscale route health is tracked separately from app route health so relay/DNS problems do not get misdiagnosed as React/API failures.
+- Cloudflare route health is tracked separately from app route health so tunnel/DNS problems do not get misdiagnosed as React/API failures.
 
 ## Required Verification Matrix
 
@@ -38,7 +38,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 | Large import smoke | 10k and 50k CSV rows analyze/apply in background phases, awaiting approval before writes, with the app still usable. |
 | Image-heavy import smoke | Image references/ZIP/folder batches avoid base64 JSON and process with bounded worker concurrency. |
 | Media uploads | Product, take-photo, avatar, business logo, site logo, portal/about, file library, and import images route through multipart upload and compression metadata. |
-| Tailscale Funnel | Local and public customer URLs respond, with failures reported as network/runtime status rather than app freezes. |
+| Cloudflare Tunnel | Local and public customer URLs respond, with failures reported as network/runtime status rather than app freezes. |
 
 ## Implemented Verification Improvements
 
@@ -65,7 +65,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 - `docker compose -f ops/docker/compose.scale.yml config --quiet`: passed.
 - Import worker Redis smoke: passed, queues `business-os-import-analyze` and `business-os-import-apply` active.
 - Media worker Redis smoke: passed, queue `business-os-media-optimize` active.
-- Local/public route smoke: passed for local `/health`, local `/public` standards doctype, and Tailscale `/`, `/health`, `/public`, `/api/portal/bootstrap`.
+- Local/public route smoke: passed for local `/health`, local `/public` standards doctype, and Cloudflare `/`, `/health`, `/public`, `/api/portal/bootstrap`.
 
 ## Notes
 

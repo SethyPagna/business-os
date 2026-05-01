@@ -63,7 +63,7 @@ export function connectWS() {
       window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: Date.now() } }))
     }
     // Send a ping every 25 s to prevent idle-timeout drops on reverse proxies
-    // (Tailscale, Nginx, AWS ALB, etc. typically close idle WS after ~60 s).
+    // (Cloudflare Tunnel, Nginx, AWS ALB, etc. typically close idle WS after ~60 s).
     // The backend already handles { type:'ping' } and replies { type:'pong' }.
     clearInterval(wsPingTimer)
     wsPingTimer = setInterval(() => {

@@ -76,7 +76,7 @@ if exist "%BACKEND_SRC%\.env" (
     for /f "tokens=1,* delims==" %%a in ('type "%BACKEND_SRC%\.env" ^| findstr /i "^GOOGLE_DRIVE_CLIENT_SECRET"') do set "RELEASE_GOOGLE_DRIVE_CLIENT_SECRET=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%BACKEND_SRC%\.env" ^| findstr /i "^GOOGLE_DRIVE_OAUTH_REDIRECT_URI"') do set "RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=%%b"
 )
-if "!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=https://leangcosmetics.crane-qilin.ts.net/api/system/drive-sync/oauth/callback"
+if "!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=https://leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback"
 
 where node >nul 2>&1
 if errorlevel 1 (
@@ -116,10 +116,6 @@ if not errorlevel 1 (
     echo [INFO] Stopping running business-os-server.exe...
     powershell -Command "Stop-Process -Name 'business-os-server' -Force -ErrorAction Stop" >nul 2>&1
     powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
-    where tailscale >nul 2>&1
-    if not errorlevel 1 (
-        tailscale serve reset >nul 2>&1
-    )
     echo [OK] Running packaged server stopped
 ) else (
     echo [OK] No running packaged server found
@@ -418,7 +414,6 @@ REM ---- Runtime bootstrap + Docker Compose service config
 if not exist "%DIST_OUT%\ops\scripts\powershell" mkdir "%DIST_OUT%\ops\scripts\powershell" >nul 2>&1
 if not exist "%DIST_OUT%\ops\docker" mkdir "%DIST_OUT%\ops\docker" >nul 2>&1
 copy /y "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" "%DIST_OUT%\ops\scripts\powershell\runtime-bootstrap.ps1" >nul
-copy /y "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" "%DIST_OUT%\ops\scripts\powershell\tailscale-health-monitor.ps1" >nul
 copy /y "%ROOT%\ops\docker\compose.scale.yml" "%DIST_OUT%\ops\docker\compose.scale.yml" >nul
 echo [OK] Runtime bootstrap and Docker Compose config added
 
@@ -441,7 +436,10 @@ if exist "%PRESERVE_ENV%" (
 ) else (
     (
     echo PORT=4000
-    echo TAILSCALE_URL=
+    echo BUSINESS_OS_REMOTE_PROVIDER=cloudflare
+    echo PUBLIC_BASE_URL=https://leangcosmetics.dpdns.org
+    echo CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org
+    echo CLOUDFLARE_TUNNEL_TOKEN_FILE=runtime\secrets\cloudflare-business-os-leangcosmetics.token
     echo SYNC_TOKEN=
     echo.
     echo # ---- Security / Verification Providers ----
@@ -522,19 +520,16 @@ echo 4. Login: admin / admin  ^(change password after first login^)
 echo 5. To stop the app: run stop-server.bat
 echo 6. Customer portal: use the public URL configured in Customer Portal, or the custom public path if no external URL is set
 echo.
-echo REMOTE ACCESS ^(Tailscale^):
-echo - start-server.bat handles Tailscale automatically if installed.
-echo - On each device, start-server.bat updates TAILSCALE_URL in .env to that device's current Tailscale URL.
-echo - Install from: https://tailscale.com/download
-echo - Enable HTTPS:  https://login.tailscale.com/admin/dns
-echo - Enable Funnel: https://login.tailscale.com/admin/acls
+echo REMOTE ACCESS ^(Cloudflare^):
+echo - start-server.bat starts Cloudflare Tunnel for https://leangcosmetics.dpdns.org
+echo - Keep the Cloudflare tunnel token file in runtime\secrets.
 echo.
 echo FILES:
 echo - business-os-server.exe   ^(main server, no Node.js required^)
 echo - start-server.bat         ^(launch script^)
 echo - stop-server.bat          ^(stop script^)
 echo - ops\docker\              ^(required Redis/Postgres/MinIO service config^)
-echo - .env                     ^(port and Tailscale config^)
+echo - .env                     ^(port and Cloudflare config^)
 echo - business-os-data\        ^(created on first run and preserved across rebuilds^)
 echo.
 echo REQUIREMENTS: Windows 10+, Docker Desktop, port 4000 available.
@@ -607,7 +602,7 @@ echo     start-server.bat         - double-click to launch
 echo     stop-server.bat          - double-click to stop
 echo     ops\docker\              - Redis/Postgres/MinIO compose config
 echo     ops\scripts\powershell\  - one-button runtime bootstrap
-echo     .env                     - port + Tailscale config
+echo     .env                     - port + Cloudflare config
 echo     @img\                    - sharp image binaries ^(if present^)
 echo     business-os-data\        - created automatically for persistent data
 echo.

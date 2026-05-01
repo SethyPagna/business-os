@@ -1147,7 +1147,7 @@
   "sync_refresh": "Refresh",
   "sync_save_connect": "Save & Connect",
   "sync_server": "Sync Server",
-  "sync_server_desc": "One device runs the server. All devices open the Tailscale URL in browser — no manual setup needed.",
+  "sync_server_desc": "One device runs the server. All devices open the Cloudflare URL in a browser, with no manual setup needed.",
   "sync_server_offline": "Server offline",
   "sync_server_time_title": "Server Time",
   "sync_server_title": "Sync Server",

@@ -30,6 +30,14 @@ function getConfiguredSyncToken() {
   return trim(process.env.SYNC_TOKEN || '')
 }
 
+function getRemoteAccessProvider() {
+  return trim(process.env.BUSINESS_OS_REMOTE_PROVIDER || 'cloudflare').toLowerCase()
+}
+
+function isLegacyTailscaleEnabled() {
+  return getRemoteAccessProvider() === 'tailscale'
+}
+
 function getRequestHost(req) {
   const forwardedHost = trim(req?.headers?.['x-forwarded-host'])
   const host = forwardedHost || trim(req?.headers?.host)
@@ -67,6 +75,7 @@ function getTailscaleIdentity(req) {
 }
 
 function hasTrustedTailscaleIdentity(req) {
+  if (!isLegacyTailscaleEnabled()) return false
   const remoteAddress = getRemoteAddress(req)
   if (!isLoopbackAddress(remoteAddress)) return false
   const identity = getTailscaleIdentity(req)
@@ -91,7 +100,7 @@ function isPublicRemoteRequest(req) {
   const host = getRequestHost(req)
   if (hasTrustedTailscaleIdentity(req)) return false
   if (isLocalHostRequest(req)) return false
-  if (isTsNetHost(host)) return true
+  if (isLegacyTailscaleEnabled() && isTsNetHost(host)) return true
   return true
 }
 
@@ -110,7 +119,7 @@ function classifyRequestAccess(req) {
   const tokenValid = false
   let mode = 'local'
   if (trustedTailscale) mode = 'tailscale-private'
-  else if (publicRemote && isTsNetHost(getRequestHost(req))) mode = 'tailscale-public'
+  else if (publicRemote && isLegacyTailscaleEnabled() && isTsNetHost(getRequestHost(req))) mode = 'tailscale-public'
   else if (remoteRequest) mode = 'remote'
 
   return {
@@ -126,6 +135,7 @@ function classifyRequestAccess(req) {
     tokenProvided: false,
     tokenValid,
     configuredTailscaleHost: getConfiguredTailscaleHost(),
+    remoteAccessProvider: getRemoteAccessProvider(),
   }
 }
 

@@ -48,7 +48,7 @@ Last updated: 2026-04-30
 ## Session 2 Notes
 
 - Added frontend regression coverage for in-flight write dedupe, including stable JSON body ordering and post-settle cleanup.
-- Refreshed Tailscale Funnel mapping to `https://leangcosmetics.crane-qilin.ts.net/ -> http://127.0.0.1:4000`; local health at `http://127.0.0.1:4000/health` passed. This Windows client still closes the HTTPS handshake when requesting the Funnel domain locally, so external-device verification remains open.
+- Switched normal public access to Cloudflare Tunnel at `https://leangcosmetics.dpdns.org/ -> http://127.0.0.1:4000`; local health at `http://127.0.0.1:4000/health` passed. Legacy Tailscale checks are kept only behind explicit support wrappers.
 - This is a cross-cutting guardrail, not the final Session 2 sweep. Remaining work is to keep tightening individual high-risk actions with explicit busy states, idempotency keys, and loader timeout/retry UX.
 
 ## Remaining Reports To Fill

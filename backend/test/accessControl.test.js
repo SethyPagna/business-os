@@ -34,6 +34,7 @@ function makeReq({ method = 'GET', originalUrl = '/api/auth/login', host = 'loca
 }
 
 const previousSyncToken = process.env.SYNC_TOKEN
+const previousRemoteProvider = process.env.BUSINESS_OS_REMOTE_PROVIDER
 
 runTest('public API allowlist keeps customer portal/config endpoints open', () => {
   assert.equal(isPublicApiRequest(makeReq({ originalUrl: '/api/system/config' })), true)
@@ -53,8 +54,27 @@ runTest('localhost access does not require sync token', () => {
   assert.equal(result.access.mode, 'local')
 })
 
-runTest('private Tailscale Serve identity bypasses sync token', () => {
+runTest('Cloudflare mode treats legacy Tailscale identity headers as normal remote access', () => {
   process.env.SYNC_TOKEN = 'secret-token'
+  process.env.BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
+  const result = authorizeProtectedRequest(makeReq({
+    originalUrl: '/api/auth/login',
+    host: 'device.example.ts.net',
+    remoteAddress: '127.0.0.1',
+    headers: {
+      'tailscale-user-login': 'user@example.com',
+      'tailscale-user-name': 'Tailnet User',
+    },
+  }))
+  assert.equal(result.allowed, true)
+  assert.equal(result.access.mode, 'remote')
+  assert.equal(result.access.trustedTailscale, false)
+  assert.equal(result.access.remoteAccessProvider, 'cloudflare')
+})
+
+runTest('legacy Tailscale provider can still trust private Serve identity explicitly', () => {
+  process.env.SYNC_TOKEN = 'secret-token'
+  process.env.BUSINESS_OS_REMOTE_PROVIDER = 'tailscale'
   const result = authorizeProtectedRequest(makeReq({
     originalUrl: '/api/auth/login',
     host: 'device.example.ts.net',
@@ -66,36 +86,40 @@ runTest('private Tailscale Serve identity bypasses sync token', () => {
   }))
   assert.equal(result.allowed, true)
   assert.equal(result.access.mode, 'tailscale-private')
+  assert.equal(result.access.remoteAccessProvider, 'tailscale')
 })
 
-runTest('public remote access now defers to signed user sessions', () => {
+runTest('Cloudflare public remote access defers to signed user sessions', () => {
   process.env.SYNC_TOKEN = ''
+  process.env.BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
   const result = authorizeProtectedRequest(makeReq({
     originalUrl: '/api/auth/login',
-    host: 'device.example.ts.net',
+    host: 'leangcosmetics.dpdns.org',
     remoteAddress: '127.0.0.1',
   }))
   assert.equal(result.allowed, true)
   assert.equal(result.code, 'session_required')
-  assert.equal(result.access.mode, 'tailscale-public')
+  assert.equal(result.access.mode, 'remote')
 })
 
 runTest('public remote access ignores legacy sync token headers', () => {
   process.env.SYNC_TOKEN = 'secret-token'
+  process.env.BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
   const result = authorizeProtectedRequest(makeReq({
     originalUrl: '/api/auth/login',
-    host: 'device.example.ts.net',
+    host: 'leangcosmetics.dpdns.org',
     remoteAddress: '127.0.0.1',
     headers: {
       'x-sync-token': 'secret-token',
     },
   }))
   assert.equal(result.allowed, true)
-  assert.equal(result.access.mode, 'tailscale-public')
+  assert.equal(result.access.mode, 'remote')
   assert.equal(result.code, 'session_required')
 })
 
 process.env.SYNC_TOKEN = previousSyncToken
+process.env.BUSINESS_OS_REMOTE_PROVIDER = previousRemoteProvider
 
 if (failed > 0) {
   process.exitCode = 1

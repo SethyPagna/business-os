@@ -46,7 +46,7 @@ These changes are low-risk and should improve speed without making deploys or
 - Use that response to populate the shell before deeper page-specific fetches.
 
 Why:
-- fewer round trips on Tailscale Funnel
+- fewer round trips through Cloudflare Tunnel
 - less "first click after login" instability
 - lower chance of early 401 noise from staggered requests
 

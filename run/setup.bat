@@ -67,6 +67,7 @@ echo [OK] Organizations root: %DATA_DIR%\organizations
 REM ---- Write .env (preserve existing SYNC_TOKEN and provider settings) ---
 echo.
 echo [INFO] Writing backend configuration...
+set "EXISTING_REMOTE_PROVIDER="
 set "EXISTING_TAILSCALE_URL="
 set "EXISTING_PUBLIC_BASE_URL="
 set "EXISTING_CLOUDFLARE_PUBLIC_URL="
@@ -101,6 +102,9 @@ set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI="
 if exist "%ENV_FILE%" (
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^TAILSCALE_URL"') do (
         set "EXISTING_TAILSCALE_URL=%%b"
+    )
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^BUSINESS_OS_REMOTE_PROVIDER"') do (
+        set "EXISTING_REMOTE_PROVIDER=%%b"
     )
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^PUBLIC_BASE_URL"') do (
         set "EXISTING_PUBLIC_BASE_URL=%%b"
@@ -196,6 +200,8 @@ if exist "%ENV_FILE%" (
 if "!EXISTING_GOOGLE_DRIVE_CLIENT_ID!"=="" set "EXISTING_GOOGLE_DRIVE_CLIENT_ID=%GOOGLE_DRIVE_CLIENT_ID%"
 if "!EXISTING_GOOGLE_DRIVE_CLIENT_SECRET!"=="" set "EXISTING_GOOGLE_DRIVE_CLIENT_SECRET=%GOOGLE_DRIVE_CLIENT_SECRET%"
 if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=%GOOGLE_DRIVE_OAUTH_REDIRECT_URI%"
+if not "%BUSINESS_OS_REMOTE_PROVIDER%"=="" set "EXISTING_REMOTE_PROVIDER=%BUSINESS_OS_REMOTE_PROVIDER%"
+if "!EXISTING_REMOTE_PROVIDER!"=="" set "EXISTING_REMOTE_PROVIDER=cloudflare"
 if "!EXISTING_PUBLIC_BASE_URL!"=="" set "EXISTING_PUBLIC_BASE_URL=https://leangcosmetics.dpdns.org"
 if "!EXISTING_CLOUDFLARE_PUBLIC_URL!"=="" set "EXISTING_CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
 if "!EXISTING_CLOUDFLARE_ACCOUNT_ID!"=="" set "EXISTING_CLOUDFLARE_ACCOUNT_ID=743e5b727d139e85ed11679097f6f99e"
@@ -209,10 +215,11 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo.
     echo PORT=4000
     echo.
-    echo # Tailscale Funnel URL ^(auto-filled by start-server.bat^)
-    echo TAILSCALE_URL=!EXISTING_TAILSCALE_URL!
+    echo # Remote access provider. Cloudflare is the normal public route.
+    echo BUSINESS_OS_REMOTE_PROVIDER=!EXISTING_REMOTE_PROVIDER!
+    if /I "!EXISTING_REMOTE_PROVIDER!"=="tailscale" echo TAILSCALE_URL=!EXISTING_TAILSCALE_URL!
     echo.
-    echo # Preferred public URL ^(Cloudflare Tunnel custom domain; Tailscale remains fallback^)
+    echo # Cloudflare Tunnel custom domain
     echo PUBLIC_BASE_URL=!EXISTING_PUBLIC_BASE_URL!
     echo CLOUDFLARE_PUBLIC_URL=!EXISTING_CLOUDFLARE_PUBLIC_URL!
     echo CLOUDFLARE_ACCOUNT_ID=!EXISTING_CLOUDFLARE_ACCOUNT_ID!
@@ -220,7 +227,7 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo CLOUDFLARE_TUNNEL_ID=!EXISTING_CLOUDFLARE_TUNNEL_ID!
     echo CLOUDFLARE_TUNNEL_TOKEN_FILE=!EXISTING_CLOUDFLARE_TUNNEL_TOKEN_FILE!
     echo.
-    echo # Optional extra security token. Leave blank when using Tailscale.
+    echo # Optional extra security token.
     echo SYNC_TOKEN=!EXISTING_TOKEN!
     echo.
     echo # OTP secret encryption key ^(32-byte key as hex/base64^)

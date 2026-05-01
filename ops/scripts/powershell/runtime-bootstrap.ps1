@@ -405,7 +405,9 @@ Prepare-DockerRuntime
 $node = Ensure-Tool 'Node.js' @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe') 'OpenJS.NodeJS.LTS' ($Mode -eq 'Setup')
 $git = Ensure-Tool 'Git' @('git.exe', 'git') @('C:\Program Files\Git\cmd\git.exe') 'Git.Git' ($Mode -eq 'Setup')
 $openssl = Ensure-Tool 'OpenSSL' @('openssl.exe', 'openssl') @('C:\Program Files\OpenSSL-Win64\bin\openssl.exe', 'C:\Program Files\OpenSSL-Win32\bin\openssl.exe') 'ShiningLight.OpenSSL.Light' $false
-$tailscale = Ensure-Tool 'Tailscale' @('tailscale.exe', 'tailscale') @('C:\Program Files\Tailscale\tailscale.exe', 'C:\Program Files (x86)\Tailscale\tailscale.exe') 'Tailscale.Tailscale' $false
+if (($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant() -eq 'tailscale') {
+  $tailscale = Ensure-Tool 'Tailscale' @('tailscale.exe', 'tailscale') @('C:\Program Files\Tailscale\tailscale.exe', 'C:\Program Files (x86)\Tailscale\tailscale.exe') 'Tailscale.Tailscale' $false
+}
 $docker = Ensure-Tool 'Docker CLI' @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe') 'Docker.DockerDesktop' $true
 
 try {

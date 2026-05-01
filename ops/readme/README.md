@@ -11,11 +11,11 @@ Business OS now starts as one application, but it depends on local scale service
 - MinIO for the future verified asset-storage target
 - SQLite and local files as the current authoritative business data source
 
-`run\start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Tailscale Funnel when installed, and prints the local and customer URLs.
+`run\start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Cloudflare Tunnel, and prints the local and customer URLs.
 
 The app does not silently switch live business data to Postgres/MinIO. SQLite/local files stay authoritative until an admin uses Settings > Backup > Data migration and completes a verified migration workflow. The current one-button safety step does run automatically inside the app: it creates a local folder backup and then runs Google Drive sync when Drive is connected, without changing the live data source.
 
-The public URL check intentionally verifies both the HTTPS routes and public DNS ingress. If the app routes return `200` but the DNS ingress check fails, the local app is healthy and the Funnel route may still be tailnet-only. Enable Funnel/public DNS in Tailscale admin before treating that URL as usable by non-tailnet devices.
+The public URL check intentionally verifies HTTPS routes through the configured Cloudflare custom domain. If the app routes return locally but the public URL fails, the local app is healthy and the Cloudflare tunnel or DNS route needs attention.
 
 ## New Laptop Setup
 
@@ -29,7 +29,6 @@ The setup flow uses `ops\scripts\powershell\runtime-bootstrap.ps1` before Node i
 
 - Node.js
 - Docker Desktop
-- Tailscale
 - Git
 - OpenSSL
 

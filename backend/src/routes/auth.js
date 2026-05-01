@@ -62,7 +62,7 @@ const {
 } = require('../organizationContext')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
-const { PUBLIC_BASE_URL, TAILSCALE_URL } = require('../config')
+const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
 const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
 
@@ -141,8 +141,7 @@ function resolvePasswordResetRedirect(req, redirectTo) {
     redirectTo,
     process.env.SUPABASE_PASSWORD_RESET_REDIRECT_TO,
     PUBLIC_BASE_URL,
-    process.env.CLOUDFLARE_PUBLIC_URL,
-    process.env.TAILSCALE_URL,
+    CLOUDFLARE_PUBLIC_URL,
     buildPublicBaseUrl(req),
     'http://localhost:4000',
   ]
@@ -365,17 +364,16 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
     serverStartTime: String(SERVER_START_TIME),
   }
   return {
-    syncServerUrl: PUBLIC_BASE_URL || TAILSCALE_URL || null,
+    syncServerUrl: PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || null,
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,
-    trustedTailscale: access.trustedTailscale,
     tokenAccepted: access.tokenValid,
     hostUiAvailable,
     serverStartTime: SERVER_START_TIME,
     runtime,
     security: {
-      configuredTailscaleHost: access.configuredTailscaleHost || null,
+      remoteAccessProvider: access.remoteAccessProvider || 'cloudflare',
       host: access.host || null,
       remoteAddress: access.remoteAddress || null,
       mode: access.mode,
@@ -383,7 +381,6 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
       tokenRequired: access.tokenRequired,
       hasConfiguredToken: access.hasConfiguredToken,
       tokenProvided: access.tokenProvided,
-      trustedTailscale: access.trustedTailscale,
       hostUiAvailable,
     },
   }

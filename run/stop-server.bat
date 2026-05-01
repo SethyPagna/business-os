@@ -9,7 +9,7 @@ REM  Shutdown flow:
 REM    1. stop PM2-managed app if present
 REM    2. kill listeners on the configured port
 REM    3. kill stray node server.js processes
-REM    4. stop Cloudflare/Tailscale tunnels
+REM    4. stop Cloudflare Tunnel and optional legacy tunnels
 REM    5. retry with elevation if the port is still busy
 REM ========================================================================
 
@@ -25,23 +25,27 @@ set "ENV_FILE=%ROOT%\backend\.env"
 set "PORT=4000"
 set "TAILSCALE_CMD="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
+if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 
 if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^BUSINESS_OS_REMOTE_PROVIDER="') do set "BUSINESS_OS_REMOTE_PROVIDER=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] STOP requested port=%PORT%>>"%RUN_LOG%"
 
-for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
-    if not defined TAILSCALE_CMD (
-        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
+if /I "%BUSINESS_OS_REMOTE_PROVIDER%"=="tailscale" (
+    for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
+        if not defined TAILSCALE_CMD (
+            for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
+        )
     )
-)
-if not defined TAILSCALE_CMD (
-    for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
-        if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+    if not defined TAILSCALE_CMD (
+        for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
+            if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+        )
     )
 )
 
@@ -51,7 +55,7 @@ echo   Business OS  ^|  Stopping Server
 echo ============================================================
 echo.
 
-if defined TAILSCALE_CMD (
+if /I "%BUSINESS_OS_REMOTE_PROVIDER%"=="tailscale" if defined TAILSCALE_CMD (
     echo [INFO] Stopping Tailscale health monitor...
     powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode Stop -Root "%ROOT%" -TailscalePath "!TAILSCALE_CMD!" >nul 2>&1
 )
@@ -106,7 +110,7 @@ echo [INFO] Killing residual import/media worker processes...
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend[\\/]+src[\\/]+workers[\\/]+(importWorker|mediaWorker)\\.js' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 powershell -NoProfile -Command "Start-Sleep -Seconds 2" >nul 2>&1
 
-if defined TAILSCALE_CMD (
+if /I "%BUSINESS_OS_REMOTE_PROVIDER%"=="tailscale" if defined TAILSCALE_CMD (
     echo.
     echo [INFO] Stopping Tailscale Funnel...
     powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1

@@ -16,10 +16,10 @@ set "DATA_DIR=%ROOT%\business-os-data"
 set "ENV_FILE=%ROOT%\.env"
 set "PORT=4000"
 set "CLOUDFLARED_CMD="
-set "TAILSCALE_CMD="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
 set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
 
+if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
 set "JOB_QUEUE_DRIVER=bullmq"
 set "WORKER_RUNTIME=host"
@@ -57,9 +57,9 @@ if not exist "%ENV_FILE%" (
   echo [INFO] Creating default .env...
   (
     echo PORT=4000
+    echo BUSINESS_OS_REMOTE_PROVIDER=cloudflare
     echo PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%
     echo CLOUDFLARE_PUBLIC_URL=%CLOUDFLARE_PUBLIC_URL%
-    echo TAILSCALE_URL=
     echo SYNC_TOKEN=
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq
@@ -76,7 +76,12 @@ if not exist "%ENV_FILE%" (
 )
 
 for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
+for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PUBLIC_BASE_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
+for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_PUBLIC_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
+for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
 if "%PORT%"=="" set "PORT=4000"
+if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+if not exist "%CLOUDFLARE_TUNNEL_TOKEN_FILE%" if exist "%ROOT%\%CLOUDFLARE_TUNNEL_TOKEN_FILE%" set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\%CLOUDFLARE_TUNNEL_TOKEN_FILE%"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 
 echo [INFO] Starting required runtime services...
@@ -97,17 +102,6 @@ if not defined CLOUDFLARED_CMD (
 if defined CLOUDFLARED_CMD if exist "%CLOUDFLARE_TUNNEL_TOKEN_FILE%" (
   echo [INFO] Starting Cloudflare Tunnel...
   powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','%CLOUDFLARE_TUNNEL_TOKEN_FILE%'); Start-Process -FilePath '%CLOUDFLARED_CMD%' -ArgumentList $argsList -WindowStyle Hidden | Out-Null" >nul 2>&1
-)
-
-for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
-  if not defined TAILSCALE_CMD for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
-)
-if not defined TAILSCALE_CMD (
-  for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
-)
-if defined TAILSCALE_CMD (
-  powershell -NoProfile -Command "& '%TAILSCALE_CMD%' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode Start -Root "%ROOT%" -TailscalePath "%TAILSCALE_CMD%" -IntervalSeconds 60 >nul 2>&1
 )
 
 echo [INFO] Starting Business OS server...

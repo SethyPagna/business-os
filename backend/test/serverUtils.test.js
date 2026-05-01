@@ -93,6 +93,7 @@ runTest('origin policy allows configured Cloudflare public origin for module scr
   const publicUrl = PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL
   if (!publicUrl) return
   assert.equal(isAllowedRequestOrigin(publicUrl), true)
+  assert.equal(isAllowedRequestOrigin('https://device.example.ts.net'), false)
 })
 
 runTest('websocket origin policy accepts same-host and rejects mismatched origins', () => {

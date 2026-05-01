@@ -7,16 +7,16 @@ Business OS is meant to run like a normal Windows business app.
 1. Run `run\setup.bat` once on a new laptop.
 2. Run `run\start-server.bat` whenever you want to open the app.
 3. Open the local URL printed by the start window, usually `http://localhost:4000`.
-4. Use the printed customer URL for phones or other devices when Tailscale Funnel is available.
+4. Use the printed Cloudflare customer URL for phones or other devices.
 5. Run `run\stop-server.bat` to stop the app.
 
 That is the normal workflow. You do not need to run Redis, Postgres, MinIO, Docker Compose, or import workers by hand.
 
-If the start window says the public URL check failed, the app still started locally, but Tailscale has not provided a public Funnel ingress for that hostname yet. Devices signed into the same tailnet may still work; public internet devices need Funnel enabled in the Tailscale account.
+If the start window says the public URL check failed, the app still started locally, but Cloudflare Tunnel is not connected to the custom domain yet. Check the tunnel token file and Cloudflare tunnel health before using public devices.
 
 ## What Setup Does
 
-`run\setup.bat` checks for Node.js, Docker Desktop, Tailscale, Git, and OpenSSL. When Windows allows it, missing tools are installed with `winget`. If Windows needs administrator approval or a restart, the script tells you what to do and stops clearly.
+`run\setup.bat` checks for Node.js, Docker Desktop, Git, and OpenSSL. When Windows allows it, missing tools are installed with `winget`. If Windows needs administrator approval or a restart, the script tells you what to do and stops clearly.
 
 Docker Desktop is required because Business OS uses Redis, Postgres, and MinIO for large imports and future scale features. The live business database still stays local SQLite until an admin explicitly runs the in-app migration wizard.
 

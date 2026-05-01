@@ -9,7 +9,7 @@ REM  Runtime flow:
 REM    1. start/verify required Docker scale services
 REM    2. confirm backend deps and frontend build exist
 REM    3. start with PM2 when possible, otherwise fall back to background node
-REM    4. start Cloudflare Tunnel for the custom domain, then keep Tailscale as fallback
+REM    4. start Cloudflare Tunnel for the custom domain
 REM    5. wait for /health, then print admin + customer portal URLs
 REM ========================================================================
 
@@ -32,6 +32,7 @@ set "USING_PM2=0"
 set "TAILSCALE_URL_FOUND="
 set "PUBLIC_URL_FOUND="
 set "PUBLIC_URL_KIND="
+if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
 set "PUBLIC_BASE_URL="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
@@ -64,10 +65,12 @@ if exist "%ENV_FILE%" (
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PUBLIC_BASE_URL="') do set "PUBLIC_BASE_URL=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_PUBLIC_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^BUSINESS_OS_REMOTE_PROVIDER="') do set "BUSINESS_OS_REMOTE_PROVIDER=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
 if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
 if "%PUBLIC_BASE_URL%"=="" set "PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%"
+if "%BUSINESS_OS_REMOTE_PROVIDER%"=="" set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 if not exist "%PM2_HOME%" mkdir "%PM2_HOME%" >nul 2>&1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
@@ -84,17 +87,6 @@ if errorlevel 1 (
     pause
     echo [%DATE% %TIME%] START failed: runtime bootstrap failed>>"%RUN_LOG%"
     exit /b 1
-)
-
-for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
-    if not defined TAILSCALE_CMD (
-        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
-    )
-)
-if not defined TAILSCALE_CMD (
-    for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
-        if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
-    )
 )
 
 for %%g in (cloudflared.exe cloudflared.cmd cloudflared.bat cloudflared) do (
@@ -263,7 +255,7 @@ if defined CLOUDFLARED_CMD (
         powershell -NoProfile -Command "$envFile='%ENV_FILE%'; $public='!PUBLIC_BASE_URL!'; $cloud='!CLOUDFLARE_PUBLIC_URL!'; if(Test-Path $envFile){ $lines=Get-Content $envFile; foreach($pair in @(@('PUBLIC_BASE_URL',$public),@('CLOUDFLARE_PUBLIC_URL',$cloud))){ $key=$pair[0]; $value=$pair[1]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) } }; Set-Content -Encoding UTF8 $envFile $lines }" >nul 2>&1
         powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','!CLOUDFLARE_TUNNEL_TOKEN_FILE!'); $p = Start-Process -FilePath '!CLOUDFLARED_CMD!' -ArgumentList $argsList -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
         if errorlevel 1 (
-            echo [WARN] Cloudflare Tunnel could not be started. Tailscale fallback will be tried.
+            echo [WARN] Cloudflare Tunnel could not be started. Remote access may be unavailable.
         ) else (
             set "PUBLIC_URL_FOUND=!PUBLIC_BASE_URL!"
             set "PUBLIC_URL_KIND=cloudflare"
@@ -272,14 +264,26 @@ if defined CLOUDFLARED_CMD (
     ) else (
         echo [WARN] Cloudflare tunnel token file is missing:
         echo        !CLOUDFLARE_TUNNEL_TOKEN_FILE!
-        echo        Tailscale fallback will be tried.
+        echo        Remote access needs the Cloudflare tunnel token file.
     )
 ) else (
-    echo [WARN] cloudflared was not found. Tailscale fallback will be tried.
+    echo [WARN] cloudflared was not found. Remote access may be unavailable.
 )
 
+if /I not "!BUSINESS_OS_REMOTE_PROVIDER!"=="tailscale" goto :after_remote_access_provider
+
 echo.
-echo [INFO] Checking Tailscale for remote access...
+echo [INFO] Checking legacy Tailscale remote access...
+for %%g in (tailscale.exe tailscale.cmd tailscale.bat tailscale) do (
+    if not defined TAILSCALE_CMD (
+        for /f "tokens=*" %%p in ('where %%g 2^>nul') do if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%p"
+    )
+)
+if not defined TAILSCALE_CMD (
+    for %%p in ("%ProgramFiles%\Tailscale\tailscale.exe" "%ProgramFiles(x86)%\Tailscale\tailscale.exe") do (
+        if exist "%%~p" if not defined TAILSCALE_CMD set "TAILSCALE_CMD=%%~p"
+    )
+)
 if defined TAILSCALE_CMD (
     echo [INFO] Using Tailscale CLI: !TAILSCALE_CMD!
     echo [INFO] Starting Tailscale Funnel on port %PORT%...
@@ -349,6 +353,8 @@ if defined TAILSCALE_CMD (
     echo [INFO] Starting Tailscale health monitor...
     powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\tailscale-health-monitor.ps1" -Mode Start -Root "%ROOT%" -TailscalePath "!TAILSCALE_CMD!" -IntervalSeconds 60
 )
+
+:after_remote_access_provider
 
 echo.
 if "!USING_PM2!"=="1" (
@@ -506,7 +512,7 @@ if defined PUBLIC_URL_OK (
     if not "!PUBLIC_URL_FOUND!"=="" echo   Public URL check: warning - see log output above
 )
 if not defined PUBLIC_URL_OK if not "!PUBLIC_URL_FOUND!"=="" (
-    echo   Multi-device note: check the Cloudflare/Tailscale tunnel status if public devices cannot connect.
+    echo   Multi-device note: check the Cloudflare Tunnel status if public devices cannot connect.
 )
 echo.
 echo   Factory-reset default login: admin / admin

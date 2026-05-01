@@ -545,7 +545,7 @@ export default function ServerPage() {
           icon={Server}
           tone="blue"
           title={t('sync_server_title') || 'Sync Server'}
-          subtitle={t('sync_server_desc') || 'One device runs the server. All others open the Tailscale URL in their browser with no manual config needed.'}
+          subtitle={t('sync_server_desc') || 'One device runs the server. All others open the Cloudflare URL in their browser with no manual config needed.'}
         />
 
         <div className={`card flex items-center gap-4 p-4 ${
@@ -599,21 +599,21 @@ export default function ServerPage() {
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">1.</span>
                 <div>
                   <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step1_title') || 'Run setup on the server PC'}</p>
-                  <p className="mt-0.5">{t('sync_step1_desc') || 'Double-click setup.bat (Windows) or run ./setup.sh (Mac/Linux). Installs everything and starts the server.'}</p>
+                  <p className="mt-0.5">{t('sync_step1_desc') || 'Double-click run\\start-server.bat (Windows) or run bash run/sh/start-server.sh (Mac/Linux).'}</p>
                 </div>
               </li>
               <li className="flex gap-2">
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">2.</span>
                 <div>
-                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step2_title') || 'Enable Tailscale Funnel (one-time on server)'}</p>
-                  <p className="mt-0.5">{t('sync_step2_desc') || 'Run: tailscale funnel --bg 4000'}</p>
+                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step2_title') || 'Wait for URL'}</p>
+                  <p className="mt-0.5">{t('sync_step2_desc') || 'Wait ~10 seconds. A public Cloudflare URL appears in the terminal.'}</p>
                 </div>
               </li>
               <li className="flex gap-2">
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">3.</span>
                 <div>
                   <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step3_title') || 'Open the app on this device'}</p>
-                  <p className="mt-0.5">{t('sync_step3_desc') || 'Go to https://your-pc.tailnet.ts.net in the browser. The app connects automatically with no token needed.'}</p>
+                  <p className="mt-0.5">{t('sync_step3_desc') || 'Copy that URL and paste it below on every device that needs to sync.'}</p>
                 </div>
               </li>
               <li className="flex gap-2">
@@ -653,7 +653,7 @@ export default function ServerPage() {
                   autoComplete="url"
                   value={urlInput}
                   onChange={(event) => { setUrlInput(event.target.value); setTestResult(null) }}
-                  placeholder="https://your-device-name.ts.net"
+                  placeholder="https://leangcosmetics.dpdns.org"
                   className="input text-sm"
                 />
                 <p className="mt-1 text-xs text-gray-400">{t('sync_manual_url_hint') || 'No trailing slash.'}</p>
@@ -663,7 +663,7 @@ export default function ServerPage() {
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300">
                   <p><strong>Detected mode:</strong> {securityConfig.accessMode || 'local'}</p>
                   <p><strong>Sign-in:</strong> Browser sessions now use your normal Business OS login after the page loads.</p>
-                  <p><strong>Trusted path:</strong> {securityConfig.accessMode === 'tailscale-private' ? 'Private Tailscale identity' : 'Public or direct browser access'}</p>
+                  <p><strong>Trusted path:</strong> {securityConfig.accessMode === 'tailscale-private' ? 'Legacy private tunnel identity' : 'Cloudflare or direct browser access'}</p>
                 </div>
               ) : null}
 
