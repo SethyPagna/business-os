@@ -68,6 +68,18 @@ function shouldCheckPublicIngress(baseUrl) {
   }
 }
 
+function shouldRequirePublicIngress(baseUrl) {
+  try {
+    const { hostname } = new URL(baseUrl)
+    return process.env.BUSINESS_OS_STRICT_PUBLIC_INGRESS === '1'
+      || process.env.BUSINESS_OS_REQUIRE_PUBLIC_INTERNET === '1'
+      || process.env.BUSINESS_OS_PUBLIC_URL_STRICT === '1'
+      || hostname.endsWith('.ts.net')
+  } catch {
+    return false
+  }
+}
+
 async function fetchJsonWithTimeout(url, timeoutMs = PUBLIC_DNS_TIMEOUT_MS) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -178,20 +190,21 @@ async function main() {
   const routeHasFailure = routeResults.some((result) => !result.ok)
 
   if (shouldCheckPublicIngress(baseUrl)) {
+    const requirePublicIngress = shouldRequirePublicIngress(baseUrl)
     const hostname = new URL(baseUrl).hostname
     let publicEndpoints = []
     try {
       publicEndpoints = await resolvePublicIngress(hostname)
     } catch (error) {
-      const label = routeHasFailure ? 'FAIL' : 'WARN'
+      const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
       console.log(`[${label}] DNS ${hostname} :: ${error?.message || error}`)
-      if (routeHasFailure) hasFailure = true
+      if (routeHasFailure || requirePublicIngress) hasFailure = true
     }
 
     if (!publicEndpoints.length) {
-      const label = routeHasFailure ? 'FAIL' : 'WARN'
+      const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
       console.log(`[${label}] DNS ${hostname} :: no public IPv4/IPv6 ingress addresses resolved`)
-      if (routeHasFailure) hasFailure = true
+      if (routeHasFailure || requirePublicIngress) hasFailure = true
     }
 
     const ingressResults = await Promise.all(publicEndpoints.map(async (endpoint) => {
@@ -199,11 +212,11 @@ async function main() {
       try {
         const response = await checkHttpsViaIp(url, endpoint)
         const ok = response.status >= 200 && response.status < 400
-        const label = ok ? 'OK' : routeHasFailure ? 'FAIL' : 'WARN'
-        return { ok: ok || !routeHasFailure, line: `[${label}] ${response.status} ${url} via ${endpoint.ip}` }
+        const label = ok ? 'OK' : routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
+        return { ok: ok || (!routeHasFailure && !requirePublicIngress), line: `[${label}] ${response.status} ${url} via ${endpoint.ip}` }
       } catch (error) {
-        const label = routeHasFailure ? 'FAIL' : 'WARN'
-        return { ok: !routeHasFailure, line: `[${label}] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}` }
+        const label = routeHasFailure || requirePublicIngress ? 'FAIL' : 'WARN'
+        return { ok: !routeHasFailure && !requirePublicIngress, line: `[${label}] ERR ${url} via ${endpoint.ip} :: ${error?.code || error?.message || error}` }
       }
     }))
     ingressResults.forEach((result) => {

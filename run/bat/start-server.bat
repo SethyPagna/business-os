@@ -29,6 +29,7 @@ set "PM2_CMD="
 set "TAILSCALE_CMD="
 set "USING_PM2=0"
 set "TAILSCALE_URL_FOUND="
+set "TAILSCALE_NET_OK="
 set "LOCAL_API=http://127.0.0.1:4000"
 set "SERVER_ALREADY_RUNNING=0"
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
@@ -198,6 +199,19 @@ if defined TAILSCALE_CMD (
             if "!CLEAN_URL:~-1!"=="/" set "CLEAN_URL=!CLEAN_URL:~0,-1!"
             powershell -Command "$p='%ENV_FILE%'; if(Test-Path $p){$lines=Get-Content $p; if($lines -match '^TAILSCALE_URL='){ $lines=$lines -replace '^TAILSCALE_URL=.*','TAILSCALE_URL=!CLEAN_URL!' } else { $lines += 'TAILSCALE_URL=!CLEAN_URL!' }; Set-Content $p $lines }" >nul 2>&1
             echo [OK] Tailscale Funnel active: !CLEAN_URL!
+            echo [INFO] Checking Tailscale relay health...
+            powershell -NoProfile -Command "$tailscale='!TAILSCALE_CMD!'; $out=@(& $tailscale netcheck 2>&1); $text=($out -join [Environment]::NewLine); if($text -match 'Nearest DERP:\s+unknown' -or $text -match 'no response to latency probes' -or $text -match 'could not connect') { $text | Set-Content -Encoding UTF8 '%TEMP%\bos_tailscale_netcheck.txt'; exit 1 }; exit 0" >nul 2>&1
+            if errorlevel 1 (
+                echo [WARN] Tailscale relay health failed. Public internet devices may time out.
+                if exist "%TEMP%\bos_tailscale_netcheck.txt" (
+                    type "%TEMP%\bos_tailscale_netcheck.txt"
+                    del "%TEMP%\bos_tailscale_netcheck.txt" >nul 2>&1
+                )
+                echo      Check VPN/firewall/proxy rules. Tailscale needs outbound HTTPS to control/DERP relays.
+            ) else (
+                set "TAILSCALE_NET_OK=1"
+                echo [OK] Tailscale relay health passed.
+            )
         ) else (
             echo [OK] Tailscale Funnel started ^(URL could not be detected automatically^)
             echo      Run: tailscale funnel status
@@ -294,11 +308,18 @@ for /f "tokens=*" %%r in ('powershell -Command "try { $cfg = Invoke-RestMethod -
 set "PUBLIC_URL_OK="
 if not "!TAILSCALE_URL_FOUND!"=="" (
     echo [INFO] Verifying public URL with Node HTTPS...
+    set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
     node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check.txt" 2>&1
     if not errorlevel 1 (
-        set "PUBLIC_URL_OK=1"
-        echo [OK] Public URL verification passed.
-        echo [%DATE% %TIME%] START verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        if defined TAILSCALE_NET_OK (
+            set "PUBLIC_URL_OK=1"
+            echo [OK] Public URL verification passed.
+            echo [%DATE% %TIME%] START verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        ) else (
+            echo [WARN] Public route responded locally, but Tailscale relay health failed.
+            type "%TEMP%\bos_public_check.txt"
+            echo [%DATE% %TIME%] START warning: Tailscale relay health failed for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+        )
     ) else (
         echo [WARN] Public URL verification failed.
         type "%TEMP%\bos_public_check.txt"
@@ -306,11 +327,18 @@ if not "!TAILSCALE_URL_FOUND!"=="" (
         if defined TAILSCALE_CMD (
             powershell -NoProfile -Command "& '!TAILSCALE_CMD!' serve reset" >nul 2>&1
             powershell -NoProfile -Command "& '!TAILSCALE_CMD!' funnel --bg --yes 'http://127.0.0.1:%PORT%'" >nul 2>&1
+            set "BUSINESS_OS_STRICT_PUBLIC_INGRESS=1"
             node "%ROOT%\ops\scripts\runtime\check-public-url.mjs" "!TAILSCALE_URL_FOUND!" "!CUSTOMER_PORTAL_PATH!" >"%TEMP%\bos_public_check_retry.txt" 2>&1
             if not errorlevel 1 (
-                set "PUBLIC_URL_OK=1"
-                echo [OK] Public URL verification passed after Tailscale reset.
-                echo [%DATE% %TIME%] START repaired and verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+                if defined TAILSCALE_NET_OK (
+                    set "PUBLIC_URL_OK=1"
+                    echo [OK] Public URL verification passed after Tailscale reset.
+                    echo [%DATE% %TIME%] START repaired and verified public URL !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+                ) else (
+                    echo [WARN] Public route responded after reset, but Tailscale relay health failed.
+                    type "%TEMP%\bos_public_check_retry.txt"
+                    echo [%DATE% %TIME%] START warning: Tailscale relay health failed after reset for !TAILSCALE_URL_FOUND!>>"%RUN_LOG%"
+                )
             ) else (
                 echo [WARN] Public URL verification still failed after Tailscale reset.
                 type "%TEMP%\bos_public_check_retry.txt"
