@@ -3957,6 +3957,9 @@ export default function CatalogPage({ publicView = false }) {
   const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
+  const previewTitleIsBusinessName = previewBusinessName
+    && previewTitle
+    && previewBusinessName.toLowerCase() === previewTitle.toLowerCase()
   const showHeroToolsPanel = publicView
   const showPortalToolsBar = false
 
@@ -4038,24 +4041,26 @@ export default function CatalogPage({ publicView = false }) {
                       </div>
                       <div>
                         {showBrandLabel ? (
-                          <div className="text-sm font-semibold text-amber-100">{previewConfig.businessName}</div>
+                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{previewConfig.businessName}</div>
                         ) : null}
                         {previewConfig.businessTagline ? (
-                          <div className="mt-1 text-sm text-slate-100/90">{previewConfig.businessTagline}</div>
+                          <div className="notranslate mt-1 text-sm text-slate-100/90" translate="no">{previewConfig.businessTagline}</div>
                         ) : null}
                       </div>
                     </div>
 
                     {previewTitle ? (
                       <h1
-                        className="mt-5 font-semibold tracking-tight text-white"
+                        className={`mt-5 font-semibold tracking-tight text-white${previewTitleIsBusinessName ? ' notranslate' : ''}`}
+                        translate={previewTitleIsBusinessName ? 'no' : undefined}
                         style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
                       >
                         {previewTitle}
                       </h1>
                     ) : null}
                     <p
-                      className="mt-3 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base"
+                      className="notranslate mt-3 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base"
+                      translate="no"
                       style={{ textShadow: '0 6px 18px rgba(15, 23, 42, 0.28)' }}
                     >
                       {previewConfig.intro}

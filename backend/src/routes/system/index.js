@@ -29,7 +29,8 @@ const {
   writeDataLocation,
   normalizeSelectedDataDir,
   PUBLIC_BASE_URL,
-  TAILSCALE_URL,
+  CLOUDFLARE_PUBLIC_URL,
+  CLOUDFLARE_ADMIN_URL,
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI,
   BUSINESS_OS_REQUIRE_SCALE_SERVICES,
   JOB_QUEUE_DRIVER,
@@ -736,7 +737,8 @@ router.get('/config', authToken, (req, res) => {
   const { hostUiAvailable } = getHostUiAvailability(req)
   const organization = getDefaultOrganization()
   res.json({
-    syncServerUrl: PUBLIC_BASE_URL || TAILSCALE_URL || null,
+    syncServerUrl: PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || null,
+    adminServerUrl: CLOUDFLARE_ADMIN_URL || null,
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,

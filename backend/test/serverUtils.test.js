@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL } = require('../src/config')
+const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL } = require('../src/config')
 const {
   sanitizeObjectKeys,
   sanitizeStringValue,
@@ -94,6 +94,11 @@ runTest('origin policy allows configured Cloudflare public origin for module scr
   if (!publicUrl) return
   assert.equal(isAllowedRequestOrigin(publicUrl), true)
   assert.equal(isAllowedRequestOrigin('https://device.example.ts.net'), false)
+})
+
+runTest('origin policy allows configured Cloudflare admin origin', () => {
+  if (!CLOUDFLARE_ADMIN_URL) return
+  assert.equal(isAllowedRequestOrigin(CLOUDFLARE_ADMIN_URL), true)
 })
 
 runTest('websocket origin policy accepts same-host and rejects mismatched origins', () => {

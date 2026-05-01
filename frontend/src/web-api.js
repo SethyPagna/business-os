@@ -160,7 +160,7 @@ if (typeof window !== 'undefined') {
 // KEY FIX: When not in Vite dev mode the page is served BY the backend, so the
 // current origin is always the correct API/WS server ??regardless of any stale
 // URL that may be saved in localStorage from a previous session or a different
-// device (e.g. localhost saved when first run locally, but accessed via Tailscale
+// device (e.g. localhost saved when first run locally, but accessed via Cloudflare
 // on another device).  We always overwrite the stored URL with the current origin.
 ;(async () => {
   try {

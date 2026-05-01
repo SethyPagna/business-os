@@ -1,6 +1,6 @@
 'use strict'
 
-const { REMOTE_ACCESS_PROVIDER, TAILSCALE_URL, CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL } = require('./config')
+const { REMOTE_ACCESS_PROVIDER, TAILSCALE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, PUBLIC_BASE_URL } = require('./config')
 
 const API_PATH_PREFIX = '/api/'
 const UPLOADS_PATH_PREFIX = '/uploads/'
@@ -42,7 +42,7 @@ function normalizeConfiguredHost(value) {
 }
 
 function getConfiguredPublicHosts() {
-  const hosts = [CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL]
+  const hosts = [CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, PUBLIC_BASE_URL]
   if (REMOTE_ACCESS_PROVIDER === 'tailscale') hosts.push(TAILSCALE_URL)
   return hosts
     .map(normalizeConfiguredHost)
@@ -92,6 +92,7 @@ function getTrustedDocumentOrigins(req) {
 
   if (REMOTE_ACCESS_PROVIDER === 'tailscale') addOrigin(TAILSCALE_URL)
   addOrigin(CLOUDFLARE_PUBLIC_URL)
+  addOrigin(CLOUDFLARE_ADMIN_URL)
   addOrigin(PUBLIC_BASE_URL)
   addOrigin('http://localhost:4000')
   addOrigin('http://127.0.0.1:4000')

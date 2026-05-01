@@ -34,6 +34,7 @@ set "PUBLIC_URL_FOUND="
 set "PUBLIC_URL_KIND="
 if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+set "CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org"
 set "PUBLIC_BASE_URL="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
 set "TAILSCALE_NET_OK="
@@ -64,11 +65,13 @@ if exist "%ENV_FILE%" (
     for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PUBLIC_BASE_URL="') do set "PUBLIC_BASE_URL=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_PUBLIC_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_ADMIN_URL="') do set "CLOUDFLARE_ADMIN_URL=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^BUSINESS_OS_REMOTE_PROVIDER="') do set "BUSINESS_OS_REMOTE_PROVIDER=%%b"
 )
 if "%PORT%"=="" set "PORT=4000"
 if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+if "%CLOUDFLARE_ADMIN_URL%"=="" set "CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org"
 if "%PUBLIC_BASE_URL%"=="" set "PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%"
 if "%BUSINESS_OS_REMOTE_PROVIDER%"=="" set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
@@ -252,7 +255,7 @@ if defined CLOUDFLARED_CMD (
     if exist "!CLOUDFLARE_TUNNEL_TOKEN_FILE!" (
         echo [INFO] Using cloudflared: !CLOUDFLARED_CMD!
         powershell -NoProfile -Command "$tokenPath='!CLOUDFLARE_TUNNEL_TOKEN_FILE!'; Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | Where-Object { ([string]$_.CommandLine) -match [regex]::Escape($tokenPath) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-        powershell -NoProfile -Command "$envFile='%ENV_FILE%'; $public='!PUBLIC_BASE_URL!'; $cloud='!CLOUDFLARE_PUBLIC_URL!'; if(Test-Path $envFile){ $lines=Get-Content $envFile; foreach($pair in @(@('PUBLIC_BASE_URL',$public),@('CLOUDFLARE_PUBLIC_URL',$cloud))){ $key=$pair[0]; $value=$pair[1]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) } }; Set-Content -Encoding UTF8 $envFile $lines }" >nul 2>&1
+        powershell -NoProfile -Command "$envFile='%ENV_FILE%'; $public='!PUBLIC_BASE_URL!'; $cloud='!CLOUDFLARE_PUBLIC_URL!'; $admin='!CLOUDFLARE_ADMIN_URL!'; if(Test-Path $envFile){ $lines=Get-Content $envFile; foreach($pair in @(@('PUBLIC_BASE_URL',$public),@('CLOUDFLARE_PUBLIC_URL',$cloud),@('CLOUDFLARE_ADMIN_URL',$admin))){ $key=$pair[0]; $value=$pair[1]; if($lines -match ('^'+[regex]::Escape($key)+'=')){ $lines=$lines -replace ('^'+[regex]::Escape($key)+'=.*'), ($key+'='+$value) } else { $lines += ($key+'='+$value) } }; Set-Content -Encoding UTF8 $envFile $lines }" >nul 2>&1
         powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','!CLOUDFLARE_TUNNEL_TOKEN_FILE!'); $p = Start-Process -FilePath '!CLOUDFLARED_CMD!' -ArgumentList $argsList -WindowStyle Hidden -PassThru; if ($p) { exit 0 } else { exit 1 }" >nul 2>&1
         if errorlevel 1 (
             echo [WARN] Cloudflare Tunnel could not be started. Remote access may be unavailable.
@@ -500,7 +503,7 @@ echo ========================================================================
 echo.
 echo   Local Admin:  http://localhost:%PORT%
 echo   Local Portal: http://localhost:%PORT%!CUSTOMER_PORTAL_PATH!
-if not "!PUBLIC_URL_FOUND!"=="" echo   Remote Admin: !PUBLIC_URL_FOUND!
+if not "!CLOUDFLARE_ADMIN_URL!"=="" echo   Remote Admin: !CLOUDFLARE_ADMIN_URL!
 if not "!CUSTOMER_PUBLIC_URL!"=="" (
     echo   Customer URL: !CUSTOMER_PUBLIC_URL!
 ) else (

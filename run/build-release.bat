@@ -439,6 +439,7 @@ if exist "%PRESERVE_ENV%" (
     echo BUSINESS_OS_REMOTE_PROVIDER=cloudflare
     echo PUBLIC_BASE_URL=https://leangcosmetics.dpdns.org
     echo CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org
+    echo CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org
     echo CLOUDFLARE_TUNNEL_TOKEN_FILE=runtime\secrets\cloudflare-business-os-leangcosmetics.token
     echo SYNC_TOKEN=
     echo.
@@ -522,6 +523,7 @@ echo 6. Customer portal: use the public URL configured in Customer Portal, or th
 echo.
 echo REMOTE ACCESS ^(Cloudflare^):
 echo - start-server.bat starts Cloudflare Tunnel for https://leangcosmetics.dpdns.org
+echo - Optional admin hostname: https://admin.leangcosmetics.dpdns.org
 echo - Keep the Cloudflare tunnel token file in runtime\secrets.
 echo.
 echo FILES:

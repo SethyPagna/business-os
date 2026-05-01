@@ -62,7 +62,7 @@ const {
 } = require('../organizationContext')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
-const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL } = require('../config')
+const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
 const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
 
@@ -140,6 +140,7 @@ function resolvePasswordResetRedirect(req, redirectTo) {
   const candidates = [
     redirectTo,
     process.env.SUPABASE_PASSWORD_RESET_REDIRECT_TO,
+    CLOUDFLARE_ADMIN_URL,
     PUBLIC_BASE_URL,
     CLOUDFLARE_PUBLIC_URL,
     buildPublicBaseUrl(req),
@@ -365,6 +366,7 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
   }
   return {
     syncServerUrl: PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || null,
+    adminServerUrl: CLOUDFLARE_ADMIN_URL || null,
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,

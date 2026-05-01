@@ -309,7 +309,7 @@ export function AppProvider({ children }) {
 
   // Sync URL ??when served by the backend the page origin IS the API/WS server.
   // Always use it (never a stale localhost stored from a previous session) so that
-  // Tailscale URLs, LAN IPs and localhost:4000 all connect without manual config.
+  // Cloudflare Tunnel URLs, LAN IPs and localhost:4000 all connect without manual config.
   const [syncUrl, _setSyncUrl] = useState(() => {
     try {
       const isViteDev = window.location.hostname === 'localhost' &&

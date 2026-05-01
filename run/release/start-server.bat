@@ -18,6 +18,7 @@ set "PORT=4000"
 set "CLOUDFLARED_CMD="
 set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\runtime\secrets\cloudflare-business-os-leangcosmetics.token"
 set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+set "CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org"
 
 if not defined BUSINESS_OS_REMOTE_PROVIDER set "BUSINESS_OS_REMOTE_PROVIDER=cloudflare"
 set "BUSINESS_OS_REQUIRE_SCALE_SERVICES=1"
@@ -60,6 +61,7 @@ if not exist "%ENV_FILE%" (
     echo BUSINESS_OS_REMOTE_PROVIDER=cloudflare
     echo PUBLIC_BASE_URL=%CLOUDFLARE_PUBLIC_URL%
     echo CLOUDFLARE_PUBLIC_URL=%CLOUDFLARE_PUBLIC_URL%
+    echo CLOUDFLARE_ADMIN_URL=%CLOUDFLARE_ADMIN_URL%
     echo SYNC_TOKEN=
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq
@@ -78,9 +80,11 @@ if not exist "%ENV_FILE%" (
 for /f "tokens=2 delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PORT="') do set "PORT=%%a"
 for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^PUBLIC_BASE_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
 for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_PUBLIC_URL="') do set "CLOUDFLARE_PUBLIC_URL=%%b"
+for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_ADMIN_URL="') do set "CLOUDFLARE_ADMIN_URL=%%b"
 for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" 2^>nul ^| findstr /i "^CLOUDFLARE_TUNNEL_TOKEN_FILE="') do set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%%b"
 if "%PORT%"=="" set "PORT=4000"
 if "%CLOUDFLARE_PUBLIC_URL%"=="" set "CLOUDFLARE_PUBLIC_URL=https://leangcosmetics.dpdns.org"
+if "%CLOUDFLARE_ADMIN_URL%"=="" set "CLOUDFLARE_ADMIN_URL=https://admin.leangcosmetics.dpdns.org"
 if not exist "%CLOUDFLARE_TUNNEL_TOKEN_FILE%" if exist "%ROOT%\%CLOUDFLARE_TUNNEL_TOKEN_FILE%" set "CLOUDFLARE_TUNNEL_TOKEN_FILE=%ROOT%\%CLOUDFLARE_TUNNEL_TOKEN_FILE%"
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 
@@ -137,6 +141,7 @@ if defined SERVER_OK (
 )
 echo.
 echo   Local Admin:  http://localhost:%PORT%
+echo   Remote Admin: %CLOUDFLARE_ADMIN_URL%
 echo   Customer URL: %CLOUDFLARE_PUBLIC_URL%/public
 echo   Data folder:  %DATA_DIR%
 echo.

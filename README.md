@@ -7,12 +7,15 @@ Business OS is meant to run like a normal Windows business app.
 1. Run `run\setup.bat` once on a new laptop.
 2. Run `run\start-server.bat` whenever you want to open the app.
 3. Open the local URL printed by the start window, usually `http://localhost:4000`.
-4. Use the printed Cloudflare customer URL for phones or other devices.
-5. Run `run\stop-server.bat` to stop the app.
+4. Use `https://admin.leangcosmetics.dpdns.org` for staff/admin access once the admin hostname is added in Cloudflare.
+5. Use `https://leangcosmetics.dpdns.org/public` for the public customer portal.
+6. Run `run\stop-server.bat` to stop the app.
 
 That is the normal workflow. You do not need to run Redis, Postgres, MinIO, Docker Compose, or import workers by hand.
 
 If the start window says the public URL check failed, the app still started locally, but Cloudflare Tunnel is not connected to the custom domain yet. Check the tunnel token file and Cloudflare tunnel health before using public devices.
+
+Cloudflare setup details are in `ops\docs\cloudflare-ready-setup.md`.
 
 ## What Setup Does
 
