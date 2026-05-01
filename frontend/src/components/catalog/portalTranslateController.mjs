@@ -1,14 +1,34 @@
 export const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
 export const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
 export const PORTAL_TRANSLATE_RELOAD_KEY = 'business-os:portal-translate-last-reload'
+export const PORTAL_TRANSLATE_SCRIPT_ID = 'business-os-portal-translate-script'
+
+const GOOGLE_TRANSLATE_PRECONNECTS = [
+  'https://translate.google.com',
+  'https://translate.googleapis.com',
+  'https://www.gstatic.com',
+]
+
+const GOOGLE_TRANSLATE_DNS_PREFETCHES = [
+  'https://translate-pa.googleapis.com',
+]
 
 function normalizeLanguage(value, fallback = 'en') {
   return String(value || fallback).trim().toLowerCase() || fallback
 }
 
+export function canonicalTranslateLanguage(value, fallback = 'en') {
+  const raw = String(value || fallback).trim()
+  if (!raw) return fallback
+  const lower = raw.toLowerCase()
+  if (lower === 'zh-cn') return 'zh-CN'
+  if (lower === 'zh-tw') return 'zh-TW'
+  return lower
+}
+
 export function normalizeTranslateTarget(value, sourceLang = 'en') {
   const from = normalizeLanguage(sourceLang)
-  const target = normalizeLanguage(value, 'original')
+  const target = canonicalTranslateLanguage(value, 'original')
   return !target || target === from ? 'original' : target
 }
 
@@ -22,7 +42,7 @@ export function getPortalTranslateCookieTarget(sourceLang) {
   if (!cookie) return ''
   const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
   const parts = cookieValue.split('/').filter(Boolean)
-  const target = normalizeLanguage(parts[1], '')
+  const target = canonicalTranslateLanguage(parts[1], '')
   return target && target !== from ? target : ''
 }
 
@@ -37,7 +57,10 @@ export function clearGoogleTranslateCookies() {
   const host = typeof window !== 'undefined' ? String(window.location?.hostname || '') : ''
   const pathName = typeof window !== 'undefined' ? String(window.location?.pathname || '/') : '/'
   const paths = Array.from(new Set(['/', pathName || '/']))
-  const domains = ['', host, host && host.includes('.') ? `.${host}` : ''].filter(Boolean)
+  const parentDomains = host.includes('.')
+    ? host.split('.').slice(1, -1).map((_, index, parts) => `.${host.split('.').slice(index + 1).join('.')}`)
+    : []
+  const domains = Array.from(new Set(['', host, host && host.includes('.') ? `.${host}` : '', ...parentDomains].filter(Boolean)))
   const targets = paths.flatMap((pathValue) => [
     `path=${pathValue}; SameSite=Lax`,
     ...domains.map((domain) => `domain=${domain}; path=${pathValue}; SameSite=Lax`),
@@ -49,7 +72,7 @@ export function clearGoogleTranslateCookies() {
 
 export function writePortalTranslateTarget(sourceLang, targetLang) {
   if (typeof document === 'undefined') return 'original'
-  const from = normalizeLanguage(sourceLang)
+  const from = canonicalTranslateLanguage(sourceLang)
   const target = normalizeTranslateTarget(targetLang, from)
   const cookieValue = target === 'original' ? '' : `/${from}/${target}`
   if (!cookieValue) clearGoogleTranslateCookies()
@@ -67,6 +90,43 @@ export function writePortalTranslateTarget(sourceLang, targetLang) {
     window.localStorage?.setItem(PORTAL_TRANSLATE_STORAGE_KEY, target)
   } catch (_) {}
   return target
+}
+
+function ensureLinkHint(rel, href) {
+  if (typeof document === 'undefined') return
+  const selector = `link[rel="${rel}"][href="${href}"]`
+  if (document.querySelector?.(selector)) return
+  const link = document.createElement('link')
+  link.rel = rel
+  link.href = href
+  if (rel === 'preconnect') link.crossOrigin = 'anonymous'
+  document.head?.appendChild(link)
+}
+
+export function warmPortalTranslateNetwork() {
+  GOOGLE_TRANSLATE_PRECONNECTS.forEach((href) => ensureLinkHint('preconnect', href))
+  GOOGLE_TRANSLATE_DNS_PREFETCHES.forEach((href) => ensureLinkHint('dns-prefetch', href))
+}
+
+export function ensurePortalTranslateScript(callbackName, onError) {
+  if (typeof document === 'undefined') return null
+  warmPortalTranslateNetwork()
+  const scriptSrc = `https://translate.google.com/translate_a/element.js?cb=${encodeURIComponent(callbackName)}`
+  const existingScript = document.getElementById?.(PORTAL_TRANSLATE_SCRIPT_ID)
+    || document.querySelector?.('script[data-business-os-translate="true"]')
+  if (existingScript) {
+    if (existingScript.getAttribute?.('src') !== scriptSrc) existingScript.setAttribute('src', scriptSrc)
+    return existingScript
+  }
+  const script = document.createElement('script')
+  script.id = PORTAL_TRANSLATE_SCRIPT_ID
+  script.src = scriptSrc
+  script.async = true
+  script.defer = true
+  script.dataset.businessOsTranslate = 'true'
+  if (typeof onError === 'function') script.onerror = onError
+  document.body.appendChild(script)
+  return script
 }
 
 export function ensurePortalTranslateWidgetHost() {

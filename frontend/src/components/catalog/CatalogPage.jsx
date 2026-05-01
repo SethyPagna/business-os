@@ -55,8 +55,10 @@ import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import { ProductImg } from '../products/primitives'
 import {
   applyGoogleTranslateSelection,
+  ensurePortalTranslateScript,
   ensurePortalTranslateWidgetHost,
   isPortalTranslateApplied,
+  normalizeTranslateTarget,
   readStoredTranslateTarget,
   removePortalTranslateWidgetHost,
   requestPortalTranslateReload,
@@ -1427,6 +1429,10 @@ function isDocumentVisible() {
   return document.visibilityState !== 'hidden'
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }) {
   const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp()
@@ -1519,6 +1525,37 @@ export default function CatalogPage({ publicView = false }) {
     [editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
   const language = previewConfig.language === 'km' ? 'km' : 'en'
+  const portalTranslateContentKey = useMemo(() => {
+    if (!publicView) return ''
+    const firstProduct = products[0]?.id || products[0]?.name || ''
+    const lastProduct = products[products.length - 1]?.id || products[products.length - 1]?.name || ''
+    return [
+      loading ? 'loading' : 'ready',
+      activeTab,
+      products.length,
+      firstProduct,
+      lastProduct,
+      previewConfig.businessName,
+      previewConfig.title,
+      previewConfig.showCatalog,
+      previewConfig.showMembership,
+      previewConfig.showAbout,
+      previewConfig.showFaq,
+      previewConfig.aiEnabled,
+    ].join('|')
+  }, [
+    activeTab,
+    loading,
+    previewConfig.aiEnabled,
+    previewConfig.businessName,
+    previewConfig.showAbout,
+    previewConfig.showCatalog,
+    previewConfig.showFaq,
+    previewConfig.showMembership,
+    previewConfig.title,
+    products,
+    publicView,
+  ])
   const editorLanguage = appLanguage === 'km' ? 'km' : 'en'
   const copy = (key, fallback, fallbackKm = fallback) => {
     const global = typeof t === 'function' ? t(key) : ''
@@ -1650,37 +1687,33 @@ export default function CatalogPage({ publicView = false }) {
 
   /** Apply selected language via Google Translate and confirm the page changed. */
   async function changeTranslateTarget(nextTarget) {
-    const target = String(nextTarget || 'original').trim().toLowerCase() || 'original'
+    const target = normalizeTranslateTarget(nextTarget, language)
     setTranslateTarget(target)
     setTranslateApplyMessage('')
     if (!publicView || !previewConfig.translateWidgetEnabled) return
     writePortalTranslateTarget(language, target)
-    if (!translateReady) {
-      setTranslateApplyState('pending')
-      setTranslateApplyMessage(copy('preparingTranslations', 'Preparing translation tools...'))
-      requestPortalTranslateReload('user-change', 800)
-      return
-    }
     if (typeof window === 'undefined') return
     setTranslateApplyState('pending')
-    if (requestPortalTranslateReload('user-change', 800)) {
-      return
-    }
-    const firstAttempt = applyGoogleTranslateSelection(language, target)
-    const maxAttempts = target === 'original' || target === language ? 8 : 24
+    setTranslateApplyMessage(copy('preparingTranslations', 'Preparing translation tools...'))
+
+    const sourceReadyAtStart = translateReady
+    const maxAttempts = sourceReadyAtStart
+      ? (target === 'original' || target === language ? 10 : 26)
+      : 36
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      if (attempt > 0 || !firstAttempt) applyGoogleTranslateSelection(language, target)
-      if (isPortalTranslateApplied(language, target)) {
+      const attempted = applyGoogleTranslateSelection(language, target)
+      if (attempted && isPortalTranslateApplied(language, target)) {
         setTranslateApplyState('applied')
         setTranslateApplyMessage(target === 'original' || target === language
           ? copy('translationOriginalApplied', 'Original language restored')
           : copy('translationApplied', 'Translation applied'))
         return
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 180))
+      await sleep(sourceReadyAtStart ? 180 : 220)
     }
 
-    if (requestPortalTranslateReload('retry', 5000)) {
+    const reloadReason = target === 'original' || target === language ? 'reset-stuck' : 'apply-stuck'
+    if (requestPortalTranslateReload(reloadReason, 5000)) {
       return
     }
     setTranslateApplyState('failed')
@@ -1958,10 +1991,16 @@ export default function CatalogPage({ publicView = false }) {
           const combo = container.querySelector('.goog-te-combo')
           if (combo) {
             setTranslateReady(true)
+            setTranslateApplyMessage('')
             return
           }
           widgetChecks += 1
-          if (widgetChecks >= 80) return
+          if (widgetChecks >= 80) {
+            setTranslateReady(false)
+            setTranslateApplyState('failed')
+            setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
+            return
+          }
           window.setTimeout(waitForWidget, 120)
         }
         waitForWidget()
@@ -1977,18 +2016,13 @@ export default function CatalogPage({ publicView = false }) {
       }
     }
 
-    const existingScript = document.querySelector('script[data-business-os-translate="true"]')
-    if (!existingScript) {
-      const script = document.createElement('script')
-      script.src = 'https://translate.google.com/translate_a/element.js?cb=businessOsPortalTranslateInit'
-      script.async = true
-      script.defer = true
-      script.dataset.businessOsTranslate = 'true'
-      script.onerror = () => {
-        if (!cancelled) setTranslateReady(false)
+    ensurePortalTranslateScript('businessOsPortalTranslateInit', () => {
+      if (!cancelled) {
+        setTranslateReady(false)
+        setTranslateApplyState('failed')
+        setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
       }
-      document.body.appendChild(script)
-    }
+    })
 
     return () => {
       cancelled = true
@@ -2016,29 +2050,38 @@ export default function CatalogPage({ publicView = false }) {
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || !translateReady) return undefined
-    let tries = 0
-    const maxTries = 60
-    const timer = window.setInterval(() => {
-      tries += 1
-      applyGoogleTranslateSelection(language, translateTarget)
-      if (isPortalTranslateApplied(language, translateTarget)) {
-        setTranslateApplyState('applied')
-        setTranslateApplyMessage('')
-        window.clearInterval(timer)
-      } else if (tries >= maxTries) {
-        setTranslateApplyState('failed')
-        setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-        window.clearInterval(timer)
+    let cancelled = false
+    const settleTimer = window.setTimeout(async () => {
+      const isOriginalTarget = translateTarget === 'original' || translateTarget === language
+      const maxTries = isOriginalTarget ? 4 : 20
+      for (let tries = 0; tries < maxTries; tries += 1) {
+        if (cancelled) return
+        applyGoogleTranslateSelection(language, translateTarget)
+        if (isPortalTranslateApplied(language, translateTarget)) {
+          setTranslateApplyState(isOriginalTarget ? 'idle' : 'applied')
+          setTranslateApplyMessage('')
+          return
+        }
+        await sleep(180)
       }
-    }, 150)
-    applyGoogleTranslateSelection(language, translateTarget)
-    if (isPortalTranslateApplied(language, translateTarget)) {
-      setTranslateApplyState('applied')
-      setTranslateApplyMessage('')
-      window.clearInterval(timer)
+      if (cancelled) return
+      if (isOriginalTarget && requestPortalTranslateReload('reset-stuck', 5000)) return
+      setTranslateApplyState('failed')
+      setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
+    }, loading ? 650 : 260)
+    return () => {
+      cancelled = true
+      window.clearTimeout(settleTimer)
     }
-    return () => window.clearInterval(timer)
-  }, [language, previewConfig.translateWidgetEnabled, publicView, translateReady, translateTarget])
+  }, [
+    language,
+    loading,
+    portalTranslateContentKey,
+    previewConfig.translateWidgetEnabled,
+    publicView,
+    translateReady,
+    translateTarget,
+  ])
 
   const filteredProducts = useMemo(() => {
     const terms = deferredSearch.toLowerCase().split(/[\s,]+/).map((term) => term.trim()).filter(Boolean)
@@ -3818,7 +3861,7 @@ export default function CatalogPage({ publicView = false }) {
                       </div>
                       <div>
                         {showBrandLabel ? (
-                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{previewConfig.businessName}</div>
+                          <div className="text-sm font-semibold text-amber-100">{previewConfig.businessName}</div>
                         ) : null}
                         {previewConfig.businessTagline ? (
                           <div className="mt-1 text-sm text-slate-100/90">{previewConfig.businessTagline}</div>
@@ -3828,9 +3871,8 @@ export default function CatalogPage({ publicView = false }) {
 
                     {previewTitle ? (
                       <h1
-                        className="notranslate mt-5 font-semibold tracking-tight text-white"
+                        className="mt-5 font-semibold tracking-tight text-white"
                         style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
-                        translate="no"
                       >
                         {previewTitle}
                       </h1>

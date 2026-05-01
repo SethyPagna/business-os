@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import {
   ensurePortalTranslateWidgetHost,
+  applyGoogleTranslateSelection,
   isPortalTranslateApplied,
+  normalizeTranslateTarget,
   readStoredTranslateTarget,
   removePortalTranslateWidgetHost,
   writePortalTranslateTarget,
@@ -9,6 +11,7 @@ import {
 
 const originalWindow = globalThis.window
 const originalDocument = globalThis.document
+const originalEvent = globalThis.Event
 
 function createStorage() {
   const data = new Map()
@@ -28,6 +31,13 @@ function createStorage() {
 function createDocument() {
   const cookies = new Map()
   const hosts = []
+  const combo = {
+    value: '',
+    events: [],
+    dispatchEvent(event) {
+      this.events.push(event.type)
+    },
+  }
   const body = {
     className: '',
     appendChild(node) {
@@ -73,9 +83,10 @@ function createDocument() {
       if (selector === '#business-os-portal-translate-widget-host') {
         return hosts.filter((node) => node.id === 'business-os-portal-translate-widget-host')
       }
-      if (selector === '.goog-te-combo') return []
+      if (selector === '.goog-te-combo') return [combo]
       return []
     },
+    __combo: combo,
   }
 }
 
@@ -86,14 +97,26 @@ try {
     sessionStorage: createStorage(),
   }
   globalThis.document = createDocument()
+  globalThis.Event = class Event {
+    constructor(type) {
+      this.type = type
+    }
+  }
+  globalThis.window.Event = globalThis.Event
 
   assert.equal(writePortalTranslateTarget('en', 'fr'), 'fr')
   assert.match(globalThis.document.cookie, /googtrans=%2Fen%2Ffr|googtrans=\/en\/fr/)
   assert.equal(readStoredTranslateTarget('en'), 'fr')
   assert.equal(isPortalTranslateApplied('en', 'fr'), false)
+  assert.equal(normalizeTranslateTarget('zh-cn', 'en'), 'zh-CN')
+  assert.equal(writePortalTranslateTarget('en', 'zh-cn'), 'zh-CN')
+  assert.match(globalThis.document.cookie, /zh-CN/)
+  assert.equal(applyGoogleTranslateSelection('en', 'zh-cn'), true)
+  assert.equal(globalThis.document.__combo.value, 'zh-CN')
+  assert.deepEqual(globalThis.document.__combo.events, ['input', 'change'])
 
   globalThis.document.documentElement.className = 'translated-ltr'
-  assert.equal(isPortalTranslateApplied('en', 'fr'), true)
+  assert.equal(isPortalTranslateApplied('en', 'zh-CN'), true)
 
   assert.equal(writePortalTranslateTarget('en', 'original'), 'original')
   globalThis.document.documentElement.className = ''
@@ -111,4 +134,5 @@ try {
 } finally {
   globalThis.window = originalWindow
   globalThis.document = originalDocument
+  globalThis.Event = originalEvent
 }
