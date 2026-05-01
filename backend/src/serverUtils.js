@@ -1,6 +1,6 @@
 'use strict'
 
-const { TAILSCALE_URL } = require('./config')
+const { TAILSCALE_URL, CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL } = require('./config')
 
 const API_PATH_PREFIX = '/api/'
 const UPLOADS_PATH_PREFIX = '/uploads/'
@@ -41,13 +41,18 @@ function normalizeConfiguredHost(value) {
   }
 }
 
+function getConfiguredPublicHosts() {
+  return [TAILSCALE_URL, CLOUDFLARE_PUBLIC_URL, PUBLIC_BASE_URL]
+    .map(normalizeConfiguredHost)
+    .filter(Boolean)
+}
+
 function isAllowedRequestOrigin(origin) {
   if (!origin) return true
   const host = parseOriginHost(origin)
   if (!host) return false
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true
-  const configuredHost = normalizeConfiguredHost(TAILSCALE_URL)
-  if (configuredHost && host === configuredHost) return true
+  if (getConfiguredPublicHosts().includes(host)) return true
   return host.endsWith('.ts.net')
 }
 
@@ -62,9 +67,8 @@ function isAllowedWebSocketOrigin(req) {
     .replace(/:\d+$/, '')
     .toLowerCase()
   if (!requestHost) return true
-  const configuredHost = normalizeConfiguredHost(TAILSCALE_URL)
   if (originHost === requestHost) return true
-  if (configuredHost && originHost === configuredHost) return true
+  if (getConfiguredPublicHosts().includes(originHost)) return true
   if (originHost.endsWith('.ts.net') && requestHost.endsWith('.ts.net')) return true
   return hostIsLoopbackPair(originHost, requestHost)
 }
@@ -85,6 +89,8 @@ function getTrustedDocumentOrigins(req) {
   }
 
   addOrigin(TAILSCALE_URL)
+  addOrigin(CLOUDFLARE_PUBLIC_URL)
+  addOrigin(PUBLIC_BASE_URL)
   addOrigin('http://localhost:4000')
   addOrigin('http://127.0.0.1:4000')
   addOrigin('http://localhost:4173')
