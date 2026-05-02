@@ -25,7 +25,7 @@ import {
 } from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
-import { STORAGE_KEYS } from '../constants'
+import { STORAGE_KEYS, SYNC } from '../constants'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,

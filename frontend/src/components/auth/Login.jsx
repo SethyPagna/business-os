@@ -207,10 +207,16 @@ export default function Login() {
           'Organization bootstrap',
         )
         if (!isTrackedRequestCurrent(organizationBootstrapRequestRef, requestId)) return
-        const fallbackOrg = remembered || boot?.organization || null
+        const serverOrg = boot?.organization || null
+        const rememberedUsable = remembered && (remembered.public_id || remembered.slug || remembered.id)
+          ? remembered
+          : null
+        const fallbackOrg = serverOrg && !boot?.organizationCreationEnabled
+          ? serverOrg
+          : (rememberedUsable || serverOrg || null)
         if (fallbackOrg) {
           setOrganizationSearch(fallbackOrg.name || fallbackOrg.slug || '')
-          setOrganizationId(fallbackOrg.public_id || '')
+          setOrganizationId(fallbackOrg.public_id || fallbackOrg.slug || '')
           setOrganizationMatches(fallbackOrg ? [fallbackOrg] : [])
           setOrganizationExpanded(false)
           rememberOrganization(fallbackOrg)
@@ -692,7 +698,10 @@ export default function Login() {
                     className="input"
                     type="text"
                     value={organizationSearch}
-                    onChange={(event) => setOrganizationSearch(event.target.value)}
+                    onChange={(event) => {
+                      setOrganizationSearch(event.target.value)
+                      setOrganizationId('')
+                    }}
                     placeholder="LeangCosmetics"
                     autoComplete="organization"
                   />

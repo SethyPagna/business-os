@@ -927,18 +927,26 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     setBusy('sync')
     try {
       const queued = await window.api.queueGoogleDriveSyncNow?.()
-      const result = await trackQueuedJob(queued, 'Google Drive sync')
-      const summary = result?.summary || {}
-      actionHistory?.pushAction?.({
-        scope: 'backup',
-        entity: 'google_drive_sync',
-        label: copy('drive_sync_complete', 'Drive sync complete'),
-        undo_payload: summary,
-      })
-      notify(
-        `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
-        'success',
-      )
+      notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
+      window.setTimeout(() => {
+        trackQueuedJob(queued, 'Google Drive sync')
+          .then((result) => {
+            const summary = result?.summary || {}
+            actionHistory?.pushAction?.({
+              scope: 'backup',
+              entity: 'google_drive_sync',
+              label: copy('drive_sync_complete', 'Drive sync complete'),
+              undo_payload: summary,
+            })
+            notify(
+              `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
+              'success',
+            )
+          })
+          .catch((error) => {
+            notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+          })
+      }, 0)
     } catch (error) {
       notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -1409,15 +1417,38 @@ export default function Backup() {
       const queued = await window.api.queueBackupFolderExport?.(exportDestination)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
-      const result = jobId
-        ? await window.api.pollSystemJob?.(jobId, {
-          reason: 'backup export',
-          pollMs: 1000,
-          onUpdate: (job) => {
-            if (aliveRef.current && job) setActiveJob(job)
-          },
-        })
-        : await window.api.exportBackupFolder(exportDestination)
+      if (jobId) {
+        notify(copy('backup_export_queued', 'Backup export queued'), 'info')
+        window.setTimeout(() => {
+          window.api.pollSystemJob?.(jobId, {
+            reason: 'backup export',
+            pollMs: 1000,
+            onUpdate: (job) => {
+              if (aliveRef.current && job) setActiveJob(job)
+            },
+          })
+            .then((result) => {
+              if (!aliveRef.current) return
+              if (result?.job) setActiveJob(result.job)
+              actionHistory.pushAction({
+                scope: 'backup',
+                entity: 'backup',
+                label: copy('export_backup_success', 'Backup exported successfully'),
+                redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
+              })
+              notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
+              if (result.backupRoot) setFolderImportPath(result.backupRoot)
+            })
+            .catch((error) => {
+              if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+            })
+            .finally(() => {
+              if (aliveRef.current) setLoading('')
+            })
+        }, 0)
+        return
+      }
+      const result = await window.api.exportBackupFolder(exportDestination)
       if (result?.success) {
         if (result?.job) setActiveJob(result.job)
         actionHistory.pushAction({
@@ -1433,8 +1464,9 @@ export default function Backup() {
       }
     } catch (error) {
       notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
+    } finally {
+      if (aliveRef.current) setLoading((current) => (current === 'folder-export' ? '' : current))
     }
-    setLoading('')
   }
 
   const handleFolderImport = async () => {
@@ -1448,15 +1480,39 @@ export default function Backup() {
       const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
-      const result = jobId
-        ? await window.api.pollSystemJob?.(jobId, {
-          reason: 'backup restore',
-          pollMs: 1000,
-          onUpdate: (job) => {
-            if (aliveRef.current && job) setActiveJob(job)
-          },
-        })
-        : await window.api.importBackupFolder(folderImportPath)
+      if (jobId) {
+        notify(copy('backup_restore_queued', 'Backup restore queued'), 'info')
+        window.setTimeout(() => {
+          window.api.pollSystemJob?.(jobId, {
+            reason: 'backup restore',
+            pollMs: 1000,
+            onUpdate: (job) => {
+              if (aliveRef.current && job) setActiveJob(job)
+            },
+          })
+            .then((result) => {
+              if (!aliveRef.current) return
+              if (result?.job) setActiveJob(result.job)
+              cacheClearAll()
+              actionHistory.pushAction({
+                scope: 'backup',
+                entity: 'backup',
+                label: copy('import_backup_success', 'Backup imported successfully'),
+                undo_payload: { sourceDir: folderImportPath },
+              })
+              notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
+              setTimeout(() => refreshAppData(), 200)
+            })
+            .catch((error) => {
+              if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+            })
+            .finally(() => {
+              if (aliveRef.current) setLoading('')
+            })
+        }, 0)
+        return
+      }
+      const result = await window.api.importBackupFolder(folderImportPath)
       if (result?.success) {
         if (result?.job) setActiveJob(result.job)
         cacheClearAll()
@@ -1473,8 +1529,9 @@ export default function Backup() {
       }
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
+    } finally {
+      if (aliveRef.current) setLoading((current) => (current === 'folder-import' ? '' : current))
     }
-    setLoading('')
   }
 
   const handleChooseImportFile = async () => {

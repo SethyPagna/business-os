@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../src/routes/system/ind
 
 assert.match(source, /function\s+getDefaultBackupDestinationDir\s*\(/)
 assert.match(source, /BUSINESS_OS_BACKUP_DIR/)
-assert.match(source, /business-os-backups/)
+assert.match(source, /path\.resolve\(STORAGE_ROOT,\s*'backups'\)/)
 assert.match(source, /destinationDir\s*=\s*String\(req\.body\?\.destinationDir\s*\|\|\s*''\)\.trim\(\)\s*\|\|\s*getDefaultBackupDestinationDir\(\)/)
 
 console.log('PASS backup export has a safe default destination')

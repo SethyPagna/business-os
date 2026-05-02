@@ -729,7 +729,7 @@ function broadcastDataRestored() {
 function getDefaultBackupDestinationDir() {
   const configured = String(process.env.BUSINESS_OS_BACKUP_DIR || '').trim()
   if (configured) return path.resolve(configured)
-  return path.resolve(path.dirname(STORAGE_ROOT), 'business-os-backups')
+  return path.resolve(STORAGE_ROOT, 'backups')
 }
 
 async function createFolderBackup({ destinationDir, actor = {}, progress = null } = {}) {
