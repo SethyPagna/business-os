@@ -26,6 +26,11 @@ if exist "%ROOT%\run\start-server.bat" (
     exit /b %ERRORLEVEL%
 )
 
+if exist "%ROOT%\run\docker\start.bat" (
+    call "%ROOT%\run\docker\start.bat"
+    exit /b %ERRORLEVEL%
+)
+
 if exist "%ROOT%\start-server.bat" (
     call "%ROOT%\start-server.bat"
     exit /b %ERRORLEVEL%
@@ -34,6 +39,7 @@ if exist "%ROOT%\start-server.bat" (
 echo [ERROR] Business OS launcher could not find a start script.
 echo         Expected one of:
 echo           %ROOT%\run\start-server.bat
+echo           %ROOT%\run\docker\start.bat
 echo           %ROOT%\start-server.bat
 echo.
 echo         Reinstall Business OS or restore the full portable folder.

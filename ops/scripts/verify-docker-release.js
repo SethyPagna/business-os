@@ -37,17 +37,20 @@ function main() {
     failures.push('Production release Compose must not bind-mount the source tree or node_modules.')
   }
   ;[
-    'DATABASE_DRIVER: postgres',
-    'OBJECT_STORAGE_DRIVER: minio',
+    'BUSINESS_OS_DOCKER_DATA_MODE',
+    'DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"',
+    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"',
     'JOB_QUEUE_DRIVER: bullmq',
     'cloudflared:',
     'postgres:',
     'redis-queue:',
     'redis-cache:',
     'minio:',
+    'legacy-adopter:',
     'import-worker:',
     'media-worker:',
     'migrator:',
+    'business_os_runtime:/runtime',
   ].forEach((token) => {
     if (!compose.includes(token)) failures.push(`Production release Compose is missing ${token}`)
   })
@@ -59,10 +62,15 @@ function main() {
     'npm run build:linux',
     'PKG_CACHE_PATH=/root/.pkg-cache',
     'COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp',
-    'BUSINESS_OS_ENFORCE_POSTGRES=1',
+    'BUSINESS_OS_DOCKER_DATA_MODE=sqlite',
+    'DATABASE_DRIVER=sqlite',
   ].forEach((token) => {
     if (!dockerfile.includes(token)) failures.push(`Production Dockerfile is missing ${token}`)
   })
+
+  if (dockerfile.includes('BUSINESS_OS_ENFORCE_POSTGRES=1')) {
+    failures.push('Production Dockerfile must not force Postgres before route-level Postgres serving is complete.')
+  }
 
   const automation = read(scriptPath)
   ;['Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor', 'Publish'].forEach((action) => {

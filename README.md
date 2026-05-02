@@ -24,12 +24,12 @@ Use this path for a normal business/user laptop.
 8. Wait until the window says Business OS is ready.
 9. Open the URLs printed in the window.
 
-If you are moving to a laptop that should not expose source code, use the installer or portable release folder produced by `run\build-release.bat` / `run\docker\release.bat`. Copy that release folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside the release. Do not copy only the `run\` folder.
+If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy only the beginner release/installer files to the new laptop, then double-click the root **`Start Business OS.bat`** inside that release. Do not copy only the `run\` folder.
 
 What the launcher does for you:
 
 - installs or guides Docker Desktop and Cloudflare Tunnel when Windows allows it,
-- starts Docker Desktop services for Redis, Postgres, MinIO, app workers, and media workers,
+- starts Docker Desktop services for the app, Redis queues/cache, Postgres, MinIO, app workers, and media workers,
 - cleans stopped Business OS containers without deleting data volumes,
 - pulls current Docker service images during setup,
 - starts the Cloudflare connector for the public/admin links.
@@ -102,11 +102,11 @@ Current source-runtime business data stays under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Do **not** delete `business-os-data` manually when Docker looks mismatched. In source/runtime mode it can still be the live SQLite/local-file data and the legacy migration source. Use **Settings > Backup**, `run\docker\backup.bat`, restore tools, or support-guided archive steps instead.
+Do **not** delete `business-os-data` manually when Docker looks mismatched. In source/runtime mode it can still be the live SQLite/local-file data and the legacy migration source. The Docker release adopts that folder into the Docker runtime volume only when the Docker volume is empty, then leaves the source folder untouched for safety. Use **Settings > Backup**, `run\docker\backup.bat`, restore tools, or support-guided archive steps instead.
 
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
-Docker-only production release support is being guarded until the remaining route-level Postgres/MinIO cutover is complete. The tooling must not silently serve from a hidden SQLite database inside Docker because that risks data loss.
+The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
 
 ## Large Imports
 
