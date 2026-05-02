@@ -48,24 +48,33 @@ body.lang-km select,
 body.lang-km table,
 body.lang-km th,
 body.lang-km td {
-  font-weight: 460;
+  font-weight: 500;
 }
 
-body.lang-km .text-xs,
-body.lang-km .text-sm,
-body.lang-km .text-base,
-body.lang-km .text-lg,
-body.lang-km .text-xl,
-body.lang-km .text-2xl {
-  font-weight: 520 !important;
+body.lang-km:not([data-public-portal='true']) h1,
+body.lang-km:not([data-public-portal='true']) h2,
+body.lang-km:not([data-public-portal='true']) h3,
+body.lang-km:not([data-public-portal='true']) .page-title,
+body.lang-km:not([data-public-portal='true']) .section-title,
+body.lang-km:not([data-public-portal='true']) th,
+body.lang-km:not([data-public-portal='true']) [role='columnheader'],
+body.lang-km:not([data-public-portal='true']) thead .font-medium,
+body.lang-km:not([data-public-portal='true']) thead .font-semibold,
+body.lang-km:not([data-public-portal='true']) .sidebar-item,
+body.lang-km:not([data-public-portal='true']) aside nav button,
+body.lang-km:not([data-public-portal='true']) aside nav button span,
+body.lang-km:not([data-public-portal='true']) header.fixed .truncate,
+body.lang-km:not([data-public-portal='true']) nav.safe-area-inset-bottom button,
+body.lang-km:not([data-public-portal='true']) nav.safe-area-inset-bottom button span,
+body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button,
+body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button span {
+  font-weight: 700 !important;
 }
 
-body.lang-km .sidebar-item,
-body.lang-km nav button,
-body.lang-km header button,
-body.lang-km .app-topbar button,
-body.lang-km .safe-area-inset-bottom button {
-  font-weight: 460 !important;
+body.lang-km:not([data-public-portal='true']) .app-topbar .font-medium,
+body.lang-km:not([data-public-portal='true']) .app-topbar .font-semibold,
+body.lang-km:not([data-public-portal='true']) .app-topbar .font-bold {
+  font-weight: 700 !important;
 }
   :root {
     --sidebar-width: 240px;
