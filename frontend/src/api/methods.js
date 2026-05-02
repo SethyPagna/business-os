@@ -1154,17 +1154,15 @@ export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch(
 export async function exportBackup() {
   const url = getSyncServerUrl()
   if (!url) throw new Error('Server required for backup export')
-  const headers = { 'bypass-tunnel-reminder': 'true' }
+  const downloadUrl = new URL(`${url}/api/system/backup/export`)
   const authToken = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
-  const res  = await fetch(`${url}/api/system/backup/export`, { headers })
-  if (!res.ok) throw new Error('Backup export failed')
-  const blob = await res.blob()
+  if (authToken) downloadUrl.searchParams.set('token', authToken)
+  downloadUrl.searchParams.set('bypass-tunnel-reminder', 'true')
   const a    = document.createElement('a')
-  a.href     = URL.createObjectURL(blob)
+  a.href     = downloadUrl.toString()
   a.download = `business-os-backup-${new Date().toISOString().split('T')[0]}.json`
+  a.rel = 'noopener'
   a.click()
-  URL.revokeObjectURL(a.href)
   return { success: true }
 }
 

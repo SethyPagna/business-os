@@ -245,7 +245,21 @@ function buildBackupPreview(backup, fileName, copy = (_key, fallback) => fallbac
 
 function yieldToBrowser() {
   if (typeof window === 'undefined') return Promise.resolve()
+  if (typeof window.requestAnimationFrame === 'function') {
+    return new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)))
+  }
   return new Promise((resolve) => window.setTimeout(resolve, 0))
+}
+
+function normalizeFolderBrowserResult(result, maxDirs = 200) {
+  if (!result || typeof result !== 'object') return result
+  const dirs = Array.isArray(result.dirs) ? result.dirs : []
+  if (dirs.length <= maxDirs) return { ...result, dirs }
+  return {
+    ...result,
+    dirs: dirs.slice(0, maxDirs),
+    truncatedCount: dirs.length - maxDirs,
+  }
 }
 
 async function parseBackupJsonFile(file) {
@@ -375,6 +389,11 @@ function FolderBrowserPanel({
             {copy('no_subfolders_found', 'No subfolders found')}
           </div>
         ) : null}
+        {Number(browseState.truncatedCount || 0) > 0 ? (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            {copy('folder_browser_limited', 'Showing the first 200 folders so the page stays responsive. Type a more specific path to narrow the list.')} ({browseState.truncatedCount} {copy('hidden', 'hidden')})
+          </div>
+        ) : null}
 
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {browseState.dirs.map((dir) => (
@@ -478,8 +497,9 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
     if (busy) return
     try {
       setBusy(true)
+      await yieldToBrowser()
       const result = await window.api.browseDir(dir || inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
-      if (result) setBrowseState(result)
+      if (result) setBrowseState(normalizeFolderBrowserResult(result))
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -496,11 +516,11 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
     if (!hostUiAvailable) {
       notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
       setShowAdvancedBrowser(true)
-      await openDriveBrowser()
       return
     }
     try {
       setBusy(true)
+      await yieldToBrowser()
       const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
       if (selectedFolder && typeof selectedFolder === 'string') {
         setInputPath(selectedFolder)
@@ -522,9 +542,7 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
   const openInlinePicker = async () => {
     const next = !showAdvancedBrowser
     setShowAdvancedBrowser(next)
-    if (next && !browseState) {
-      await openDriveBrowser()
-    }
+    if (next && !browseState && String(inputPath || '').trim()) await openBrowser(inputPath)
   }
 
   const openInExplorer = async () => {
@@ -861,6 +879,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (busy) return
     setBusy('save')
     try {
+      await yieldToBrowser()
       const result = await window.api.saveGoogleDriveSyncPreferences?.({
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
@@ -874,7 +893,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         label: copy('drive_sync_preferences_saved', 'Google Drive sync preferences saved'),
       })
       notify(copy('saved', 'Saved'), 'success')
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
     } catch (error) {
       notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -895,6 +914,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
     setBusy('connect')
     try {
+      await yieldToBrowser()
       const result = await window.api.startGoogleDriveSyncOauth?.({
         clientId: form.clientId,
         clientSecret: form.clientSecret,
@@ -926,6 +946,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (busy) return
     setBusy('sync')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueGoogleDriveSyncNow?.()
       notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
       window.setTimeout(() => {
@@ -959,9 +980,10 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
     setBusy('disconnect')
     try {
+      await yieldToBrowser()
       await window.api.disconnectGoogleDriveSync?.()
       setForm((current) => ({ ...current, clientSecret: '' }))
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -980,13 +1002,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
     setBusy('forget')
     try {
+      await yieldToBrowser()
       await window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true })
       setForm((current) => ({
         ...current,
         clientId: '',
         clientSecret: '',
       }))
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -1304,6 +1327,7 @@ export default function Backup() {
   const [restoreBrowser, setRestoreBrowser] = useState(null)
   const [browserBusy, setBrowserBusy] = useState('')
   const [activeJob, setActiveJob] = useState(null)
+  const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const hostConfigRequestRef = useRef(0)
   const exportBrowseRequestRef = useRef(0)
   const restoreBrowseRequestRef = useRef(0)
@@ -1339,17 +1363,24 @@ export default function Backup() {
   }, [isActive])
 
   const browseServerFolders = async (target, dir) => {
+    const requestedDir = String(dir || '').trim()
+    if (!hostUiAvailable && (!requestedDir || requestedDir === '__ROOTS__')) {
+      notify(copy('server_browser_remote_requires_path', 'Remote browsers cannot browse the server device from the root. Type a specific server/container backup path first, then open that path.'), 'info')
+      return
+    }
     const requestRef = target === 'export' ? exportBrowseRequestRef : restoreBrowseRequestRef
     const requestId = beginTrackedRequest(requestRef)
     try {
       setBrowserBusy(target)
+      await yieldToBrowser()
       const result = await withLoaderTimeout(
-        () => window.api.browseDir(dir || '__ROOTS__'),
+        () => window.api.browseDir(requestedDir || '__ROOTS__'),
         target === 'export' ? 'Backup export folders' : 'Backup restore folders',
       )
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      if (target === 'export') setExportBrowser(result)
-      if (target === 'restore') setRestoreBrowser(result)
+      const normalized = normalizeFolderBrowserResult(result)
+      if (target === 'export') setExportBrowser(normalized)
+      if (target === 'restore') setRestoreBrowser(normalized)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -1377,8 +1408,10 @@ export default function Backup() {
   const handleExport = async () => {
     if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!confirm(copy('legacy_json_large_warning', 'Legacy JSON export is only for small older backups and can take a long time with large catalogs. For normal Docker backup, use Create full backup. Continue with legacy JSON?'))) return
     setLoading('export')
     try {
+      await yieldToBrowser()
       const result = await window.api.exportBackup()
       if (result?.success) {
         actionHistory.pushAction({
@@ -1397,10 +1430,11 @@ export default function Backup() {
 
   const pickFolder = async (setter, hintPath = '') => {
     if (!hostUiAvailable) {
-      notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
+      notify(copy('host_ui_local_only', 'This action only works on the server machine. Type a server/container path manually when connected remotely.'), 'info')
       return
     }
     try {
+      await yieldToBrowser()
       const folder = await window.api.openFolderDialog?.(hintPath)
       if (folder && typeof folder === 'string') setter(folder)
     } catch (error) {
@@ -1414,6 +1448,7 @@ export default function Backup() {
     const exportDestination = String(folderExportPath || '').trim()
     setLoading('folder-export')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueBackupFolderExport?.(exportDestination)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
@@ -1448,20 +1483,7 @@ export default function Backup() {
         }, 0)
         return
       }
-      const result = await window.api.exportBackupFolder(exportDestination)
-      if (result?.success) {
-        if (result?.job) setActiveJob(result.job)
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('export_backup_success', 'Backup exported successfully'),
-          redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
-        })
-        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-        if (result.backupRoot) setFolderImportPath(result.backupRoot)
-      } else {
-        notify(result?.error || copy('export_failed', 'Export failed'), 'error')
-      }
+      throw new Error(copy('backup_job_not_queued', 'Backup job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
       notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
     } finally {
@@ -1477,6 +1499,7 @@ export default function Backup() {
 
     setLoading('folder-import')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
@@ -1512,21 +1535,7 @@ export default function Backup() {
         }, 0)
         return
       }
-      const result = await window.api.importBackupFolder(folderImportPath)
-      if (result?.success) {
-        if (result?.job) setActiveJob(result.job)
-        cacheClearAll()
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('import_backup_success', 'Backup imported successfully'),
-          undo_payload: { sourceDir: folderImportPath },
-        })
-        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-        setTimeout(() => refreshAppData(), 200)
-      } else {
-        notify(result?.error || copy('import_failed', 'Import failed'), 'error')
-      }
+      throw new Error(copy('backup_restore_job_not_queued', 'Restore job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
     } finally {
@@ -1541,6 +1550,7 @@ export default function Backup() {
       const file = await window.api.pickBackupFile?.()
       if (!file) return
       setLoading('preview-import')
+      await yieldToBrowser()
       const parsed = await parseBackupJsonFile(file)
       setPendingImport({
         data: parsed,
@@ -1562,6 +1572,7 @@ export default function Backup() {
 
     setLoading('import')
     try {
+      await yieldToBrowser()
       const result = await window.api.importBackupData(pendingImport.data)
       if (result?.success) {
         cacheClearAll()
@@ -1616,10 +1627,6 @@ export default function Backup() {
                 <ArchiveRestore className="h-4 w-4" />
                 {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleExport} disabled={!!loading}>
-                <Download className="h-4 w-4" />
-                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Legacy JSON')}
-              </PathActionButton>
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {folderExportPath
@@ -1632,6 +1639,18 @@ export default function Backup() {
                 {copy('advanced', 'Advanced')}
               </summary>
               <div className="mt-3 grid gap-3">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+                  <div className="font-semibold">{copy('legacy_json_backup', 'Legacy JSON')}</div>
+                  <p className="mt-1">
+                    {copy('legacy_json_large_warning', 'Legacy JSON export is only for small older backups and can take a long time with large catalogs. For normal Docker backup, use Create full backup.')}
+                  </p>
+                  <div className="mt-2">
+                    <PathActionButton onClick={handleExport} disabled={!!loading}>
+                      <Download className="h-4 w-4" />
+                      {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Download legacy JSON')}
+                    </PathActionButton>
+                  </div>
+                </div>
                 <div className="flex flex-col gap-2 lg:flex-row">
                   <input
                     id="backup-folder-export-path"
@@ -1647,7 +1666,7 @@ export default function Backup() {
                       {copy('browse_folder', 'Choose Folder')}
                     </PathActionButton>
                   ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
+                  <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export' || (!hostUiAvailable && !String(folderExportPath || '').trim())}>
                     <FolderOutput className="h-4 w-4" />
                     {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
                   </PathActionButton>
@@ -1732,7 +1751,7 @@ export default function Backup() {
                       {copy('browse_folder', 'Choose Folder')}
                     </PathActionButton>
                   ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
+                  <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore' || (!hostUiAvailable && !String(folderImportPath || '').trim())}>
                     <FolderInput className="h-4 w-4" />
                     {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
                   </PathActionButton>
@@ -1812,10 +1831,25 @@ export default function Backup() {
         </div>
 
         {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
-        {isActive ? <ScaleMigrationSection t={t} notify={notify} active={isActive} /> : null}
-        {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
-        <ResetData actionHistory={actionHistory} />
-        <FactoryReset actionHistory={actionHistory} />
+        <details
+          className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          onToggle={(event) => setAdvancedMaintenanceOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {copy('advanced_maintenance', 'Advanced maintenance, reset, and data-location tools')}
+          </summary>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {copy('advanced_maintenance_desc', 'These tools are loaded only when opened so backup, restore, and Drive actions stay responsive.')}
+          </p>
+          {advancedMaintenanceOpen ? (
+            <div className="mt-4 space-y-4">
+              {isActive ? <ScaleMigrationSection t={t} notify={notify} active={isActive} /> : null}
+              {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+              <ResetData actionHistory={actionHistory} />
+              <FactoryReset actionHistory={actionHistory} />
+            </div>
+          ) : null}
+        </details>
       </div>
     </div>
   )

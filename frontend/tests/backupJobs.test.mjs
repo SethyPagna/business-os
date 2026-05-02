@@ -17,8 +17,22 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /queueBackupFolderExport/)
   assert.match(source, /queueBackupFolderRestore/)
   assert.match(source, /backup_default_path_note/)
+  assert.match(source, /normalizeFolderBrowserResult/)
+  assert.match(source, /advancedMaintenanceOpen/)
   assert.match(source, /<details[^>]+className=/)
+  assert.doesNotMatch(source, /await\s+window\.api\.exportBackupFolder/)
+  assert.doesNotMatch(source, /await\s+window\.api\.importBackupFolder/)
   console.log('PASS backup UI polls queued jobs with visible progress')
+})()
+
+await (async function legacyJsonDownloadShouldNotBufferBlobOnMainThread() {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const exportBackupBody = source.match(/export async function exportBackup\(\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(exportBackupBody, /new URL/)
+  assert.match(exportBackupBody, /searchParams\.set\('token'/)
+  assert.doesNotMatch(exportBackupBody, /\.blob\(/)
+  assert.doesNotMatch(exportBackupBody, /URL\.createObjectURL/)
+  console.log('PASS legacy JSON download avoids buffering the backup blob in React')
 })()
 
 await (async function notificationsShouldRenderThroughPortal() {
