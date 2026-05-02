@@ -44,6 +44,38 @@ function Find-Executable($names, $fallbacks = @()) {
   return ''
 }
 
+function Invoke-ProcessWithTimeout($filePath, [string[]]$arguments = @(), [int]$timeoutSeconds = 20) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $filePath
+  $psi.Arguments = (($arguments | ForEach-Object {
+    $arg = [string]$_
+    if ($arg -match '[\s"]') {
+      '"' + ($arg -replace '"', '\"') + '"'
+    } else {
+      $arg
+    }
+  }) -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  try {
+    [void]$process.Start()
+    if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
+      try { $process.Kill($true) } catch { try { $process.Kill() } catch {} }
+      return [pscustomobject]@{ ExitCode = 124; TimedOut = $true; Stdout = ''; Stderr = "Timed out after ${timeoutSeconds}s" }
+    }
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; TimedOut = $false; Stdout = $process.StandardOutput.ReadToEnd(); Stderr = $process.StandardError.ReadToEnd() }
+  } catch {
+    return [pscustomobject]@{ ExitCode = 1; TimedOut = $false; Stdout = ''; Stderr = $_.Exception.Message }
+  } finally {
+    $process.Dispose()
+  }
+}
+
 function Resolve-Docker {
   $docker = Find-Executable @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe')
   if (-not $docker) { Fail 'Docker CLI was not found. Install Docker Desktop first.' }
@@ -160,10 +192,15 @@ function Ensure-Env {
 function Ensure-DockerReady {
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
-  & $docker info --format '{{.ServerVersion}}' > $null 2> $null
-  if ($LASTEXITCODE -ne 0) {
+  Write-Step 'Checking Docker engine readiness...'
+  $result = Invoke-ProcessWithTimeout $docker @('info', '--format', '{{.ServerVersion}}') 20
+  if ($result.TimedOut) {
+    Fail 'Docker CLI did not answer within 20 seconds. Open Docker Desktop, wait until it says Running, then retry.'
+  }
+  if ($result.ExitCode -ne 0) {
     Fail 'Docker Desktop is not running. Open Docker Desktop, wait until it says Running, then retry.'
   }
+  Write-Ok 'Docker engine is reachable.'
 }
 
 function Get-VersionTag {

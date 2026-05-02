@@ -402,6 +402,11 @@ if not exist "%ROOT%\run\release\start-server.bat" (
 copy /y "%ROOT%\run\release\start-server.bat" "%DIST_OUT%\start-server.bat" >nul
 echo [OK] start-server.bat (release version) added
 
+if exist "%ROOT%\Start Business OS.bat" (
+    copy /y "%ROOT%\Start Business OS.bat" "%DIST_OUT%\Start Business OS.bat" >nul
+    echo [OK] Start Business OS.bat one-file launcher added
+)
+
 if not exist "%ROOT%\run\release\stop-server.bat" (
     echo [ERROR] Release stop script template not found.
     pause
@@ -465,7 +470,7 @@ if exist "%PRESERVE_ENV%" (
     echo GOOGLE_DRIVE_CLIENT_ID=!RELEASE_GOOGLE_DRIVE_CLIENT_ID!
     echo GOOGLE_DRIVE_CLIENT_SECRET=!RELEASE_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!RELEASE_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
-    echo # Required local scale services ^(started automatically by start-server.bat^). Keep real secrets in .env or machine environment.
+    echo # Required local scale services ^(started automatically by Start Business OS.bat^). Keep real secrets in .env or machine environment.
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq
     echo WORKER_RUNTIME=host
@@ -514,7 +519,7 @@ echo Business OS - Release Package
 echo ================================
 echo.
 echo QUICK START:
-echo 1. Double-click start-server.bat
+echo 1. Double-click Start Business OS.bat
 echo 2. Docker Desktop, Redis, Postgres, and MinIO are started automatically
 echo 3. Open http://localhost:4000 in your browser
 echo 4. Login: admin / admin  ^(change password after first login^)
@@ -522,12 +527,13 @@ echo 5. To stop the app: run stop-server.bat
 echo 6. Customer portal: use the public URL configured in Customer Portal, or the custom public path if no external URL is set
 echo.
 echo REMOTE ACCESS ^(Cloudflare^):
-echo - start-server.bat starts Cloudflare Tunnel for https://leangcosmetics.dpdns.org
+echo - Start Business OS.bat starts Cloudflare Tunnel for https://leangcosmetics.dpdns.org
 echo - Optional admin hostname: https://admin.leangcosmetics.dpdns.org
 echo - Keep the Cloudflare tunnel token file in runtime\secrets.
 echo.
 echo FILES:
 echo - business-os-server.exe   ^(main server, no Node.js required^)
+echo - Start Business OS.bat    ^(one-file launcher for normal users^)
 echo - start-server.bat         ^(launch script^)
 echo - stop-server.bat          ^(stop script^)
 echo - ops\docker\              ^(required Redis/Postgres/MinIO service config^)
@@ -600,7 +606,8 @@ echo   Portable folder:  %DIST_OUT%
 echo.
 echo   Contents:
 echo     business-os-server.exe   - main server (no Node.js needed^)
-echo     start-server.bat         - double-click to launch
+echo     Start Business OS.bat    - one-file launcher for normal users
+echo     start-server.bat         - support launcher used by Start Business OS.bat
 echo     stop-server.bat          - double-click to stop
 echo     ops\docker\              - Redis/Postgres/MinIO compose config
 echo     ops\scripts\powershell\  - one-button runtime bootstrap
@@ -617,7 +624,7 @@ echo   To distribute (installer^):
 echo     Share release\BusinessOS-Setup-*.exe
 echo     ^(only if NSIS ran successfully above^)
 echo.
-echo   Run start-server.bat to launch, then open http://localhost:4000
+echo   Double-click Start Business OS.bat to launch, then open http://localhost:4000
 echo   Customer portal: use the public URL configured in Customer Portal, or the custom public path if no external URL is set
 echo.
 echo ========================================================================

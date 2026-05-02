@@ -1,5 +1,5 @@
 @echo off
-chcp 1252 >nul 2>&1
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM ========================================================================
@@ -29,8 +29,8 @@ echo ========================================================================
 echo   Business OS  ^|  Setup
 echo ========================================================================
 echo.
-echo   Run ONCE to install dependencies and build the frontend.
-echo   After setup, use run\start-server.bat to launch.
+echo   Run ONCE on a source checkout to install dependencies and build the frontend.
+echo   After setup, double-click Start Business OS.bat to launch.
 echo.
 
 REM ---- Workstation/runtime bootstrap --------------------------------------
@@ -40,6 +40,7 @@ if errorlevel 1 (
     echo.
     echo [ERROR] Runtime bootstrap failed.
     echo         Finish any installer, administrator, Docker Desktop, or restart prompt, then run run\setup.bat again.
+    echo         Support command: run\docker\doctor.bat
     echo.
     pause
     exit /b 1
@@ -366,9 +367,10 @@ echo   SETUP COMPLETE
 echo ========================================================================
 echo.
 echo   Next steps:
-echo     1. Run run\start-server.bat  to launch the server
-echo     2. Open http://localhost:4000 in your browser
-echo     3. Default login: admin / admin  ^(change after first login^)
+echo     1. Double-click Start Business OS.bat
+echo     2. Or run: run\start-server.bat
+echo     3. Open http://localhost:4000 in your browser
+echo     4. Default login: admin / admin  ^(change after first login^)
 echo.
 echo   Data stored at: %DATA_DIR%
 echo.

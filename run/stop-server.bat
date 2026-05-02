@@ -172,4 +172,11 @@ if defined PORT_STILL_BUSY (
     echo [%DATE% %TIME%] STOP succeeded port=%PORT%>>"%RUN_LOG%"
 )
 echo.
+echo Next step: double-click Start Business OS.bat when you want to run again.
+echo Support log: %RUN_LOG%
+echo.
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" (
+    echo Press any key to close this window.
+    pause >nul
+)
 exit /b 0

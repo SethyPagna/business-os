@@ -12,9 +12,21 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if "%~1"=="" (
   echo Usage: scale-services.bat up^|down^|status^|logs
   echo.
-  echo This is a support command. Everyday users should run run\start-server.bat.
+  echo This is a legacy support command.
+  echo Everyday users should run Start Business OS.bat.
+  echo For diagnostics, run run\docker\doctor.bat.
+  if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
   exit /b 2
 )
 
+echo [INFO] Legacy support command. Normal startup handles scale services automatically.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Scale -ScaleAction "%~1" -RequireServices
-exit /b %ERRORLEVEL%
+set "EXIT_CODE=%ERRORLEVEL%"
+echo.
+if "%EXIT_CODE%"=="0" (
+  echo [DONE] Scale service support command finished.
+) else (
+  echo [ERROR] Scale service support command failed. Prefer run\docker\doctor.bat for full diagnostics.
+)
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
+exit /b %EXIT_CODE%

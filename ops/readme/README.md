@@ -1,6 +1,6 @@
 # Business OS Operator Guide
 
-This guide is for support, installers, and technical operators. Everyday users should read the root `README.md` and use only `run\setup.bat`, `run\start-server.bat`, and `run\stop-server.bat`.
+This guide is for support, installers, and technical operators. Everyday users should read the root `README.md` and use `Start Business OS.bat`.
 
 ## Runtime Model
 
@@ -42,7 +42,7 @@ When `winget` is available, setup tries to install missing tools automatically. 
 ## Daily Start / Stop
 
 ```bat
-run\start-server.bat
+Start Business OS.bat
 run\stop-server.bat
 ```
 
@@ -54,16 +54,13 @@ run\stop-server.bat --with-services
 
 ## Support Service Commands
 
-These commands are hidden from normal user instructions:
+Scale services are started automatically by the launcher. The old `run\scale-services.bat` wrapper remains only for compatibility with older support notes; prefer `run\docker\doctor.bat` for diagnostics.
 
 ```bat
-run\scale-services.bat status
-run\scale-services.bat logs
-run\scale-services.bat up
-run\scale-services.bat down
+run\docker\doctor.bat
 ```
 
-The batch wrapper delegates to the shared PowerShell bootstrapper and uses a project-local Docker config folder at `ops\runtime\docker-config` to avoid user profile Docker config permission issues.
+The runtime bootstrapper uses a project-local Docker config folder at `ops\runtime\docker-config` to avoid user profile Docker config permission issues.
 
 ## Data Layout
 

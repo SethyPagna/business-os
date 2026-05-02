@@ -27,6 +27,7 @@ if /I "%~1"=="--help" (
 
 set "ENV_FILE=%ROOT%\backend\.env"
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
+set "RUN_LOG=%LOG_DIR%\start-docker.log"
 set "COMPOSE_FILE=%ROOT%\ops\docker\compose.scale.yml"
 set "DOCKER_ENV=%ROOT%\ops\runtime\docker-scale.env"
 set "DOCKER_CONFIG=%ROOT%\ops\runtime\docker-config"
@@ -55,6 +56,7 @@ set "LOCAL_API=http://127.0.0.1:%PORT%"
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 if not exist "%DOCKER_CONFIG%" mkdir "%DOCKER_CONFIG%" >nul 2>&1
+echo [%DATE% %TIME%] Docker runtime start requested>>"%RUN_LOG%"
 
 echo.
 echo ============================================================
@@ -67,7 +69,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 if errorlevel 1 (
     echo.
     echo [ERROR] Docker services are not ready. Open Docker Desktop, wait until it says Running, then retry.
-    exit /b 1
+    echo         Log folder: %LOG_DIR%
+    set "EXIT_CODE=1"
+    goto :finish
 )
 
 for %%g in (docker.exe docker.cmd docker.bat docker) do (
@@ -80,7 +84,9 @@ if not defined DOCKER_CMD (
 )
 if not defined DOCKER_CMD (
     echo [ERROR] Docker CLI was not found.
-    exit /b 1
+    echo         Install or start Docker Desktop, then retry.
+    set "EXIT_CODE=1"
+    goto :finish
 )
 
 set "MINIO_LICENSE_HOST_FILE=%ROOT%\ops\runtime\secrets\minio.license"
@@ -97,7 +103,9 @@ echo [INFO] Starting Docker app container...
 if errorlevel 1 (
     echo [ERROR] Docker app runtime failed to start.
     type "%DOCKER_APP_LOG%"
-    exit /b 1
+    echo         Log file: %DOCKER_APP_LOG%
+    set "EXIT_CODE=1"
+    goto :finish
 )
 
 if /I "%BUSINESS_OS_CLOUDFLARED_RUNTIME%"=="docker" (
@@ -153,6 +161,9 @@ echo [INFO] Waiting for app health...
 set "HEALTH_OK="
 for /l %%N in (1,1,150) do (
     if not defined HEALTH_OK (
+        if %%N==1 echo        Checking %LOCAL_API%/health ...
+        set /a "HEALTH_TICK=%%N %% 15"
+        if "!HEALTH_TICK!"=="0" echo        Still waiting for app health ^(%%N/150^)...
         for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { (Invoke-WebRequest -Uri %LOCAL_API%/health -UseBasicParsing -TimeoutSec 2).StatusCode } catch { 0 }" 2^>nul') do set "HTTP_STATUS=%%r"
         if "!HTTP_STATUS!"=="200" (
             set "HEALTH_OK=1"
@@ -163,8 +174,10 @@ for /l %%N in (1,1,150) do (
 )
 if not defined HEALTH_OK (
     echo [ERROR] Docker app did not become healthy at %LOCAL_API%/health.
-    echo         Run: run\scale-services.bat logs
-    exit /b 1
+    echo         Run: run\docker\doctor.bat
+    echo         App log: %DOCKER_APP_LOG%
+    set "EXIT_CODE=1"
+    goto :finish
 )
 
 echo [INFO] Starting Docker workers after app health is confirmed...
@@ -183,4 +196,21 @@ echo   Local Portal: http://127.0.0.1:%PORT%/public
 echo   Remote Admin: %CLOUDFLARE_ADMIN_URL%
 echo   Customer URL: %CLOUDFLARE_PUBLIC_URL%/public
 echo.
-exit /b 0
+echo   Next time: double-click Start Business OS.bat or run run\start-server.bat
+echo   To stop:   run\stop-server.bat
+echo   Support:   run\docker\doctor.bat
+set "EXIT_CODE=0"
+goto :finish
+
+:finish
+echo [%DATE% %TIME%] Docker runtime finished with code %EXIT_CODE%>>"%RUN_LOG%"
+echo.
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" if not "%BUSINESS_OS_CHILD_LAUNCHER%"=="1" (
+    if "%EXIT_CODE%"=="0" (
+        echo Press any key to close this window ^(Business OS keeps running^).
+    ) else (
+        echo Press any key to close this window after reading the message above.
+    )
+    pause >nul
+)
+exit /b %EXIT_CODE%

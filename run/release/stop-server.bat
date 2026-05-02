@@ -48,4 +48,7 @@ if /I "%~1"=="--with-services" (
 
 echo [DONE] Business OS stop command completed.
 echo [%DATE% %TIME%] STOP completed>>"%RUN_LOG%"
+echo.
+echo Next step: double-click Start Business OS.bat when you want to run again.
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
 exit /b 0

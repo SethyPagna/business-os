@@ -83,9 +83,34 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] START requested (port=%PORT%)>>"%RUN_LOG%"
 
 if /I "%BUSINESS_OS_APP_RUNTIME%"=="docker" (
-    echo [INFO] BUSINESS_OS_APP_RUNTIME=docker. Handing off to Docker runtime launcher...
+    echo.
+    echo [INFO] Docker runtime selected.
+    echo        This launcher owns the user experience and will hand off once to run\start-docker.bat.
+    echo        Progress and failures are logged under ops\runtime\logs.
+    set "BUSINESS_OS_CHILD_LAUNCHER=1"
     call "%ROOT%\run\start-docker.bat"
-    exit /b %ERRORLEVEL%
+    set "DOCKER_START_EXIT=!ERRORLEVEL!"
+    set "BUSINESS_OS_CHILD_LAUNCHER="
+    echo.
+    if "!DOCKER_START_EXIT!"=="0" (
+        echo [DONE] Business OS is ready.
+        echo        Admin:    %CLOUDFLARE_ADMIN_URL%
+        echo        Public:   %CLOUDFLARE_PUBLIC_URL%/public
+        echo        Local:    http://127.0.0.1:%PORT%
+        echo.
+        echo Next time: double-click Start Business OS.bat or run\start-server.bat.
+        echo To stop:  run\stop-server.bat
+    ) else (
+        echo [ERROR] Docker runtime launcher failed with exit code !DOCKER_START_EXIT!.
+        echo         Log folder: %LOG_DIR%
+        echo         Safest repair command: run\docker\doctor.bat
+    )
+    echo.
+    if not "%BUSINESS_OS_NO_PAUSE%"=="1" (
+        echo Press any key to close this window.
+        pause >nul
+    )
+    exit /b !DOCKER_START_EXIT!
 )
 
 echo.

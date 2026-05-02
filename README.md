@@ -1,100 +1,89 @@
 # Business OS
 
-Business OS is designed for a normal Windows business laptop: one setup, one start button, and one public Cloudflare link for other devices.
+Business OS is meant to feel like normal Windows business software: one launcher starts the app, required Docker services, workers, and Cloudflare access.
 
-## Blank Laptop Setup
+## Blank Windows Laptop
 
-Start here if the laptop has nothing installed.
+Use this path for a normal business/user laptop.
 
-1. Download or copy the Business OS folder onto the laptop.
-2. Right-click `run\setup.bat` and choose **Run as administrator**.
-3. Let setup install or check Docker Desktop, Node.js, Git, OpenSSL, and Cloudflare support files.
-4. If Windows asks for a restart, restart the laptop and run `run\setup.bat` again.
-5. When setup finishes, run `run\start-server.bat`.
-6. Open the URL printed in the start window.
+1. Install **Docker Desktop for Windows** if the installer did not include it.
+2. Copy the Business OS portable folder or run the Business OS installer.
+3. Double-click **`Start Business OS.bat`**.
+4. If Windows or Docker asks for a restart, restart once and double-click **`Start Business OS.bat`** again.
+5. Open the URLs printed in the window.
 
 Normal URLs:
 
-- Local/admin on the server laptop: `http://localhost:4000`
-- Staff/admin from other devices: `https://admin.leangcosmetics.dpdns.org`
+- Server laptop: `http://localhost:4000`
+- Admin from other devices: `https://admin.leangcosmetics.dpdns.org`
 - Public customer portal: `https://leangcosmetics.dpdns.org/public`
 
-You do not need to run Docker Compose, Redis, Postgres, MinIO, workers, or Cloudflare commands by hand. The start script owns that.
+You do **not** need to run Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands by hand.
+
+## Source Checkout Setup
+
+Use this only when working from the source code folder.
+
+1. Run `run\setup.bat` once.
+2. After setup, double-click **`Start Business OS.bat`**.
+3. For support diagnostics, run `run\docker\doctor.bat`.
+
+The root folder intentionally has no `package.json` and no root `node_modules`. Keep lockfiles only in `backend\package-lock.json` and `frontend\package-lock.json`.
 
 ## Daily Use
 
 1. Turn on the server laptop.
-2. Open Docker Desktop if Windows did not start it automatically.
-3. Run `run\start-server.bat`.
-4. Use the admin or public Cloudflare URL on phones/tablets/other computers.
-5. Run `run\stop-server.bat` before shutting the laptop down.
+2. Double-click **`Start Business OS.bat`**.
+3. Use the admin or public Cloudflare URL on phones, tablets, and other computers.
+4. Run `run\stop-server.bat` before shutting the laptop down.
 
-If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. The tunnel origin should point to `http://127.0.0.1:4000` for the Windows-host runtime, or `http://app:4000` for the Docker-only private release.
+If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. Use `run\docker\doctor.bat` first.
 
-## Data Safety
+## Data And Backups
 
-Your live business data currently stays on the server laptop under:
+Current source-runtime business data stays under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Backups, uploaded files, imports, and the live SQLite database are stored there. Backup and reset actions cancel running imports first so old background jobs cannot keep writing after a destructive action.
+Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
-Google Drive sync is managed in Settings > Backup. Use it as a backup/sync target, not as the only copy of the business database.
+Docker-only production release support is being guarded until the remaining route-level Postgres/MinIO cutover is complete. The tooling must not silently serve from a hidden SQLite database inside Docker because that risks data loss.
 
 ## Large Imports
 
 Large product, inventory, sales, customer, supplier, and delivery imports run as background jobs.
 
-- Uploading returns quickly with a job tracker at the top of the app.
+- Uploading returns quickly with a top-of-app job tracker.
+- Workers stay idle when no large action exists and wake automatically when jobs are queued.
 - CSV/TSV parsing preserves Khmer text and rounds money/percent values upward to two decimals.
-- Product conflicts are grouped by same name and identifier conflicts such as same SKU/barcode.
+- Product conflicts are grouped by same name, same SKU/barcode, and errors/issues.
 - Imports wait for review before applying large changes.
-- Cancel, retry, failed-row download, and remove are available from the top tracker.
+- Cancel, retry, failed-row download, remove, undo, and redo are available from the tracker or history tools where supported.
 
-Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so uploaded temp files are cleaned.
+Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so temp files and queue state can be cleaned.
 
-## Support Commands
+## Update, Backup, Restore
 
-Only use these if support asks:
+Normal users should use the simple files:
 
-- `run\scale-services.bat status`
-- `run\scale-services.bat logs`
-- `run\cloudflare-origin.bat host`
-- `run\cloudflare-origin.bat docker`
-- `run\stop-server.bat --with-services`
+- Start: `Start Business OS.bat`
+- Stop: `run\stop-server.bat`
+- Diagnose: `run\docker\doctor.bat`
+- Backup: `run\docker\backup.bat`
+- Restore: `run\docker\restore.bat`
+- Update Docker release: `run\docker\update.bat`
 
-Technical notes are in `ops\readme\README.md`.
-
-## Docker-Only Private Release
-
-Use this when you want another device to run Business OS without receiving the source repository.
-
-Developer machine:
-
-1. Run `run\docker\release.bat` to build the private Docker image.
-2. Run `run\docker\publish-release.bat` to push the image to the private registry.
-
-Business/user machine:
-
-1. Run `run\docker\install.bat` once.
-2. Put a Cloudflare API token with Tunnel write permission in `ops\runtime\secrets\cloudflare-api-token.txt`.
-3. Run `run\docker\rotate-cloudflare.bat --disconnect-old` if the tunnel token was pasted, shared, or may be compromised.
-4. Run `run\docker\start.bat`.
-5. Run `run\docker\update.bat` whenever a new version is published.
-
-The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into runtime containers. It also refuses to silently run SQLite in production release mode.
-
-Important: the current source app still contains SQLite-specific route code. The Docker-only release tooling and migrator are in place, but production serving remains guarded until the route-level Postgres data-layer cutover is completed. This prevents accidental data loss or a hidden throwaway SQLite database inside Docker.
+Every user-facing command window stays open and prints what to do next.
 
 ## Cloudflare Safety
 
-Business OS now uses Cloudflare for the public/admin links. Tailscale is legacy support only and is not part of normal setup.
+Business OS uses Cloudflare for the public/admin links. Tailscale is legacy support only and is hidden from normal setup.
 
 If a Cloudflare tunnel token, origin private key, or API token was pasted into chat or sent to anyone, treat it as compromised:
 
-1. Create or confirm a Cloudflare API token with Cloudflare Tunnel write permission.
+1. Create or confirm a Cloudflare API token with Tunnel write permission.
 2. Save it locally only in `ops\runtime\secrets\cloudflare-api-token.txt`.
 3. Run `run\docker\rotate-cloudflare.bat --disconnect-old`.
-4. Restart with `run\docker\start.bat`.
+4. Restart with **`Start Business OS.bat`**.
 
-The rotation script updates the tunnel to route `leangcosmetics.dpdns.org` and `admin.leangcosmetics.dpdns.org` to the Docker app service (`http://app:4000`) and writes the new connector token only into ignored runtime secret files.
+Technical details are in `run\README.md`, `run\docker\README.md`, and `ops\README.md`.

@@ -51,6 +51,57 @@ function Find-Executable($names, $fallbacks = @()) {
   return ''
 }
 
+function Invoke-ProcessWithTimeout($filePath, [string[]]$arguments = @(), [int]$timeoutSeconds = 20) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $filePath
+  $psi.Arguments = (($arguments | ForEach-Object {
+    $arg = [string]$_
+    if ($arg -match '[\s"]') {
+      '"' + ($arg -replace '"', '\"') + '"'
+    } else {
+      $arg
+    }
+  }) -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  try {
+    [void]$process.Start()
+    if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
+      try {
+        $process.Kill($true)
+      } catch {
+        try { $process.Kill() } catch {}
+      }
+      return [pscustomobject]@{
+        ExitCode = 124
+        TimedOut = $true
+        Stdout = ''
+        Stderr = "Timed out after ${timeoutSeconds}s"
+      }
+    }
+    return [pscustomobject]@{
+      ExitCode = $process.ExitCode
+      TimedOut = $false
+      Stdout = $process.StandardOutput.ReadToEnd()
+      Stderr = $process.StandardError.ReadToEnd()
+    }
+  } catch {
+    return [pscustomobject]@{
+      ExitCode = 1
+      TimedOut = $false
+      Stdout = ''
+      Stderr = $_.Exception.Message
+    }
+  } finally {
+    $process.Dispose()
+  }
+}
+
 function Install-WithWinget($id, $label) {
   $winget = Find-Executable @('winget.exe', 'winget')
   if (-not $winget) {
@@ -232,7 +283,7 @@ function Start-DockerDesktop($dockerExe) {
     Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then run run\start-server.bat again.'
   }
 
-  Write-Step 'Starting Docker Desktop...'
+  Write-Step 'Starting Docker Desktop. This can take 1-3 minutes on Windows...'
   try {
     Start-Process -FilePath $dockerDesktop -WindowStyle Hidden | Out-Null
   } catch {
@@ -242,20 +293,25 @@ function Start-DockerDesktop($dockerExe) {
 }
 
 function Test-DockerEngine($dockerExe) {
-  $oldPreference = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
-  & $dockerExe info --format '{{.ServerVersion}}' > $null 2> $null
-  $code = $LASTEXITCODE
-  $ErrorActionPreference = $oldPreference
-  return ($code -eq 0)
+  $result = Invoke-ProcessWithTimeout $dockerExe @('info', '--format', '{{.ServerVersion}}') 20
+  if ($result.TimedOut) {
+    Write-Warn 'Docker CLI did not answer within 20 seconds. Docker Desktop may still be starting.'
+    return $false
+  }
+  return ($result.ExitCode -eq 0)
 }
 
 function Wait-DockerEngine($dockerExe, $timeoutSeconds = 90) {
   $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+  $attempt = 0
   do {
+    $attempt++
     if (Test-DockerEngine $dockerExe) {
       Write-Ok 'Docker engine is ready.'
       return
+    }
+    if (($attempt -eq 1) -or (($attempt % 5) -eq 0)) {
+      Write-Step "Waiting for Docker engine... attempt $attempt"
     }
     Start-Sleep -Seconds 3
   } while ((Get-Date) -lt $deadline)
@@ -325,7 +381,7 @@ function Wait-ScaleServicesHealthy($dockerExe, $timeoutSeconds = 90) {
   foreach ($service in $services) {
     Write-Warn "$service health: $(Get-ServiceHealth $dockerExe $service)"
   }
-  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\scale-services.bat status for support details.'
+  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\docker\doctor.bat for support details.'
 }
 
 function Verify-ScaleServices($dockerExe) {
@@ -414,6 +470,7 @@ if (($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant() -e
 $docker = Ensure-Tool 'Docker CLI' @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe') 'Docker.DockerDesktop' $true
 
 try {
+  Write-Step 'Checking Docker engine readiness...'
   if (-not (Test-DockerEngine $docker)) {
     if ($Mode -in @('Setup', 'Start') -or $StartServices -or $RequireServices) {
       Start-DockerDesktop $docker
