@@ -89,9 +89,10 @@ if not exist "%CLOUDFLARE_TUNNEL_TOKEN_FILE%" if exist "%ROOT%\%CLOUDFLARE_TUNNE
 set "LOCAL_API=http://127.0.0.1:%PORT%"
 
 echo [INFO] Starting required runtime services...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Start -StartServices -RequireServices
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Start -InstallMissing -StartServices -RequireServices
 if errorlevel 1 (
   echo [ERROR] Required runtime services are not ready.
+  echo         Install/finish Docker Desktop or Cloudflare Tunnel prompts, restart Windows if requested, then run again.
   pause
   exit /b 1
 )

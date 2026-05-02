@@ -10,7 +10,14 @@ Normal users should start Business OS with **`Start Business OS.bat`**. These fi
    - Admin: `https://admin.leangcosmetics.dpdns.org`
    - Public: `https://leangcosmetics.dpdns.org/public`
 
-No WSL command is required by Business OS. Docker Desktop may ask Windows to enable WSL2 during its own installation.
+No WSL command is required by Business OS. Docker Desktop may ask Windows to enable WSL2 during its own installation. The launcher also checks Cloudflare Tunnel (`cloudflared`) and can install it with `winget` when Windows allows it.
+
+Setup/start also keeps Docker tidy:
+
+- setup pulls the current Redis/Postgres/MinIO service images,
+- startup removes stopped Business OS containers before starting services,
+- data volumes are preserved and are not deleted by startup cleanup,
+- Postgres 18 uses the supported parent data-volume layout so Docker image updates do not strand the service in a restart loop.
 
 ## Support Commands
 

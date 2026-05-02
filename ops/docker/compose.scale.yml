@@ -118,6 +118,7 @@ services:
       POSTGRES_DB: "${POSTGRES_DB:-business_os}"
       POSTGRES_USER: "${POSTGRES_USER:-business_os}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-business_os_dev_password}"
+      PGDATA: /var/lib/postgresql/data
     command:
       - postgres
       - -c
@@ -147,7 +148,7 @@ services:
     ports:
       - "${POSTGRES_BIND_HOST:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
     volumes:
-      - business_os_postgres18:/var/lib/postgresql/data
+      - business_os_postgres18_cluster:/var/lib/postgresql
     networks:
       - business_os_internal
     healthcheck:
@@ -321,7 +322,11 @@ services:
 
 volumes:
   business_os_redis_queue:
+  # Preserved for old local scale-service installs that mounted Postgres 18 at
+  # /var/lib/postgresql/data. Do not delete automatically; migration/doctor can
+  # inspect it if a real Postgres cutover ever used this volume.
   business_os_postgres18:
+  business_os_postgres18_cluster:
   business_os_minio:
   business_os_backend_node_modules_app:
   business_os_backend_node_modules_import:

@@ -8,12 +8,21 @@ Use this path for a normal business/user laptop.
 
 1. Download or copy the **Business OS portable folder** to the laptop, or run the Business OS installer.
 2. Double-click **`Start Business OS.bat`**.
-3. If Docker Desktop is missing, install **Docker Desktop for Windows** from the prompt or from Docker's website.
-4. If Docker asks to enable WSL2 or Windows virtualization, accept it. Business OS does not require you to use Linux commands; Docker Desktop may need WSL2 internally.
-5. Restart Windows if Docker asks.
-6. Double-click **`Start Business OS.bat`** again.
-7. Wait until the window says Business OS is ready.
-8. Open the URLs printed in the window.
+3. Business OS checks Docker Desktop and Cloudflare Tunnel (`cloudflared`).
+4. If either tool is missing, Business OS tries to install it with Windows `winget`.
+5. If Windows asks for administrator permission, WSL2, virtualization, or a restart, accept it. Business OS does not require you to use Linux commands; Docker Desktop may need WSL2 internally.
+6. Restart Windows if Docker asks.
+7. Double-click **`Start Business OS.bat`** again.
+8. Wait until the window says Business OS is ready.
+9. Open the URLs printed in the window.
+
+What the launcher does for you:
+
+- installs or guides Docker Desktop and Cloudflare Tunnel when Windows allows it,
+- starts Docker Desktop services for Redis, Postgres, MinIO, app workers, and media workers,
+- cleans stopped Business OS containers without deleting data volumes,
+- pulls current Docker service images during setup,
+- starts the Cloudflare connector for the public/admin links.
 
 Normal URLs:
 
@@ -22,6 +31,8 @@ Normal URLs:
 - Public customer portal: `https://leangcosmetics.dpdns.org/public`
 
 You do **not** need to run Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands by hand.
+
+Cloudflare requires a local tunnel token file. The installer/portable folder should include it in ignored runtime secret storage, or support can create it with `run\docker\rotate-cloudflare.bat`. Never paste that token into chat or commit it to Git.
 
 ### Moving To A New Laptop With Data
 

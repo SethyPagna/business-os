@@ -166,6 +166,7 @@ $publicUrl = if ($envMap.CLOUDFLARE_PUBLIC_URL) { $envMap.CLOUDFLARE_PUBLIC_URL.
 $adminUrl = if ($envMap.CLOUDFLARE_ADMIN_URL) { $envMap.CLOUDFLARE_ADMIN_URL.TrimEnd('/') } else { 'https://admin.leangcosmetics.dpdns.org' }
 $tokenFile = if ($envMap.CLOUDFLARE_TUNNEL_TOKEN_FILE) { $envMap.CLOUDFLARE_TUNNEL_TOKEN_FILE } else { Join-Path $Root 'ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token' }
 if (-not [System.IO.Path]::IsPathRooted($tokenFile)) { $tokenFile = Join-Path $Root $tokenFile }
+$env:BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
 
 Write-Host ''
 Write-Host '========================================================================'
@@ -174,7 +175,7 @@ Write-Host '====================================================================
 Write-Host ''
 
 Write-Step 'Preparing Docker services and runtime profile...'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $Bootstrap -Mode Start -StartServices -RequireServices
+& powershell -NoProfile -ExecutionPolicy Bypass -File $Bootstrap -Mode Start -InstallMissing -StartServices -RequireServices
 if ($LASTEXITCODE -ne 0) { Fail 'Runtime bootstrap failed. Open Docker Desktop, wait until it is running, then retry.' }
 
 $docker = Find-Executable @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe')

@@ -122,7 +122,7 @@ function Ensure-Tool($label, $ids, $fallbacks, $wingetId, [bool]$required = $tru
     return $path
   }
 
-  if ($InstallMissing -and $wingetId) {
+  if ($InstallMissing -and $wingetId -and ($required -or $Mode -eq 'Setup')) {
     Install-WithWinget $wingetId $label
     $path = Find-Executable $ids $fallbacks
     if ($path) {
@@ -332,12 +332,40 @@ function Ensure-ComposeFile {
 
 function Start-ScaleServices($dockerExe) {
   Ensure-ComposeFile
+  Remove-StoppedScaleContainers $dockerExe
   Write-Step 'Starting required Redis queue/cache, Postgres, and MinIO services...'
   $code = Invoke-Compose $dockerExe @('up', '-d', '--remove-orphans')
   if ($code -ne 0) {
     Fail 'Docker Compose could not start the required Business OS services.'
   }
   Wait-ScaleServicesHealthy $dockerExe 180
+}
+
+function Remove-StoppedScaleContainers($dockerExe) {
+  try {
+    Write-Step 'Cleaning stopped Business OS Docker service containers...'
+    $dockerArgs = @('compose', '--progress', 'quiet', '--env-file', $DockerScaleEnv, '-f', $ComposeFile, 'rm', '-f')
+    $result = Invoke-ProcessWithTimeout $dockerExe $dockerArgs 60
+    $code = $result.ExitCode
+    if ($code -eq 0) {
+      Write-Ok 'Stopped Business OS Docker service containers cleaned.'
+    } else {
+      Write-Warn 'Docker cleanup skipped; continuing startup.'
+    }
+  } catch {
+    Write-Warn 'Docker cleanup skipped; continuing startup.'
+  }
+}
+
+function Update-ScaleServiceImages($dockerExe) {
+  Ensure-ComposeFile
+  Write-Step 'Checking for newer Docker service images...'
+  $code = Invoke-Compose $dockerExe @('pull', 'redis-queue', 'redis-cache', 'postgres', 'minio')
+  if ($code -eq 0) {
+    Write-Ok 'Docker service images are available locally.'
+  } else {
+    Write-Warn 'Docker image update check failed. Startup can still continue with local images if present.'
+  }
 }
 
 function Get-ServiceHealth($dockerExe, $service) {
@@ -467,6 +495,14 @@ $openssl = Ensure-Tool 'OpenSSL' @('openssl.exe', 'openssl') @('C:\Program Files
 if (($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant() -eq 'tailscale') {
   $tailscale = Ensure-Tool 'Tailscale' @('tailscale.exe', 'tailscale') @('C:\Program Files\Tailscale\tailscale.exe', 'C:\Program Files (x86)\Tailscale\tailscale.exe') 'Tailscale.Tailscale' $false
 }
+$remoteProviderForTools = ($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant()
+if (-not $remoteProviderForTools -and $Mode -in @('Setup', 'Start')) {
+  $remoteProviderForTools = 'cloudflare'
+}
+if ($remoteProviderForTools -eq 'cloudflare') {
+  $cloudflaredRequired = ($Mode -in @('Setup', 'Start'))
+  $cloudflared = Ensure-Tool 'Cloudflare Tunnel' @('cloudflared.exe', 'cloudflared') @('C:\Program Files\cloudflared\cloudflared.exe', 'C:\Program Files (x86)\cloudflared\cloudflared.exe', "$env:LOCALAPPDATA\cloudflared\cloudflared.exe") 'Cloudflare.cloudflared' $cloudflaredRequired
+}
 $docker = Ensure-Tool 'Docker CLI' @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe') 'Docker.DockerDesktop' $true
 
 try {
@@ -490,6 +526,7 @@ try {
 
 switch ($Mode) {
   'Setup' {
+    Update-ScaleServiceImages $docker
     Start-ScaleServices $docker
   }
   'Start' {
