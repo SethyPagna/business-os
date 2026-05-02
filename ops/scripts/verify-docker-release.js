@@ -105,6 +105,15 @@ function main() {
   ;['Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor', 'Publish'].forEach((action) => {
     if (!automation.includes(`'${action}'`)) failures.push(`Docker release automation is missing ${action}`)
   })
+  ;[
+    'Docker image bundle',
+    "Invoke-Docker -DockerArgs @('save'",
+    "Invoke-Docker -DockerArgs @('load'",
+    'Ensure-ReleaseImageAvailable',
+    'business-os-image.tar',
+  ].forEach((token) => {
+    if (!automation.includes(token)) failures.push(`Docker release automation is missing local image bundle support: ${token}`)
+  })
 
   const rootLauncher = read(path.join(root, 'Start Business OS.bat'))
   if (rootLauncher.includes('run\\start-server.bat') || rootLauncher.includes('start-server.bat"')) {

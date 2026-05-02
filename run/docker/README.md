@@ -14,11 +14,14 @@ No WSL command is required by Business OS. Docker Desktop may ask Windows to ena
 
 Setup/start also keeps Docker tidy:
 
-- setup pulls the current app, Redis, Postgres, MinIO, worker, and Cloudflare service images,
+- setup loads `images\business-os-image.tar` when the app image is not already present,
+- setup pulls Redis, Postgres, MinIO, and Cloudflare service images when the internet is available,
 - startup removes stopped Business OS containers before starting services,
 - data volumes are preserved and are not deleted by startup cleanup,
 - app data lives in Docker-managed Postgres and MinIO volumes,
 - Postgres 18 uses the supported parent data-volume layout so Docker image updates do not strand the service in a restart loop.
+
+GHCR is optional for local/Google Drive installs. A complete `release\business-os` folder contains the app image bundle, so copying or syncing that folder is enough for the app image. `publish-release.bat` is only needed when you want a private registry update.
 
 ## Support Commands
 

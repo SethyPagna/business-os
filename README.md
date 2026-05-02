@@ -120,11 +120,20 @@ Final data architecture target:
 
 For Docker, the live data is inside Docker-managed Postgres and MinIO volumes. Do not manually edit those volumes.
 
+The release folder is portable without GHCR when it contains:
+
+- `Start Business OS.bat`
+- `images\business-os-image.tar`
+- `ops\runtime\docker-release\docker-release.env`
+- `run\docker\*.bat`
+
+`Start Business OS.bat`, `run\docker\install.bat`, and `run\docker\start.bat` load `images\business-os-image.tar` automatically if the image is not already on the laptop. Google Drive can carry this release folder the same way as a USB drive or local copy.
+
 Safest way to move data to another laptop:
 
 1. On the old laptop, run `run\docker\backup.bat`.
 2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`, or choose the matching Google Drive `datasync-N` folder.
-3. On the new laptop, copy the full `release\business-os\` folder.
+3. On the new laptop, copy the full `release\business-os\` folder, including `images\business-os-image.tar`.
 4. Run `run\docker\restore.bat -BackupPath "C:\path\to\that\backup-folder"`.
 5. Double-click **`Start Business OS.bat`** and check products, sales, files, settings, and portal content.
 

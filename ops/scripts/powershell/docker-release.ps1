@@ -263,6 +263,61 @@ function Get-VersionTag {
   return "v$($pkg.version)-$(Get-Date -Format 'yyyyMMddHHmm')"
 }
 
+function Get-ImageBundlePath($baseRoot) {
+  return Join-Path (Join-Path $baseRoot 'images') 'business-os-image.tar'
+}
+
+function Test-DockerImageExists($imageName) {
+  if (-not $imageName) { return $false }
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  $result = Invoke-ProcessWithTimeout $docker @('image', 'inspect', $imageName, '--format', '{{.Id}}') 20
+  return ($result.ExitCode -eq 0)
+}
+
+function Save-ReleaseImageBundle($imageName) {
+  $bundlePath = Get-ImageBundlePath $DockerKitDir
+  Ensure-Dir ([System.IO.Path]::GetDirectoryName($bundlePath))
+  Write-Step "Saving local Docker image bundle: $bundlePath"
+  Invoke-Docker -DockerArgs @('save', '-o', $bundlePath, $imageName) | Out-Null
+  Set-Content -LiteralPath (Join-Path ([System.IO.Path]::GetDirectoryName($bundlePath)) 'business-os-image.txt') -Encoding UTF8 -Value (@(
+    "image=$imageName",
+    "createdAt=$((Get-Date).ToString('o'))",
+    'purpose=Copy this release folder locally or through Google Drive, then Start Business OS.bat loads this image without GHCR.'
+  ))
+  Write-Ok 'Local Docker image bundle saved for offline/local/Google Drive installs.'
+}
+
+function Ensure-ReleaseImageAvailable($imageName) {
+  if (Test-DockerImageExists $imageName) {
+    Write-Ok "Release image is already available locally: $imageName"
+    return
+  }
+
+  $candidates = @(
+    (Get-ImageBundlePath $Root),
+    (Get-ImageBundlePath $DockerKitDir)
+  ) | Select-Object -Unique
+
+  foreach ($bundlePath in $candidates) {
+    if (-not (Test-Path -LiteralPath $bundlePath)) { continue }
+    Write-Step "Loading local Docker image bundle: $bundlePath"
+    Invoke-Docker -DockerArgs @('load', '-i', $bundlePath) | Out-Null
+    if (Test-DockerImageExists $imageName) {
+      Write-Ok "Release image loaded locally: $imageName"
+      return
+    }
+  }
+
+  Write-Warn 'No local image bundle matched this release. Trying the registry as an optional fallback.'
+  Invoke-Docker -DockerArgs @('pull', $imageName) -AllowFailure | Out-Null
+  if (Test-DockerImageExists $imageName) {
+    Write-Ok "Release image pulled from registry: $imageName"
+    return
+  }
+  Fail "Release image is not available. Copy the full release\\business-os folder, including images\\business-os-image.tar, or log in to GHCR and rerun publish/install."
+}
+
 function Test-ReleaseContents {
   $compose = Get-Content -Raw $ComposeFile
   if ($compose -match '\.\./\.\.:/app' -or $compose -match 'node_modules') {
@@ -401,6 +456,8 @@ function Write-DockerReleaseKit($imageName) {
     $script:EnvFile = $oldEnvFile
   }
 
+  Save-ReleaseImageBundle $imageName
+
   @"
 Business OS Docker Release
 ==========================
@@ -415,15 +472,22 @@ Use this folder on a laptop where you do not want to expose source code.
    https://admin.leangcosmetics.dpdns.org
    https://leangcosmetics.dpdns.org/public
 
-This folder contains launcher/support scripts and Docker configuration only.
-The app itself runs from the private Docker image:
+This folder contains launcher/support scripts, Docker configuration, and a
+local Docker image bundle at:
+  images\business-os-image.tar
+
+The app itself runs from this Docker image:
   $imageName
+
+No GHCR registry push is required for local/Google Drive installs. If the image
+is missing on a laptop, install/start loads images\business-os-image.tar.
 
 Live app data is stored in Docker-managed Postgres and MinIO volumes.
 
 Moving data safely:
 1. Preferred: run run\docker\backup.bat on the old laptop.
-2. Copy the newest backup folder from ops\runtime\docker-release\backups.
+2. Copy the newest backup folder from ops\runtime\docker-release\backups,
+   or choose the matching Google Drive datasync-N folder.
 3. On the new laptop run:
    run\docker\restore.bat -BackupPath "C:\path\to\backup-folder"
 
@@ -470,9 +534,10 @@ function Invoke-Publish {
 
 function Invoke-Install {
   Ensure-DockerReady
-  Ensure-Env | Out-Null
-  Write-Step 'Pulling release images...'
-  Invoke-Compose -ComposeArgs @('pull')
+  $envMap = Ensure-Env
+  Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
+  Write-Step 'Pulling base service images when available...'
+  Invoke-Compose -ComposeArgs @('pull', 'postgres', 'redis-queue', 'redis-cache', 'minio', 'cloudflared') -AllowFailure | Out-Null
   Write-Step 'Starting database, queues, and storage...'
   Invoke-Compose -ComposeArgs @('up', '-d', 'postgres', 'redis-queue', 'redis-cache', 'minio')
   Write-Ok 'Base Docker services are installed.'
@@ -482,6 +547,7 @@ function Invoke-Start {
   Ensure-DockerReady
   Ensure-Env | Out-Null
   $envMap = Read-EnvFile
+  Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
   if (Test-Path -LiteralPath $ScaleComposeFile) {
     Write-Step 'Stopping retired source app/worker containers that could occupy port 4000...'
     Invoke-Docker -DockerArgs @('compose', '-f', $ScaleComposeFile, 'stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
@@ -687,8 +753,9 @@ function Invoke-Update {
   $previousFile = Join-Path $RuntimeDir 'previous-image.txt'
   Set-Content -LiteralPath $previousFile -Value $envMap.BUSINESS_OS_IMAGE -Encoding ASCII
   Invoke-Backup
-  Write-Step 'Pulling new release image...'
-  Invoke-Compose -ComposeArgs @('pull')
+  Write-Step 'Ensuring release image is available locally...'
+  Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
+  Invoke-Compose -ComposeArgs @('pull', 'postgres', 'redis-queue', 'redis-cache', 'minio', 'cloudflared') -AllowFailure | Out-Null
   Write-Step 'Applying migration and restarting...'
   Invoke-Start
   $code = Invoke-Compose -ComposeArgs @('ps') -AllowFailure
