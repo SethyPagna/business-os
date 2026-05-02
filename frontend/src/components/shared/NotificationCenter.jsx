@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, ChevronDown, ExternalLink, Settings2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import {
@@ -148,6 +149,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
   })
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
   const containerRef = useRef(null)
+  const panelRef = useRef(null)
   const requestRef = useRef(0)
   const aliveRef = useRef(true)
   const refreshTimerRef = useRef(null)
@@ -234,7 +236,8 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (!containerRef.current?.contains(event.target)) {
+      const target = event.target
+      if (!containerRef.current?.contains(target) && !panelRef.current?.contains(target)) {
         setOpen(false)
       }
     }
@@ -325,8 +328,8 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
         ) : null}
       </button>
 
-      {open ? (
-        <div className="fixed left-2 right-2 top-16 z-[120] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[min(92vw,24rem)] sm:max-w-[calc(100vw-1rem)]">
+      {open && typeof document !== 'undefined' ? createPortal((
+        <div ref={panelRef} className="fixed left-2 right-2 top-16 z-[1000] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:left-auto sm:right-4 sm:w-[min(92vw,24rem)] sm:max-w-[calc(100vw-1rem)]">
           <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 dark:border-slate-700 sm:px-4">
             <div>
               <div className="text-sm font-semibold text-slate-900 dark:text-white">{tr('notifications', 'Notifications', 'ការជូនដំណឹង')}</div>
@@ -459,7 +462,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
             </div>
           </div>
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   )
 }

@@ -15,7 +15,13 @@ const {
   ORGANIZATION_FOLDER_NAME,
 } = require('../../config')
 const { walkFiles } = require('../../dataPath')
+const { getRuntimeVersion } = require('../../runtimeVersion')
 const { encryptSecret, decryptSecret } = require('../../security')
+const {
+  DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
+  resolveDriveSyncVersionState,
+  selectExpiredDriveSyncVersions,
+} = require('./versioning')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
@@ -29,6 +35,10 @@ const SETTINGS_KEYS = {
   refreshTokenEncrypted: 'google_drive_sync_refresh_token_encrypted',
   folderName: 'google_drive_sync_folder_name',
   rootFolderId: 'google_drive_sync_root_folder_id',
+  currentVersionFolderId: 'google_drive_sync_current_version_folder_id',
+  currentVersionNumber: 'google_drive_sync_current_version_number',
+  currentVersionStartedAt: 'google_drive_sync_current_version_started_at',
+  retentionDays: 'google_drive_sync_retention_days',
   deleteMissing: 'google_drive_sync_delete_missing',
   syncIntervalSeconds: 'google_drive_sync_interval_seconds',
   connectedEmail: 'google_drive_sync_connected_email',
@@ -112,6 +122,9 @@ function resetDriveSyncRootState() {
   clearDriveSyncMappings()
   writeSettingsMap({
     [SETTINGS_KEYS.rootFolderId]: null,
+    [SETTINGS_KEYS.currentVersionFolderId]: null,
+    [SETTINGS_KEYS.currentVersionNumber]: null,
+    [SETTINGS_KEYS.currentVersionStartedAt]: null,
   })
 }
 
@@ -131,6 +144,10 @@ function getDriveSyncConfig() {
     refreshToken,
     folderName,
     rootFolderId: trim(settings[SETTINGS_KEYS.rootFolderId]),
+    currentVersionFolderId: trim(settings[SETTINGS_KEYS.currentVersionFolderId]),
+    currentVersionNumber: trim(settings[SETTINGS_KEYS.currentVersionNumber]),
+    currentVersionStartedAt: trim(settings[SETTINGS_KEYS.currentVersionStartedAt]),
+    retentionDays: clamp(settings[SETTINGS_KEYS.retentionDays], 1, 365, DRIVE_SYNC_DEFAULT_RETENTION_DAYS),
     deleteMissing: toBool(settings[SETTINGS_KEYS.deleteMissing], true),
     syncIntervalSeconds: clamp(settings[SETTINGS_KEYS.syncIntervalSeconds], 30, 3600, 120),
     connectedEmail: trim(settings[SETTINGS_KEYS.connectedEmail]),
@@ -402,6 +419,87 @@ async function ensureRootFolder(config) {
   return created.id
 }
 
+async function ensureDriveVersionFolder(config, rootFolderId) {
+  const versionState = resolveDriveSyncVersionState({
+    currentVersionNumber: config.currentVersionNumber,
+    currentVersionStartedAt: config.currentVersionStartedAt,
+  })
+
+  let versionFolderId = ''
+  if (!versionState.rotated && config.currentVersionFolderId) {
+    const existingById = await getDriveFileIfExists(config, config.currentVersionFolderId)
+    if (existingById?.id) versionFolderId = existingById.id
+  }
+
+  const matches = await findDriveItems(config, rootFolderId, versionState.versionName, 'application/vnd.google-apps.folder')
+  if (!versionFolderId && matches[0]?.id) versionFolderId = matches[0].id
+  if (!versionFolderId) {
+    const created = await createDriveFolder(config, rootFolderId, versionState.versionName)
+    versionFolderId = trim(created?.id)
+  }
+  if (!versionFolderId) throw new Error(`Google Drive version folder ${versionState.versionName} could not be created`)
+
+  await removeDuplicateDriveItems(config, matches, versionFolderId)
+
+  const folderChanged = trim(config.currentVersionFolderId) !== versionFolderId
+  if (versionState.rotated || folderChanged) clearDriveSyncMappings()
+  writeSettingsMap({
+    [SETTINGS_KEYS.currentVersionFolderId]: versionFolderId,
+    [SETTINGS_KEYS.currentVersionNumber]: String(versionState.versionNumber),
+    [SETTINGS_KEYS.currentVersionStartedAt]: versionState.startedAt,
+  })
+
+  const rootChildren = await listDriveChildren(config, rootFolderId)
+  const expired = selectExpiredDriveSyncVersions(rootChildren, config.retentionDays)
+  let prunedVersions = 0
+  for (const item of expired) {
+    const itemId = trim(item?.id)
+    if (!itemId || itemId === versionFolderId) continue
+    await removeDriveFile(config, itemId)
+    prunedVersions += 1
+  }
+
+  return {
+    ...versionState,
+    folderId: versionFolderId,
+    prunedVersions,
+  }
+}
+
+function writeSnapshotManifest(snapshotRoot, versionState) {
+  const runtimeVersion = getRuntimeVersion()
+  const manifest = {
+    format: 'business-os-drive-sync',
+    version: 1,
+    createdAt: nowIso(),
+    dataFolderName: DATA_FOLDER_NAME,
+    organizationFolderName: ORGANIZATION_FOLDER_NAME,
+    driveVersion: {
+      number: versionState.versionNumber,
+      name: versionState.versionName,
+      startedAt: versionState.startedAt,
+      folderId: versionState.folderId,
+    },
+    runtime: {
+      app: runtimeVersion.app,
+      packageVersion: runtimeVersion.packageVersion,
+      revision: runtimeVersion.revision,
+      sourceHash: runtimeVersion.sourceHash,
+      frontend: runtimeVersion.frontend,
+    },
+    restore: {
+      source: 'google-drive-sync-version',
+      note: 'Restore only after Business OS validates this folder and its checksums.',
+    },
+  }
+  fs.writeFileSync(
+    path.join(snapshotRoot, 'business-os-drive-sync-manifest.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'utf8',
+  )
+  return manifest
+}
+
 function buildManagedSnapshotRoot(snapshotRoot) {
   return path.join(snapshotRoot, DATA_FOLDER_NAME, 'organizations', ORGANIZATION_FOLDER_NAME)
 }
@@ -566,6 +664,9 @@ async function runDriveSync(reason = 'manual') {
   try {
     let mappings = getDriveSyncEntriesMap()
     const rootFolderId = await ensureRootFolder(config)
+    const versionState = await ensureDriveVersionFolder(config, rootFolderId)
+    mappings = getDriveSyncEntriesMap()
+    const manifest = writeSnapshotManifest(snapshot.snapshotRoot, versionState)
     const items = collectSnapshotItems(snapshot.snapshotRoot)
     const canonicalRootRelative = `${DATA_FOLDER_NAME}/organizations/${ORGANIZATION_FOLDER_NAME}`
     const hasCanonicalLayout = !!mappings[canonicalRootRelative]
@@ -578,13 +679,15 @@ async function runDriveSync(reason = 'manual') {
       clearDriveSyncMappings()
       mappings = {}
     }
-    const remoteDirs = await ensureRemoteDirectories(config, mappings, rootFolderId, items.directories)
+    const remoteDirs = await ensureRemoteDirectories(config, mappings, versionState.folderId, items.directories)
 
     let removed = 0
     if (legacyFlatLayout && config.deleteMissing) {
       const rootChildren = await listDriveChildren(config, rootFolderId)
       for (const child of rootChildren) {
         if (!trim(child?.id)) continue
+        if (trim(child?.id) === trim(versionState.folderId)) continue
+        if (/^datasync-\d+$/i.test(trim(child?.name))) continue
         await removeDriveFile(config, child.id)
         removed += 1
       }
@@ -596,7 +699,7 @@ async function runDriveSync(reason = 'manual') {
 
     for (const file of items.files) {
       const parentRelative = path.posix.dirname(file.relativePath) === '.' ? '' : path.posix.dirname(file.relativePath)
-      const parentRemoteId = remoteDirs[parentRelative] || rootFolderId
+      const parentRemoteId = remoteDirs[parentRelative] || versionState.folderId
       const existing = mappings[file.relativePath]
       const alreadySynced = existing
         && existing.item_type === 'file'
@@ -680,8 +783,16 @@ async function runDriveSync(reason = 'manual') {
       updated,
       skipped,
       removed,
+      prunedVersions: versionState.prunedVersions || 0,
       fileCount: items.files.length,
       folderCount: items.directories.length,
+      version: {
+        number: versionState.versionNumber,
+        name: versionState.versionName,
+        startedAt: versionState.startedAt,
+        rotated: versionState.rotated,
+      },
+      manifest,
     }
     runtimeState.lastSummary = summary
     writeSettingsMap({
@@ -737,6 +848,14 @@ function getDriveSyncStatus(redirectUri = '') {
     hasRefreshToken: !!config.refreshToken,
     folderName: config.folderName,
     rootFolderId: config.rootFolderId,
+    activeVersion: config.currentVersionNumber ? {
+      number: Number(config.currentVersionNumber || 0) || null,
+      name: config.currentVersionNumber ? `datasync-${config.currentVersionNumber}` : '',
+      folderId: config.currentVersionFolderId,
+      startedAt: config.currentVersionStartedAt,
+      retentionDays: config.retentionDays,
+    } : null,
+    retentionDays: config.retentionDays,
     deleteMissing: config.deleteMissing,
     syncIntervalSeconds: config.syncIntervalSeconds,
     connectedEmail: config.connectedEmail,
@@ -854,6 +973,9 @@ function disconnectDriveSync() {
     [SETTINGS_KEYS.lastError]: null,
     [SETTINGS_KEYS.lastStatus]: 'idle',
     [SETTINGS_KEYS.lastSyncedAt]: null,
+    [SETTINGS_KEYS.currentVersionFolderId]: null,
+    [SETTINGS_KEYS.currentVersionNumber]: null,
+    [SETTINGS_KEYS.currentVersionStartedAt]: null,
   })
   runtimeState.lastSummary = null
   runtimeState.lastError = ''

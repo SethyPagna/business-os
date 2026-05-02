@@ -1172,6 +1172,70 @@ function ensurePrimaryAdminRoleAndUser() {
   `).run(adminRole.id, adminPermissions, primaryAdmin.id)
 }
 
+const DEFAULT_MANAGER_PERMISSIONS = {
+  products: true,
+  inventory: true,
+  sales: true,
+  contacts: true,
+  customer_portal: true,
+}
+
+const DEFAULT_EMPLOYEE_PERMISSIONS = {
+  pos: true,
+  products: true,
+  sales: true,
+  contacts: true,
+}
+
+function isEmptyPermissionObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || '{}'))
+    return !parsed || typeof parsed !== 'object' || Object.keys(parsed).length === 0
+  } catch (_) {
+    return true
+  }
+}
+
+function ensureEditableDefaultRole({ name, code, permissions }) {
+  const safeName = String(name || '').trim()
+  const safeCode = String(code || '').trim().toLowerCase()
+  if (!safeName || !safeCode) return null
+  let role = db.prepare(`SELECT id, permissions FROM roles WHERE lower(trim(code)) = ? LIMIT 1`).get(safeCode)
+  if (!role) {
+    role = db.prepare(`SELECT id, permissions FROM roles WHERE lower(trim(name)) = ? LIMIT 1`).get(safeName.toLowerCase())
+  }
+  const defaultPermissions = JSON.stringify(permissions || {})
+  if (!role) {
+    const inserted = db.prepare(`
+      INSERT INTO roles (name, code, is_system, permissions)
+      VALUES (?, ?, 0, ?)
+    `).run(safeName, safeCode, defaultPermissions)
+    return { id: Number(inserted.lastInsertRowid) }
+  }
+  const shouldSeedPermissions = isEmptyPermissionObject(role.permissions)
+  db.prepare(`
+    UPDATE roles
+    SET name = ?, code = ?, is_system = 0,
+        permissions = CASE WHEN ? = 1 THEN ? ELSE permissions END,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(safeName, safeCode, shouldSeedPermissions ? 1 : 0, defaultPermissions, role.id)
+  return { id: Number(role.id) }
+}
+
+function ensureDefaultOperationalRoles() {
+  ensureEditableDefaultRole({
+    name: 'Manager',
+    code: 'manager',
+    permissions: DEFAULT_MANAGER_PERMISSIONS,
+  })
+  ensureEditableDefaultRole({
+    name: 'Employee',
+    code: 'employee',
+    permissions: DEFAULT_EMPLOYEE_PERMISSIONS,
+  })
+}
+
 function buildDefaultSettingsSeed(defaultOrganizationContext = null) {
   return [
   { key: 'business_name',    value: 'My Business' },
@@ -1330,6 +1394,7 @@ function ensureDefaultUnits() {
 function ensureCoreDataInvariants(options = {}) {
   const repairUploads = options.repairUploads !== false
   ensurePrimaryAdminRoleAndUser()
+  ensureDefaultOperationalRoles()
   const organizationContext = ensureDefaultOrganizationAndGroup()
   ensureDefaultSettings(organizationContext)
   ensureDefaultBranches()

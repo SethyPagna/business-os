@@ -97,6 +97,35 @@ function PrimaryActionButton({ children, ...props }) {
   )
 }
 
+function JobProgressCard({ job, copy, onClear }) {
+  if (!job) return null
+  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)))
+  const status = String(job.status || '').toLowerCase()
+  const failed = status === 'failed' || status === 'cancelled'
+  const completed = status === 'completed'
+  return (
+    <div className={`mt-4 rounded-2xl border p-4 text-sm ${failed ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200' : completed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100'}`}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="font-semibold">{job.message || copy('job_running', 'Working...')}</div>
+          <div className="mt-1 text-xs opacity-80">
+            {job.type || 'system job'} · {job.phase || job.status || 'queued'}
+          </div>
+          {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
+        </div>
+        {completed || failed ? (
+          <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onClear}>
+            {copy('clear', 'Clear')}
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-slate-950/50">
+        <div className={`h-full rounded-full ${failed ? 'bg-red-500' : completed ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
+      </div>
+    </div>
+  )
+}
+
 function useCopy(t) {
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
   return (key, fallback, fallbackKm = fallback) => {
@@ -703,6 +732,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     enabled: true,
     syncIntervalSeconds: 120,
   })
+  const [activeJob, setActiveJob] = useState(null)
   const loadRequestRef = useRef(0)
   const retryTimerRef = useRef(null)
   const failureCountRef = useRef(0)
@@ -809,6 +839,24 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
+  const trackQueuedJob = useCallback(async (queued, reason) => {
+    const jobId = queued?.job_id || queued?.item?.id
+    if (!jobId) return queued
+    setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: reason })
+    const result = await window.api.pollSystemJob?.(jobId, {
+      reason,
+      pollMs: 1000,
+      onUpdate: (job) => {
+        if (isMountedRef.current && job) setActiveJob(job)
+      },
+    })
+    if (isMountedRef.current) {
+      setActiveJob(result?.job || null)
+      await load({ force: true })
+    }
+    return result
+  }, [load])
+
   const savePreferences = async () => {
     if (busy) return
     setBusy('save')
@@ -878,9 +926,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (busy) return
     setBusy('sync')
     try {
-      const result = await window.api.syncGoogleDriveNow?.()
+      const queued = await window.api.queueGoogleDriveSyncNow?.()
+      const result = await trackQueuedJob(queued, 'Google Drive sync')
       const summary = result?.summary || {}
-      await load({ force: true })
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -1059,6 +1107,8 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           {status.lastError}
         </div>
       ) : null}
+
+      <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <PrimaryActionButton onClick={savePreferences} disabled={!!busy}>
@@ -1245,6 +1295,7 @@ export default function Backup() {
   const [exportBrowser, setExportBrowser] = useState(null)
   const [restoreBrowser, setRestoreBrowser] = useState(null)
   const [browserBusy, setBrowserBusy] = useState('')
+  const [activeJob, setActiveJob] = useState(null)
   const hostConfigRequestRef = useRef(0)
   const exportBrowseRequestRef = useRef(0)
   const restoreBrowseRequestRef = useRef(0)
@@ -1352,16 +1403,28 @@ export default function Backup() {
   const handleFolderExport = async () => {
     if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    if (!folderExportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
+    const exportDestination = String(folderExportPath || '').trim()
     setLoading('folder-export')
     try {
-      const result = await window.api.exportBackupFolder(folderExportPath)
+      const queued = await window.api.queueBackupFolderExport?.(exportDestination)
+      const jobId = queued?.job_id || queued?.item?.id
+      if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
+      const result = jobId
+        ? await window.api.pollSystemJob?.(jobId, {
+          reason: 'backup export',
+          pollMs: 1000,
+          onUpdate: (job) => {
+            if (aliveRef.current && job) setActiveJob(job)
+          },
+        })
+        : await window.api.exportBackupFolder(exportDestination)
       if (result?.success) {
+        if (result?.job) setActiveJob(result.job)
         actionHistory.pushAction({
           scope: 'backup',
           entity: 'backup',
           label: copy('export_backup_success', 'Backup exported successfully'),
-          redo_payload: { destinationDir: folderExportPath },
+          redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
         })
         notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
         if (result.backupRoot) setFolderImportPath(result.backupRoot)
@@ -1382,8 +1445,20 @@ export default function Backup() {
 
     setLoading('folder-import')
     try {
-      const result = await window.api.importBackupFolder(folderImportPath)
+      const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
+      const jobId = queued?.job_id || queued?.item?.id
+      if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
+      const result = jobId
+        ? await window.api.pollSystemJob?.(jobId, {
+          reason: 'backup restore',
+          pollMs: 1000,
+          onUpdate: (job) => {
+            if (aliveRef.current && job) setActiveJob(job)
+          },
+        })
+        : await window.api.importBackupFolder(folderImportPath)
       if (result?.success) {
+        if (result?.job) setActiveJob(result.job)
         cacheClearAll()
         actionHistory.pushAction({
           scope: 'backup',
@@ -1461,6 +1536,7 @@ export default function Backup() {
           subtitle={copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
+        <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -1478,51 +1554,6 @@ export default function Backup() {
           </div>
 
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
-            <div className="flex flex-col gap-2 lg:flex-row">
-              <input
-                id="backup-folder-export-path"
-                name="backup_folder_export_path"
-                className="input flex-1 font-mono text-sm"
-                value={folderExportPath}
-                onChange={(event) => setFolderExportPath(event.target.value)}
-                placeholder={copy('folder_backup_placeholder', 'Choose a parent folder on the server for the full backup')}
-              />
-              {hostUiAvailable ? (
-                <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
-                  <FolderOutput className="h-4 w-4" />
-                  {copy('browse_folder', 'Choose Folder')}
-                </PathActionButton>
-              ) : null}
-              <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
-                <FolderOutput className="h-4 w-4" />
-                {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-              </PathActionButton>
-            </div>
-            <p className="text-xs text-blue-700 dark:text-blue-300">
-              {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. When you are connected remotely through Cloudflare, choose or paste a path that exists on the server machine, not your phone or browser device.')}
-            </p>
-
-            {exportBrowser ? (
-              <FolderBrowserPanel
-                browseState={exportBrowser}
-                busy={browserBusy === 'export'}
-                copy={copy}
-                onBrowse={(dir) => browseServerFolders('export', dir)}
-                onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
-                onClose={() => {
-                  invalidateTrackedRequest(exportBrowseRequestRef)
-                  setBrowserBusy((current) => (current === 'export' ? '' : current))
-                  setExportBrowser(null)
-                }}
-                onSelect={(fullPath) => {
-                  invalidateTrackedRequest(exportBrowseRequestRef)
-                  setFolderExportPath(fullPath)
-                  setExportBrowser(null)
-                }}
-                currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-              />
-            ) : null}
-
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <PrimaryActionButton onClick={handleFolderExport} disabled={!!loading}>
                 <ArchiveRestore className="h-4 w-4" />
@@ -1533,6 +1564,63 @@ export default function Backup() {
                 {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Legacy JSON')}
               </PathActionButton>
             </div>
+            <p className="text-xs text-blue-700 dark:text-blue-300">
+              {folderExportPath
+                ? copy('backup_custom_path_note', 'Export will use the advanced server path below.')
+                : copy('backup_default_path_note', 'Export uses the safe Docker backup folder automatically. No folder choice is needed.')}
+            </p>
+
+            <details className="rounded-xl border border-blue-100 bg-white/60 p-3 text-sm dark:border-blue-900/50 dark:bg-zinc-900/40">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                {copy('advanced', 'Advanced')}
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <div className="flex flex-col gap-2 lg:flex-row">
+                  <input
+                    id="backup-folder-export-path"
+                    name="backup_folder_export_path"
+                    className="input flex-1 font-mono text-sm"
+                    value={folderExportPath}
+                    onChange={(event) => setFolderExportPath(event.target.value)}
+                    placeholder={copy('folder_backup_placeholder', 'Optional server folder for full backups')}
+                  />
+                  {hostUiAvailable ? (
+                    <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
+                      <FolderOutput className="h-4 w-4" />
+                      {copy('browse_folder', 'Choose Folder')}
+                    </PathActionButton>
+                  ) : null}
+                  <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
+                    <FolderOutput className="h-4 w-4" />
+                    {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
+                  </PathActionButton>
+                </div>
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. When you are connected remotely through Cloudflare, choose or paste a path that exists on the server machine, not your phone or browser device.')}
+                </p>
+
+                {exportBrowser ? (
+                  <FolderBrowserPanel
+                    browseState={exportBrowser}
+                    busy={browserBusy === 'export'}
+                    copy={copy}
+                    onBrowse={(dir) => browseServerFolders('export', dir)}
+                    onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
+                    onClose={() => {
+                      invalidateTrackedRequest(exportBrowseRequestRef)
+                      setBrowserBusy((current) => (current === 'export' ? '' : current))
+                      setExportBrowser(null)
+                    }}
+                    onSelect={(fullPath) => {
+                      invalidateTrackedRequest(exportBrowseRequestRef)
+                      setFolderExportPath(fullPath)
+                      setExportBrowser(null)
+                    }}
+                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
+                  />
+                ) : null}
+              </div>
+            </details>
           </div>
         </div>
 
@@ -1546,51 +1634,6 @@ export default function Backup() {
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
-            <div className="flex flex-col gap-2 lg:flex-row">
-              <input
-                id="backup-folder-import-path"
-                name="backup_folder_import_path"
-                className="input flex-1 font-mono text-sm"
-                value={folderImportPath}
-                onChange={(event) => setFolderImportPath(event.target.value)}
-                placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
-              />
-              {hostUiAvailable ? (
-                <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
-                  <FolderInput className="h-4 w-4" />
-                  {copy('browse_folder', 'Choose Folder')}
-                </PathActionButton>
-              ) : null}
-              <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
-                <FolderInput className="h-4 w-4" />
-                {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-              </PathActionButton>
-            </div>
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              {copy('server_restore_note', 'Restore uses a folder from the Business OS server/container. Remote browsers cannot browse their own local disk into the server runtime.')}
-            </p>
-
-            {restoreBrowser ? (
-              <FolderBrowserPanel
-                browseState={restoreBrowser}
-                busy={browserBusy === 'restore'}
-                copy={copy}
-                onBrowse={(dir) => browseServerFolders('restore', dir)}
-                onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
-                onClose={() => {
-                  invalidateTrackedRequest(restoreBrowseRequestRef)
-                  setBrowserBusy((current) => (current === 'restore' ? '' : current))
-                  setRestoreBrowser(null)
-                }}
-                onSelect={(fullPath) => {
-                  invalidateTrackedRequest(restoreBrowseRequestRef)
-                  setFolderImportPath(fullPath)
-                  setRestoreBrowser(null)
-                }}
-                currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-              />
-            ) : null}
-
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <PrimaryActionButton onClick={handleFolderImport} disabled={!!loading}>
                 <Upload className="h-4 w-4" />
@@ -1611,6 +1654,58 @@ export default function Backup() {
             <p className="text-xs text-amber-700 dark:text-amber-300">
               {copy('folder_restore_note', 'Folder restore replaces current data with the selected backup contents.')}
             </p>
+
+            <details className="rounded-xl border border-amber-100 bg-white/60 p-3 text-sm dark:border-amber-900/50 dark:bg-zinc-900/40">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                {copy('advanced', 'Advanced')}
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <div className="flex flex-col gap-2 lg:flex-row">
+                  <input
+                    id="backup-folder-import-path"
+                    name="backup_folder_import_path"
+                    className="input flex-1 font-mono text-sm"
+                    value={folderImportPath}
+                    onChange={(event) => setFolderImportPath(event.target.value)}
+                    placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
+                  />
+                  {hostUiAvailable ? (
+                    <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
+                      <FolderInput className="h-4 w-4" />
+                      {copy('browse_folder', 'Choose Folder')}
+                    </PathActionButton>
+                  ) : null}
+                  <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
+                    <FolderInput className="h-4 w-4" />
+                    {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
+                  </PathActionButton>
+                </div>
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  {copy('server_restore_note', 'Restore uses a folder from the Business OS server/container. Remote browsers cannot browse their own local disk into the server runtime.')}
+                </p>
+
+                {restoreBrowser ? (
+                  <FolderBrowserPanel
+                    browseState={restoreBrowser}
+                    busy={browserBusy === 'restore'}
+                    copy={copy}
+                    onBrowse={(dir) => browseServerFolders('restore', dir)}
+                    onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
+                    onClose={() => {
+                      invalidateTrackedRequest(restoreBrowseRequestRef)
+                      setBrowserBusy((current) => (current === 'restore' ? '' : current))
+                      setRestoreBrowser(null)
+                    }}
+                    onSelect={(fullPath) => {
+                      invalidateTrackedRequest(restoreBrowseRequestRef)
+                      setFolderImportPath(fullPath)
+                      setRestoreBrowser(null)
+                    }}
+                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
+                  />
+                ) : null}
+              </div>
+            </details>
           </div>
 
           {pendingImport ? (

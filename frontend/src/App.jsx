@@ -1,4 +1,5 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
@@ -516,9 +517,10 @@ function Notification({ notification }) {
 
   const colorClass = getNotificationColor(notification.type)
   const prefix = getNotificationPrefix(notification.type)
-  const classes = `fixed bottom-20 md:bottom-5 right-3 md:right-5 z-[100] ${colorClass} text-white px-4 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-xs`
+  const classes = `fixed right-3 top-20 md:right-5 md:top-5 z-[1100] ${colorClass} text-white px-4 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-xs`
 
-  return <div className={classes}>{prefix}{notification.message}</div>
+  const node = <div className={classes}>{prefix}{notification.message}</div>
+  return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
 function SyncErrorBanner({ error, onDismiss, onGoToServer }) {

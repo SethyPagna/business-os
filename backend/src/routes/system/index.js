@@ -726,9 +726,14 @@ function broadcastDataRestored() {
   ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
 }
 
+function getDefaultBackupDestinationDir() {
+  const configured = String(process.env.BUSINESS_OS_BACKUP_DIR || '').trim()
+  if (configured) return path.resolve(configured)
+  return path.resolve(path.dirname(STORAGE_ROOT), 'business-os-backups')
+}
+
 async function createFolderBackup({ destinationDir, actor = {}, progress = null } = {}) {
-  const rawDestination = String(destinationDir || '').trim()
-  if (!rawDestination) throw new Error('destinationDir is required')
+  const rawDestination = String(destinationDir || getDefaultBackupDestinationDir()).trim()
   const resolvedDestination = path.resolve(rawDestination)
   if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
     throw new Error('Choose a backup destination outside the current live data folder.')
@@ -829,6 +834,9 @@ router.get('/config', authToken, (req, res) => {
     runtime: {
       ...buildRuntimeDescriptor(organization?.public_id || ''),
       serverStartTime: String(SERVER_START_TIME),
+    },
+    backup: {
+      defaultDestinationDir: getDefaultBackupDestinationDir(),
     },
     security: {
       configuredTailscaleHost: access.configuredTailscaleHost || null,
@@ -1043,8 +1051,7 @@ router.post('/backups', authToken, requirePermission('backup'), async (req, res)
   const actor = getAuditActor(req, req.body || {})
   try {
     if (type === 'export-folder' || type === 'export_folder') {
-      const destinationDir = String(req.body?.destinationDir || '').trim()
-      if (!destinationDir) return err(res, 'destinationDir is required')
+      const destinationDir = String(req.body?.destinationDir || '').trim() || getDefaultBackupDestinationDir()
       const job = startSystemJob('backup_export_folder', ({ progress }) => createFolderBackup({
         destinationDir,
         actor,
@@ -1126,8 +1133,7 @@ router.get('/backup/export', authToken, requirePermission('backup'), (req, res) 
 
 router.post('/backup/export-folder', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_export_folder', max: 12, windowMs: 10 * 60 * 1000 })) return
-  const destinationDir = String(req.body?.destinationDir || '').trim()
-  if (!destinationDir) return err(res, 'destinationDir is required')
+  const destinationDir = String(req.body?.destinationDir || '').trim() || getDefaultBackupDestinationDir()
 
   try {
     return ok(res, await createFolderBackup({
