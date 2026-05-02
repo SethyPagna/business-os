@@ -111,6 +111,8 @@ function main() {
     "Invoke-Docker -DockerArgs @('load'",
     'Ensure-ReleaseImageAvailable',
     'business-os-image.tar',
+    'Assert-PostgresCutoverReadyForApp',
+    'Postgres migration finished, but the app data layer is not cut over yet',
   ].forEach((token) => {
     if (!automation.includes(token)) failures.push(`Docker release automation is missing local image bundle support: ${token}`)
   })

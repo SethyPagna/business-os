@@ -243,6 +243,52 @@ function Ensure-Env {
   return $values
 }
 
+function Get-PostgresCutoverBlockerSummary {
+  $node = Find-Executable @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe')
+  $analyzer = Join-Path $Root 'backend\src\db\cutoverReadiness.js'
+  if (-not $node -or -not (Test-Path -LiteralPath $analyzer)) {
+    return ''
+  }
+  $rootJson = $Root | ConvertTo-Json -Compress
+  $script = @"
+const root = $rootJson;
+const { analyzePostgresCutoverReadiness } = require(root + '/backend/src/db/cutoverReadiness');
+const report = analyzePostgresCutoverReadiness({ repoRoot: root, packagedRuntime: false });
+console.log(JSON.stringify({
+  blockerCount: report.blockerCount,
+  byCode: report.summary.byCode,
+  byFile: report.summary.byFile.slice(0, 12)
+}, null, 2));
+process.exit(report.ready ? 0 : 2);
+"@
+  $result = Invoke-ProcessWithTimeout $node @('-e', $script) 20
+  $text = (($result.Stdout, $result.Stderr) -join [Environment]::NewLine).Trim()
+  return $text
+}
+
+function Assert-PostgresCutoverReadyForApp($envMap) {
+  if (($envMap.DATABASE_DRIVER -ne 'postgres') -or ($envMap.OBJECT_STORAGE_DRIVER -ne 'minio') -or ($envMap.BUSINESS_OS_DISABLE_SQLITE -ne '1')) {
+    Fail 'Docker release app startup requires DATABASE_DRIVER=postgres, OBJECT_STORAGE_DRIVER=minio, and BUSINESS_OS_DISABLE_SQLITE=1.'
+  }
+
+  $verified = [string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED
+  $summary = Get-PostgresCutoverBlockerSummary
+  if ($verified -ne '1') {
+    Invoke-Compose -ComposeArgs @('stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
+    $details = if ($summary) { "`nCurrent cutover blockers:`n$summary" } else { '' }
+    Fail ("Postgres migration finished, but the app data layer is not cut over yet. " +
+      "Business OS will not start the app/workers/Cloudflare because that would crash or tempt a hidden SQLite fallback. " +
+      "Complete the Postgres repository and MinIO storage adapter cutover, then set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after route-contract verification passes." +
+      $details)
+  }
+
+  if ($summary -and $summary -match '"blockerCount"\s*:\s*([1-9][0-9]*)') {
+    Invoke-Compose -ComposeArgs @('stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
+    Fail ("BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 is set, but live SQLite data-layer references are still present. " +
+      "Refusing to start production Docker until the source scan is clean.`nCurrent cutover blockers:`n$summary")
+  }
+}
+
 function Ensure-DockerReady {
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
@@ -560,6 +606,7 @@ function Invoke-Start {
   } else {
     Fail 'Docker release no longer supports SQLite/local runtime mode. Restore a verified Postgres/MinIO backup or run the explicit legacy migration before starting.'
   }
+  Assert-PostgresCutoverReadyForApp $envMap
   Write-Step 'Starting Business OS Docker release runtime...'
   $importReplicas = if ($envMap.IMPORT_WORKER_REPLICAS) { [int]$envMap.IMPORT_WORKER_REPLICAS } else { 1 }
   $mediaReplicas = if ($envMap.MEDIA_WORKER_REPLICAS) { [int]$envMap.MEDIA_WORKER_REPLICAS } else { 1 }
@@ -799,11 +846,17 @@ function Invoke-Restore {
 }
 
 function Invoke-Doctor {
-  Ensure-Env | Out-Null
+  $envMap = Ensure-Env
   Test-ReleaseContents
   Ensure-DockerReady
   Invoke-Docker -DockerArgs @('compose', '--env-file', $EnvFile, '-f', $ComposeFile, 'config', '--quiet') | Out-Null
   Invoke-Compose -ComposeArgs @('ps') -AllowFailure | Out-Null
+  if ([string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED -ne '1') {
+    $summary = Get-PostgresCutoverBlockerSummary
+    Write-Warn 'Docker infrastructure is ready, but the Business OS app is not startable in Postgres-only mode yet.'
+    Write-Warn 'Postgres migration can run, but live app routes still need the Postgres repository/MinIO adapter cutover.'
+    if ($summary) { Write-Host $summary }
+  }
   Write-Ok 'Docker release diagnostics completed.'
   Write-Ok 'Docker release uses private images, Postgres/MinIO data volumes, Redis services, and no source bind mount.'
 }
