@@ -526,12 +526,22 @@ export const deleteBranch = async (id, userId, userName) => {
   const payload = await withExpectedUpdatedAt('branches', id, { userId, userName })
   return route('branches:delete', () => apiFetch('DELETE', `/api/branches/${id}`, payload), null, true)
 }
-export const getBranchStock = id       => route('branches:stock',  () => apiFetch('GET', `/api/branches/${id}/stock`),   () => [])
+export const getBranchStock = (id, params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`branches:stock:${id}:${q}`,  () => apiFetch('GET', `/api/branches/${id}/stock${q ? `?${q}` : ''}`),   () => [])
+}
 export const getTransfers   = ()       => route('transfers:get',   () => apiFetch('GET', '/api/transfers'),              () => dexieDb.stock_transfers.orderBy('created_at').reverse().toArray())
 export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', d), null, true)
+export const getBranchStockIntegrity = () => route('branches:stockIntegrity', () => apiFetch('GET', '/api/branches/stock-integrity'), () => ({ issues: [], summary: {} }))
+export const repairBranchStockIntegrity = payload => route('branches:stockIntegrity:repair', () => apiFetch('POST', '/api/branches/stock-integrity/repair', payload), null, true)
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
+export const searchProducts = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`), () => ({ items: [], total: 0, page: 1, pageSize: Number(params.pageSize || 20) || 20 }))
+}
+export const getProductFilters = () => route('products:filters', () => apiFetch('GET', '/api/products/filters'), () => ({ brands: [], categories: [], suppliers: [], initials: [], total: 0 }))
 export async function getCatalogMeta() {
   const base = getPortalBaseUrl()
   const res = await fetchJsonWithTimeout(`${base}/api/catalog/meta`, {

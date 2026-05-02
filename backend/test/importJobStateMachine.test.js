@@ -171,6 +171,28 @@ async function main() {
     assert.equal(updated.policy.decisionsByRowNumber[String(review.rows[0].rowNumber)]._identifier_conflict_mode, 'clear_imported')
   })
 
+  await runTest('product import review accounts for missing names, invalid barcodes, and duplicate barcodes in the file', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeJobFile(job.id, 'review-product-issues.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,stock_quantity,branch',
+      'Alpha Serum,,DUP-100,Leang,pcs,1,',
+      'Beta Serum,,DUP-100,Leang,pcs,1,',
+      'Khmer Barcode,,កាដូរឈើ,Leang,pcs,1,',
+      ',,3606000534674,Leang,pcs,1,',
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'review-product-issues.csv', mimetype: 'text/csv' }, 'csv', 'review-product-issues.csv')
+
+    const review = await getImportJobReview(job.id, { pageSize: 20 })
+
+    assert.equal(review.counts.total, 4)
+    assert.equal(review.counts.duplicate_barcode_groups, 1)
+    assert.equal(review.counts.duplicate_barcode, 2)
+    assert.equal(review.counts.invalid_barcode, 1)
+    assert.equal(review.counts.missing_name, 1)
+    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('invalid_barcode')), true)
+    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('missing_name')), true)
+  })
+
   await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {
     const jobs = [
       createImportJob({ type: 'products', actor: { userName: 'test' } }),

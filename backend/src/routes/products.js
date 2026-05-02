@@ -273,6 +273,166 @@ function discountValues(source = {}, fallback = {}) {
   ]
 }
 
+function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function parseInclude(value = '') {
+  return new Set(String(value || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean))
+}
+
+function appendProductSearchFilters(query = {}) {
+  const where = ['p.is_active = 1']
+  const params = {}
+  const joins = []
+  const branchId = Number.parseInt(query.branchId || query.branch_id || '', 10)
+  if (Number.isFinite(branchId) && branchId > 0) {
+    params.branchId = branchId
+    joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
+  }
+  const search = String(query.query || query.q || '').normalize('NFC').trim()
+  if (search) {
+    params.search = `%${search.toLowerCase()}%`
+    where.push(`(
+      lower(COALESCE(p.name, '')) LIKE @search
+      OR lower(COALESCE(p.sku, '')) LIKE @search
+      OR lower(COALESCE(p.barcode, '')) LIKE @search
+      OR lower(COALESCE(p.brand, '')) LIKE @search
+      OR lower(COALESCE(p.category, '')) LIKE @search
+      OR lower(COALESCE(p.supplier, '')) LIKE @search
+    )`)
+  }
+  ;['brand', 'category', 'supplier'].forEach((field) => {
+    const raw = String(query[field] || '').normalize('NFC').trim()
+    if (raw && raw.toLowerCase() !== 'all') {
+      params[field] = raw
+      where.push(`p.${field} = @${field}`)
+    }
+  })
+  const groupState = String(query.groupState || query.group_state || 'all').toLowerCase()
+  if (groupState === 'parent') where.push('COALESCE(p.is_group, 0) = 1')
+  if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (groupState === 'standalone') where.push('COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0')
+  const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
+  const stockState = String(query.stockState || query.stock_state || 'all').toLowerCase()
+  if (stockState === 'positive' || stockState === 'in_stock') where.push(`${stockExpr} > 0`)
+  if (stockState === 'out' || stockState === 'out_of_stock') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
+  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
+  const initial = String(query.initial || '').normalize('NFC').trim()
+  if (initial && initial.toLowerCase() !== 'all') {
+    params.initial = initial.slice(0, 1).toLowerCase()
+    where.push('lower(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
+  }
+  return { where, joins, params, stockExpr }
+}
+
+function attachBranchStock(products = []) {
+  const ids = Array.from(new Set((products || []).map((product) => Number(product?.id || 0)).filter((id) => id > 0)))
+  if (!ids.length) return products
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = db.prepare(`
+    SELECT bs.product_id, b.id AS branch_id, b.name AS branch_name, COALESCE(bs.quantity, 0) AS quantity
+    FROM branches b
+    LEFT JOIN branch_stock bs ON bs.branch_id = b.id AND bs.product_id IN (${placeholders})
+    WHERE b.is_active = 1
+    ORDER BY b.is_default DESC, b.id ASC
+  `).all(...ids)
+  const byProduct = new Map(ids.map((id) => [id, []]))
+  rows.forEach((row) => {
+    if (!row.product_id) return
+    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, [])
+    byProduct.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
+  })
+  return products.map((product) => ({
+    ...product,
+    branch_stock: byProduct.get(Number(product.id)) || [],
+  }))
+}
+
+// GET /api/products/search - paged catalog read for large datasets
+router.get('/search', authToken, (req, res) => {
+  try {
+    const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
+    const pageSize = normalizePositiveInt(req.query.pageSize || req.query.page_size, 20, { min: 1, max: 100 })
+    const offset = (page - 1) * pageSize
+    const include = parseInclude(req.query.include)
+    const { where, joins, params, stockExpr } = appendProductSearchFilters(req.query)
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const joinSql = joins.join('\n')
+    const sort = String(req.query.sort || 'name_asc').toLowerCase()
+    const orderSql = sort === 'created_desc'
+      ? 'datetime(p.created_at) DESC, p.id DESC'
+      : sort === 'created_asc'
+        ? 'datetime(p.created_at) ASC, p.id ASC'
+        : sort === 'stock_desc'
+          ? `${stockExpr} DESC, p.name COLLATE NOCASE ASC, p.id ASC`
+          : 'p.name COLLATE NOCASE ASC, p.id ASC'
+
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM products p
+      ${joinSql}
+      ${whereSql}
+    `).get(params)?.count || 0
+    const rows = db.prepare(`
+      SELECT p.*, ${stockExpr} AS selected_branch_quantity
+      FROM products p
+      ${joinSql}
+      ${whereSql}
+      ORDER BY ${orderSql}
+      LIMIT @pageSize OFFSET @offset
+    `).all({ ...params, pageSize, offset }).map((product) => ({
+      ...product,
+      custom_fields: tryParse(product.custom_fields, {}),
+    }))
+    let items = rows
+    if (include.has('branch_stock')) items = attachBranchStock(items)
+    if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
+    ok(res, {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      summary: {
+        total,
+        returned: items.length,
+        page,
+        pageSize,
+      },
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to search products')
+  }
+})
+
+// GET /api/products/filters - compact filter metadata without downloading all products
+router.get('/filters', authToken, (_req, res) => {
+  try {
+    const brands = db.prepare("SELECT DISTINCT brand AS value FROM products WHERE is_active = 1 AND COALESCE(trim(brand), '') != '' ORDER BY brand COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
+    const categories = db.prepare("SELECT DISTINCT category AS value FROM products WHERE is_active = 1 AND COALESCE(trim(category), '') != '' ORDER BY category COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
+    const suppliers = db.prepare("SELECT DISTINCT supplier AS value FROM products WHERE is_active = 1 AND COALESCE(trim(supplier), '') != '' ORDER BY supplier COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
+    const initials = db.prepare(`
+      SELECT substr(trim(name), 1, 1) AS value, COUNT(*) AS count
+      FROM products
+      WHERE is_active = 1 AND COALESCE(trim(name), '') != ''
+      GROUP BY value
+      ORDER BY value COLLATE NOCASE ASC
+      LIMIT 300
+    `).all()
+    const total = db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get()?.count || 0
+    ok(res, { brands, categories, suppliers, initials, total })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load product filters')
+  }
+})
+
 // ?? GET /api/products ?????????????????????????????????????????????????????????
 router.get('/', authToken, (req, res) => {
   // Fetch all products with branch stock in a single optimized query (avoids O(n簡) filtering)

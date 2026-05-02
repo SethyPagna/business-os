@@ -292,6 +292,47 @@ function normalizeReviewText(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+function normalizeReviewIdentifier(value) {
+  return normalizeText(value).toLowerCase()
+}
+
+function getBarcodeReviewIssue(value) {
+  const barcode = normalizeText(value)
+  if (!barcode) return ''
+  if (barcode.length > 128) return 'barcode_too_long'
+  if (/[^\x20-\x7E]/.test(barcode)) return 'invalid_barcode'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+() -]*$/.test(barcode)) return 'invalid_barcode'
+  return ''
+}
+
+async function buildProductImportReviewState(csvFile) {
+  const byBarcode = new Map()
+  const bySku = new Map()
+  const byName = new Map()
+  const add = (map, key, rowNumber) => {
+    if (!key) return
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(rowNumber)
+  }
+  for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(500, IMPORT_ROW_BATCH_SIZE) })) {
+    for (const row of batchRows) {
+      add(byBarcode, normalizeReviewIdentifier(row.barcode), row._rowNumber || null)
+      add(bySku, normalizeReviewIdentifier(row.sku), row._rowNumber || null)
+      add(byName, normalizeReviewIdentifier(row.name), row._rowNumber || null)
+    }
+    await yieldImportWorker()
+  }
+  const duplicateGroupCount = (map) => Array.from(map.values()).filter((rows) => rows.length > 1).length
+  return {
+    byBarcode,
+    bySku,
+    byName,
+    duplicateBarcodeGroups: duplicateGroupCount(byBarcode),
+    duplicateSkuGroups: duplicateGroupCount(bySku),
+    duplicateNameGroups: duplicateGroupCount(byName),
+  }
+}
+
 function hasReviewQueryMatch(row = {}, conflict = {}, query = '') {
   const needle = normalizeReviewText(query)
   if (!needle) return true
@@ -355,7 +396,7 @@ function buildProductReviewIndex() {
   return { byName, bySku, byBarcode }
 }
 
-function getProductConflictForReview(row = {}, index) {
+function getProductConflictForReview(row = {}, index, importState = null) {
   const normalized = normalizeRowForProduct(row)
   const store = index || buildProductReviewIndex()
   const sameName = store.byName.get(normalizeReviewText(normalized.name)) || []
@@ -364,25 +405,41 @@ function getProductConflictForReview(row = {}, index) {
   const fields = []
   if (skuConflict) fields.push('sku')
   if (barcodeConflict && (!skuConflict || barcodeConflict.id !== skuConflict.id || barcodeConflict.barcode === normalized.barcode)) fields.push('barcode')
+  const issueTypes = []
+  const barcodeRows = normalized.barcode && importState?.byBarcode?.get(normalizeReviewIdentifier(normalized.barcode)) || []
+  const skuRows = normalized.sku && importState?.bySku?.get(normalizeReviewIdentifier(normalized.sku)) || []
+  const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
+  if (!normalized.name) issueTypes.push('missing_name')
+  if (barcodeIssue) issueTypes.push(barcodeIssue)
+  if (barcodeRows.length > 1) issueTypes.push('duplicate_barcode')
+  if (skuRows.length > 1) issueTypes.push('duplicate_sku')
+  if ((barcodeIssue || barcodeRows.length > 1) && !fields.includes('barcode')) fields.push('barcode')
+  if (skuRows.length > 1 && !fields.includes('sku')) fields.push('sku')
   const matching = sameName.find((product) => normalizeProductSignature(product) === normalizeProductSignature(normalized)) || null
   const selectedParent = chooseParentProduct(sameName)
   const hasIdentifier = fields.length > 0
   const sameNameType = sameName.length
     ? (hasIdentifier ? 'same_name_identifier' : (matching ? 'same_name_same_details' : 'same_name_different_details'))
     : ''
-  const type = sameNameType || (hasIdentifier ? 'identifier' : 'new')
+  const issueType = issueTypes[0] || ''
+  const type = issueType || sameNameType || (hasIdentifier ? 'identifier' : 'new')
   const plannedAction = sameName.length
     ? (matching ? 'merge_stock' : 'create_variant')
     : 'new'
   const conflictTarget = skuConflict || barcodeConflict || matching || sameName[0] || null
   return {
-    issue: !normalized.name,
+    issue: issueTypes.length > 0 || hasIdentifier,
+    issueTypes,
     type,
     fields,
     labels: [
       sameName.length ? 'same name' : '',
       fields.includes('sku') ? 'same sku' : '',
       fields.includes('barcode') ? 'same barcode' : '',
+      issueTypes.includes('missing_name') ? 'missing name' : '',
+      issueTypes.includes('invalid_barcode') ? 'invalid barcode' : '',
+      issueTypes.includes('duplicate_barcode') ? 'duplicate barcode in file' : '',
+      issueTypes.includes('duplicate_sku') ? 'duplicate sku in file' : '',
       !matching && sameName.length ? 'different details' : '',
     ].filter(Boolean),
     plannedAction,
@@ -395,6 +452,14 @@ function getProductConflictForReview(row = {}, index) {
       barcode: conflictTarget.barcode,
       parent_id: conflictTarget.parent_id || null,
     } : null,
+    importConflict: {
+      barcodeRows,
+      skuRows,
+      duplicateBarcodeGroup: barcodeRows.length > 1,
+      duplicateSkuGroup: skuRows.length > 1,
+      barcodeIssue,
+      branchDefaulted: !normalizeText(row.branch),
+    },
     decisionDefaults: {
       _action: plannedAction,
       _identifier_conflict_mode: hasIdentifier ? 'clear_imported' : '',
@@ -502,6 +567,14 @@ function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
       ? (decision.field_rules || decision._field_rules)
       : stringify(decision.field_rules || decision._field_rules)
   }
+  const normalizedDecision = normalizeLookup(decision.decision || decision._decision || '')
+  const decisionValue = normalizeText(decision.decision_value || decision.value || '')
+  if (normalizedDecision === 'allow_duplicate') next._identifier_conflict_mode = 'allow_duplicate'
+  if (normalizedDecision === 'clear_barcode') next.barcode = ''
+  if (normalizedDecision === 'change_barcode') next.barcode = decisionValue
+  if (normalizedDecision === 'clear_sku') next.sku = ''
+  if (normalizedDecision === 'change_sku') next.sku = decisionValue
+  if (normalizedDecision === 'skip_row') next._action = 'skip_row'
   return next
 }
 
@@ -523,8 +596,32 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
   const safePageSize = Math.max(10, Math.min(100, Number(pageSize || 50)))
   const offsetStart = (safePage - 1) * safePageSize
   const rows = []
-  const counts = { total: 0, visible: 0, same_name: 0, identifier: 0, barcode: 0, sku: 0, membership: 0, phone: 0, email: 0, issues: 0, new: 0 }
+  const counts = {
+    total: 0,
+    visible: 0,
+    same_name: 0,
+    identifier: 0,
+    barcode: 0,
+    sku: 0,
+    membership: 0,
+    phone: 0,
+    email: 0,
+    issues: 0,
+    new: 0,
+    missing_name: 0,
+    invalid_barcode: 0,
+    duplicate_barcode: 0,
+    duplicate_sku: 0,
+    malformed_number: 0,
+    duplicate_barcode_groups: 0,
+    duplicate_sku_groups: 0,
+  }
   const productIndex = job.type === 'products' ? buildProductReviewIndex() : null
+  const productImportState = job.type === 'products' ? await buildProductImportReviewState(csvFile) : null
+  if (productImportState) {
+    counts.duplicate_barcode_groups = productImportState.duplicateBarcodeGroups
+    counts.duplicate_sku_groups = productImportState.duplicateSkuGroups
+  }
   const contactIndex = ['customers', 'suppliers', 'delivery_contacts'].includes(job.type) ? buildContactReviewIndex(job.type) : null
   const decisionsByRow = getImportDecisionMap(jobId)
   let matched = 0
@@ -534,16 +631,18 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
       let conflict
       try {
         conflict = job.type === 'products'
-          ? getProductConflictForReview(row, productIndex)
+          ? getProductConflictForReview(row, productIndex, productImportState)
           : contactIndex
             ? getContactConflictForReview(row, job.type, contactIndex)
             : getGenericImportConflictForReview(row, job.type)
       } catch (error) {
+        const numericIssue = /number|price|stock|quantity|negative|malformed|invalid/i.test(String(error?.message || ''))
         conflict = {
           issue: true,
-          type: 'row_error',
+          type: numericIssue ? 'malformed_number' : 'row_error',
           fields: ['errors'],
           labels: ['error'],
+          issueTypes: [numericIssue ? 'malformed_number' : 'row_error'],
           plannedAction: 'skip',
           existing: null,
           decisionDefaults: {},
@@ -557,6 +656,9 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
         if ((conflict.fields || []).includes(field)) counts[field] += 1
       })
       if (conflict.issue) counts.issues += 1
+      ;(conflict.issueTypes || []).forEach((issueType) => {
+        if (Object.prototype.hasOwnProperty.call(counts, issueType)) counts[issueType] += 1
+      })
       if (conflict.type === 'new') counts.new += 1
       if (!matchesReviewFilter(conflict, normalizedFilter)) continue
       if (!hasReviewQueryMatch(row, conflict, query)) continue
@@ -1242,8 +1344,14 @@ function seedBranchRows(productId, ctx) {
 }
 
 async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache }) {
+  if (normalizeLookup(row._action || row.decision || row._decision) === 'skip_row') {
+    return { imported: 0, updated: 0, skipped: 1 }
+  }
   const normalized = normalizeRowForProduct(row)
   if (!normalized.name) throw new Error('Product name required')
+  if (getBarcodeReviewIssue(normalized.barcode)) {
+    throw new Error(`Invalid barcode "${normalized.barcode}". Clear it or change it in import review.`)
+  }
   normalized.category = ensureCategory(ctx, normalized.category)
   normalized.unit = ensureUnit(ctx, normalized.unit)
   normalized.brand = ensureBrand(ctx, normalized.brand)
@@ -1353,7 +1461,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         reason: 'CSV import - new product',
         actor,
       })
-      return { imported: 1, updated: 0 }
+      return { imported: 1, updated: 0, variant: normalizedParentId ? 1 : 0 }
     }
 
     const existing = plannedTargetId
@@ -1458,7 +1566,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         actor,
       })
     }
-    return { imported: 0, updated: 1 }
+    return { imported: 0, updated: 1, merged: action === 'merge' ? 1 : 0 }
   })()
 }
 
@@ -1469,6 +1577,9 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
   let imported = 0
   let updated = 0
   let failed = 0
+  let skipped = 0
+  let variants = 0
+  let merged = 0
   let pendingProgressRows = 0
 
   const flushProgress = () => {
@@ -1480,7 +1591,15 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
           summary_json = ?,
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(pendingProgressRows, failed, stringify({ imported, updated, failed }), jobId)
+    `).run(pendingProgressRows, failed, stringify({
+      imported,
+      updated,
+      merged,
+      variants,
+      skipped,
+      failed,
+      accounted: imported + updated + skipped + failed,
+    }), jobId)
     pendingProgressRows = 0
   }
 
@@ -1488,7 +1607,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
     if (isCancelled(jobId)) {
       flushProgress()
       updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
-      return { imported, updated, failed, cancelled: true }
+      return { imported, updated, merged, variants, skipped, failed, cancelled: true }
     }
     const batchRows = Array.isArray(batch?.rows) ? batch.rows : []
     const offset = Number(batch?.startIndex || 0)
@@ -1508,12 +1627,15 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       if (isCancelled(jobId)) {
         flushProgress()
         updateJob(jobId, { status: 'cancelled', phase: 'cancelled', finished_at: nowIso() })
-        return { imported, updated, failed, cancelled: true }
+        return { imported, updated, merged, variants, skipped, failed, cancelled: true }
       }
       try {
         const result = await processProductRow({ row, imageLookup, actor, ctx, jobId, imageAssetCache })
         imported += result.imported || 0
         updated += result.updated || 0
+        skipped += result.skipped || 0
+        variants += result.variant || 0
+        merged += result.merged || 0
       } catch (error) {
         failed += 1
         addJobError(jobId, {
@@ -1533,7 +1655,15 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       updateJob(jobId, {
         processed_rows: Math.min(totalRows, offset + batchRows.length),
         failed_rows: failed,
-        summary_json: stringify({ imported, updated, failed }),
+        summary_json: stringify({
+          imported,
+          updated,
+          merged,
+          variants,
+          skipped,
+          failed,
+          accounted: imported + updated + skipped + failed,
+        }),
       })
     }
     await yieldImportWorker()
@@ -1548,7 +1678,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
   if (ctx.changed.brands) broadcast('settings')
   if (ctx.changed.branches) broadcast('branches')
   if (ctx.changed.suppliers) broadcast('suppliers')
-  return { imported, updated, failed, cancelled: false }
+  return { imported, updated, merged, variants, skipped, failed, cancelled: false }
 }
 
 async function processProductRows({ jobId, rows, imageLookup, actor }) {

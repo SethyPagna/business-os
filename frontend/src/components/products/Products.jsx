@@ -538,6 +538,11 @@ export default function Products() {
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [products, settings?.product_brand_options])
+  const compactBrandOptions = useMemo(() => {
+    if (brandOptions.length <= 40) return brandOptions
+    const selected = brandFilter !== 'all' && brandOptions.includes(brandFilter) ? [brandFilter] : []
+    return Array.from(new Set([...selected, ...brandOptions])).slice(0, 40)
+  }, [brandFilter, brandOptions])
   const branchNameById = useMemo(
     () => new Map(branches.map((branch) => [String(branch.id), branch.name])),
     [branches],
@@ -1207,7 +1212,14 @@ export default function Products() {
     try {
       for (const id of selectedVisibleIds) {
         try {
-          const result = await window.api.updateProduct(id, { ...nextUpdates, userId: user.id, userName: user.name })
+          const current = productsById.get(Number(id))
+          const result = await window.api.updateProduct(id, {
+            ...nextUpdates,
+            updated_at: current?.updated_at || undefined,
+            expectedUpdatedAt: current?.updated_at || undefined,
+            userId: user.id,
+            userName: user.name,
+          })
           if (result?.success === false) throw new Error(result.error || 'Failed to update product')
           done++
         } catch {
@@ -1226,7 +1238,14 @@ export default function Products() {
           undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
           redo: async () => {
             for (const snapshot of restoredSnapshots) {
-              const result = await window.api.updateProduct(snapshot.id, { ...nextUpdates, userId: user.id, userName: user.name })
+              const current = productsById.get(Number(snapshot.id))
+              const result = await window.api.updateProduct(snapshot.id, {
+                ...nextUpdates,
+                updated_at: current?.updated_at || snapshot?.updated_at || undefined,
+                expectedUpdatedAt: current?.updated_at || snapshot?.updated_at || undefined,
+                userId: user.id,
+                userName: user.name,
+              })
               if (result?.success === false) throw new Error(result.error || 'Failed to reapply product update')
             }
             await load(true)
@@ -1242,7 +1261,7 @@ export default function Products() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, restoreProductSnapshots, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
+  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
 
   const productFilterSections = useMemo(() => ([
     {
@@ -1283,7 +1302,7 @@ export default function Products() {
       label: t('brand') || 'Brand',
       options: [
         { id: 'brand-all', label: t('all_brands') || 'All Brands', active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-        ...brandOptions.map((brand) => ({
+        ...compactBrandOptions.map((brand) => ({
           id: `brand-${brand}`,
           label: brand,
           active: brandFilter === brand,
@@ -1355,7 +1374,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0

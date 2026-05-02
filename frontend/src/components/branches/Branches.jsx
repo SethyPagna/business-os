@@ -189,10 +189,25 @@ export default function Branches() {
       return
     }
     if (!branchStocks[branchId]) {
-      const stock = await window.api.getBranchStock(branchId)
-      setBranchStocks((prev) => ({ ...prev, [branchId]: Array.isArray(stock) ? stock : [] }))
+      const stock = await window.api.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive' })
+      setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
     }
     setExpandedBranch(branchId)
+  }
+
+  const loadMoreBranchStock = async (branchId) => {
+    const current = branchStocks[branchId]
+    if (!current || Array.isArray(current)) return
+    const nextPage = Number(current.page || 1) + 1
+    if (nextPage > Number(current.totalPages || 1)) return
+    const stock = await window.api.getBranchStock(branchId, { page: nextPage, pageSize: current.pageSize || 20, stockState: current.stockState || 'positive' })
+    setBranchStocks((prev) => ({
+      ...prev,
+      [branchId]: {
+        ...stock,
+        items: [...(current.items || []), ...(stock.items || [])],
+      },
+    }))
   }
 
   /**
@@ -477,8 +492,11 @@ export default function Branches() {
 
           {branches.map((branch) => {
             const isExpanded = expandedBranch === branch.id
-            const stock = branchStocks[branch.id] || []
-            const inStock = stock.filter((product) => Number(product.branch_quantity || 0) > 0)
+            const stockState = branchStocks[branch.id] || null
+            const stockRows = Array.isArray(stockState) ? stockState : (Array.isArray(stockState?.items) ? stockState.items : [])
+            const inStock = stockRows.filter((product) => Number(product.branch_quantity || 0) > 0)
+            const stockSummary = !Array.isArray(stockState) ? stockState?.summary || {} : {}
+            const stockCount = Number(stockSummary.positive_products ?? inStock.length)
             const totalValue = inStock.reduce(
               (sum, product) => sum + Number(product.branch_quantity || 0) * Number(product.purchase_price_usd || 0),
               0,
@@ -536,9 +554,9 @@ export default function Branches() {
                         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
                           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                              {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(inStock.length))}
+                              {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(stockCount))}
                               {' · '}
-                              {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
+                              {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(Number(stockSummary.positive_value_usd ?? totalValue))}</span>
                             </span>
                             <button onClick={() => setModal('transfer')} className="text-xs text-blue-500 hover:underline">
                               {t('transfer_stock_link') || 'Transfer stock'}
@@ -550,32 +568,41 @@ export default function Branches() {
                               {t('no_branch_stock') || 'No stock in this branch. Use Transfer or Adjust Stock to add items.'}
                             </p>
                           ) : (
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-                              {inStock.map((product) => (
-                                <div
-                                  key={product.id}
-                                  className={`rounded-lg border p-2.5 text-xs ${
-                                    Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
-                                      ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
-                                      : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
-                                  }`}
-                                >
-                                  <div className="mb-0.5 truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                            <>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+                                {inStock.map((product) => (
                                   <div
-                                    className={`text-sm font-bold ${
-                                      Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
-                                        ? 'text-red-600'
-                                        : Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
-                                          ? 'text-yellow-600'
-                                          : 'text-green-600'
+                                    key={product.id}
+                                    className={`rounded-lg border p-2.5 text-xs ${
+                                      Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
+                                        ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
+                                        : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
                                     }`}
                                   >
-                                    {product.branch_quantity} {product.unit}
+                                    <div className="mb-0.5 truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                                    <div
+                                      className={`text-sm font-bold ${
+                                        Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
+                                          ? 'text-red-600'
+                                          : Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
+                                            ? 'text-yellow-600'
+                                            : 'text-green-600'
+                                      }`}
+                                    >
+                                      {product.branch_quantity} {product.unit}
+                                    </div>
+                                    {product.sku ? <div className="truncate font-mono text-gray-400">{product.sku}</div> : null}
                                   </div>
-                                  {product.sku ? <div className="truncate font-mono text-gray-400">{product.sku}</div> : null}
+                                ))}
+                              </div>
+                              {!Array.isArray(stockState) && Number(stockState.page || 1) < Number(stockState.totalPages || 1) ? (
+                                <div className="mt-3 flex justify-center">
+                                  <button type="button" onClick={() => loadMoreBranchStock(branch.id)} className="btn-secondary px-3 py-1.5 text-xs">
+                                    Show more stock
+                                  </button>
                                 </div>
-                              ))}
-                            </div>
+                              ) : null}
+                            </>
                           )}
                         </div>
                       ) : null}

@@ -109,6 +109,11 @@ await runTest('import job delete prefers canonical DELETE route with legacy fall
   assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
 })
 
+await runTest('empty local mirrors are not treated as usable server read fallback data', () => {
+  const source = fs.readFileSync(new URL('../src/api/http.js', import.meta.url), 'utf8')
+  assert.match(source, /if\s*\(\s*Array\.isArray\(value\)\s*\)\s*return\s+value\.length\s*>\s*0/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
