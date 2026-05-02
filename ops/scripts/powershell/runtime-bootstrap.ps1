@@ -263,7 +263,7 @@ function Write-DockerScaleProfile {
     $lines += "$($entry.Key)=$($entry.Value)"
   }
   Set-Content -LiteralPath $DockerScaleEnv -Value $lines -Encoding ASCII
-  Write-Ok "Docker scale profile ready: $profile ($DockerScaleEnv)"
+  Write-Ok "Docker runtime profile ready: $profile ($DockerScaleEnv)"
 }
 
 function Prepare-DockerRuntime {
@@ -339,8 +339,24 @@ function Ensure-ComposeFile {
   }
 }
 
+function Ensure-DockerNetwork($dockerExe, [string]$networkName) {
+  $inspect = Invoke-ProcessWithTimeout $dockerExe @('network', 'inspect', $networkName) 20
+  if ($inspect.ExitCode -eq 0) {
+    return
+  }
+
+  Write-Step "Creating Docker network $networkName..."
+  $create = Invoke-ProcessWithTimeout $dockerExe @('network', 'create', '--driver', 'bridge', $networkName) 30
+  if ($create.ExitCode -ne 0) {
+    Fail "Could not create Docker network $networkName. Open Docker Desktop, then run Start Business OS.bat again."
+  }
+  Write-Ok "Docker network ready: $networkName"
+}
+
 function Start-ScaleServices($dockerExe) {
   Ensure-ComposeFile
+  Stop-RetiredComposeProjects $dockerExe
+  Ensure-DockerNetwork $dockerExe 'business_os_internal'
   Remove-StoppedScaleContainers $dockerExe
   Write-Step 'Starting required Redis queue/cache, Postgres, and MinIO services...'
   $code = Invoke-Compose $dockerExe @('up', '-d', '--remove-orphans')
@@ -363,6 +379,24 @@ function Remove-StoppedScaleContainers($dockerExe) {
     }
   } catch {
     Write-Warn 'Docker cleanup skipped; continuing startup.'
+  }
+}
+
+function Stop-RetiredComposeProjects($dockerExe) {
+  $retiredProjects = @('business-os-scale')
+  foreach ($project in $retiredProjects) {
+    try {
+      $containers = @(& $dockerExe ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}' 2>$null)
+      $containers = @($containers | Where-Object { $_ })
+      if ($containers.Count -eq 0) { continue }
+
+      Write-Step "Retiring old Docker project '$project' containers so ports and networks do not conflict..."
+      & $dockerExe stop $containers *> $null
+      & $dockerExe rm -f $containers *> $null
+      Write-Ok "Retired Docker project '$project' containers removed. Data volumes were kept."
+    } catch {
+      Write-Warn "Could not fully retire old Docker project '$project'. Startup will continue and report any remaining port conflicts."
+    }
   }
 }
 
@@ -408,7 +442,7 @@ function Wait-ScaleServicesHealthy($dockerExe, $timeoutSeconds = 90) {
       if ($health -notin @('healthy', 'running')) { $allHealthy = $false }
     }
     if ($allHealthy) {
-      Write-Ok "Scale services ready: redis-queue=$($statuses['redis-queue']), redis-cache=$($statuses['redis-cache']), postgres=$($statuses.postgres), minio=$($statuses.minio)"
+      Write-Ok "Business OS Docker services ready: redis-queue=$($statuses['redis-queue']), redis-cache=$($statuses['redis-cache']), postgres=$($statuses.postgres), minio=$($statuses.minio)"
       Show-DockerResourceSummary $dockerExe
       return
     }
@@ -436,9 +470,9 @@ function Verify-ScaleServices($dockerExe) {
   }
   if ($failed.Count -gt 0) {
     if ($RequireServices) {
-      Fail "Required scale services are not ready: $($failed -join ', ')"
+      Fail "Required Business OS Docker services are not ready: $($failed -join ', ')"
     }
-    Write-Warn "Scale services are not ready: $($failed -join ', ')"
+    Write-Warn "Business OS Docker services are not ready: $($failed -join ', ')"
   }
   Show-DockerResourceSummary $dockerExe
 }
@@ -475,9 +509,9 @@ function Invoke-ScaleAction($dockerExe) {
       Start-ScaleServices $dockerExe
     }
     'down' {
-      Write-Step 'Stopping Business OS scale services...'
+      Write-Step 'Stopping Business OS Docker services...'
       $code = Invoke-Compose $dockerExe @('down')
-      if ($code -ne 0) { Fail 'Docker Compose could not stop scale services.' }
+      if ($code -ne 0) { Fail 'Docker Compose could not stop Business OS Docker services.' }
     }
     'status' {
       $code = Invoke-Compose $dockerExe @('ps')

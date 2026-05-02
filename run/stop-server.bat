@@ -139,12 +139,12 @@ echo [OK] Cloudflare Tunnel stop command executed.
 
 if /I "%~1"=="--with-services" (
     echo.
-    echo [INFO] Stopping Docker scale services...
+    echo [INFO] Stopping Business OS Docker services...
     powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Scale -ScaleAction down
     if errorlevel 1 (
-        echo [WARN] Docker scale services could not be stopped automatically.
+        echo [WARN] Business OS Docker services could not be stopped automatically.
     ) else (
-        echo [OK] Docker scale services stopped.
+        echo [OK] Business OS Docker services stopped.
     )
 )
 

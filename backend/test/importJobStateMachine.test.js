@@ -171,7 +171,7 @@ async function main() {
     assert.equal(updated.policy.decisionsByRowNumber[String(review.rows[0].rowNumber)]._identifier_conflict_mode, 'clear_imported')
   })
 
-  await runTest('product import review accounts for missing names, invalid barcodes, and duplicate barcodes in the file', async () => {
+  await runTest('product import review accounts for missing names, text barcodes, and duplicate barcodes in the file', async () => {
     const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
     const csvPath = writeJobFile(job.id, 'review-product-issues.csv', [
       '\uFEFFname,sku,barcode,brand,unit,stock_quantity,branch',
@@ -187,10 +187,44 @@ async function main() {
     assert.equal(review.counts.total, 4)
     assert.equal(review.counts.duplicate_barcode_groups, 1)
     assert.equal(review.counts.duplicate_barcode, 2)
-    assert.equal(review.counts.invalid_barcode, 1)
+    assert.equal(review.counts.barcode_text, 1)
     assert.equal(review.counts.missing_name, 1)
-    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('invalid_barcode')), true)
+    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('barcode_text')), true)
     assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('missing_name')), true)
+  })
+
+  await runTest('product import keeps reviewed unicode and scientific barcode text without row failures', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const unicodeBarcode = 'កាដូរឈើ'
+    const scientificBarcode = '3.3489E+12'
+    const csvPath = writeJobFile(job.id, 'unicode-barcode-products.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,stock_quantity,branch',
+      `Unicode Barcode Product,,${unicodeBarcode},Leang,pcs,1,`,
+      `Scientific Barcode Product,,${scientificBarcode},Leang,pcs,1,`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'unicode-barcode-products.csv', mimetype: 'text/csv' }, 'csv', 'unicode-barcode-products.csv')
+
+    const review = await getImportJobReview(job.id, { filter: 'barcode', pageSize: 20 })
+    assert.equal(review.counts.total, 2)
+    assert.equal(review.counts.barcode_text, 1)
+    assert.equal(review.counts.barcode_scientific_notation, 1)
+    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('barcode_text')), true)
+    assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('barcode_scientific_notation')), true)
+
+    updateImportJobDecisions(job.id, {
+      2: { decision: 'keep_barcode', _action: 'new' },
+      3: { decision: 'keep_barcode', _action: 'new' },
+    })
+
+    const result = await processImportJob(job.id, { mode: 'apply' })
+    const saved = db.prepare('SELECT name, barcode FROM products WHERE name IN (?, ?) ORDER BY name ASC')
+      .all('Scientific Barcode Product', 'Unicode Barcode Product')
+
+    assert.equal(result.status, 'completed')
+    assert.equal(Number(result.failed_rows || 0), 0)
+    assert.equal(saved.length, 2)
+    assert.equal(saved.find((row) => row.name === 'Unicode Barcode Product')?.barcode, unicodeBarcode)
+    assert.equal(saved.find((row) => row.name === 'Scientific Barcode Product')?.barcode, scientificBarcode)
   })
 
   await runTest('product import create_variant automatically creates a parent group for same-file rows', async () => {

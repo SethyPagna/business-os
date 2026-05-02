@@ -43,7 +43,8 @@ await runTest('buildProductGroups keeps explicit parent-child variants under one
 
   assert.equal(groups.length, 1)
   assert.equal(groups[0].leadProduct.id, 10)
-  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [10, 12, 11])
+  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [12, 11])
+  assert.deepEqual(groups[0].sellableItems.map((item) => item.__variantLabel), ['#1', '#2'])
   assert.equal(groups[0].groupKind, 'variant')
 })
 
@@ -74,7 +75,7 @@ await runTest('buildProductGroups merges same-name roots into one option group',
   assert.equal(groups.length, 1)
   assert.equal(groups[0].items.length, 3)
   assert.equal(groups[0].groupKind, 'option')
-  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [20, 21, 22])
+  assert.deepEqual(groups[0].sellableItems.map((item) => item.id), [21, 22])
 })
 
 await runTest('buildProductGroupSections supports Khmer initial sections', () => {

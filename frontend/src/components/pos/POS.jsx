@@ -1779,7 +1779,10 @@ export default function POS() {
                         const variantPromotion = calculateProductDiscount(variant, exchangeRate)
                         return (
                           <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
-                            <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
+                            <div className="flex items-center gap-2">
+                              {variant.__variantLabel ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{variant.__variantLabel}</span> : null}
+                              <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
+                            </div>
                             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{variantStock} {variant.unit}</div>
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               <button className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'selling'); setDetailProduct(null) }}>

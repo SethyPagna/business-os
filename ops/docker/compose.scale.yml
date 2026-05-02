@@ -1,4 +1,4 @@
-name: business-os-scale
+name: business-os
 
 x-service-logging: &service-logging
   driver: json-file
@@ -346,5 +346,5 @@ volumes:
 
 networks:
   business_os_internal:
+    external: true
     name: business_os_internal
-    driver: bridge

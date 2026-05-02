@@ -7,7 +7,7 @@ REM  Business OS | Source Setup
 REM
 REM  One-time workstation bootstrap:
 REM    1. install/verify Windows prerequisites where possible
-REM    2. start required Docker scale services
+REM    2. start required Business OS Docker services
 REM    3. create the default business-os-data folders
 REM    4. write backend/.env while preserving important existing secrets
 REM    5. install backend/frontend dependencies
@@ -272,7 +272,7 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo GOOGLE_DRIVE_CLIENT_SECRET=!EXISTING_GOOGLE_DRIVE_CLIENT_SECRET!
     echo GOOGLE_DRIVE_OAUTH_REDIRECT_URI=!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!
     echo.
-    echo # Required local scale services ^(started automatically by setup/start^)
+    echo # Required local Docker services ^(started automatically by setup/start^)
     echo BUSINESS_OS_APP_RUNTIME=!EXISTING_APP_RUNTIME!
     echo BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
     echo JOB_QUEUE_DRIVER=bullmq

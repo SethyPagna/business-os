@@ -6,7 +6,7 @@ REM ========================================================================
 REM  Business OS | Source Runtime Launcher
 REM
 REM  Runtime flow:
-REM    1. start/verify required Docker scale services
+REM    1. start/verify required Business OS Docker services
 REM    2. confirm backend deps and frontend build exist
 REM    3. start with PM2 when possible, otherwise fall back to background node
 REM    4. start Cloudflare Tunnel for the custom domain

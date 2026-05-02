@@ -34,8 +34,15 @@ function getDefaultBranch() {
   return db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1').get() || null
 }
 
-function buildBranchStockWhere(req) {
-  const where = ['p.is_active = 1', '(p.parent_id IS NULL OR p.parent_id = 0)']
+function getSellableProductWhere() {
+  return [
+    'p.is_active = 1',
+    'NOT (COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)',
+  ]
+}
+
+function buildBranchStockWhere(req, { includeStockState = true } = {}) {
+  const where = getSellableProductWhere()
   const params = { branchId: Number.parseInt(req.params.id, 10) }
   const query = String(req.query?.query || req.query?.q || '').normalize('NFC').trim()
   if (query) {
@@ -49,10 +56,12 @@ function buildBranchStockWhere(req) {
     )`)
   }
   const stockState = String(req.query?.stockState || req.query?.stock_state || 'positive').toLowerCase()
-  if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > 0')
-  if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
-  if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
-  if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
+  if (includeStockState) {
+    if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > 0')
+    if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
+    if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
+    if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
+  }
   return { where, params, stockState }
 }
 
@@ -229,7 +238,7 @@ router.get('/:id/stock', authToken, (req, res) => {
            COALESCE(bs.quantity, 0) AS branch_quantity
     FROM products p
     LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = ?
-    WHERE p.is_active = 1 AND (p.parent_id IS NULL OR p.parent_id = 0)
+    WHERE ${getSellableProductWhere().join(' AND ')}
     ORDER BY p.name
     `).all(req.params.id)
     return res.json(rows)
@@ -239,6 +248,8 @@ router.get('/:id/stock', authToken, (req, res) => {
   const offset = (page - 1) * pageSize
   const { where, params, stockState } = buildBranchStockWhere(req)
   const whereSql = `WHERE ${where.join(' AND ')}`
+  const summaryWhere = buildBranchStockWhere(req, { includeStockState: false })
+  const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
   const total = db.prepare(`
     SELECT COUNT(*) AS count
     FROM products p
@@ -247,13 +258,19 @@ router.get('/:id/stock', authToken, (req, res) => {
   `).get(params)?.count || 0
   const summary = db.prepare(`
     SELECT
+      COUNT(*) AS total_products,
+      SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN 1 ELSE 0 END) AS in_stock_products,
+      SUM(CASE WHEN COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10) THEN 1 ELSE 0 END) AS low_stock_products,
+      SUM(CASE WHEN COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0) THEN 1 ELSE 0 END) AS out_of_stock_products,
       SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN 1 ELSE 0 END) AS positive_products,
       COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) ELSE 0 END), 0) AS positive_quantity,
-      COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) * COALESCE(p.purchase_price_usd, p.cost_price_usd, 0) ELSE 0 END), 0) AS positive_value_usd
+      COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) * COALESCE(p.purchase_price_usd, p.cost_price_usd, 0) ELSE 0 END), 0) AS positive_value_usd,
+      COALESCE(SUM(COALESCE(bs.quantity, 0)), 0) AS total_quantity,
+      COALESCE(SUM(COALESCE(bs.quantity, 0) * COALESCE(p.purchase_price_usd, p.cost_price_usd, 0)), 0) AS total_value_usd
     FROM products p
     LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
-    WHERE p.is_active = 1 AND (p.parent_id IS NULL OR p.parent_id = 0)
-  `).get(params) || {}
+    ${summaryWhereSql}
+  `).get(summaryWhere.params) || {}
   const items = db.prepare(`
     SELECT p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
            p.purchase_price_usd, p.purchase_price_khr, p.cost_price_usd, p.cost_price_khr,

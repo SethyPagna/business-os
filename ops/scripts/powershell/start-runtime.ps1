@@ -153,7 +153,7 @@ function Get-ComposeContainers($docker, $service) {
   $containers = @()
   try {
     $output = & $docker ps `
-      --filter 'label=com.docker.compose.project=business-os-scale' `
+      --filter 'label=com.docker.compose.project=business-os' `
       --filter "label=com.docker.compose.service=$service" `
       --format '{{.Names}}'
     if ($LASTEXITCODE -ne 0) { return @() }

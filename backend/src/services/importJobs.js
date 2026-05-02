@@ -299,10 +299,16 @@ function normalizeReviewIdentifier(value) {
 function getBarcodeReviewIssue(value) {
   const barcode = normalizeText(value)
   if (!barcode) return ''
+  if (/[\u0000-\u001F\u007F]/.test(barcode)) return 'invalid_barcode'
   if (barcode.length > 128) return 'barcode_too_long'
-  if (/[^\x20-\x7E]/.test(barcode)) return 'invalid_barcode'
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+() -]*$/.test(barcode)) return 'invalid_barcode'
+  if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(barcode)) return 'barcode_scientific_notation'
+  if (/[^\x20-\x7E]/.test(barcode)) return 'barcode_text'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+() -]*$/.test(barcode)) return 'barcode_text'
   return ''
+}
+
+function isBlockingBarcodeIssue(issueType) {
+  return ['invalid_barcode', 'barcode_too_long'].includes(String(issueType || ''))
 }
 
 async function buildProductImportReviewState(csvFile) {
@@ -448,6 +454,9 @@ function getProductConflictForReview(row = {}, index, importState = null) {
       fields.includes('barcode') ? 'same barcode' : '',
       issueTypes.includes('missing_name') ? 'missing name' : '',
       issueTypes.includes('invalid_barcode') ? 'invalid barcode' : '',
+      issueTypes.includes('barcode_too_long') ? 'barcode too long' : '',
+      issueTypes.includes('barcode_text') ? 'barcode text' : '',
+      issueTypes.includes('barcode_scientific_notation') ? 'barcode looks scientific' : '',
       issueTypes.includes('duplicate_barcode') ? 'duplicate barcode in file' : '',
       issueTypes.includes('duplicate_sku') ? 'duplicate sku in file' : '',
       !matching && hasSameNameConflict ? 'different details' : '',
@@ -582,10 +591,15 @@ function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
   const normalizedDecision = normalizeLookup(decision.decision || decision._decision || '')
   const decisionValue = normalizeText(decision.decision_value || decision.value || '')
   if (normalizedDecision === 'allow_duplicate') next._identifier_conflict_mode = 'allow_duplicate'
+  if (normalizedDecision === 'keep_barcode') next._identifier_conflict_mode = next._identifier_conflict_mode || 'allow_duplicate'
   if (normalizedDecision === 'clear_barcode') next.barcode = ''
   if (normalizedDecision === 'change_barcode') next.barcode = decisionValue
   if (normalizedDecision === 'clear_sku') next.sku = ''
   if (normalizedDecision === 'change_sku') next.sku = decisionValue
+  if (normalizedDecision === 'create_variant') next._action = 'create_variant'
+  if (normalizedDecision === 'merge_stock') next._action = 'merge_stock'
+  if (normalizedDecision === 'create_new' || normalizedDecision === 'new') next._action = 'new'
+  if (normalizedDecision === 'keep') next._action = next._action || row._action || ''
   if (normalizedDecision === 'skip_row') next._action = 'skip_row'
   return next
 }
@@ -622,6 +636,9 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
     new: 0,
     missing_name: 0,
     invalid_barcode: 0,
+    barcode_text: 0,
+    barcode_scientific_notation: 0,
+    barcode_too_long: 0,
     duplicate_barcode: 0,
     duplicate_sku: 0,
     malformed_number: 0,
@@ -1364,7 +1381,8 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   }
   const normalized = normalizeRowForProduct(row)
   if (!normalized.name) throw new Error('Product name required')
-  if (getBarcodeReviewIssue(normalized.barcode)) {
+  const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
+  if (isBlockingBarcodeIssue(barcodeIssue)) {
     throw new Error(`Invalid barcode "${normalized.barcode}". Clear it or change it in import review.`)
   }
   normalized.category = ensureCategory(ctx, normalized.category)
@@ -1642,6 +1660,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       variants,
       skipped,
       failed,
+      applied_rows: imported + updated + skipped + failed,
       accounted: imported + updated + skipped + failed,
     }), jobId)
     pendingProgressRows = 0
@@ -1706,6 +1725,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
           variants,
           skipped,
           failed,
+          applied_rows: imported + updated + skipped + failed,
           accounted: imported + updated + skipped + failed,
         }),
       })

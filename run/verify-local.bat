@@ -41,10 +41,10 @@ if errorlevel 1 exit /b 1
 echo [OK] Docker-only release automation check passed
 echo.
 
-echo [1b/6] Verifying required Docker scale services...
+echo [1b/6] Verifying required Business OS Docker services...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\runtime-bootstrap.ps1" -Mode Verify -RequireServices
 if errorlevel 1 exit /b 1
-echo [OK] Required scale services are ready
+echo [OK] Required Business OS Docker services are ready
 echo.
 
 echo [1c/6] Checking running app API route contract when available...

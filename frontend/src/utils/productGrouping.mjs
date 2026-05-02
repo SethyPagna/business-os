@@ -167,7 +167,18 @@ export function buildProductGroups(products = [], productsById = new Map()) {
       const itemId = Number(item?.id || 0)
       return !Number(item?.parent_id || 0) && familyRootIds.includes(itemId)
     }) || items[0]
-    const sellableItems = [...items]
+    const hasChildRows = items.some((item) => Number(item?.parent_id || 0) > 0)
+    const sellableItems = items.filter((item) => {
+      const itemId = Number(item?.id || 0)
+      const isGroupOnlyRoot = Boolean(Number(item?.is_group || 0))
+        && !Number(item?.parent_id || 0)
+        && (hasChildRows || childrenByParentId.has(itemId))
+      return !isGroupOnlyRoot
+    }).map((item, index) => ({
+      ...item,
+      __variantOrdinal: index + 1,
+      __variantLabel: `#${index + 1}`,
+    }))
     const priceValues = items
       .map((item) => Number(item?.selling_price_usd || 0))
       .filter((value) => Number.isFinite(value) && value > 0)
