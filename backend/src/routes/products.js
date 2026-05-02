@@ -13,6 +13,7 @@ const { sanitizeMediaList } = require('../settingsSnapshot')
 const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
+const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const {
   hasImportValue,
   normalizeFieldRule,
@@ -283,6 +284,15 @@ function parseInclude(value = '') {
   return new Set(String(value || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean))
 }
 
+function splitSearchTerms(value = '') {
+  return String(value || '')
+    .normalize('NFC')
+    .split(',')
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
 function appendProductSearchFilters(query = {}) {
   const where = ['p.is_active = 1']
   const params = {}
@@ -292,17 +302,22 @@ function appendProductSearchFilters(query = {}) {
     params.branchId = branchId
     joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
   }
-  const search = String(query.query || query.q || '').normalize('NFC').trim()
-  if (search) {
-    params.search = `%${search.toLowerCase()}%`
-    where.push(`(
-      lower(COALESCE(p.name, '')) LIKE @search
-      OR lower(COALESCE(p.sku, '')) LIKE @search
-      OR lower(COALESCE(p.barcode, '')) LIKE @search
-      OR lower(COALESCE(p.brand, '')) LIKE @search
-      OR lower(COALESCE(p.category, '')) LIKE @search
-      OR lower(COALESCE(p.supplier, '')) LIKE @search
-    )`)
+  const searchTerms = splitSearchTerms(query.query || query.q || '')
+  if (searchTerms.length) {
+    const searchMode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
+    const termClauses = searchTerms.map((term, index) => {
+      const key = `search${index}`
+      params[key] = `%${term}%`
+      return `(
+        lower(COALESCE(p.name, '')) LIKE @${key}
+        OR lower(COALESCE(p.sku, '')) LIKE @${key}
+        OR lower(COALESCE(p.barcode, '')) LIKE @${key}
+        OR lower(COALESCE(p.brand, '')) LIKE @${key}
+        OR lower(COALESCE(p.category, '')) LIKE @${key}
+        OR lower(COALESCE(p.supplier, '')) LIKE @${key}
+      )`
+    })
+    where.push(`(${termClauses.join(searchMode === 'OR' ? ' OR ' : ' AND ')})`)
   }
   ;['brand', 'category', 'supplier'].forEach((field) => {
     const raw = String(query[field] || '').normalize('NFC').trim()
@@ -322,10 +337,45 @@ function appendProductSearchFilters(query = {}) {
   if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
   const initial = String(query.initial || '').normalize('NFC').trim()
   if (initial && initial.toLowerCase() !== 'all') {
-    params.initial = initial.slice(0, 1).toLowerCase()
-    where.push('lower(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
+    const key = getInitialKey(initial)
+    params.initial = key
+    if (getInitialType(key) === 'latin') {
+      where.push('upper(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
+    } else {
+      where.push('substr(trim(COALESCE(p.name, "")), 1, 1) = @initial')
+    }
   }
   return { where, joins, params, stockExpr }
+}
+
+function getProductSearchMetadata(query = {}) {
+  const metadataQuery = { ...query, initial: 'all' }
+  const { where, joins, params } = appendProductSearchFilters(metadataQuery)
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const joinSql = joins.join('\n')
+  const distinctField = (field) => db.prepare(`
+    SELECT DISTINCT p.${field} AS value
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+      AND COALESCE(trim(p.${field}), '') != ''
+    ORDER BY p.${field} COLLATE NOCASE ASC
+    LIMIT 500
+  `).all(params).map((row) => row.value)
+  const initials = aggregateInitialRows(db.prepare(`
+    SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+      AND COALESCE(trim(p.name), '') != ''
+    GROUP BY value
+  `).all(params))
+  return {
+    brands: distinctField('brand'),
+    categories: distinctField('category'),
+    suppliers: distinctField('supplier'),
+    initials,
+  }
 }
 
 function attachBranchStock(products = []) {
@@ -394,12 +444,15 @@ router.get('/search', authToken, (req, res) => {
     let items = rows
     if (include.has('branch_stock')) items = attachBranchStock(items)
     if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
+    const filters = getProductSearchMetadata(req.query)
     ok(res, {
       items,
       total,
       page,
       pageSize,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      filters,
+      initials: filters.initials,
       summary: {
         total,
         returned: items.length,
@@ -413,19 +466,9 @@ router.get('/search', authToken, (req, res) => {
 })
 
 // GET /api/products/filters - compact filter metadata without downloading all products
-router.get('/filters', authToken, (_req, res) => {
+router.get('/filters', authToken, (req, res) => {
   try {
-    const brands = db.prepare("SELECT DISTINCT brand AS value FROM products WHERE is_active = 1 AND COALESCE(trim(brand), '') != '' ORDER BY brand COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
-    const categories = db.prepare("SELECT DISTINCT category AS value FROM products WHERE is_active = 1 AND COALESCE(trim(category), '') != '' ORDER BY category COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
-    const suppliers = db.prepare("SELECT DISTINCT supplier AS value FROM products WHERE is_active = 1 AND COALESCE(trim(supplier), '') != '' ORDER BY supplier COLLATE NOCASE ASC LIMIT 500").all().map((row) => row.value)
-    const initials = db.prepare(`
-      SELECT substr(trim(name), 1, 1) AS value, COUNT(*) AS count
-      FROM products
-      WHERE is_active = 1 AND COALESCE(trim(name), '') != ''
-      GROUP BY value
-      ORDER BY value COLLATE NOCASE ASC
-      LIMIT 300
-    `).all()
+    const { brands, categories, suppliers, initials } = getProductSearchMetadata(req.query)
     const total = db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get()?.count || 0
     ok(res, { brands, categories, suppliers, initials, total })
   } catch (error) {

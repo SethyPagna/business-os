@@ -1528,6 +1528,12 @@ export default function CatalogPage({ publicView = false }) {
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   const [products, setProducts] = useState(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
+  const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
+  const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
+  const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || 20) || 20)
+  const [portalProductInitial, setPortalProductInitial] = useState('all')
+  const [portalProductInitials, setPortalProductInitials] = useState(() => Array.isArray(cachedPortal?.catalog?.initials) ? cachedPortal.catalog.initials : [])
+  const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [categories, setCategories] = useState(() => Array.isArray(cachedPortal?.categories) ? cachedPortal.categories : [])
   const [brands, setBrands] = useState(() => Array.isArray(cachedPortal?.brands) ? cachedPortal.brands : [])
   const [branches, setBranches] = useState(() => Array.isArray(cachedPortal?.branches) ? cachedPortal.branches : [])
@@ -1586,6 +1592,7 @@ export default function CatalogPage({ publicView = false }) {
   const assistantStatusRequestRef = useRef(0)
   const assistantInFlightRef = useRef(false)
   const portalBootstrapRequestRef = useRef(0)
+  const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
   const aliveRef = useRef(true)
 
@@ -1896,7 +1903,8 @@ export default function CatalogPage({ publicView = false }) {
 
     const portalConfig = bootstrapResult?.config || null
     const meta = bootstrapResult?.meta || null
-    const portalProducts = bootstrapResult?.products || null
+    const catalogPage = bootstrapResult?.catalog || null
+    const portalProducts = catalogPage?.items || bootstrapResult?.products || null
     if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load customer portal')
 
     const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
@@ -1913,12 +1921,19 @@ export default function CatalogPage({ publicView = false }) {
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
     setProducts(nextProducts)
+    if (catalogPage && typeof catalogPage === 'object') {
+      setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
+      setPortalProductPage(Number(catalogPage.page || 1) || 1)
+      setPortalProductPageSize(Number(catalogPage.pageSize || 20) || 20)
+      setPortalProductInitials(Array.isArray(catalogPage.initials) ? catalogPage.initials : [])
+    }
     setActiveTab((current) => resolveVisibleTab(current, nextConfig))
 
     writePortalCache({
       config: nextConfig,
       ...nextMeta,
       products: nextProducts,
+      catalog: catalogPage || null,
       reviewItems: canEdit ? reviewItems : [],
     })
 
@@ -1930,6 +1945,7 @@ export default function CatalogPage({ publicView = false }) {
     aliveRef.current = true
     if (!isPageActive) {
       invalidateTrackedRequest(portalBootstrapRequestRef)
+      invalidateTrackedRequest(portalProductsRequestRef)
       invalidateTrackedRequest(loadRequestRef)
       if (syncReloadTimerRef.current) {
         window.clearTimeout(syncReloadTimerRef.current)
@@ -1938,6 +1954,7 @@ export default function CatalogPage({ publicView = false }) {
       setLoading(false)
       return () => {
         invalidateTrackedRequest(portalBootstrapRequestRef)
+        invalidateTrackedRequest(portalProductsRequestRef)
         invalidateTrackedRequest(loadRequestRef)
       }
     }
@@ -1946,6 +1963,7 @@ export default function CatalogPage({ publicView = false }) {
     if (!publicView) {
       return () => {
         invalidateTrackedRequest(portalBootstrapRequestRef)
+        invalidateTrackedRequest(portalProductsRequestRef)
         invalidateTrackedRequest(loadRequestRef)
       }
     }
@@ -1957,14 +1975,76 @@ export default function CatalogPage({ publicView = false }) {
 
     return () => {
       invalidateTrackedRequest(portalBootstrapRequestRef)
+      invalidateTrackedRequest(portalProductsRequestRef)
       invalidateTrackedRequest(loadRequestRef)
       window.clearInterval(timer)
     }
   }, [isPageActive, publicView, previewConfig.refreshSeconds])
 
+  useEffect(() => {
+    setPortalProductPage(1)
+  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, portalProductInitial, stockFilter])
+
+  useEffect(() => {
+    if (!isPageActive || !previewConfig.showCatalog) return undefined
+    const requestId = beginTrackedRequest(portalProductsRequestRef)
+    setPortalProductRefreshing(products.length > 0)
+
+    const params = {
+      page: portalProductPage,
+      pageSize: portalProductPageSize,
+      query: deferredSearch,
+      brand: brandFilter.join(','),
+      category: categoryFilter.join(','),
+      branchId: branchFilter.join(','),
+      stockState: stockFilter.join(','),
+      initial: portalProductInitial,
+    }
+
+    withLoaderTimeout(() => window.api.searchPortalCatalogProducts(params), 'Portal product search', 12000)
+      .then((result) => {
+        if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
+        const nextItems = Array.isArray(result?.items) ? result.items : []
+        setPortalError('')
+        setProducts(nextItems)
+        setPortalProductTotal(Number(result?.total || 0))
+        setPortalProductPage(Number(result?.page || portalProductPage) || 1)
+        setPortalProductPageSize(Number(result?.pageSize || portalProductPageSize) || portalProductPageSize)
+        setPortalProductInitials(Array.isArray(result?.initials) ? result.initials : [])
+        if (Array.isArray(result?.filters?.brands)) setBrands(result.filters.brands)
+        if (Array.isArray(result?.filters?.categories)) {
+          setCategories(result.filters.categories.map((name, index) => ({ id: `server-${index}-${name}`, name })))
+        }
+      })
+      .catch((error) => {
+        if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
+        setPortalError(error?.message || 'Portal product search failed')
+      })
+      .finally(() => {
+        if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
+        setPortalProductRefreshing(false)
+      })
+
+    return () => {
+      invalidateTrackedRequest(portalProductsRequestRef)
+    }
+  }, [
+    brandFilter,
+    branchFilter,
+    categoryFilter,
+    deferredSearch,
+    isPageActive,
+    portalProductInitial,
+    portalProductPage,
+    portalProductPageSize,
+    previewConfig.showCatalog,
+    stockFilter,
+  ])
+
   useEffect(() => () => {
     aliveRef.current = false
     invalidateTrackedRequest(portalBootstrapRequestRef)
+    invalidateTrackedRequest(portalProductsRequestRef)
     invalidateTrackedRequest(portalFaviconRequestRef)
     invalidateTrackedRequest(loadRequestRef)
     invalidateTrackedRequest(membershipLookupRequestRef)
@@ -2240,6 +2320,7 @@ export default function CatalogPage({ publicView = false }) {
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
+    setPortalProductInitial('all')
   }
 
   function setDraft(key, value) {
@@ -2794,7 +2875,7 @@ export default function CatalogPage({ publicView = false }) {
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length + (portalProductInitial === 'all' ? 0 : 1)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {
     const map = new Map()
@@ -2824,6 +2905,16 @@ export default function CatalogPage({ publicView = false }) {
   const catalogTabProps = {
     copy,
     filteredProducts,
+    serverPaged: true,
+    productTotal: portalProductTotal,
+    productPage: portalProductPage,
+    productPageSize: portalProductPageSize,
+    setProductPage: setPortalProductPage,
+    setProductPageSize: setPortalProductPageSize,
+    initialOptions: portalProductInitials,
+    initialFilter: portalProductInitial,
+    setInitialFilter: setPortalProductInitial,
+    refreshingProducts: portalProductRefreshing,
     categories,
     brands,
     branches,

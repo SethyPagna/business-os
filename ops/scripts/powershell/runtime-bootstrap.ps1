@@ -194,9 +194,13 @@ function Write-DockerScaleProfile {
     MEDIA_WORKER_CPUS = '3.5'
     IMPORT_QUEUE_CONCURRENCY = '3'
     MEDIA_QUEUE_CONCURRENCY = '4'
+    IMPORT_WORKER_REPLICAS = '2'
+    MEDIA_WORKER_REPLICAS = '2'
     IMPORT_ROW_BATCH_SIZE = '400'
     IMPORT_BATCH_PAUSE_MS = '20'
     IMPORT_IMAGE_CONCURRENCY = '4'
+    SEARCH_CACHE_TTL_SECONDS = '15'
+    POSTGRES_ENABLE_SEARCH_EXTENSIONS = '1'
     RUNTIME_CACHE_ENABLED = '1'
     UPLOAD_CHUNK_MB = '12'
   }
@@ -215,6 +219,8 @@ function Write-DockerScaleProfile {
     $values['MEDIA_WORKER_CPUS'] = '2.0'
     $values['IMPORT_QUEUE_CONCURRENCY'] = '2'
     $values['MEDIA_QUEUE_CONCURRENCY'] = '3'
+    $values['IMPORT_WORKER_REPLICAS'] = '1'
+    $values['MEDIA_WORKER_REPLICAS'] = '1'
     $values['IMPORT_IMAGE_CONCURRENCY'] = '3'
   } elseif ($profile -eq 'maximum') {
     $values['REDIS_QUEUE_MEMORY_LIMIT'] = '2048m'
@@ -238,6 +244,8 @@ function Write-DockerScaleProfile {
     $values['MEDIA_WORKER_CPUS'] = '4.5'
     $values['IMPORT_QUEUE_CONCURRENCY'] = '4'
     $values['MEDIA_QUEUE_CONCURRENCY'] = '4'
+    $values['IMPORT_WORKER_REPLICAS'] = '3'
+    $values['MEDIA_WORKER_REPLICAS'] = '3'
   }
 
   foreach ($key in @($values.Keys)) {

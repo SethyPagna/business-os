@@ -590,6 +590,15 @@ export async function getPortalCatalogProducts() {
   if (!res.ok) throw new Error(`Portal catalog products failed: ${res.status}`)
   return res.json()
 }
+export async function searchPortalCatalogProducts(params = {}) {
+  const base = getPortalBaseUrl()
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/products/search${q ? `?${q}` : ''}`, {
+    headers: { 'bypass-tunnel-reminder': 'true' },
+  })
+  if (!res.ok) throw new Error(`Portal catalog search failed: ${res.status}`)
+  return res.json()
+}
 export async function lookupPortalMembership(membershipNumber) {
   const base = getPortalBaseUrl()
   const value = encodeURIComponent(String(membershipNumber || '').trim())
@@ -1001,6 +1010,10 @@ export const undoActionHistory = id =>
 export const redoActionHistory = id =>
   route(`actionHistory:redo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/redo`, getDeviceInfo()), null, true)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
+export const searchInventoryProducts = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`), () => ({ items: [], total: 0, page: 1, pageSize: Number(params.pageSize || 20) || 20, initials: [], filters: { brands: [] } }))
+}
 export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
 
 // ─── Sales ────────────────────────────────────────────────────────────────────

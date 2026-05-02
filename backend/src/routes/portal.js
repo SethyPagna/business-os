@@ -17,6 +17,7 @@ const { getDefaultOrganization, getPortalPublicPath } = require('../organization
 const { assertSafeOutboundUrl, isSafeExternalImageReference } = require('../netSecurity')
 const { sanitizeMediaList, sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { getOrSetJson } = require('../runtimeCache')
+const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 
 const router = express.Router()
 
@@ -496,6 +497,229 @@ function cacheTtl(seconds = 20) {
   return Math.min(60, Math.max(5, Number(seconds || 20) || 20))
 }
 
+function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function splitSearchTerms(value = '') {
+  return String(value || '')
+    .normalize('NFC')
+    .split(',')
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function splitFilterValues(value = '') {
+  return String(value || '')
+    .normalize('NFC')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && entry.toLowerCase() !== 'all')
+    .slice(0, 40)
+}
+
+function appendPortalProductSearchFilters(query = {}, config = {}) {
+  const joins = []
+  const params = {}
+  const where = ['p.is_active = 1']
+  const branchIds = splitFilterValues(query.branchId || query.branch_id || '')
+    .map((entry) => Number.parseInt(entry, 10))
+    .filter((entry) => Number.isFinite(entry) && entry > 0)
+  if (branchIds.length) {
+    branchIds.forEach((id, index) => {
+      params[`branchId${index}`] = id
+    })
+  }
+  const searchTerms = splitSearchTerms(query.query || query.q || '')
+  if (searchTerms.length) {
+    const clauses = searchTerms.map((term, index) => {
+      const key = `search${index}`
+      params[key] = `%${term}%`
+      return `(
+        lower(COALESCE(p.name, '')) LIKE @${key}
+        OR lower(COALESCE(p.category, '')) LIKE @${key}
+        OR lower(COALESCE(p.brand, '')) LIKE @${key}
+        OR lower(COALESCE(p.description, '')) LIKE @${key}
+      )`
+    })
+    where.push(`(${clauses.join(' AND ')})`)
+  }
+  ;['brand', 'category'].forEach((field) => {
+    const values = splitFilterValues(query[field] || '')
+    if (values.length === 1) {
+      params[field] = values[0]
+      where.push(`p.${field} = @${field}`)
+    } else if (values.length > 1) {
+      const keys = values.map((value, index) => {
+        const key = `${field}${index}`
+        params[key] = value
+        return `@${key}`
+      })
+      where.push(`p.${field} IN (${keys.join(',')})`)
+    }
+  })
+  const branchIdPlaceholders = branchIds.map((_, index) => `@branchId${index}`).join(',')
+  const stockExpr = branchIds.length
+    ? `(SELECT COALESCE(SUM(quantity), 0) FROM branch_stock selected_bs WHERE selected_bs.product_id = p.id AND selected_bs.branch_id IN (${branchIdPlaceholders}))`
+    : 'COALESCE(p.stock_quantity, 0)'
+  if (branchIds.length) {
+    where.push(`${stockExpr} > 0`)
+  }
+  const stockStates = splitFilterValues(query.stockState || query.stock_state || '').map((entry) => entry.toLowerCase())
+  if (stockStates.length) {
+    const stockClauses = []
+    if (stockStates.includes('in_stock') || stockStates.includes('positive')) stockClauses.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
+    if (stockStates.includes('low_stock') || stockStates.includes('low')) stockClauses.push(`(${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10))`)
+    if (stockStates.includes('out_of_stock') || stockStates.includes('out')) stockClauses.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
+    if (stockClauses.length) where.push(`(${stockClauses.join(' OR ')})`)
+  }
+  if (!normalizeBoolean(config?.showOutOfStockProducts, false) && !stockStates.length) {
+    where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
+  }
+  const initial = String(query.initial || '').normalize('NFC').trim()
+  if (initial && initial.toLowerCase() !== 'all') {
+    const key = getInitialKey(initial)
+    params.initial = key
+    if (getInitialType(key) === 'latin') where.push('upper(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
+    else where.push('substr(trim(COALESCE(p.name, "")), 1, 1) = @initial')
+  }
+  return { joins, where, params, stockExpr }
+}
+
+function getPortalCatalogSearchMetadata(query = {}, config = {}) {
+  const metadataQuery = { ...query, initial: 'all' }
+  const { joins, where, params } = appendPortalProductSearchFilters(metadataQuery, config)
+  const joinSql = joins.join('\n')
+  const whereSql = `WHERE ${where.join(' AND ')}`
+  const distinctField = (field) => db.prepare(`
+    SELECT DISTINCT p.${field} AS value
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+      AND COALESCE(trim(p.${field}), '') != ''
+    ORDER BY p.${field} COLLATE NOCASE ASC
+    LIMIT 500
+  `).all(params).map((row) => row.value)
+  const initials = aggregateInitialRows(db.prepare(`
+    SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+      AND COALESCE(trim(p.name), '') != ''
+    GROUP BY value
+  `).all(params))
+  return {
+    brands: distinctField('brand'),
+    categories: distinctField('category'),
+    initials,
+  }
+}
+
+function getPortalCatalogProductPage(config = {}, query = {}) {
+  const page = normalizePositiveInt(query.page, 1, { min: 1, max: 100000 })
+  const pageSize = normalizePositiveInt(query.pageSize || query.page_size, 20, { min: 1, max: 100 })
+  const offset = (page - 1) * pageSize
+  const signals = getPortalProductSignals(config)
+  const { joins, where, params, stockExpr } = appendPortalProductSearchFilters(query, config)
+  const joinSql = joins.join('\n')
+  const whereSql = `WHERE ${where.join(' AND ')}`
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+  `).get(params)?.count || 0
+  const products = db.prepare(`
+    SELECT
+      p.id,
+      p.name,
+      p.category,
+      p.brand,
+      p.unit,
+      p.description,
+      p.selling_price_usd,
+      p.selling_price_khr,
+      p.special_price_usd,
+      p.special_price_khr,
+      p.discount_enabled,
+      p.discount_type,
+      p.discount_percent,
+      p.discount_amount_usd,
+      p.discount_amount_khr,
+      p.discount_label,
+      p.discount_badge_color,
+      p.discount_starts_at,
+      p.discount_ends_at,
+      p.stock_quantity,
+      p.low_stock_threshold,
+      p.out_of_stock_threshold,
+      p.image_path,
+      p.created_at,
+      ${stockExpr} AS selected_branch_quantity,
+      (
+        SELECT COALESCE(json_group_array(json_object(
+          'branch_id', b.id,
+          'branch_name', b.name,
+          'quantity', COALESCE(bs.quantity, 0)
+        )), '[]')
+        FROM branches b
+        LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
+        WHERE b.is_active = 1
+      ) AS branch_stock_json
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+    ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+    LIMIT @pageSize OFFSET @offset
+  `).all({ ...params, pageSize, offset })
+
+  const ids = products.map((product) => product.id)
+  const imageRows = ids.length
+    ? db.prepare(`
+      SELECT product_id, image_path
+      FROM product_images
+      WHERE product_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY sort_order ASC, id ASC
+    `).all(...ids)
+    : []
+  const imageMap = new Map()
+  imageRows.forEach((row) => {
+    if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
+    imageMap.get(row.product_id).push(row.image_path)
+  })
+
+  const items = products.map((product) => {
+    const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
+    const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
+    if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
+    return {
+      ...product,
+      image_path: gallery[0] || null,
+      image_gallery: gallery,
+      branch_stock: tryParse(product.branch_stock_json, []),
+      top_seller_rank: signals.topSellerRank.get(product.id) || 0,
+      top_product_rank: signals.topProductRank.get(product.id) || 0,
+      new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
+      portal_recommended: signals.recommendedRank.has(product.id),
+      recommended_rank: signals.recommendedRank.get(product.id) || 0,
+      branch_stock_json: undefined,
+    }
+  })
+  const filters = getPortalCatalogSearchMetadata(query, config)
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    filters,
+    initials: filters.initials,
+  }
+}
+
 function getCachedPortalConfig() {
   return getOrSetJson('portal:config', 20, () => buildPortalConfig())
 }
@@ -629,10 +853,12 @@ router.get('/config', asyncRoute(async (_req, res) => {
 
 router.get('/bootstrap', asyncRoute(async (_req, res) => {
   const config = await getCachedPortalConfig()
+  const catalog = getPortalCatalogProductPage(config, { page: 1, pageSize: 20 })
   res.json({
     config,
     meta: await getCachedPortalMeta(),
-    products: await getCachedPortalProducts(config),
+    catalog,
+    products: catalog.items,
   })
 }))
 
@@ -643,6 +869,11 @@ router.get('/catalog/meta', asyncRoute(async (_req, res) => {
 router.get('/catalog/products', asyncRoute(async (_req, res) => {
   const config = await getCachedPortalConfig()
   res.json(await getCachedPortalProducts(config))
+}))
+
+router.get('/catalog/products/search', asyncRoute(async (req, res) => {
+  const config = await getCachedPortalConfig()
+  res.json(getPortalCatalogProductPage(config, req.query))
 }))
 
 router.get('/ai/status', (_req, res) => {

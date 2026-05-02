@@ -177,6 +177,11 @@ Write-Host ''
 Write-Step 'Preparing Docker services and runtime profile...'
 & powershell -NoProfile -ExecutionPolicy Bypass -File $Bootstrap -Mode Start -InstallMissing -StartServices -RequireServices
 if ($LASTEXITCODE -ne 0) { Fail 'Runtime bootstrap failed. Open Docker Desktop, wait until it is running, then retry.' }
+$dockerEnvMap = Read-EnvFile $DockerEnv
+$importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 2 }
+$mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
+$importWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $importWorkerReplicas))
+$mediaWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $mediaWorkerReplicas))
 
 $docker = Find-Executable @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe')
 if (-not $docker) { Fail 'Docker CLI was not found.' }
@@ -204,12 +209,12 @@ if (-not (Wait-HttpOk "$localApi/health" $TimeoutSeconds)) {
 Write-Ok "Business OS app is healthy at $localApi"
 
 Write-Step 'Starting Docker import/media workers...'
-$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', 'import-worker', 'media-worker') $DockerWorkerLog
+$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--scale', "import-worker=$importWorkerReplicas", '--scale', "media-worker=$mediaWorkerReplicas", 'import-worker', 'media-worker') $DockerWorkerLog
 if ($code -ne 0) {
   Write-Warn "Docker workers could not be started. Large jobs will stay queued. Log: $DockerWorkerLog"
   if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 80 }
 } else {
-  Write-Ok 'Docker import and media workers are running or starting.'
+  Write-Ok "Docker import/media workers are running or starting (import=$importWorkerReplicas, media=$mediaWorkerReplicas)."
 }
 
 $cloudflared = Find-Executable @('cloudflared.exe', 'cloudflared') @(
