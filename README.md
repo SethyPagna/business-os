@@ -1,100 +1,170 @@
 # Business OS
 
-Business OS is designed for a normal Windows business laptop: one setup, one start button, and one public Cloudflare link for other devices.
+Business OS is meant to feel like normal Windows business software: one launcher starts the app, required Docker services, workers, and Cloudflare access.
 
-## Blank Laptop Setup
+## Which File Do I Use?
 
-Start here if the laptop has nothing installed.
+Use **`Start Business OS.bat`** in the root folder.
 
-1. Download or copy the Business OS folder onto the laptop.
-2. Right-click `run\setup.bat` and choose **Run as administrator**.
-3. Let setup install or check Docker Desktop, Node.js, Git, OpenSSL, and Cloudflare support files.
-4. If Windows asks for a restart, restart the laptop and run `run\setup.bat` again.
-5. When setup finishes, run `run\start-server.bat`.
-6. Open the URL printed in the start window.
+That is the normal button. Do not open Docker Desktop, Docker Compose, Redis, Postgres, MinIO, worker, Node, npm, or Cloudflare commands yourself for everyday use.
+
+The `run\` folder is for support, updates, backup/restore, diagnostics, and source-development tasks. The final normal runtime is the Docker release path under `run\docker\`; the old standalone Windows EXE/installer release is no longer shipped. The `ops\docker\` folder is internal configuration used by the launcher and support tools; normal users should not edit it.
+
+## Blank Windows Laptop To Running App
+
+Use this path for a normal business/user laptop.
+
+1. Download or copy the **Business OS Docker portable folder** to the laptop.
+2. Double-click **`Start Business OS.bat`**.
+3. Business OS checks Docker Desktop and Cloudflare Tunnel (`cloudflared`).
+4. If either tool is missing, Business OS tries to install it with Windows `winget`.
+5. If Windows asks for administrator permission, WSL2, virtualization, or a restart, accept it. Business OS does not require you to use Linux commands; Docker Desktop may need WSL2 internally.
+6. Restart Windows if Docker asks.
+7. Double-click **`Start Business OS.bat`** again.
+8. Wait until the window says Business OS is ready.
+9. Open the URLs printed in the window.
+
+If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\build-release.bat` or `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy the complete `release\business-os\` folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside that folder. Do not copy only the `run\` folder.
+
+What the launcher does for you:
+
+- installs or guides Docker Desktop and Cloudflare Tunnel when Windows allows it,
+- starts Docker Desktop services for the app, Redis queues/cache, Postgres, MinIO, app workers, and media workers,
+- cleans stopped Business OS containers without deleting data volumes,
+- pulls current Docker service images during setup,
+- starts the Cloudflare connector for the public/admin links.
 
 Normal URLs:
 
-- Local/admin on the server laptop: `http://localhost:4000`
-- Staff/admin from other devices: `https://admin.leangcosmetics.dpdns.org`
+- Server laptop: `http://localhost:4000`
+- Admin from other devices: `https://admin.leangcosmetics.dpdns.org`
 - Public customer portal: `https://leangcosmetics.dpdns.org/public`
 
-You do not need to run Docker Compose, Redis, Postgres, MinIO, workers, or Cloudflare commands by hand. The start script owns that.
+You do **not** need to run Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands by hand.
+
+Cloudflare requires a local tunnel token file. The Docker portable folder should include it in ignored runtime secret storage, or support can create it with `run\docker\rotate-cloudflare.bat`. Never paste that token into chat or commit it to Git.
+
+### Moving To A New Laptop With Data
+
+1. On the old laptop, run a Business OS backup first.
+2. Copy the full Business OS folder or install the new release on the new laptop.
+3. Copy the backup or `business-os-data` folder to the new laptop.
+4. Double-click **`Start Business OS.bat`**.
+5. Restore the backup from the app or `run\docker\restore.bat` if support asks.
+6. Confirm products, contacts, sales, files, portal settings, and logos before using the new laptop for live work.
+
+## Source Checkout Setup
+
+Use this only when working from the source code folder.
+
+1. Run `run\setup.bat` once.
+2. After setup, double-click **`Start Business OS.bat`**.
+3. For support diagnostics, run `run\docker\doctor.bat`.
+
+The root folder intentionally has no `package.json` and no root `node_modules`. Keep lockfiles only in `backend\package-lock.json` and `frontend\package-lock.json`.
 
 ## Daily Use
 
 1. Turn on the server laptop.
-2. Open Docker Desktop if Windows did not start it automatically.
-3. Run `run\start-server.bat`.
-4. Use the admin or public Cloudflare URL on phones/tablets/other computers.
-5. Run `run\stop-server.bat` before shutting the laptop down.
+2. Double-click **`Start Business OS.bat`**.
+3. Use the admin or public Cloudflare URL on phones, tablets, and other computers.
+4. Run `run\stop-server.bat` before shutting the laptop down.
 
-If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. The tunnel origin should point to `http://127.0.0.1:4000` for the Windows-host runtime, or `http://app:4000` for the Docker-only private release.
+If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. Use `run\docker\doctor.bat` first.
 
-## Data Safety
+## Public Languages
 
-Your live business data currently stays on the server laptop under:
+The customer portal uses first-party language packs for fast public switching. English, Khmer, Chinese simplified/traditional, Vietnamese, Thai, Russian, French, Spanish, German, Japanese, Korean, Portuguese, Italian, Arabic, Hindi, Indonesian, Malay, and Turkish switch without loading Google Translate.
+
+Google Translate remains only a slower fallback for unsupported languages. Business name, portal intro, and short tagline stay in the original business text instead of being auto-translated.
+
+Fixed portal labels translate from built-in language packs. Custom content you type yourself, such as About blocks, FAQ answers, assistant text, submission instructions, social labels, and product descriptions, can use optional translation overrides in **Customer Portal > Publishing > Dynamic content translations**. This keeps edited content accurate instead of guessing a machine translation.
+
+Example override:
+
+```json
+{
+  "zh-CN": {
+    "aboutTitle": "关于我们",
+    "faqItems": {
+      "faq-id": { "question": "问题", "answer": "答案" }
+    },
+    "products": {
+      "123": { "description": "产品说明" }
+    }
+  }
+}
+```
+
+## Data And Backups
+
+Current source-runtime business data stays under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Backups, uploaded files, imports, and the live SQLite database are stored there. Backup and reset actions cancel running imports first so old background jobs cannot keep writing after a destructive action.
+Do **not** delete `business-os-data` manually when Docker looks mismatched. In source/runtime mode it can still be the live SQLite/local-file data and the legacy migration source. The Docker release adopts that folder into the Docker runtime volume only when the Docker volume is empty, then leaves the source folder untouched for safety. Use **Settings > Backup**, `run\docker\backup.bat`, restore tools, or support-guided archive steps instead.
 
-Google Drive sync is managed in Settings > Backup. Use it as a backup/sync target, not as the only copy of the business database.
+Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
+
+The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. SQLite-in-Docker is a compatibility bridge, not the final heavy-load database. In this mode Business OS deliberately uses one import writer and conservative worker concurrency so data stays safe. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
+
+### Docker Data: Copy, Restore, Update
+
+For Docker, the live data is inside a Docker volume named like `business-os_business_os_runtime`. Do not manually edit that volume.
+
+Safest way to move data to another laptop:
+
+1. On the old laptop, run `run\docker\backup.bat`.
+2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`.
+3. On the new laptop, copy the full `release\business-os\` folder.
+4. Run `run\docker\restore.bat -BackupPath "C:\path\to\that\backup-folder"`.
+5. Double-click **`Start Business OS.bat`** and check products, sales, files, settings, and portal content.
+
+First-start shortcut for old source data:
+
+- If the Docker volume is empty and a `business-os-data` folder sits beside `Start Business OS.bat`, Business OS copies it into Docker once.
+- If Docker already has data, loose `business-os-data` folders are ignored so an old folder cannot overwrite newer Docker data.
+- If you are unsure which copy is newest, use backup/restore instead of copying folders.
+
+Updating the app version does not require copying data. Run `run\docker\update.bat`; it backs up the Docker volume first, updates containers, and keeps the data volume.
 
 ## Large Imports
 
 Large product, inventory, sales, customer, supplier, and delivery imports run as background jobs.
 
-- Uploading returns quickly with a job tracker at the top of the app.
+- Uploading returns quickly with a top-of-app job tracker.
+- Workers stay idle when no large action exists and wake automatically when jobs are queued.
 - CSV/TSV parsing preserves Khmer text and rounds money/percent values upward to two decimals.
-- Product conflicts are grouped by same name and identifier conflicts such as same SKU/barcode.
+- Product conflicts are grouped by same name, same SKU/barcode, and errors/issues.
 - Imports wait for review before applying large changes.
-- Cancel, retry, failed-row download, and remove are available from the top tracker.
+- Cancel, retry, failed-row download, remove, undo, and redo are available from the tracker or history tools where supported.
 
-Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so uploaded temp files are cleaned.
+Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so temp files and queue state can be cleaned.
 
-## Support Commands
+For tens of thousands of rows plus heavy image batches, the durable target is Docker Postgres + MinIO + Redis workers. SQLite can be made stable with pagination, WAL, and a single writer, but it is not the right final database for many concurrent writers or large media-heavy imports.
 
-Only use these if support asks:
+## Update, Backup, Restore
 
-- `run\scale-services.bat status`
-- `run\scale-services.bat logs`
-- `run\cloudflare-origin.bat host`
-- `run\cloudflare-origin.bat docker`
-- `run\stop-server.bat --with-services`
+Normal users should use the simple files:
 
-Technical notes are in `ops\readme\README.md`.
+- Start: `Start Business OS.bat`
+- Stop: `run\stop-server.bat`
+- Diagnose: `run\docker\doctor.bat`
+- Backup: `run\docker\backup.bat`
+- Restore: `run\docker\restore.bat`
+- Update Docker release: `run\docker\update.bat`
 
-## Docker-Only Private Release
-
-Use this when you want another device to run Business OS without receiving the source repository.
-
-Developer machine:
-
-1. Run `run\docker\release.bat` to build the private Docker image.
-2. Run `run\docker\publish-release.bat` to push the image to the private registry.
-
-Business/user machine:
-
-1. Run `run\docker\install.bat` once.
-2. Put a Cloudflare API token with Tunnel write permission in `ops\runtime\secrets\cloudflare-api-token.txt`.
-3. Run `run\docker\rotate-cloudflare.bat --disconnect-old` if the tunnel token was pasted, shared, or may be compromised.
-4. Run `run\docker\start.bat`.
-5. Run `run\docker\update.bat` whenever a new version is published.
-
-The Docker-only release uses Postgres, Redis, MinIO, workers, and Cloudflare Tunnel containers. It does not bind-mount this source folder into runtime containers. It also refuses to silently run SQLite in production release mode.
-
-Important: the current source app still contains SQLite-specific route code. The Docker-only release tooling and migrator are in place, but production serving remains guarded until the route-level Postgres data-layer cutover is completed. This prevents accidental data loss or a hidden throwaway SQLite database inside Docker.
+Every user-facing command window stays open and prints what to do next.
 
 ## Cloudflare Safety
 
-Business OS now uses Cloudflare for the public/admin links. Tailscale is legacy support only and is not part of normal setup.
+Business OS uses Cloudflare for the public/admin links. Tailscale is legacy support only and is hidden from normal setup.
 
 If a Cloudflare tunnel token, origin private key, or API token was pasted into chat or sent to anyone, treat it as compromised:
 
-1. Create or confirm a Cloudflare API token with Cloudflare Tunnel write permission.
+1. Create or confirm a Cloudflare API token with Tunnel write permission.
 2. Save it locally only in `ops\runtime\secrets\cloudflare-api-token.txt`.
 3. Run `run\docker\rotate-cloudflare.bat --disconnect-old`.
-4. Restart with `run\docker\start.bat`.
+4. Restart with **`Start Business OS.bat`**.
 
-The rotation script updates the tunnel to route `leangcosmetics.dpdns.org` and `admin.leangcosmetics.dpdns.org` to the Docker app service (`http://app:4000`) and writes the new connector token only into ignored runtime secret files.
+Technical details are in `run\README.md`, `run\docker\README.md`, and `ops\README.md`.

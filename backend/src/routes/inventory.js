@@ -5,6 +5,7 @@ const { ok, err, audit, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
+const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 
 const router = express.Router()
 
@@ -29,6 +30,71 @@ function cleanMoveReason(value) {
   const raw = String(value || '').trim()
   if (!raw) return 'Stock moved to another product row'
   return raw.replace(/\?+/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function splitSearchTerms(value = '') {
+  return String(value || '')
+    .normalize('NFC')
+    .split(',')
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function appendInventoryProductFilters(query = {}) {
+  const where = ['p.is_active = 1']
+  const params = {}
+  const joins = []
+  const branchId = Number.parseInt(query.branchId || query.branch_id || '', 10)
+  if (Number.isFinite(branchId) && branchId > 0) {
+    params.branchId = branchId
+    joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
+  }
+  const terms = splitSearchTerms(query.query || query.q || '')
+  if (terms.length) {
+    const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
+    where.push(`(${terms.map((term, index) => {
+      const key = `search${index}`
+      params[key] = `%${term}%`
+      return `(
+        lower(COALESCE(p.name, '')) LIKE @${key}
+        OR lower(COALESCE(p.sku, '')) LIKE @${key}
+        OR lower(COALESCE(p.barcode, '')) LIKE @${key}
+        OR lower(COALESCE(p.brand, '')) LIKE @${key}
+        OR lower(COALESCE(p.category, '')) LIKE @${key}
+        OR lower(COALESCE(p.supplier, '')) LIKE @${key}
+        OR lower(COALESCE(p.unit, '')) LIKE @${key}
+      )`
+    }).join(` ${mode} `)})`)
+  }
+  const brand = String(query.brand || '').normalize('NFC').trim()
+  if (brand && brand.toLowerCase() !== 'all') {
+    params.brand = brand
+    where.push('p.brand = @brand')
+  }
+  const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
+  const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
+  if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
+  if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
+  if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.low_stock_threshold, 0)`)
+  const groupState = String(query.groupState || query.group_state || '').toLowerCase()
+  if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
+  if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (groupState === 'standalone') where.push('(COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0)')
+  const initial = String(query.initial || '').normalize('NFC').trim()
+  if (initial && initial.toLowerCase() !== 'all') {
+    const key = getInitialKey(initial)
+    params.initial = key
+    if (getInitialType(key) === 'latin') where.push('upper(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
+    else where.push('substr(trim(COALESCE(p.name, "")), 1, 1) = @initial')
+  }
+  return { where, joins, params, stockExpr }
 }
 
 // POST /api/inventory/adjust
@@ -363,6 +429,82 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
     ok(res, result)
   } catch (e) {
     err(res, e.message || 'Stock move failed')
+  }
+})
+
+// GET /api/inventory/summary
+router.get('/products/search', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
+    const pageSize = normalizePositiveInt(req.query.pageSize || req.query.page_size, 20, { min: 1, max: 100 })
+    const offset = (page - 1) * pageSize
+    const { where, joins, params, stockExpr } = appendInventoryProductFilters(req.query)
+    const joinSql = joins.join('\n')
+    const whereSql = `WHERE ${where.join(' AND ')}`
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM products p
+      ${joinSql}
+      ${whereSql}
+    `).get(params)?.count || 0
+    const rows = db.prepare(`
+      SELECT p.*,
+        ${stockExpr} AS display_quantity,
+        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
+        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+        (
+          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+          FROM branch_stock bs2
+          JOIN branches b2 ON b2.id = bs2.branch_id
+          WHERE bs2.product_id = p.id
+        ) AS branch_stock_json
+      FROM products p
+      ${joinSql}
+      ${whereSql}
+      ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+      LIMIT @pageSize OFFSET @offset
+    `).all({ ...params, pageSize, offset }).map((product) => {
+      try {
+        product.branch_stock = JSON.parse(product.branch_stock_json || '[]')
+      } catch {
+        product.branch_stock = []
+      }
+      delete product.branch_stock_json
+      return product
+    })
+    const metadataQuery = { ...req.query, initial: 'all' }
+    const metaFilters = appendInventoryProductFilters(metadataQuery)
+    const metaJoinSql = metaFilters.joins.join('\n')
+    const metaWhereSql = `WHERE ${metaFilters.where.join(' AND ')}`
+    const brands = db.prepare(`
+      SELECT DISTINCT p.brand AS value
+      FROM products p
+      ${metaJoinSql}
+      ${metaWhereSql}
+        AND COALESCE(trim(p.brand), '') != ''
+      ORDER BY p.brand COLLATE NOCASE ASC
+      LIMIT 500
+    `).all(metaFilters.params).map((row) => row.value)
+    const initials = aggregateInitialRows(db.prepare(`
+      SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
+      FROM products p
+      ${metaJoinSql}
+      ${metaWhereSql}
+        AND COALESCE(trim(p.name), '') != ''
+      GROUP BY value
+    `).all(metaFilters.params))
+    res.json({
+      items: rows,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      filters: { brands, initials },
+      initials,
+    })
+  } catch (e) {
+    console.error('[inventory/products/search] error:', e.message)
+    err(res, 'Failed to search inventory: ' + e.message)
   }
 })
 

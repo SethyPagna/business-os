@@ -10,7 +10,7 @@ import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
+import PaginationControls from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
 import ManageCategoriesModal from './ManageCategoriesModal'
 import ManageBrandsModal from './ManageBrandsModal'
@@ -28,6 +28,8 @@ import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
+import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -61,6 +63,15 @@ const CREATED_MONTH_OPTIONS = [
 ]
 
 const PRODUCT_JUMP_OFFSET = 88
+
+function useDebouncedValue(value, delayMs = 180) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(timer)
+  }, [delayMs, value])
+  return debounced
+}
 
 function getScrollContainer(node) {
   let current = node?.parentElement
@@ -117,7 +128,10 @@ export default function Products() {
   const [search,       setSearch]       = useState('')
   const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
   const [productPage, setProductPage] = useState(1)
-  const [productPageSize, setProductPageSize] = useState(50)
+  const [productPageSize, setProductPageSize] = useState(20)
+  const [productTotal, setProductTotal] = useState(0)
+  const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], categories: [], suppliers: [], initials: [] })
+  const [initialFilter, setInitialFilter] = useState('all')
   const [selectedIds,    setSelectedIds]    = useState(new Set())
   const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
   const [bulkEditMode,   setBulkEditMode]   = useState(null)  // 'info'|'pricing'|'stock'|'branch'
@@ -129,6 +143,7 @@ export default function Products() {
   const [selected,     setSelected]     = useState(null)
   const [detailProduct,setDetailProduct]= useState(null)
   const [loading,      setLoading]      = useState(true)
+  const [refreshingProducts, setRefreshingProducts] = useState(false)
   const [loadError,    setLoadError]    = useState(null)
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
@@ -142,35 +157,72 @@ export default function Products() {
   const mobileSelectAllRef = useRef(null)
   const initializedCollapsedGroupKeysRef = useRef(new Set())
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'products' })
+  const debouncedSearch = useDebouncedValue(search, 180)
 
   const load = useCallback(async (silent = false) => {
-    if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       window.clearTimeout(loadWatchdogRef.current)
-      if (!silent || !loadedOnceRef.current) {
+      const firstLoad = !loadedOnceRef.current
+      if (!silent || firstLoad) {
         setLoadError(null)
-        setLoading(true)
+        if (firstLoad) setLoading(true)
+        else setRefreshingProducts(true)
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
+          if (firstLoad) setLoading(false)
+          setRefreshingProducts(false)
           setLoadError(tr('products_load_slow', 'Products are taking longer than expected. Tap Retry or revisit the page in a moment.'))
         }, 10000)
+      } else {
+        setRefreshingProducts(true)
       }
       try {
+        const productQuery = {
+          page: productPage,
+          pageSize: productPageSize,
+          query: debouncedSearch,
+          searchMode,
+          category: catFilter === 'all' ? '' : catFilter,
+          brand: brandFilter === 'all' ? '' : brandFilter,
+          supplier: supplierFilter === 'all' ? '' : supplierFilter,
+          branchId: branchFilter === 'all' ? '' : branchFilter,
+          stockState: stockFilter === 'all' && branchFilter !== 'all' ? 'positive' : (stockFilter === 'all' ? '' : stockFilter),
+          groupState: groupFilter === 'all' ? '' : groupFilter,
+          initial: initialFilter === 'all' ? '' : initialFilter,
+          sort: productSortDirection === 'asc' ? 'created_asc' : 'created_desc',
+          include: 'branch_stock,images',
+        }
         const result = await settleLoaderMap({
-          products: () => window.api.getProducts(),
+          products: () => window.api.searchProducts(productQuery),
+          filters: () => window.api.getProductFilters(productQuery),
           categories: () => window.api.getCategories(),
           units: () => window.api.getUnits(),
           branches: () => window.api.getBranches(),
         })
-        const prods = result.values.products
+        const productPayload = result.values.products || {}
+        const prods = Array.isArray(productPayload?.items)
+          ? productPayload.items
+          : (Array.isArray(productPayload) ? productPayload : [])
+        const filters = productPayload?.filters || result.values.filters || {}
         const cats = result.values.categories
         const unitList = result.values.units
         const brs = result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        if (versionMismatchError) {
+          setLoadError(versionMismatchError.message)
+          throw versionMismatchError
+        }
         if (Array.isArray(prods)) setProducts(prods)
+        setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
+        setProductFilterMeta({
+          brands: Array.isArray(filters?.brands) ? filters.brands : [],
+          categories: Array.isArray(filters?.categories) ? filters.categories : [],
+          suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+          initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
+        })
         if (Array.isArray(cats)) setCategories(cats)
         if (Array.isArray(unitList)) setUnits(unitList)
         if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
@@ -196,6 +248,7 @@ export default function Products() {
         window.clearTimeout(loadWatchdogRef.current)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
+        setRefreshingProducts(false)
       }
     })()
     const wrappedPromise = promise.finally(() => {
@@ -205,7 +258,7 @@ export default function Products() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, t, tr])
+  }, [branchFilter, brandFilter, catFilter, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr])
 
   useEffect(() => {
     if (!isActive) {
@@ -526,8 +579,8 @@ export default function Products() {
   const catMap = Object.fromEntries(categories.map(c => [c.name, c]))
   const unitMap = Object.fromEntries(units.map(unit => [unit.name, unit]))
   const brandOptions = useMemo(() => {
-    const fromProducts = products
-      .map((product) => String(product?.brand || '').trim())
+    const fromProducts = (productFilterMeta.brands || [])
+      .map((brand) => String(brand || '').trim())
       .filter(Boolean)
     let fromSettings = []
     try {
@@ -537,7 +590,12 @@ export default function Products() {
       }
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
-  }, [products, settings?.product_brand_options])
+  }, [productFilterMeta.brands, settings?.product_brand_options])
+  const compactBrandOptions = useMemo(() => {
+    if (brandOptions.length <= 40) return brandOptions
+    const selected = brandFilter !== 'all' && brandOptions.includes(brandFilter) ? [brandFilter] : []
+    return Array.from(new Set([...selected, ...brandOptions])).slice(0, 40)
+  }, [brandFilter, brandOptions])
   const branchNameById = useMemo(
     () => new Map(branches.map((branch) => [String(branch.id), branch.name])),
     [branches],
@@ -711,19 +769,14 @@ export default function Products() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
-
-  const pagedProducts = useMemo(
-    () => paginateItems(allVisibleProducts, productPage, productPageSize),
-    [allVisibleProducts, productPage, productPageSize],
-  )
+  }, [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, initialFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
   const productSections = useMemo(
-    () => buildProductGroupSections(pagedProducts, {
+    () => buildProductGroupSections(filtered, {
       productsById,
       sortDirection: productSortDirection,
     }),
-    [pagedProducts, productSortDirection, productsById],
+    [filtered, productSortDirection, productsById],
   )
 
   const visibleProducts = useMemo(
@@ -762,7 +815,7 @@ export default function Products() {
     return targets
   }, [collapsedProductSections, productSections])
   const visibleLetters = useMemo(
-    () => [...jumpTargetIdsByLetter.keys()].sort((left, right) => left.localeCompare(right)),
+    () => [...jumpTargetIdsByLetter.keys()].sort(compareInitialKeys),
     [jumpTargetIdsByLetter],
   )
   const hasSelected = selectedVisibleCount > 0
@@ -836,8 +889,8 @@ export default function Products() {
   ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
-    () => [...new Set(products.map((product) => product.supplier).filter(Boolean))].sort(),
-    [products],
+    () => [...new Set((productFilterMeta.suppliers || []).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [productFilterMeta.suppliers],
   )
 
   const activeFilters = [
@@ -847,6 +900,7 @@ export default function Products() {
     supplierFilter !== 'all' ? 1 : 0,
     stockFilter !== 'all' ? 1 : 0,
     groupFilter !== 'all' ? 1 : 0,
+    initialFilter !== 'all' ? 1 : 0,
     createdYearFilter !== 'all' ? 1 : 0,
     createdMonthFilter !== 'all' ? 1 : 0,
     productSortDirection !== 'desc' ? 1 : 0,
@@ -859,10 +913,16 @@ export default function Products() {
     setSupplierFilter('all')
     setStockFilter('all')
     setGroupFilter('all')
+    setInitialFilter('all')
     setCreatedYearFilter('all')
     setCreatedMonthFilter('all')
     setProductSortDirection('desc')
   }, [])
+
+  const initialOptions = useMemo(
+    () => aggregateInitialOptions(productFilterMeta.initials || []),
+    [productFilterMeta.initials],
+  )
 
   const toggleProductSection = useCallback((sectionId) => {
     setCollapsedProductSections((current) => {
@@ -1207,7 +1267,14 @@ export default function Products() {
     try {
       for (const id of selectedVisibleIds) {
         try {
-          const result = await window.api.updateProduct(id, { ...nextUpdates, userId: user.id, userName: user.name })
+          const current = productsById.get(Number(id))
+          const result = await window.api.updateProduct(id, {
+            ...nextUpdates,
+            updated_at: current?.updated_at || undefined,
+            expectedUpdatedAt: current?.updated_at || undefined,
+            userId: user.id,
+            userName: user.name,
+          })
           if (result?.success === false) throw new Error(result.error || 'Failed to update product')
           done++
         } catch {
@@ -1226,7 +1293,14 @@ export default function Products() {
           undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
           redo: async () => {
             for (const snapshot of restoredSnapshots) {
-              const result = await window.api.updateProduct(snapshot.id, { ...nextUpdates, userId: user.id, userName: user.name })
+              const current = productsById.get(Number(snapshot.id))
+              const result = await window.api.updateProduct(snapshot.id, {
+                ...nextUpdates,
+                updated_at: current?.updated_at || snapshot?.updated_at || undefined,
+                expectedUpdatedAt: current?.updated_at || snapshot?.updated_at || undefined,
+                userId: user.id,
+                userName: user.name,
+              })
               if (result?.success === false) throw new Error(result.error || 'Failed to reapply product update')
             }
             await load(true)
@@ -1242,7 +1316,7 @@ export default function Products() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, restoreProductSnapshots, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
+  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, selectedVisibleIds, snapshotProductsByIds, user.id, user.name])
 
   const productFilterSections = useMemo(() => ([
     {
@@ -1283,7 +1357,7 @@ export default function Products() {
       label: t('brand') || 'Brand',
       options: [
         { id: 'brand-all', label: t('all_brands') || 'All Brands', active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-        ...brandOptions.map((brand) => ({
+        ...compactBrandOptions.map((brand) => ({
           id: `brand-${brand}`,
           label: brand,
           active: brandFilter === brand,
@@ -1355,7 +1429,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1603,6 +1677,36 @@ export default function Products() {
 
       <ActionHistoryBar history={actionHistory} className="mb-3" />
 
+      {initialOptions.length ? (
+        <div className="mb-3 flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/85 p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900/75">
+          <button
+            type="button"
+            className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+            onClick={() => setInitialFilter('all')}
+          >
+            {t('all') || 'All'}
+          </button>
+          {initialOptions.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`min-h-8 shrink-0 rounded-lg px-2 font-semibold ${initialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+              onClick={() => setInitialFilter(initialFilter === item.key ? 'all' : item.key)}
+              title={`${item.label} (${item.count})`}
+            >
+              <span>{item.label}</span>
+              <span className="ml-1 text-[10px] opacity-65">{item.count}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {refreshingProducts && !loading ? (
+        <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+          {tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...')}
+        </div>
+      ) : null}
+
       {/* Bulk action bar */}
       {hasSelected && (
         <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
@@ -1734,27 +1838,11 @@ export default function Products() {
         </div>
       )}
 
-      {visibleLetters.length ? (
-        <div className="fixed right-0.5 top-1/2 z-20 flex -translate-y-1/2 flex-col rounded-2xl border border-slate-200 bg-white/95 px-1 py-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
-          {visibleLetters.map((letter) => (
-            <button
-              key={letter}
-              type="button"
-              className="flex h-4 w-4 items-center justify-center rounded text-[9px] font-semibold text-slate-500 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-blue-300"
-              onClick={() => jumpToLetter(letter)}
-              title={`Jump to ${letter}`}
-            >
-              {letter}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       <PaginationControls
         className="mb-3"
         page={productPage}
         pageSize={productPageSize}
-        totalItems={allVisibleProducts.length}
+        totalItems={productTotal}
         label={t('products') || 'products'}
         t={t}
         onPageChange={setProductPage}
@@ -1876,7 +1964,7 @@ export default function Products() {
           </table>
         </div>
         <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-400 dark:border-gray-700">
-          {visibleProducts.length} / {allVisibleProducts.length} {t('products')}
+          {visibleProducts.length} / {productTotal || allVisibleProducts.length} {t('products')}
         </div>
       </div>
 

@@ -35,6 +35,13 @@ function getJobProgressDetails(job, labels = {}) {
   const phase = String(job?.phase || '').toLowerCase()
   const summary = job?.summary || {}
   const analyzedRows = Number(summary?.analyzed_rows || summary?.rows || 0)
+  if (ACTIVE_STATUSES.has(status) && phase.includes('queued')) {
+    return {
+      value: 8,
+      label: labels.waitingForWorker || 'Queued - waiting for worker',
+      indeterminate: true,
+    }
+  }
   if (status === 'awaiting_review') {
     return {
       value: 60,
@@ -111,6 +118,11 @@ function getRowsDisplay(job, rowsLabel, analyzedLabel = 'Analyzed') {
   const phase = String(job?.phase || '').toLowerCase()
   const summary = job?.summary || {}
   const analyzedRows = Number(summary?.analyzed_rows || summary?.rows || 0)
+  if (ACTIVE_STATUSES.has(status) && phase.includes('queued')) {
+    return analyzedRows
+      ? `${analyzedLabel} ${analyzedRows.toLocaleString()} ${rowsLabel}`
+      : 'Waiting for import worker'
+  }
   if ((status === 'awaiting_review' || phase.includes('analyz')) && analyzedRows) {
     return `${analyzedLabel} ${analyzedRows.toLocaleString()} ${rowsLabel}`
   }
@@ -213,6 +225,7 @@ export default function BackgroundImportTracker() {
     queued: t('queued') || 'Queued',
     cancelRequested: t('import_cancel_requested') || 'Cancel requested',
     finalCleanup: t('import_final_cleanup') || 'Final cleanup',
+    waitingForWorker: t('import_waiting_for_worker') || 'Queued - waiting for worker',
   }
   const resultLabels = {
     created: t('created') || 'created',

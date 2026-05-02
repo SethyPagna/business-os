@@ -6,8 +6,13 @@ const { authToken, hasPermission } = require('../middleware')
 const { getQueueStatus, initializeBullQueue } = require('../services/importJobs')
 const { getMediaQueueStatus, initializeMediaQueue } = require('../services/mediaQueue')
 const { getRuntimeCacheStatus, pingRuntimeCache } = require('../runtimeCache')
+const { getRuntimeVersion } = require('../runtimeVersion')
 
 const router = express.Router()
+
+router.get('/version', (_req, res) => {
+  ok(res, getRuntimeVersion())
+})
 
 function requireRuntimePermission(req, res, next) {
   if (hasPermission(req.user, 'settings')) return next()

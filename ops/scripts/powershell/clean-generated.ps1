@@ -44,8 +44,8 @@ $targets = @(
 ) | ForEach-Object { Join-Path $root $_ }
 
 $lockfileTargets = @(
-  'frontend\package-lock.json',
-  'backend\package-lock.json'
+  'ops\demo\remotion-mobile-demo\package-lock.json',
+  'ops\demo\video-tools\package-lock.json'
 ) | ForEach-Object { Join-Path $root $_ }
 
 function Get-ProjectListenerProcesses {
@@ -140,7 +140,8 @@ if ($Preview) {
   Write-Host 'Preview mode is ON. No files will be removed.'
 }
 if ($IncludeLockfiles) {
-  Write-Host 'Deep cleanup mode: package-lock files will also be removed.'
+  Write-Host 'Deep cleanup mode: ignored demo package-lock files will be removed.'
+  Write-Host 'Production lockfiles in backend/ and frontend/ are preserved.'
 }
 Write-Host ''
 

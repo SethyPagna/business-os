@@ -16,7 +16,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 | Backend security/core/import/stock tests | Pass | `npm.cmd run test:utils` passed, including the streaming import smoke. |
 | Backend data integrity | Pass | `npm.cmd run verify:integrity` passed against the current SQLite data root. |
 | Worker queue smoke | Pass | Import and media workers started against Redis/BullMQ and reported active queues. |
-| Release build/start smoke | Pass | `cmd /c run\build-release.bat` passed, produced portable release and NSIS installer. |
+| Release build/start smoke | Pass | `cmd /c run\build-release.bat` now builds the final Docker release kit under `release\business-os\`. |
 | Cloudflare Tunnel route check | Pass | `node ops/scripts/runtime/check-public-url.mjs https://leangcosmetics.dpdns.org /public` is the active public-route smoke for `/`, `/health`, `/public`, and `/api/portal/bootstrap`. |
 
 ## High-Risk Findings Addressed In This Pass
@@ -46,7 +46,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 - Import jobs analyze and apply CSV rows from streaming batches instead of `readFile` plus all-row parsing.
 - Import queues are split into `business-os-import-analyze` and `business-os-import-apply`; the web process only enqueues work, while `backend/src/workers/importWorker.js` owns processing.
 - Media optimization has a dedicated `business-os-media-optimize` queue and `backend/src/workers/mediaWorker.js`. Product import images are copied quickly, queued for optimization, and counted as complete only after the worker updates file/job status.
-- `run\start-server.bat` starts host Node import/media workers in SQLite mode. Release startup launches packaged worker roles from the same executable. Docker app/worker services are configured under the Postgres runtime profile.
+- `Start Business OS.bat` launches the final Docker runtime path. App, import worker, media worker, Redis, Postgres, MinIO, and Cloudflare run as Docker services for the release path.
 - Docker Compose includes resource limits, health checks, restart policies, Redis memory limits/persistence, Postgres bulk-write tuning, and Docker log rotation.
 - `/api/runtime/queues/status` reports import and media queue status separately for support diagnostics.
 - The global import tracker compares primitive job signatures, uses React transitions for polling updates, polls less aggressively, and applies `content-visibility` to reduce repaint pressure.
@@ -58,7 +58,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 ## Latest Verification Evidence
 
 - `cmd /c run\verify-local.bat`: passed, including Docker Redis/Postgres/MinIO health, frontend build/tests/i18n/UI/performance, backend tests, and backend data integrity.
-- `cmd /c run\build-release.bat`: passed, including shared verification, packaged server build, portable release assembly, and NSIS installer build.
+- `cmd /c run\build-release.bat`: passed for the Docker release path, including Docker release verification and portable Docker kit assembly.
 - `npm.cmd run test:utils` in `backend`: passed.
 - `npm.cmd run build`, `test:utils`, `verify:i18n`, `verify:ui`, `verify:performance` in `frontend`: passed.
 - `npm.cmd run verify:integrity` in `backend`: passed.

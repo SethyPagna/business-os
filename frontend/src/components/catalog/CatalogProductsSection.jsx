@@ -4,6 +4,7 @@ import { ProductImg } from '../products/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.mjs'
+import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.mjs'
 
 function getBadgeIcon(badge) {
   if (badge?.key === 'promotion') return BadgePercent
@@ -23,10 +24,7 @@ function getBadgeToneClass(badge) {
 }
 
 function getProductInitial(product) {
-  const chars = Array.from(String(product?.name || '').trim())
-  if (!chars.length) return '#'
-  const first = chars[0].toLocaleUpperCase('km')
-  return /[\p{L}\p{N}]/u.test(first) ? first : '#'
+  return getInitialKey(product?.name || '')
 }
 
 /**
@@ -37,6 +35,17 @@ export default function CatalogProductsSection(props) {
   const {
     copy,
     filteredProducts,
+    serverPaged = false,
+    productTotal,
+    productPage,
+    productPageSize,
+    setProductPage,
+    setProductPageSize,
+    initialOptions: serverInitialOptions,
+    initialFilter: controlledInitialFilter,
+    setInitialFilter: setControlledInitialFilter,
+    refreshingProducts = false,
+    loadingProducts = false,
     categories,
     brands,
     branches,
@@ -70,27 +79,39 @@ export default function CatalogProductsSection(props) {
   } = props
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [initialFilter, setInitialFilter] = useState('all')
+  const [localInitialFilter, setLocalInitialFilter] = useState('all')
+  const effectivePage = serverPaged ? Number(productPage || 1) : page
+  const effectivePageSize = serverPaged ? Number(productPageSize || 20) : pageSize
+  const effectiveInitialFilter = serverPaged ? (controlledInitialFilter || 'all') : localInitialFilter
+  const updatePage = serverPaged ? setProductPage : setPage
+  const updatePageSize = serverPaged ? setProductPageSize : setPageSize
+  const updateInitialFilter = serverPaged ? setControlledInitialFilter : setLocalInitialFilter
 
   useEffect(() => {
-    setPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, initialFilter, search, stockFilter])
+    if (!serverPaged) setPage(1)
+  }, [brandFilter, branchFilter, categoryFilter, localInitialFilter, search, serverPaged, stockFilter])
 
-  const initialOptions = useMemo(() => {
-    const values = Array.from(new Set((filteredProducts || []).map(getProductInitial)))
-    return values.sort((left, right) => left.localeCompare(right, 'km'))
+  const localInitialOptions = useMemo(() => {
+    const counts = new Map()
+    ;(filteredProducts || []).forEach((product) => {
+      const key = getProductInitial(product)
+      counts.set(key, (counts.get(key) || 0) + 1)
+    })
+    return aggregateInitialOptions([...counts.entries()].map(([key, count]) => ({ key, count })))
   }, [filteredProducts])
+  const initialOptions = serverPaged && Array.isArray(serverInitialOptions) ? serverInitialOptions : localInitialOptions
 
   const letterFilteredProducts = useMemo(() => (
-    initialFilter === 'all'
+    serverPaged || effectiveInitialFilter === 'all'
       ? filteredProducts
-      : (filteredProducts || []).filter((product) => getProductInitial(product) === initialFilter)
-  ), [filteredProducts, initialFilter])
+      : (filteredProducts || []).filter((product) => getProductInitial(product) === effectiveInitialFilter)
+  ), [effectiveInitialFilter, filteredProducts, serverPaged])
 
   const pagedProducts = useMemo(
-    () => paginateItems(letterFilteredProducts, page, pageSize),
-    [letterFilteredProducts, page, pageSize],
+    () => (serverPaged ? letterFilteredProducts : paginateItems(letterFilteredProducts, page, pageSize)),
+    [letterFilteredProducts, page, pageSize, serverPaged],
   )
+  const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
 
   return (
     <SectionShell
@@ -191,7 +212,11 @@ export default function CatalogProductsSection(props) {
         <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-500 dark:text-slate-400">
           <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
           <span className="font-semibold text-slate-600 dark:text-slate-200">
-            {replaceVars(copy('filterSummary', '{count} result(s)'), { count: letterFilteredProducts.length })}
+            {refreshingProducts
+              ? copy('refreshing', 'Refreshing...')
+              : loadingProducts
+                ? copy('loadingProducts', 'Loading products...')
+              : replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
           </span>
         </div>
       </div>
@@ -200,19 +225,20 @@ export default function CatalogProductsSection(props) {
         <div className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900/80">
           <button
             type="button"
-            className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${initialFilter === 'all' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-            onClick={() => setInitialFilter('all')}
+            className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${effectiveInitialFilter === 'all' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+            onClick={() => updateInitialFilter?.('all')}
           >
             {copy('all', 'All')}
           </button>
-          {initialOptions.map((letter) => (
+          {initialOptions.map((item) => (
             <button
-              key={letter}
+              key={item.key}
               type="button"
-              className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${initialFilter === letter ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-              onClick={() => setInitialFilter(initialFilter === letter ? 'all' : letter)}
+              className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${effectiveInitialFilter === item.key ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+              onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
+              title={`${item.label} (${item.count})`}
             >
-              {letter}
+              {item.label}
             </button>
           ))}
         </div>
@@ -226,9 +252,9 @@ export default function CatalogProductsSection(props) {
 
       <PaginationControls
         className="mb-4"
-        page={page}
-        pageSize={pageSize}
-        totalItems={letterFilteredProducts.length}
+        page={effectivePage}
+        pageSize={effectivePageSize}
+        totalItems={totalProducts}
         label={copy('products', 'products')}
         t={(key) => ({
           page: copy('page', 'Page'),
@@ -236,14 +262,26 @@ export default function CatalogProductsSection(props) {
           showing: copy('showing', 'Showing'),
           per_page: copy('perPage', 'per page'),
         })[key] || key}
-        onPageChange={setPage}
+        onPageChange={updatePage}
         onPageSizeChange={(size) => {
-          setPageSize(size)
-          setPage(1)
+          updatePageSize?.(size)
+          updatePage?.(1)
         }}
       />
 
       <div className={`grid gap-3 ${productGridClass}`}>
+        {loadingProducts ? (
+          Array.from({ length: Math.min(4, effectivePageSize || 4) }).map((_, index) => (
+            <div key={`portal-product-skeleton-${index}`} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+              <div className={`${compactTwoColumnMobile ? 'aspect-[5/4] sm:aspect-[4/3]' : 'aspect-[5/4]'} animate-pulse bg-slate-100 dark:bg-slate-800`} />
+              <div className="space-y-3 p-4">
+                <div className="h-4 w-1/2 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-5 w-4/5 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-12 rounded bg-slate-100 dark:bg-slate-800" />
+              </div>
+            </div>
+          ))
+        ) : null}
         {pagedProducts.map((product) => {
           const qty = getBranchQty(product, selectedStockBranch)
           const status = getStockStatus(product, qty, previewConfig)
@@ -351,12 +389,12 @@ export default function CatalogProductsSection(props) {
         })}
       </div>
 
-      {letterFilteredProducts.length > pageSize ? (
+      {totalProducts > effectivePageSize ? (
         <PaginationControls
           className="mt-4"
-          page={page}
-          pageSize={pageSize}
-          totalItems={letterFilteredProducts.length}
+          page={effectivePage}
+          pageSize={effectivePageSize}
+          totalItems={totalProducts}
           label={copy('products', 'products')}
           t={(key) => ({
             page: copy('page', 'Page'),
@@ -364,15 +402,15 @@ export default function CatalogProductsSection(props) {
             showing: copy('showing', 'Showing'),
             per_page: copy('perPage', 'per page'),
           })[key] || key}
-          onPageChange={setPage}
+          onPageChange={updatePage}
           onPageSizeChange={(size) => {
-            setPageSize(size)
-            setPage(1)
+            updatePageSize?.(size)
+            updatePage?.(1)
           }}
         />
       ) : null}
 
-      {letterFilteredProducts.length === 0 ? (
+      {totalProducts === 0 && !refreshingProducts && !loadingProducts ? (
         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
           {copy('noProducts', 'No products matched the current filters.')}
         </div>

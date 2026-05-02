@@ -1,3 +1,5 @@
+import { compareInitialKeys, getInitialKey } from './initials.mjs'
+
 function toDate(value) {
   const parsed = new Date(value || '')
   return Number.isNaN(parsed.getTime()) ? null : parsed
@@ -22,26 +24,11 @@ function normalizeName(value) {
 }
 
 export function getAlphabetInitialSection(value) {
-  const firstChar = [...normalizeName(value)][0] || ''
-  const upper = firstChar.toUpperCase()
-  if (/[A-Z]/.test(upper)) return upper
-  if (KHMER_INITIAL_ORDER.has(firstChar)) return firstChar
-  if (/[\u1780-\u17FF]/.test(firstChar)) return firstChar
-  return '#'
+  return getInitialKey(normalizeName(value))
 }
 
 function compareAlphabetLabels(left, right) {
-  if (left === right) return 0
-  if (left === '#') return 1
-  if (right === '#') return -1
-  const leftKhmer = KHMER_INITIAL_ORDER.has(left)
-  const rightKhmer = KHMER_INITIAL_ORDER.has(right)
-  if (leftKhmer && rightKhmer) return KHMER_INITIAL_ORDER.get(left) - KHMER_INITIAL_ORDER.get(right)
-  if (leftKhmer !== rightKhmer) return leftKhmer ? 1 : -1
-  if (/[\u1780-\u17FF]/.test(left) && /[\u1780-\u17FF]/.test(right) && khmerCollator) {
-    return khmerCollator.compare(left, right)
-  }
-  return String(left || '').localeCompare(String(right || ''), undefined, { sensitivity: 'base' })
+  return compareInitialKeys(left, right)
 }
 
 export function getTimeParts(value) {

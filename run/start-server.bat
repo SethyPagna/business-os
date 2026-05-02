@@ -83,9 +83,24 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 echo [%DATE% %TIME%] START requested (port=%PORT%)>>"%RUN_LOG%"
 
 if /I "%BUSINESS_OS_APP_RUNTIME%"=="docker" (
-    echo [INFO] BUSINESS_OS_APP_RUNTIME=docker. Handing off to Docker runtime launcher...
-    call "%ROOT%\run\start-docker.bat"
-    exit /b %ERRORLEVEL%
+    echo.
+    echo [INFO] Docker runtime selected.
+    echo        This launcher owns setup, Docker services, workers, and Cloudflare access.
+    echo        Progress and failures are logged under ops\runtime\logs.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\start-runtime.ps1" -Root "%ROOT%"
+    set "DOCKER_START_EXIT=!ERRORLEVEL!"
+    echo.
+    if not "!DOCKER_START_EXIT!"=="0" (
+        echo [ERROR] Docker runtime launcher failed with exit code !DOCKER_START_EXIT!.
+        echo         Log folder: %LOG_DIR%
+        echo         Safest repair command: run\docker\doctor.bat
+    )
+    echo.
+    if not "%BUSINESS_OS_NO_PAUSE%"=="1" (
+        echo Press any key to close this window.
+        pause >nul
+    )
+    exit /b !DOCKER_START_EXIT!
 )
 
 echo.
@@ -94,7 +109,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 if errorlevel 1 (
     echo.
     echo [ERROR] Required runtime services are not ready.
-    echo         Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.
+    echo         Open Docker Desktop, finish any setup/restart prompts, then double-click Start Business OS.bat again.
     echo.
     pause
     echo [%DATE% %TIME%] START failed: runtime bootstrap failed>>"%RUN_LOG%"
@@ -177,7 +192,7 @@ for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
 
 if not defined PM2_CMD (
     echo [WARN] PM2 is not installed. Using background node mode.
-    echo [INFO] run\start-server.bat does not install global packages automatically.
+    echo [INFO] This support launcher does not install global packages automatically.
     if "!SERVER_ALREADY_RUNNING!"=="1" goto :after_pm2_start
     goto :background_start
 )

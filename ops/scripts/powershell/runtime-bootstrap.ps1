@@ -51,6 +51,57 @@ function Find-Executable($names, $fallbacks = @()) {
   return ''
 }
 
+function Invoke-ProcessWithTimeout($filePath, [string[]]$arguments = @(), [int]$timeoutSeconds = 20) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $filePath
+  $psi.Arguments = (($arguments | ForEach-Object {
+    $arg = [string]$_
+    if ($arg -match '[\s"]') {
+      '"' + ($arg -replace '"', '\"') + '"'
+    } else {
+      $arg
+    }
+  }) -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  try {
+    [void]$process.Start()
+    if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
+      try {
+        $process.Kill($true)
+      } catch {
+        try { $process.Kill() } catch {}
+      }
+      return [pscustomobject]@{
+        ExitCode = 124
+        TimedOut = $true
+        Stdout = ''
+        Stderr = "Timed out after ${timeoutSeconds}s"
+      }
+    }
+    return [pscustomobject]@{
+      ExitCode = $process.ExitCode
+      TimedOut = $false
+      Stdout = $process.StandardOutput.ReadToEnd()
+      Stderr = $process.StandardError.ReadToEnd()
+    }
+  } catch {
+    return [pscustomobject]@{
+      ExitCode = 1
+      TimedOut = $false
+      Stdout = ''
+      Stderr = $_.Exception.Message
+    }
+  } finally {
+    $process.Dispose()
+  }
+}
+
 function Install-WithWinget($id, $label) {
   $winget = Find-Executable @('winget.exe', 'winget')
   if (-not $winget) {
@@ -71,7 +122,7 @@ function Ensure-Tool($label, $ids, $fallbacks, $wingetId, [bool]$required = $tru
     return $path
   }
 
-  if ($InstallMissing -and $wingetId) {
+  if ($InstallMissing -and $wingetId -and ($required -or $Mode -eq 'Setup')) {
     Install-WithWinget $wingetId $label
     $path = Find-Executable $ids $fallbacks
     if ($path) {
@@ -141,11 +192,16 @@ function Write-DockerScaleProfile {
     IMPORT_WORKER_CPUS = '3.0'
     MEDIA_WORKER_MEMORY_LIMIT = '3072m'
     MEDIA_WORKER_CPUS = '3.5'
-    IMPORT_QUEUE_CONCURRENCY = '3'
-    MEDIA_QUEUE_CONCURRENCY = '4'
+    SQLITE_SAFE_WRITER_MODE = '1'
+    IMPORT_QUEUE_CONCURRENCY = '1'
+    MEDIA_QUEUE_CONCURRENCY = '2'
+    IMPORT_WORKER_REPLICAS = '1'
+    MEDIA_WORKER_REPLICAS = '1'
     IMPORT_ROW_BATCH_SIZE = '400'
-    IMPORT_BATCH_PAUSE_MS = '20'
-    IMPORT_IMAGE_CONCURRENCY = '4'
+    IMPORT_BATCH_PAUSE_MS = '50'
+    IMPORT_IMAGE_CONCURRENCY = '2'
+    SEARCH_CACHE_TTL_SECONDS = '15'
+    POSTGRES_ENABLE_SEARCH_EXTENSIONS = '1'
     RUNTIME_CACHE_ENABLED = '1'
     UPLOAD_CHUNK_MB = '12'
   }
@@ -162,9 +218,11 @@ function Write-DockerScaleProfile {
     $values['IMPORT_WORKER_CPUS'] = '1.5'
     $values['MEDIA_WORKER_MEMORY_LIMIT'] = '2048m'
     $values['MEDIA_WORKER_CPUS'] = '2.0'
-    $values['IMPORT_QUEUE_CONCURRENCY'] = '2'
-    $values['MEDIA_QUEUE_CONCURRENCY'] = '3'
-    $values['IMPORT_IMAGE_CONCURRENCY'] = '3'
+    $values['IMPORT_QUEUE_CONCURRENCY'] = '1'
+    $values['MEDIA_QUEUE_CONCURRENCY'] = '2'
+    $values['IMPORT_WORKER_REPLICAS'] = '1'
+    $values['MEDIA_WORKER_REPLICAS'] = '1'
+    $values['IMPORT_IMAGE_CONCURRENCY'] = '2'
   } elseif ($profile -eq 'maximum') {
     $values['REDIS_QUEUE_MEMORY_LIMIT'] = '2048m'
     $values['REDIS_QUEUE_MAX_MEMORY'] = '2048mb'
@@ -185,8 +243,10 @@ function Write-DockerScaleProfile {
     $values['IMPORT_WORKER_CPUS'] = '4.0'
     $values['MEDIA_WORKER_MEMORY_LIMIT'] = '4096m'
     $values['MEDIA_WORKER_CPUS'] = '4.5'
-    $values['IMPORT_QUEUE_CONCURRENCY'] = '4'
-    $values['MEDIA_QUEUE_CONCURRENCY'] = '4'
+    $values['IMPORT_QUEUE_CONCURRENCY'] = '1'
+    $values['MEDIA_QUEUE_CONCURRENCY'] = '2'
+    $values['IMPORT_WORKER_REPLICAS'] = '1'
+    $values['MEDIA_WORKER_REPLICAS'] = '1'
   }
 
   foreach ($key in @($values.Keys)) {
@@ -229,10 +289,10 @@ function Start-DockerDesktop($dockerExe) {
     'C:\Program Files\Docker Desktop\Docker Desktop.exe'
   )
   if (-not $dockerDesktop) {
-    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then run run\start-server.bat again.'
+    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then double-click Start Business OS.bat again.'
   }
 
-  Write-Step 'Starting Docker Desktop...'
+  Write-Step 'Starting Docker Desktop. This can take 1-3 minutes on Windows...'
   try {
     Start-Process -FilePath $dockerDesktop -WindowStyle Hidden | Out-Null
   } catch {
@@ -242,24 +302,29 @@ function Start-DockerDesktop($dockerExe) {
 }
 
 function Test-DockerEngine($dockerExe) {
-  $oldPreference = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
-  & $dockerExe info --format '{{.ServerVersion}}' > $null 2> $null
-  $code = $LASTEXITCODE
-  $ErrorActionPreference = $oldPreference
-  return ($code -eq 0)
+  $result = Invoke-ProcessWithTimeout $dockerExe @('info', '--format', '{{.ServerVersion}}') 20
+  if ($result.TimedOut) {
+    Write-Warn 'Docker CLI did not answer within 20 seconds. Docker Desktop may still be starting.'
+    return $false
+  }
+  return ($result.ExitCode -eq 0)
 }
 
 function Wait-DockerEngine($dockerExe, $timeoutSeconds = 90) {
   $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+  $attempt = 0
   do {
+    $attempt++
     if (Test-DockerEngine $dockerExe) {
       Write-Ok 'Docker engine is ready.'
       return
     }
+    if (($attempt -eq 1) -or (($attempt % 5) -eq 0)) {
+      Write-Step "Waiting for Docker engine... attempt $attempt"
+    }
     Start-Sleep -Seconds 3
   } while ((Get-Date) -lt $deadline)
-  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.'
+  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then double-click Start Business OS.bat again.'
 }
 
 function Invoke-Compose($dockerExe, [string[]]$composeArgs) {
@@ -276,12 +341,40 @@ function Ensure-ComposeFile {
 
 function Start-ScaleServices($dockerExe) {
   Ensure-ComposeFile
+  Remove-StoppedScaleContainers $dockerExe
   Write-Step 'Starting required Redis queue/cache, Postgres, and MinIO services...'
   $code = Invoke-Compose $dockerExe @('up', '-d', '--remove-orphans')
   if ($code -ne 0) {
     Fail 'Docker Compose could not start the required Business OS services.'
   }
   Wait-ScaleServicesHealthy $dockerExe 180
+}
+
+function Remove-StoppedScaleContainers($dockerExe) {
+  try {
+    Write-Step 'Cleaning stopped Business OS Docker service containers...'
+    $dockerArgs = @('compose', '--progress', 'quiet', '--env-file', $DockerScaleEnv, '-f', $ComposeFile, 'rm', '-f')
+    $result = Invoke-ProcessWithTimeout $dockerExe $dockerArgs 60
+    $code = $result.ExitCode
+    if ($code -eq 0) {
+      Write-Ok 'Stopped Business OS Docker service containers cleaned.'
+    } else {
+      Write-Warn 'Docker cleanup skipped; continuing startup.'
+    }
+  } catch {
+    Write-Warn 'Docker cleanup skipped; continuing startup.'
+  }
+}
+
+function Update-ScaleServiceImages($dockerExe) {
+  Ensure-ComposeFile
+  Write-Step 'Checking for newer Docker service images...'
+  $code = Invoke-Compose $dockerExe @('pull', 'redis-queue', 'redis-cache', 'postgres', 'minio')
+  if ($code -eq 0) {
+    Write-Ok 'Docker service images are available locally.'
+  } else {
+    Write-Warn 'Docker image update check failed. Startup can still continue with local images if present.'
+  }
 }
 
 function Get-ServiceHealth($dockerExe, $service) {
@@ -325,7 +418,7 @@ function Wait-ScaleServicesHealthy($dockerExe, $timeoutSeconds = 90) {
   foreach ($service in $services) {
     Write-Warn "$service health: $(Get-ServiceHealth $dockerExe $service)"
   }
-  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\scale-services.bat status for support details.'
+  Fail 'Required Business OS services are not healthy. Open Docker Desktop and run run\docker\doctor.bat for support details.'
 }
 
 function Verify-ScaleServices($dockerExe) {
@@ -411,9 +504,18 @@ $openssl = Ensure-Tool 'OpenSSL' @('openssl.exe', 'openssl') @('C:\Program Files
 if (($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant() -eq 'tailscale') {
   $tailscale = Ensure-Tool 'Tailscale' @('tailscale.exe', 'tailscale') @('C:\Program Files\Tailscale\tailscale.exe', 'C:\Program Files (x86)\Tailscale\tailscale.exe') 'Tailscale.Tailscale' $false
 }
+$remoteProviderForTools = ($env:BUSINESS_OS_REMOTE_PROVIDER -as [string]).Trim().ToLowerInvariant()
+if (-not $remoteProviderForTools -and $Mode -in @('Setup', 'Start')) {
+  $remoteProviderForTools = 'cloudflare'
+}
+if ($remoteProviderForTools -eq 'cloudflare') {
+  $cloudflaredRequired = ($Mode -in @('Setup', 'Start'))
+  $cloudflared = Ensure-Tool 'Cloudflare Tunnel' @('cloudflared.exe', 'cloudflared') @('C:\Program Files\cloudflared\cloudflared.exe', 'C:\Program Files (x86)\cloudflared\cloudflared.exe', "$env:LOCALAPPDATA\cloudflared\cloudflared.exe") 'Cloudflare.cloudflared' $cloudflaredRequired
+}
 $docker = Ensure-Tool 'Docker CLI' @('docker.exe', 'docker') @('C:\Program Files\Docker\Docker\resources\bin\docker.exe') 'Docker.DockerDesktop' $true
 
 try {
+  Write-Step 'Checking Docker engine readiness...'
   if (-not (Test-DockerEngine $docker)) {
     if ($Mode -in @('Setup', 'Start') -or $StartServices -or $RequireServices) {
       Start-DockerDesktop $docker
@@ -433,6 +535,7 @@ try {
 
 switch ($Mode) {
   'Setup' {
+    Update-ScaleServiceImages $docker
     Start-ScaleServices $docker
   }
   'Start' {

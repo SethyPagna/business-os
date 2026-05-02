@@ -32,7 +32,7 @@ import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
+import PaginationControls from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,
@@ -52,6 +52,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
+import { aggregateInitialOptions } from '../../utils/initials.mjs'
 
 // ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -60,6 +61,15 @@ import { parseContactOptions } from '../contacts/CustomersTab'
 function allTermsMatch(text, terms) {
   const lower = text.toLowerCase()
   return terms.every(t => lower.includes(t.toLowerCase()))
+}
+
+function useDebouncedValue(value, delayMs = 180) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(timer)
+  }, [delayMs, value])
+  return debounced
 }
 
 export default function POS() {
@@ -85,9 +95,13 @@ export default function POS() {
   const [stockFilter,     setStockFilter]     = useState(() => sessionStorage.getItem('pos_stock')    || 'all')
   const [groupFilter,     setGroupFilter]     = useState(() => sessionStorage.getItem('pos_group')    || 'all')
   const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
+  const [initialFilter,   setInitialFilter]   = useState(() => sessionStorage.getItem('pos_initial')  || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
   const [productPage, setProductPage] = useState(1)
-  const [productPageSize, setProductPageSize] = useState(50)
+  const [productPageSize, setProductPageSize] = useState(20)
+  const [productTotal, setProductTotal] = useState(0)
+  const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], suppliers: [], initials: [] })
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   const [quickFilters, setQuickFilters] = useState(() => {
     const defaults = { category: true, brand: true, branch: true, stock: true, supplier: false }
     try {
@@ -105,6 +119,7 @@ export default function POS() {
   const setPersistedStock    = v => { sessionStorage.setItem('pos_stock',    v); setStockFilter(v) }
   const setPersistedGroup    = v => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
   const setPersistedSupplier = v => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
+  const setPersistedInitial  = v => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
   const setQuickFilter = (key, enabled) => {
     setQuickFilters((prev) => {
       const next = { ...prev, [key]: !!enabled }
@@ -254,6 +269,7 @@ export default function POS() {
   const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_usd || '1') || 1))
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_khr || String(exchangeRate)) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
+  const debouncedProductSearch = useDebouncedValue(search, 180)
 
   const applyCatalogData = useCallback((prods, cats, brs) => {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
@@ -271,24 +287,54 @@ export default function POS() {
 
   const loadCatalogData = useCallback(async (label = 'POS catalog data') => {
     const requestId = beginTrackedRequest(catalogRequestRef)
+    setCatalogRefreshing(true)
     try {
-      const [prods, cats, brs] = await withLoaderTimeout(
+      const productQuery = {
+        page: productPage,
+        pageSize: productPageSize,
+        query: debouncedProductSearch,
+        searchMode,
+        category: categoryFilter === 'all' ? '' : categoryFilter,
+        brand: brandFilter === 'all' ? '' : brandFilter,
+        supplier: supplierFilter === 'all' ? '' : supplierFilter,
+        branchId: branchFilter === 'all' ? '' : branchFilter,
+        stockState: stockFilter === 'all' ? 'positive' : stockFilter,
+        groupState: groupFilter === 'all' ? '' : groupFilter,
+        initial: initialFilter === 'all' ? '' : initialFilter,
+        sort: 'name_asc',
+        include: 'branch_stock,images',
+      }
+      const [productPayload, cats, brs] = await withLoaderTimeout(
         () => Promise.all([
-          window.api.getProducts(),
+          window.api.searchProducts(productQuery),
           window.api.getCategories(),
           window.api.getBranches(),
         ]),
         label,
       )
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+      const prods = Array.isArray(productPayload?.items)
+        ? productPayload.items
+        : (Array.isArray(productPayload) ? productPayload : [])
       applyCatalogData(prods, cats, brs)
+      setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
+      const filters = productPayload?.filters || {}
+      setProductFilterMeta({
+        brands: Array.isArray(filters?.brands) ? filters.brands : [],
+        suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+        initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
+      })
       return { prods, cats, brs }
     } catch (error) {
       if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
       console.error('[POS] catalog load failed:', error.message)
       return null
+    } finally {
+      if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
+        setCatalogRefreshing(false)
+      }
     }
-  }, [applyCatalogData])
+  }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
 
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
@@ -362,13 +408,17 @@ export default function POS() {
       return
     }
 
+    void loadCatalogData('POS catalog')
+    searchRef.current?.focus()
+  }, [isActive, loadCatalogData])
+
+  useEffect(() => {
+    if (!isActive) return
     void Promise.allSettled([
-      loadCatalogData('POS initial catalog'),
       loadCustomers('POS initial customers'),
       loadDeliveryContacts('POS initial delivery contacts'),
     ])
-    searchRef.current?.focus()
-  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts])
+  }, [isActive, loadCustomers, loadDeliveryContacts])
 
   // ?�?� Sync-push: reload when another device changes data ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   useEffect(() => {
@@ -588,11 +638,11 @@ export default function POS() {
 
   // Derived filter lists from products
   const posSuppliers = useMemo(
-    () => [...new Set(products.map((p) => p.supplier).filter(Boolean))].sort(),
-    [products],
+    () => [...new Set((productFilterMeta.suppliers || []).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [productFilterMeta.suppliers],
   )
   const posBrands = useMemo(() => {
-    const fromProducts = products.map((p) => String(p.brand || '').trim()).filter(Boolean)
+    const fromProducts = (productFilterMeta.brands || []).map((brand) => String(brand || '').trim()).filter(Boolean)
     let fromSettings = []
     try {
       const parsed = JSON.parse(settings?.product_brand_options || '[]')
@@ -601,7 +651,11 @@ export default function POS() {
       }
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
-  }, [products, settings?.product_brand_options])
+  }, [productFilterMeta.brands, settings?.product_brand_options])
+  const initialOptions = useMemo(
+    () => aggregateInitialOptions(productFilterMeta.initials || []),
+    [productFilterMeta.initials],
+  )
 
   // ?�?� Foolproof product filter ??products NOT matching ALL active filters are 100% hidden ?�?�
   const filteredProducts = useMemo(() => {
@@ -686,12 +740,9 @@ export default function POS() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [branchFilter, brandFilter, categoryFilter, groupFilter, search, searchMode, stockFilter, supplierFilter])
+  }, [branchFilter, brandFilter, categoryFilter, groupFilter, initialFilter, search, searchMode, stockFilter, supplierFilter])
 
-  const pagedProductCards = useMemo(
-    () => paginateItems(visibleProductCards, productPage, productPageSize),
-    [productPage, productPageSize, visibleProductCards],
-  )
+  const pagedProductCards = visibleProductCards
 
   const getVariantChoices = useCallback((product) => {
     return getVariantChoicesForProduct(product, variantChildrenByParentId)
@@ -1116,6 +1167,7 @@ export default function POS() {
                     stockFilter    !== 'all' ? 1 : 0,
                     groupFilter    !== 'all' ? 1 : 0,
                     supplierFilter !== 'all' ? 1 : 0,
+                    initialFilter  !== 'all' ? 1 : 0,
                   ].reduce((a, b) => a + b, 0)
                   return (
                     <button
@@ -1163,11 +1215,39 @@ export default function POS() {
 
           {/* Product grid */}
           <div className={`flex-1 overflow-y-auto overflow-x-hidden p-3 ${filterOpen ? 'pt-[20.5rem] sm:pt-[18rem]' : ''}`}>
+            {initialOptions.length ? (
+              <div className="mb-3 flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                  onClick={() => setPersistedInitial('all')}
+                >
+                  {t('all') || 'All'}
+                </button>
+                {initialOptions.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`min-h-8 shrink-0 rounded-lg px-2 font-semibold ${initialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                    onClick={() => setPersistedInitial(initialFilter === item.key ? 'all' : item.key)}
+                    title={`${item.label} (${item.count})`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="ml-1 text-[10px] opacity-65">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {catalogRefreshing ? (
+              <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                {t('refreshing') || 'Refreshing...'}
+              </div>
+            ) : null}
             <PaginationControls
               className="mb-3"
               page={productPage}
               pageSize={productPageSize}
-              totalItems={visibleProductCards.length}
+              totalItems={productTotal}
               label={t('products') || 'products'}
               t={t}
               onPageChange={setProductPage}

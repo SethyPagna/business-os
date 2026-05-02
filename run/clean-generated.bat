@@ -41,7 +41,8 @@ echo.
 echo   This removes generated/rebuildable files only.
 echo   Source code, .env, and business-os-data are preserved.
 if defined PREVIEW_ARG echo   Preview mode: only lists what would be removed.
-if defined LOCK_ARG echo   Deep mode: package-lock files will also be removed.
+if defined LOCK_ARG echo   Deep mode: ignored demo package-lock files will also be removed.
+if defined LOCK_ARG echo   backend\package-lock.json and frontend\package-lock.json are preserved.
 echo.
 
 powershell -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\clean-generated.ps1" %PREVIEW_ARG% %LOCK_ARG%

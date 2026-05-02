@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **13**
+Total files documented: **17**
 
 ## 2. Symbol Count by File
 
@@ -19,10 +19,14 @@ Total files documented: **13**
 | 7 | `ops/scripts/lib/fs-utils.js` | 8 |
 | 8 | `ops/scripts/performance-scan.js` | 3 |
 | 9 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
-| 10 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
-| 11 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
-| 12 | `ops/scripts/verify-runtime-deps.js` | 4 |
-| 13 | `ops/scripts/verify-scale-services.js` | 8 |
+| 10 | `ops/scripts/powershell/docker-release.ps1` | 1 |
+| 11 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
+| 12 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
+| 13 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
+| 14 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
+| 15 | `ops/scripts/verify-docker-release.js` | 3 |
+| 16 | `ops/scripts/verify-runtime-deps.js` | 4 |
+| 17 | `ops/scripts/verify-scale-services.js` | 8 |
 
 ## 3. Detailed Function Commentary
 
@@ -106,32 +110,32 @@ Total files documented: **13**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 48 |
-| 2 | `toPosix` | function | 52 |
-| 3 | `rel` | function | 56 |
-| 4 | `shouldSkipDir` | function | 60 |
-| 5 | `collectFilesAndFolders` | function | 64 |
-| 6 | `getAllProjectFilesAndFolders` | function | 85 |
-| 7 | `isProbablyText` | function | 108 |
-| 8 | `readText` | function | 121 |
-| 9 | `lineCount` | function | 129 |
-| 10 | `fileCategory` | function | 134 |
-| 11 | `inferPurpose` | function | 155 |
-| 12 | `markdownHeader` | function | 180 |
-| 13 | `markdownSection` | function | 184 |
-| 14 | `extractImportsExports` | function | 188 |
-| 15 | `findSymbols` | function | 228 |
-| 16 | `writeAllFunctionReference` | function | 254 |
-| 17 | `resolveInternalImport` | function | 292 |
-| 18 | `writeAllFileInventory` | function | 315 |
-| 19 | `folderPurpose` | function | 337 |
-| 20 | `writeFolderCoverage` | function | 355 |
-| 21 | `writeImportExportReference` | function | 414 |
-| 22 | `readJsonObject` | function | 488 |
-| 23 | `translationSectionForKey` | function | 496 |
-| 24 | `writeTranslationSectionReference` | function | 547 |
-| 25 | `writeMainCoverageSummary` | function | 596 |
-| 26 | `main` | function | 625 |
+| 1 | `ensureDir` | function | 44 |
+| 2 | `toPosix` | function | 48 |
+| 3 | `rel` | function | 52 |
+| 4 | `shouldSkipDir` | function | 56 |
+| 5 | `collectFilesAndFolders` | function | 60 |
+| 6 | `getAllProjectFilesAndFolders` | function | 81 |
+| 7 | `isProbablyText` | function | 104 |
+| 8 | `readText` | function | 117 |
+| 9 | `lineCount` | function | 125 |
+| 10 | `fileCategory` | function | 130 |
+| 11 | `inferPurpose` | function | 151 |
+| 12 | `markdownHeader` | function | 175 |
+| 13 | `markdownSection` | function | 179 |
+| 14 | `extractImportsExports` | function | 183 |
+| 15 | `findSymbols` | function | 223 |
+| 16 | `writeAllFunctionReference` | function | 249 |
+| 17 | `resolveInternalImport` | function | 287 |
+| 18 | `writeAllFileInventory` | function | 310 |
+| 19 | `folderPurpose` | function | 332 |
+| 20 | `writeFolderCoverage` | function | 349 |
+| 21 | `writeImportExportReference` | function | 408 |
+| 22 | `readJsonObject` | function | 482 |
+| 23 | `translationSectionForKey` | function | 490 |
+| 24 | `writeTranslationSectionReference` | function | 541 |
+| 25 | `writeMainCoverageSummary` | function | 590 |
+| 26 | `main` | function | 619 |
 
 ### 3.7 `ops/scripts/lib/fs-utils.js`
 
@@ -158,17 +162,41 @@ Total files documented: **13**
 
 - No top-level named function/class symbols detected.
 
-### 3.10 `ops/scripts/powershell/runtime-bootstrap.ps1`
+### 3.10 `ops/scripts/powershell/docker-release.ps1`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `Fail` | function | 14 |
+
+### 3.11 `ops/scripts/powershell/runtime-bootstrap.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 25 |
 
-### 3.11 `ops/scripts/sync-firebase-release-env.ps1`
+### 3.12 `ops/scripts/powershell/start-runtime.ps1`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `Fail` | function | 11 |
+
+### 3.13 `ops/scripts/powershell/tailscale-health-monitor.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.12 `ops/scripts/verify-runtime-deps.js`
+### 3.14 `ops/scripts/sync-firebase-release-env.ps1`
+
+- No top-level named function/class symbols detected.
+
+### 3.15 `ops/scripts/verify-docker-release.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `read` | function | 33 |
+| 2 | `requireFile` | function | 37 |
+| 3 | `main` | function | 41 |
+
+### 3.16 `ops/scripts/verify-runtime-deps.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -177,16 +205,16 @@ Total files documented: **13**
 | 3 | `hasLockDependency` | function | 32 |
 | 4 | `main` | function | 38 |
 
-### 3.13 `ops/scripts/verify-scale-services.js`
+### 3.17 `ops/scripts/verify-scale-services.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 17 |
-| 2 | `run` | function | 21 |
-| 3 | `firstExisting` | function | 39 |
-| 4 | `whereDocker` | function | 43 |
-| 5 | `resolveDocker` | function | 56 |
-| 6 | `checkSecretIgnoreRules` | function | 66 |
-| 7 | `trackedLicenses` | const arrow | 67 |
-| 8 | `main` | function | 93 |
+| 1 | `ensureDir` | function | 18 |
+| 2 | `run` | function | 22 |
+| 3 | `firstExisting` | function | 40 |
+| 4 | `whereDocker` | function | 44 |
+| 5 | `resolveDocker` | function | 57 |
+| 6 | `checkSecretIgnoreRules` | function | 67 |
+| 7 | `trackedLicenses` | const arrow | 68 |
+| 8 | `main` | function | 94 |
 

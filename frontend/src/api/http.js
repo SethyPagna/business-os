@@ -72,9 +72,93 @@ const _cache      = {}
 const _inflight   = {}  // Track in-flight requests to dedupe
 const _inflightStartedAt = {}
 const _writeInflight = new Map()
+const _apiMismatchCooldown = new Map()
 const CACHE_TTL   = 20_000   // 20 seconds
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
+const API_MISMATCH_COOLDOWN_MS = 30_000
+export const FRONTEND_BUILD_INFO = {
+  hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
+  revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
+}
+
+const REQUIRED_RUNTIME_API_PATTERNS = [
+  /^\/api\/products\/search(?:\?|$)/,
+  /^\/api\/products\/filters(?:\?|$)/,
+  /^\/api\/inventory\/products\/search(?:\?|$)/,
+  /^\/api\/portal\/catalog\/products\/search(?:\?|$)/,
+]
+
+function normalizeApiPath(path) {
+  const value = String(path || '')
+  if (!value) return ''
+  try {
+    if (/^https?:\/\//i.test(value)) {
+      const url = new URL(value)
+      return `${url.pathname}${url.search || ''}`
+    }
+  } catch (_) {}
+  return value
+}
+
+export function isRequiredRuntimeApiPath(path) {
+  const normalized = normalizeApiPath(path)
+  return REQUIRED_RUNTIME_API_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function getApiMismatchKey(path) {
+  return normalizeApiPath(path).split('?')[0]
+}
+
+export function getApiVersionMismatchCooldown(path) {
+  const key = getApiMismatchKey(path)
+  const record = _apiMismatchCooldown.get(key)
+  if (!record) return null
+  if (Date.now() > record.until) {
+    _apiMismatchCooldown.delete(key)
+    return null
+  }
+  return record.error
+}
+
+function dispatchApiVersionMismatch(error) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('runtime:api-mismatch', {
+    detail: {
+      path: error.path,
+      status: error.status,
+      code: error.code,
+      frontend: FRONTEND_BUILD_INFO,
+      message: error.message,
+      ts: new Date().toISOString(),
+    },
+  }))
+}
+
+export function createApiVersionMismatchError(path, status = 404) {
+  const normalizedPath = getApiMismatchKey(path)
+  const error = new Error('Business OS server update is required. The app is using newer catalog APIs than the running server provides.')
+  error.status = status
+  error.code = 'api_version_mismatch'
+  error.path = normalizedPath
+  error.reason = 'missing_required_api'
+  error.frontend = FRONTEND_BUILD_INFO
+  return error
+}
+
+export function isApiVersionMismatchError(error) {
+  return !!(error && (error.code === 'api_version_mismatch' || error.reason === 'missing_required_api'))
+}
+
+export function markApiVersionMismatch(path, status = 404) {
+  const error = createApiVersionMismatchError(path, status)
+  _apiMismatchCooldown.set(getApiMismatchKey(path), {
+    error,
+    until: Date.now() + API_MISMATCH_COOLDOWN_MS,
+  })
+  dispatchApiVersionMismatch(error)
+  return error
+}
 
 export function cacheGet(key) {
   const e = _cache[key]
@@ -89,6 +173,7 @@ export function cacheClearAll() {
   Object.keys(_inflight).forEach(k => delete _inflight[k])
   Object.keys(_inflightStartedAt).forEach(k => delete _inflightStartedAt[k])
   _writeInflight.clear()
+  _apiMismatchCooldown.clear()
 }
 
 // Invalidate only the affected cache group on real sync updates. Cache-refresh
@@ -134,6 +219,39 @@ function createApiError(status, parsed, text) {
   error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
   error.actualUpdatedAt = parsed?.actualUpdatedAt || null
   return error
+}
+
+export function shouldCompareRuntimeVersions(serverRuntime = {}, frontendBuildInfo = FRONTEND_BUILD_INFO) {
+  const servedFrontend = serverRuntime?.frontend || {}
+  const servedFrontendRevision = String(servedFrontend.revision || '').trim()
+  const servedFrontendHash = String(servedFrontend.hash || '').trim()
+  const frontendRevision = String(FRONTEND_BUILD_INFO.revision || '').trim()
+  const frontendHash = String(frontendBuildInfo.hash || FRONTEND_BUILD_INFO.hash || '').trim()
+  const effectiveFrontendRevision = String(frontendBuildInfo.revision || frontendRevision || '').trim()
+  if (!servedFrontendRevision && !servedFrontendHash) return false
+  if (!effectiveFrontendRevision || !servedFrontendRevision) return false
+  if (effectiveFrontendRevision === 'dev' || servedFrontendRevision === 'dev') return false
+  if (servedFrontendHash && frontendHash && servedFrontendHash !== frontendHash) return true
+  return effectiveFrontendRevision !== servedFrontendRevision
+}
+
+function dispatchRuntimeVersionMismatch(serverRuntime = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('runtime:version-mismatch', {
+    detail: {
+      frontend: FRONTEND_BUILD_INFO,
+      backend: serverRuntime,
+      message: 'Business OS server and browser app versions do not match. Restart or update the server before continuing.',
+      ts: new Date().toISOString(),
+    },
+  }))
+}
+
+function checkRuntimeVersionFromHealth(payload = {}) {
+  const serverRuntime = payload?.runtime || {}
+  if (shouldCompareRuntimeVersions(serverRuntime)) {
+    dispatchRuntimeVersionMismatch(serverRuntime)
+  }
 }
 
 function createWriteBlockedError(channel, message, detail = {}) {
@@ -228,7 +346,7 @@ function sleep(ms) {
 
 function hasUsableLocalData(value) {
   if (value == null) return false
-  if (Array.isArray(value)) return true
+  if (Array.isArray(value)) return value.length > 0
   if (typeof value === 'object') return Object.keys(value).length > 0
   return true
 }
@@ -279,6 +397,13 @@ export function __resetApiWriteDedupeForTests() {
 // HTTP helpers ?????????????????????????????????????????????????????????????
 export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIMEOUT_MS, options = {}) {
   const normalizedMethod = String(method || 'GET').toUpperCase()
+  if (normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
+    const mismatchError = getApiVersionMismatchCooldown(path)
+    if (mismatchError) {
+      dispatchApiVersionMismatch(mismatchError)
+      throw mismatchError
+    }
+  }
   const dedupeKey = options.skipWriteDedupe ? '' : buildApiRequestDedupeKey(normalizedMethod, path, body)
   if (dedupeKey) {
     const existing = _writeInflight.get(dedupeKey)
@@ -316,6 +441,9 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
+      if (res.status === 404 && normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
+        throw markApiVersionMismatch(path, res.status)
+      }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
       if (res.status === 401 && parsed?.code === 'invalid_session' && requestAuthSessionToken && typeof window !== 'undefined') {
@@ -413,6 +541,8 @@ async function pingServerHealth() {
       headers: { 'bypass-tunnel-reminder': 'true' },
     })
     if (res.ok) {
+      const payload = await res.clone().json().catch(() => null)
+      if (payload) checkRuntimeVersionFromHealth(payload)
       if (!_serverOnline) {
         cacheClearAll()
       }
@@ -666,6 +796,10 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
             if (fallbackTimer != null) {
               window.clearTimeout(fallbackTimer)
             }
+            if (isApiVersionMismatchError(e)) {
+              logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
+              throw e
+            }
             const localResult = await localPromise
             if (hasUsableLocalData(localResult)) {
               logCall(channel, 'local-recovery', Date.now() - t0)
@@ -681,6 +815,10 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           try {
             return await promise
           } catch (e) {
+            if (isApiVersionMismatchError(e)) {
+              logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
+              throw e
+            }
             if (isConnectivityError(e)) setServerHealth(false)
             logCall(channel, 'local-fallback', Date.now() - t0, false)
           }

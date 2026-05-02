@@ -134,7 +134,7 @@ if /I "%BUSINESS_OS_REMOTE_PROVIDER%"=="tailscale" if defined TAILSCALE_CMD (
 
 echo.
 echo [INFO] Stopping Cloudflare Tunnel...
-powershell -NoProfile -Command "$tokenPath='%CLOUDFLARE_TUNNEL_TOKEN_FILE%'; Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | Where-Object { ([string]$_.CommandLine) -match [regex]::Escape($tokenPath) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+powershell -NoProfile -Command "$tokenPath='%CLOUDFLARE_TUNNEL_TOKEN_FILE%'; Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | Where-Object { $cmd=[string]$_.CommandLine; (-not $cmd) -or $cmd -match [regex]::Escape($tokenPath) -or $cmd -match 'cloudflare-business-os-leangcosmetics' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 echo [OK] Cloudflare Tunnel stop command executed.
 
 if /I "%~1"=="--with-services" (
@@ -172,4 +172,11 @@ if defined PORT_STILL_BUSY (
     echo [%DATE% %TIME%] STOP succeeded port=%PORT%>>"%RUN_LOG%"
 )
 echo.
+echo Next step: double-click Start Business OS.bat when you want to run again.
+echo Support log: %RUN_LOG%
+echo.
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" (
+    echo Press any key to close this window.
+    pause >nul
+)
 exit /b 0

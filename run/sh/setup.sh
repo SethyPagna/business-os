@@ -12,6 +12,7 @@ echo "========================================================================"
 echo ""
 echo "  Run this once to install dependencies and build the app."
 echo "  After setup completes, use ./start-server.sh to launch."
+echo "  Windows is the primary supported runtime; Docker services are automatic there."
 echo ""
 
 if ! command -v node &>/dev/null; then
@@ -79,9 +80,8 @@ ENVEOF
 echo "[OK] Written: $ENV_FILE"
 
 echo ""
-echo "[INFO] Starting required Docker scale services..."
-"$ROOT/run/sh/scale-services.sh" up
-echo "[OK] Required scale services ready"
+echo "[INFO] Skipping shell scale-service bootstrap."
+echo "       Windows launchers now own Docker service startup automatically."
 
 echo ""
 echo "[INFO] Installing backend dependencies..."

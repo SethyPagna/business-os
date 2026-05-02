@@ -4,6 +4,10 @@ import {
   __resetApiWriteDedupeForTests,
   apiFetch,
   buildApiRequestDedupeKey,
+  createApiVersionMismatchError,
+  shouldCompareRuntimeVersions,
+  isApiVersionMismatchError,
+  isRequiredRuntimeApiPath,
   setAuthSessionToken,
   setSyncServerUrl,
   setSyncToken,
@@ -107,6 +111,50 @@ await runTest('import job delete prefers canonical DELETE route with legacy fall
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   assert.match(source, /deleteImportJob\s*=\s*\(id,[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{encodedId\}/)
   assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
+})
+
+await runTest('empty local mirrors are not treated as usable server read fallback data', () => {
+  const source = fs.readFileSync(new URL('../src/api/http.js', import.meta.url), 'utf8')
+  assert.match(source, /if\s*\(\s*Array\.isArray\(value\)\s*\)\s*return\s+value\.length\s*>\s*0/)
+})
+
+await runTest('required paged search APIs are classified as runtime contract routes', () => {
+  assert.equal(isRequiredRuntimeApiPath('/api/products/search?page=1&pageSize=20'), true)
+  assert.equal(isRequiredRuntimeApiPath('/api/products/filters'), true)
+  assert.equal(isRequiredRuntimeApiPath('/api/inventory/products/search?page=1'), true)
+  assert.equal(isRequiredRuntimeApiPath('/api/portal/catalog/products/search?page=1'), true)
+  assert.equal(isRequiredRuntimeApiPath('/api/products'), false)
+})
+
+await runTest('api version mismatch errors are explicit and detectable', () => {
+  const error = createApiVersionMismatchError('/api/products/search?page=1', 404)
+  assert.equal(error.code, 'api_version_mismatch')
+  assert.equal(error.reason, 'missing_required_api')
+  assert.equal(error.status, 404)
+  assert.equal(isApiVersionMismatchError(error), true)
+})
+
+await runTest('runtime version guard compares served frontend metadata, not backend source revision', () => {
+  const frontend = { revision: 'browser-rev', hash: 'browser-hash' }
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+    frontend: { revision: 'browser-rev', hash: 'browser-hash' },
+  }, frontend), false)
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+    frontend: { revision: 'server-frontend-rev', hash: 'server-frontend-hash' },
+  }, frontend), true)
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+  }, frontend), false)
+})
+
+await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(source, /return route\(`products:search:\$\{q\}`,\s*\(\) => apiFetch\('GET', `\/api\/products\/search/)
+  assert.match(source, /return route\(`inventory:products:search:\$\{q\}`,\s*\(\) => apiFetch\('GET', `\/api\/inventory\/products\/search/)
+  assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
+  assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
 })
 
 if (failed > 0) {

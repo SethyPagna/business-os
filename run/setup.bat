@@ -1,5 +1,5 @@
 @echo off
-chcp 1252 >nul 2>&1
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM ========================================================================
@@ -29,8 +29,8 @@ echo ========================================================================
 echo   Business OS  ^|  Setup
 echo ========================================================================
 echo.
-echo   Run ONCE to install dependencies and build the frontend.
-echo   After setup, use run\start-server.bat to launch.
+echo   Run ONCE on a source checkout to install dependencies and build the frontend.
+echo   After setup, double-click Start Business OS.bat to launch.
 echo.
 
 REM ---- Workstation/runtime bootstrap --------------------------------------
@@ -40,6 +40,7 @@ if errorlevel 1 (
     echo.
     echo [ERROR] Runtime bootstrap failed.
     echo         Finish any installer, administrator, Docker Desktop, or restart prompt, then run run\setup.bat again.
+    echo         Support command: run\docker\doctor.bat
     echo.
     pause
     exit /b 1
@@ -294,9 +295,13 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo SQLITE_SYNCHRONOUS=NORMAL
     echo IMPORT_QUEUE_CONCURRENCY=1
     echo MEDIA_QUEUE_CONCURRENCY=4
+    echo IMPORT_WORKER_REPLICAS=2
+    echo MEDIA_WORKER_REPLICAS=2
     echo IMPORT_ROW_BATCH_SIZE=400
     echo IMPORT_BATCH_PAUSE_MS=20
     echo IMPORT_IMAGE_CONCURRENCY=4
+    echo SEARCH_CACHE_TTL_SECONDS=15
+    echo POSTGRES_ENABLE_SEARCH_EXTENSIONS=1
     echo UPLOAD_CHUNK_MB=12
     echo IMPORT_MAX_CSV_MB=80
     echo IMPORT_MAX_ZIP_MB=2048
@@ -366,9 +371,10 @@ echo   SETUP COMPLETE
 echo ========================================================================
 echo.
 echo   Next steps:
-echo     1. Run run\start-server.bat  to launch the server
-echo     2. Open http://localhost:4000 in your browser
-echo     3. Default login: admin / admin  ^(change after first login^)
+echo     1. Double-click Start Business OS.bat
+echo     2. Support only: run\docker\doctor.bat if startup fails
+echo     3. Open http://localhost:4000 in your browser
+echo     4. Default login: admin / admin  ^(change after first login^)
 echo.
 echo   Data stored at: %DATA_DIR%
 echo.

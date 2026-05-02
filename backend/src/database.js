@@ -1189,6 +1189,7 @@ function buildDefaultSettingsSeed(defaultOrganizationContext = null) {
   { key: 'customer_portal_about_title', value: 'About us' },
   { key: 'customer_portal_about_content', value: '' },
   { key: 'customer_portal_about_blocks', value: '[]' },
+  { key: 'customer_portal_translations', value: '{}' },
   { key: 'customer_portal_hero_gradient_start', value: '#0f172a' },
   { key: 'customer_portal_hero_gradient_mid', value: '#14532d' },
   { key: 'customer_portal_hero_gradient_end', value: '#ea580c' },
@@ -1266,6 +1267,7 @@ const SUPPLEMENTAL_SETTINGS_DEFAULTS = [
   ['customer_portal_about_title', 'About us'],
   ['customer_portal_about_content', ''],
   ['customer_portal_about_blocks', '[]'],
+  ['customer_portal_translations', '{}'],
   ['customer_portal_ai_enabled', 'true'],
   ['customer_portal_ai_title', 'Beauty Assistant'],
   ['customer_portal_ai_intro', 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.'],
@@ -1363,6 +1365,13 @@ try {
 
 try {
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_active_initial
+    ON products(is_active, upper(substr(trim(name), 1, 1)), id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_products_parent_active
     ON products(parent_id, is_active, id)
   `)
@@ -1393,6 +1402,13 @@ try {
 
 try {
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_products_supplier_active
+    ON products(lower(trim(supplier)), is_active, id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_products_discount_active
     ON products(discount_enabled, is_active, updated_at DESC, id DESC)
   `)
@@ -1402,6 +1418,13 @@ try {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_branch_stock_branch_product
     ON branch_stock(branch_id, product_id)
+  `)
+} catch (_) {}
+
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_branch_stock_product_branch
+    ON branch_stock(product_id, branch_id)
   `)
 } catch (_) {}
 

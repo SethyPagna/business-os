@@ -1,7 +1,7 @@
 ﻿// ?? Inventory ????????????????????????????????????????????????????????????????
 // Main Inventory page ??sub-components imported from sibling files.
 
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
 import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -12,7 +12,7 @@ import { formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
+import PaginationControls from '../shared/PaginationControls.jsx'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
@@ -21,6 +21,8 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
+import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -47,11 +49,11 @@ export default function Inventory() {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('inventory')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
-  const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
+  const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
-  }
+  }, [isKhmer, t])
   const [summary,       setSummary]       = useState([])
   const [movements,     setMovements]     = useState([])
   const [branches,      setBranches]      = useState([])
@@ -63,11 +65,17 @@ export default function Inventory() {
   const [moveModal,     setMoveModal]     = useState(null)
   const [moveForm,      setMoveForm]      = useState({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
   const [search,        setSearch]        = useState('')
+  const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
+  const deferredSearch = useDeferredValue(search)
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
   const [groupFilter,   setGroupFilter]   = useState('all')
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
-  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(50)
+  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
+  const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
+  const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
+  const [inventoryInitials, setInventoryInitials] = useState([])
+  const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
   const [tab,           setTab]           = useState('products')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementYearFilter, setMovementYearFilter] = useState('all')
@@ -112,22 +120,52 @@ export default function Inventory() {
         }
       }
       const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}
+      const productQuery = {
+        ...branchOpts,
+        page: inventoryProductPage,
+        pageSize: inventoryProductPageSize,
+        query: deferredSearch,
+        searchMode,
+        brand: brandFilter,
+        stockState: stockFilter,
+        groupState: groupFilter,
+        initial: inventoryInitialFilter,
+      }
       try {
         const result = await settleLoaderMap({
-          summary: () => window.api.getInventorySummary(branchOpts),
+          summary: () => window.api.searchInventoryProducts(productQuery),
           movements: () => window.api.getInventoryMovements(branchOpts),
           branches: () => window.api.getBranches(),
           returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
           dashboard: () => window.api.getDashboard().catch(() => ({})),
         })
-        const sum = result.values.summary
+        const sumResult = result.values.summary
+        const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
         const brs = result.values.branches
         const rets = result.values.returns
         const dash = result.values.dashboard
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        if (Array.isArray(sum)) setSummary(sum || [])
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        if (versionMismatchError) {
+          setLoadError(versionMismatchError.message)
+          throw versionMismatchError
+        }
+        if (Array.isArray(sum)) {
+          setSummary(sum || [])
+          if (sumResult && !Array.isArray(sumResult)) {
+            setInventoryProductTotal(Number(sumResult.total || 0))
+            setInventoryProductPage(Number(sumResult.page || inventoryProductPage) || 1)
+            setInventoryProductPageSize(Number(sumResult.pageSize || inventoryProductPageSize) || inventoryProductPageSize)
+            setInventoryInitials(Array.isArray(sumResult.initials) ? sumResult.initials : [])
+            setInventoryProductFilters(sumResult.filters && typeof sumResult.filters === 'object' ? sumResult.filters : { brands: [] })
+          } else {
+            setInventoryProductTotal(sum.length)
+            setInventoryInitials([])
+            setInventoryProductFilters({ brands: [] })
+          }
+        }
         if (Array.isArray(movs)) setMovements(movs || [])
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
         if (dash && typeof dash === 'object') {
@@ -177,7 +215,18 @@ export default function Inventory() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, tr])
+  }, [
+    branchFilter,
+    brandFilter,
+    deferredSearch,
+    groupFilter,
+    inventoryInitialFilter,
+    inventoryProductPage,
+    inventoryProductPageSize,
+    searchMode,
+    stockFilter,
+    tr,
+  ])
 
   useEffect(() => {
     if (!isActive) {
@@ -367,11 +416,9 @@ export default function Inventory() {
     }
   }
 
-  const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
-
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
-  const searchTerms = search.trim()
-    ? search.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const searchTerms = deferredSearch.trim()
+    ? deferredSearch.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : []
 
   const matchesSearch = (hay) => {
@@ -404,11 +451,11 @@ export default function Inventory() {
 
   useEffect(() => {
     setInventoryProductPage(1)
-  }, [branchFilter, brandFilter, groupFilter, search, searchMode, stockFilter, tab])
+  }, [branchFilter, brandFilter, deferredSearch, groupFilter, inventoryInitialFilter, searchMode, stockFilter, tab])
 
   const pagedSummary = useMemo(
-    () => paginateItems(filteredSummary, inventoryProductPage, inventoryProductPageSize),
-    [filteredSummary, inventoryProductPage, inventoryProductPageSize],
+    () => filteredSummary,
+    [filteredSummary],
   )
 
   const filteredMovements = movements.filter(m => {
@@ -526,7 +573,7 @@ export default function Inventory() {
     return qty > 0 && qty <= p.low_stock_threshold
   }).length
   const outStockCount = filteredSummary.filter(p => getStockQty(p) <= (p.out_of_stock_threshold || 0)).length
-  const totalProducts = summary.length
+  const totalProducts = inventoryProductTotal || summary.length
   const totalQtySold  = filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0)
   const totalRevenue  = filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0)
   const totalCOGS     = filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0)
@@ -699,7 +746,14 @@ export default function Inventory() {
       ],
     },
   ]
-  const inventoryBrands = [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const inventoryBrands = (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
+    ? inventoryProductFilters.brands
+    : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
+  ).sort((a, b) => a.localeCompare(b))
+  const inventoryInitialOptions = useMemo(
+    () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []),
+    [inventoryInitials],
+  )
   const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const movementDateRangeLabel = useMemo(() => {
@@ -1442,14 +1496,16 @@ export default function Inventory() {
       brandFilter !== 'all',
       groupFilter !== 'all',
       stockFilter !== 'all',
+      inventoryInitialFilter !== 'all',
     ].filter(Boolean).length
-  }, [branchFilter, brandFilter, groupFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
+  }, [branchFilter, brandFilter, groupFilter, inventoryInitialFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
     setGroupFilter('all')
     setStockFilter('all')
+    setInventoryInitialFilter('all')
     setMovFilter('all')
     setMovementYearFilter('all')
     setMovementMonthFilter('all')
@@ -1715,6 +1771,29 @@ export default function Inventory() {
         </p>
       )}
 
+      {tab === 'products' && inventoryInitialOptions.length ? (
+        <div className="mb-2 flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 text-xs dark:border-gray-700 dark:bg-gray-800">
+          <button
+            type="button"
+            className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            onClick={() => setInventoryInitialFilter('all')}
+          >
+            {t('all') || 'All'}
+          </button>
+          {inventoryInitialOptions.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+              onClick={() => setInventoryInitialFilter(inventoryInitialFilter === item.key ? 'all' : item.key)}
+              title={`${item.label} (${item.count})`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
@@ -1730,7 +1809,7 @@ export default function Inventory() {
             className="mb-3"
             page={inventoryProductPage}
             pageSize={inventoryProductPageSize}
-            totalItems={filteredSummary.length}
+            totalItems={totalProducts}
             label={t('products') || 'products'}
             t={t}
             onPageChange={setInventoryProductPage}

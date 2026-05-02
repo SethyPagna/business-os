@@ -19,6 +19,7 @@ export default function ManageCategoriesModal({ onClose, t }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
   const { notify } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -30,6 +31,7 @@ export default function ManageCategoriesModal({ onClose, t }) {
       const data = await withLoaderTimeout(() => window.api.getCategories(), 'Categories')
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setCats(Array.isArray(data) ? data : [])
+      setSelectedIds(new Set())
       setErr('')
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -95,9 +97,58 @@ export default function ManageCategoriesModal({ onClose, t }) {
     try {
       const category = cats.find((item) => Number(item.id) === Number(id))
       await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined })
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(Number(id))
+        return next
+      })
       load()
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const toggleSelected = (id) => {
+    const numericId = Number(id)
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(numericId)) next.delete(numericId)
+      else next.add(numericId)
+      return next
+    })
+  }
+
+  const toggleAllVisible = () => {
+    setSelectedIds((current) => {
+      const visibleIds = cats.map((category) => Number(category.id))
+      const allSelected = visibleIds.length > 0 && visibleIds.every((id) => current.has(id))
+      const next = new Set(current)
+      for (const id of visibleIds) {
+        if (allSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleDeleteSelected = async () => {
+    if (saving || deletingId || selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} selected categor${selectedIds.size === 1 ? 'y' : 'ies'}?`)) return
+    const ids = Array.from(selectedIds)
+    setDeletingId('selected')
+    try {
+      for (const id of ids) {
+        const category = cats.find((item) => Number(item.id) === Number(id))
+        if (!category) continue
+        await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined })
+      }
+      notify(`Deleted ${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}`, 'success')
+      setSelectedIds(new Set())
+      load()
+    } catch (error) {
+      notify(error?.message || 'Failed to delete selected categories', 'error')
     } finally {
       setDeletingId(null)
     }
@@ -139,6 +190,26 @@ export default function ManageCategoriesModal({ onClose, t }) {
 
         <div className="max-h-80 space-y-2 overflow-auto">
           {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
+          {!loading && cats.length > 0 ? (
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+              <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={cats.length > 0 && cats.every((category) => selectedIds.has(Number(category.id)))}
+                  onChange={toggleAllVisible}
+                />
+                <span>{selectedIds.size ? `${selectedIds.size} selected` : 'Select visible'}</span>
+              </label>
+              <button
+                type="button"
+                className="text-xs font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400"
+                onClick={handleDeleteSelected}
+                disabled={!selectedIds.size || saving || deletingId != null}
+              >
+                {deletingId === 'selected' ? (t('deleting') || 'Deleting...') : 'Delete selected'}
+              </button>
+            </div>
+          ) : null}
           {cats.map((category) => (
             <div key={category.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-2 dark:border-gray-700">
               {editing?.id === category.id ? (
@@ -167,6 +238,13 @@ export default function ManageCategoriesModal({ onClose, t }) {
                 </>
               ) : (
                 <>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(Number(category.id))}
+                    onChange={() => toggleSelected(category.id)}
+                    disabled={saving || deletingId != null}
+                    aria-label={`Select ${category.name}`}
+                  />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
                   <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{category.name}</span>
                   <button

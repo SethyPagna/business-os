@@ -24,9 +24,122 @@ function getStockTransferNoteColumn() {
   return null
 }
 
+function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function getDefaultBranch() {
+  return db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1').get() || null
+}
+
+function buildBranchStockWhere(req) {
+  const where = ['p.is_active = 1', '(p.parent_id IS NULL OR p.parent_id = 0)']
+  const params = { branchId: Number.parseInt(req.params.id, 10) }
+  const query = String(req.query?.query || req.query?.q || '').normalize('NFC').trim()
+  if (query) {
+    params.query = `%${query.toLowerCase()}%`
+    where.push(`(
+      lower(COALESCE(p.name, '')) LIKE @query
+      OR lower(COALESCE(p.sku, '')) LIKE @query
+      OR lower(COALESCE(p.barcode, '')) LIKE @query
+      OR lower(COALESCE(p.brand, '')) LIKE @query
+      OR lower(COALESCE(p.category, '')) LIKE @query
+    )`)
+  }
+  const stockState = String(req.query?.stockState || req.query?.stock_state || 'positive').toLowerCase()
+  if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > 0')
+  if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
+  if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
+  if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
+  return { where, params, stockState }
+}
+
 // GET /api/branches
 router.get('/', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all())
+})
+
+// GET /api/branches/stock-integrity
+router.get('/stock-integrity', authToken, requirePermission('inventory'), (_req, res) => {
+  const defaultBranch = getDefaultBranch()
+  if (!defaultBranch) return ok(res, { defaultBranch: null, issues: [], preview_token: null })
+  const rows = db.prepare(`
+    SELECT bs.product_id, p.name AS product_name, bs.branch_id, b.name AS branch_name, bs.quantity,
+           COALESCE(default_bs.quantity, 0) AS default_quantity
+    FROM branch_stock bs
+    JOIN products p ON p.id = bs.product_id
+    JOIN branches b ON b.id = bs.branch_id
+    LEFT JOIN branch_stock default_bs ON default_bs.product_id = bs.product_id AND default_bs.branch_id = ?
+    WHERE bs.branch_id != ?
+      AND COALESCE(bs.quantity, 0) > 0
+      AND p.is_active = 1
+    ORDER BY b.name COLLATE NOCASE ASC, p.name COLLATE NOCASE ASC
+    LIMIT 5000
+  `).all(defaultBranch.id, defaultBranch.id)
+  const previewPayload = JSON.stringify(rows.map((row) => [row.product_id, row.branch_id, row.quantity]))
+  const previewToken = require('crypto').createHash('sha256').update(`${defaultBranch.id}:${previewPayload}`).digest('hex')
+  ok(res, {
+    defaultBranch,
+    issues: rows,
+    summary: {
+      misplacedRows: rows.length,
+      totalQuantity: rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0),
+    },
+    preview_token: previewToken,
+  })
+})
+
+// POST /api/branches/stock-integrity/repair
+router.post('/stock-integrity/repair', authToken, requirePermission('inventory'), (req, res) => {
+  const actor = getAuditActor(req, req.body || {})
+  const defaultBranch = getDefaultBranch()
+  if (!defaultBranch) return err(res, 'Default branch required')
+  const rows = db.prepare(`
+    SELECT bs.product_id, bs.branch_id, bs.quantity
+    FROM branch_stock bs
+    JOIN products p ON p.id = bs.product_id
+    WHERE bs.branch_id != ?
+      AND COALESCE(bs.quantity, 0) > 0
+      AND p.is_active = 1
+    ORDER BY bs.product_id ASC, bs.branch_id ASC
+  `).all(defaultBranch.id)
+  const previewPayload = JSON.stringify(rows.map((row) => [row.product_id, row.branch_id, row.quantity]))
+  const previewToken = require('crypto').createHash('sha256').update(`${defaultBranch.id}:${previewPayload}`).digest('hex')
+  if (!req.body?.confirm || req.body?.preview_token !== previewToken) {
+    return err(res, 'Run stock integrity check first, then confirm the matching preview token.')
+  }
+  const repaired = db.transaction(() => {
+    const insertDefault = db.prepare(`
+      INSERT INTO branch_stock (product_id, branch_id, quantity)
+      VALUES (?, ?, ?)
+      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity
+    `)
+    const clearSource = db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ? AND branch_id = ?')
+    const recalc = db.prepare(`
+      UPDATE products SET
+        stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = ?),
+        updated_at = datetime('now')
+      WHERE id = ?
+    `)
+    const touched = new Set()
+    rows.forEach((row) => {
+      insertDefault.run(row.product_id, defaultBranch.id, Number(row.quantity || 0))
+      clearSource.run(row.product_id, row.branch_id)
+      touched.add(row.product_id)
+    })
+    touched.forEach((productId) => recalc.run(productId, productId))
+    audit(actor.userId, actor.userName, 'repair', 'branch_stock_integrity', defaultBranch.id, {
+      movedRows: rows.length,
+      defaultBranchId: defaultBranch.id,
+    })
+    return { movedRows: rows.length, productCount: touched.size }
+  })()
+  broadcast('branches')
+  broadcast('products')
+  broadcast('inventory')
+  ok(res, repaired)
 })
 
 // POST /api/branches
@@ -108,7 +221,9 @@ router.delete('/:id', authToken, requirePermission('inventory'), (req, res) => {
 
 // GET /api/branches/:id/stock
 router.get('/:id/stock', authToken, (req, res) => {
-  const rows = db.prepare(`
+  const wantsPaged = req.query && Object.keys(req.query).some((key) => ['page', 'pageSize', 'page_size', 'query', 'q', 'stockState', 'stock_state'].includes(key))
+  if (!wantsPaged) {
+    const rows = db.prepare(`
     SELECT p.id, p.name, p.sku, p.unit, p.selling_price_usd, p.selling_price_khr,
            p.purchase_price_usd, p.purchase_price_khr, p.low_stock_threshold, p.out_of_stock_threshold,
            COALESCE(bs.quantity, 0) AS branch_quantity
@@ -116,8 +231,49 @@ router.get('/:id/stock', authToken, (req, res) => {
     LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = ?
     WHERE p.is_active = 1 AND (p.parent_id IS NULL OR p.parent_id = 0)
     ORDER BY p.name
-  `).all(req.params.id)
-  res.json(rows)
+    `).all(req.params.id)
+    return res.json(rows)
+  }
+  const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
+  const pageSize = normalizePositiveInt(req.query.pageSize || req.query.page_size, 20, { min: 1, max: 100 })
+  const offset = (page - 1) * pageSize
+  const { where, params, stockState } = buildBranchStockWhere(req)
+  const whereSql = `WHERE ${where.join(' AND ')}`
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM products p
+    LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
+    ${whereSql}
+  `).get(params)?.count || 0
+  const summary = db.prepare(`
+    SELECT
+      SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN 1 ELSE 0 END) AS positive_products,
+      COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) ELSE 0 END), 0) AS positive_quantity,
+      COALESCE(SUM(CASE WHEN COALESCE(bs.quantity, 0) > 0 THEN COALESCE(bs.quantity, 0) * COALESCE(p.purchase_price_usd, p.cost_price_usd, 0) ELSE 0 END), 0) AS positive_value_usd
+    FROM products p
+    LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
+    WHERE p.is_active = 1 AND (p.parent_id IS NULL OR p.parent_id = 0)
+  `).get(params) || {}
+  const items = db.prepare(`
+    SELECT p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
+           p.purchase_price_usd, p.purchase_price_khr, p.cost_price_usd, p.cost_price_khr,
+           p.low_stock_threshold, p.out_of_stock_threshold,
+           COALESCE(bs.quantity, 0) AS branch_quantity
+    FROM products p
+    LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId
+    ${whereSql}
+    ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+    LIMIT @pageSize OFFSET @offset
+  `).all({ ...params, pageSize, offset })
+  ok(res, {
+    items,
+    total,
+    page,
+    pageSize,
+    stockState,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    summary,
+  })
 })
 
 // GET /api/transfers

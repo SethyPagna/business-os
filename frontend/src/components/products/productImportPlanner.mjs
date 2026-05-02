@@ -207,12 +207,28 @@ function buildExistingIndex(existingProducts = []) {
   return { byName, bySku, byBarcode }
 }
 
+function buildImportedIdentifierIndex(rows = []) {
+  const bySku = new Map()
+  const byBarcode = new Map()
+  const add = (map, key, rowIndex) => {
+    if (!key) return
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(rowIndex)
+  }
+  ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const rowIndex = Number(row?._import_row_index ?? index)
+    add(bySku, normalizeComparableText(row?.sku), rowIndex)
+    add(byBarcode, normalizeComparableText(row?.barcode), rowIndex)
+  })
+  return { bySku, byBarcode }
+}
+
 export function analyzeProductImportRows(rows = [], existingProducts = []) {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .map((row, index) => normalizeProductImportRow(row, index))
-    .filter((row) => normalizeText(row.name))
 
   const { byName, bySku, byBarcode } = buildExistingIndex(existingProducts)
+  const importedIdentifiers = buildImportedIdentifierIndex(normalizedRows)
   const firstPlannedByName = new Map()
   const signatureOwnerByName = new Map()
   const decisions = {}
@@ -222,22 +238,58 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
 
   normalizedRows.forEach((row, index) => {
     const rowIndex = Number(row._import_row_index ?? index)
+    if (!normalizeText(row.name)) {
+      const plannedRow = {
+        ...row,
+        _planned_action: 'skip_row',
+        _target_product_id: null,
+        _parent_id: null,
+        _detail_signature: '',
+        _identifier_conflict_mode: '',
+      }
+      normalizedRows[index] = plannedRow
+      decisions[rowIndex] = 'skip_row'
+      conflicts.push({
+        id: rowIndex,
+        row: plannedRow,
+        index: rowIndex,
+        existing: null,
+        plannedAction: 'skip_row',
+        conflictType: 'missing_name',
+        conflictFields: ['errors'],
+        issueTypes: ['missing_name'],
+        sameBasic: false,
+        samePricing: false,
+        sameImages: true,
+        incomingImages: [],
+        existingImages: [],
+      })
+      errors.push(`Row ${plannedRow._rowNumber}: product name required`)
+      return
+    }
     const nameKey = normalizeImportProductName(row.name)
     const skuKey = normalizeComparableText(row.sku)
     const barcodeKey = normalizeComparableText(row.barcode)
     const sameNameProducts = byName.get(nameKey) || []
     const skuMatch = skuKey ? bySku.get(skuKey) : null
     const barcodeMatch = barcodeKey ? byBarcode.get(barcodeKey) : null
+    const sameFileSkuRows = skuKey ? (importedIdentifiers.bySku.get(skuKey) || []) : []
+    const sameFileBarcodeRows = barcodeKey ? (importedIdentifiers.byBarcode.get(barcodeKey) || []) : []
+    const sameFileIdentifierFields = [
+      sameFileSkuRows.length > 1 ? 'sku' : '',
+      sameFileBarcodeRows.length > 1 ? 'barcode' : '',
+    ].filter(Boolean)
     const identifierMatch = skuMatch || barcodeMatch || null
     const identifierMatchSameName = identifierMatch && normalizeImportProductName(identifierMatch.name) === nameKey
     const identifierMatchFields = [
-      skuMatch ? 'sku' : '',
-      barcodeMatch ? 'barcode' : '',
+      (skuMatch || sameFileSkuRows.length > 1) ? 'sku' : '',
+      (barcodeMatch || sameFileBarcodeRows.length > 1) ? 'barcode' : '',
     ].filter(Boolean)
-    const identifierConflictFields = [
+    const identifierConflictFields = Array.from(new Set([
       skuMatch && !identifierMatchSameName ? 'sku' : '',
       barcodeMatch && !identifierMatchSameName ? 'barcode' : '',
-    ].filter(Boolean)
+      ...sameFileIdentifierFields,
+    ].filter(Boolean)))
     const existingCandidates = skuMatch && normalizeImportProductName(skuMatch.name) === nameKey
       ? [skuMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(skuMatch.id))]
       : barcodeMatch && normalizeImportProductName(barcodeMatch.name) === nameKey
@@ -256,7 +308,7 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     } else if (existingCandidates.length) {
       plannedAction = 'create_variant'
       parentId = Number(parent?.parent_id || parent?.id || 0) || null
-    } else if (identifierConflictFields.length) {
+    } else if (identifierConflictFields.length && !sameFileIdentifierFields.length) {
       plannedAction = 'new'
     } else {
       const signatureOwners = signatureOwnerByName.get(nameKey) || new Map()
@@ -296,6 +348,10 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         plannedAction,
         conflictType: identifierConflictFields.length ? 'identifier' : (identifierMatchFields.length ? 'same_name_identifier' : 'same_name'),
         conflictFields: identifierMatchFields,
+        importDuplicateRows: {
+          sku: sameFileSkuRows,
+          barcode: sameFileBarcodeRows,
+        },
         sameBasic: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         samePricing: plannedAction === 'merge_stock' || plannedAction === 'link_variant',
         sameImages: true,
@@ -303,8 +359,6 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         existingImages: [],
       })
     }
-
-    if (!plannedRow.name) errors.push(`Row ${plannedRow._rowNumber}: product name required`)
   })
 
   return {
