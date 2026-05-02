@@ -490,6 +490,109 @@ function getProductConflictForReview(row = {}, index, importState = null) {
   }
 }
 
+function getReviewRowNumber(row = {}, fallback = null) {
+  const value = Number(row?._rowNumber || fallback || 0)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function summarizeImportReviewRow(row = {}, conflict = {}) {
+  return {
+    rowNumber: getReviewRowNumber(row),
+    name: normalizeText(row.name),
+    sku: normalizeText(row.sku),
+    barcode: normalizeText(row.barcode),
+    brand: normalizeText(row.brand),
+    category: normalizeText(row.category),
+    unit: normalizeText(row.unit),
+    supplier: normalizeText(row.supplier),
+    branch: normalizeText(row.branch),
+    stock_quantity: row.stock_quantity ?? '',
+    selling_price_usd: row.selling_price_usd ?? '',
+    purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
+    plannedAction: conflict.plannedAction || row._action || row._planned_action || '',
+    fields: conflict.fields || [],
+    issueTypes: conflict.issueTypes || [],
+  }
+}
+
+function addProductReviewGroup(groupsByName, row = {}, conflict = {}) {
+  const nameKey = normalizeReviewIdentifier(row.name)
+  if (!nameKey) return
+  if (!groupsByName.has(nameKey)) {
+    groupsByName.set(nameKey, {
+      key: nameKey,
+      title: normalizeText(row.name),
+      rowNumbers: [],
+      rows: [],
+      fields: new Set(),
+      issueTypes: new Set(['same_name']),
+      subgroupsBySignature: new Map(),
+      existingMatches: new Map(),
+    })
+  }
+  const group = groupsByName.get(nameKey)
+  const rowNumber = getReviewRowNumber(row)
+  let signature = ''
+  try {
+    signature = normalizeProductSignature(normalizeRowForProduct(row))
+  } catch (_) {
+    signature = `row-error:${rowNumber || group.rows.length}`
+  }
+  if (rowNumber) group.rowNumbers.push(rowNumber)
+  ;(conflict.fields || []).forEach((field) => group.fields.add(field))
+  ;(conflict.issueTypes || []).forEach((issueType) => group.issueTypes.add(issueType))
+  if (conflict.existing?.id) group.existingMatches.set(Number(conflict.existing.id), conflict.existing)
+  group.rows.push(summarizeImportReviewRow(row, conflict))
+  if (!group.subgroupsBySignature.has(signature)) {
+    group.subgroupsBySignature.set(signature, {
+      signature,
+      rowNumbers: [],
+      rows: [],
+      fields: new Set(),
+      issueTypes: new Set(),
+    })
+  }
+  const subgroup = group.subgroupsBySignature.get(signature)
+  if (rowNumber) subgroup.rowNumbers.push(rowNumber)
+  ;(conflict.fields || []).forEach((field) => subgroup.fields.add(field))
+  ;(conflict.issueTypes || []).forEach((issueType) => subgroup.issueTypes.add(issueType))
+  subgroup.rows.push(summarizeImportReviewRow(row, conflict))
+}
+
+function finalizeProductReviewGroups(groupsByName) {
+  return Array.from(groupsByName.values())
+    .filter((group) => group.rowNumbers.length > 1)
+    .map((group) => {
+      const subgroups = Array.from(group.subgroupsBySignature.values())
+        .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
+        .map((subgroup, index, all) => ({
+          signature: subgroup.signature,
+          rowNumbers: subgroup.rowNumbers,
+          fields: Array.from(subgroup.fields),
+          issueTypes: Array.from(subgroup.issueTypes),
+          suggestedAction: subgroup.rowNumbers.length > 1
+            ? 'merge_stock'
+            : all.length > 1 || index > 0
+              ? 'create_variant'
+              : 'new',
+          rows: subgroup.rows,
+        }))
+      return {
+        key: group.key,
+        groupId: `name:${group.key}`,
+        title: group.title,
+        issueTypes: Array.from(group.issueTypes),
+        fields: Array.from(group.fields),
+        rowNumbers: group.rowNumbers,
+        rows: group.rows,
+        subgroups,
+        suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
+        existing: Array.from(group.existingMatches.values()),
+      }
+    })
+    .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
+}
+
 function buildContactReviewIndex(type) {
   const table = type === 'suppliers' ? 'suppliers' : type === 'delivery_contacts' ? 'delivery_contacts' : 'customers'
   const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id ASC`).all()
@@ -577,19 +680,57 @@ function getGenericImportConflictForReview(row = {}, type) {
 function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
   const rowNumber = String(row?._rowNumber || '')
   const zeroBased = String(Math.max(0, Number(row?._rowNumber || 2) - 2))
-  const decision = decisionsByRow[rowNumber] || decisionsByRow[zeroBased] || null
+  const groupKey = normalizeReviewIdentifier(row?.name)
+  const groupDecision = groupKey
+    ? (decisionsByRow.__groups?.[groupKey] || decisionsByRow.__groups?.[`name:${groupKey}`] || null)
+    : null
+  const rowDecision = decisionsByRow[rowNumber] || decisionsByRow[zeroBased] || null
+  const decision = groupDecision || rowDecision
   if (!decision || typeof decision !== 'object') return row
+  const mergedDecision = groupDecision && rowDecision && typeof rowDecision === 'object'
+    ? { ...groupDecision, ...rowDecision }
+    : decision
   const next = { ...row }
   ;['_action', '_target_product_id', '_parent_id', '_identifier_conflict_mode', 'image_conflict_mode', '_conflict_mode'].forEach((key) => {
-    if (decision[key] != null) next[key] = decision[key]
+    if (mergedDecision[key] != null) next[key] = mergedDecision[key]
   })
-  if (decision.field_rules || decision._field_rules) {
-    next._field_rules = typeof (decision.field_rules || decision._field_rules) === 'string'
-      ? (decision.field_rules || decision._field_rules)
-      : stringify(decision.field_rules || decision._field_rules)
+  const fieldOverrides = mergedDecision.field_overrides || mergedDecision.overrides || mergedDecision.fields || null
+  if (fieldOverrides && typeof fieldOverrides === 'object' && !Array.isArray(fieldOverrides)) {
+    ;['name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description', 'supplier', 'branch'].forEach((key) => {
+      if (fieldOverrides[key] != null) next[key] = fieldOverrides[key]
+    })
   }
-  const normalizedDecision = normalizeLookup(decision.decision || decision._decision || '')
-  const decisionValue = normalizeText(decision.decision_value || decision.value || '')
+  if (mergedDecision.field_rules || mergedDecision._field_rules) {
+    next._field_rules = typeof (mergedDecision.field_rules || mergedDecision._field_rules) === 'string'
+      ? (mergedDecision.field_rules || mergedDecision._field_rules)
+      : stringify(mergedDecision.field_rules || mergedDecision._field_rules)
+  }
+  const normalizedAction = normalizeLookup(mergedDecision.action || mergedDecision.import_action || mergedDecision._action || '')
+  if (normalizedAction === 'create_variant') next._action = 'create_variant'
+  if (normalizedAction === 'merge_stock' || normalizedAction === 'add_stock') next._action = 'merge_stock'
+  if (normalizedAction === 'create_new' || normalizedAction === 'new') next._action = 'new'
+  if (normalizedAction === 'skip_row' || normalizedAction === 'skip') next._action = 'skip_row'
+  if (normalizedAction === 'link_variant') next._action = 'link_variant'
+
+  const normalizedIdentifierDecision = normalizeLookup(
+    mergedDecision.identifier_decision
+    || mergedDecision.identifierDecision
+    || mergedDecision.identifier_mode
+    || mergedDecision._identifier_conflict_mode
+    || '',
+  )
+  if (['allow_duplicate', 'allow_duplicates', 'keep_barcode', 'keep_sku', 'keep_same', 'same_barcode'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'allow_duplicate'
+  }
+  if (['clear', 'clear_imported', 'clear_barcode', 'clear_sku'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'clear_imported'
+  }
+  if (['fail', 'reject', 'error'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'fail'
+  }
+
+  const normalizedDecision = normalizeLookup(mergedDecision.decision || mergedDecision._decision || '')
+  const decisionValue = normalizeText(mergedDecision.decision_value || mergedDecision.value || '')
   if (normalizedDecision === 'allow_duplicate') next._identifier_conflict_mode = 'allow_duplicate'
   if (normalizedDecision === 'keep_barcode') next._identifier_conflict_mode = next._identifier_conflict_mode || 'allow_duplicate'
   if (normalizedDecision === 'clear_barcode') next.barcode = ''
@@ -607,7 +748,10 @@ function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
 function getImportDecisionMap(jobId) {
   const policy = getImportJob(jobId)?.policy || {}
   const decisions = policy.decisionsByRowNumber || policy.decisions_by_row_number || policy.decisions || {}
-  return decisions && typeof decisions === 'object' ? decisions : {}
+  const rows = decisions && typeof decisions === 'object' ? { ...decisions } : {}
+  const groups = policy.groupDecisionsByKey || policy.group_decisions || {}
+  if (groups && typeof groups === 'object') rows.__groups = groups
+  return rows
 }
 
 async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'all', query = '' } = {}) {
@@ -655,6 +799,7 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
   }
   const contactIndex = ['customers', 'suppliers', 'delivery_contacts'].includes(job.type) ? buildContactReviewIndex(job.type) : null
   const decisionsByRow = getImportDecisionMap(jobId)
+  const productGroupsByName = job.type === 'products' ? new Map() : null
   let matched = 0
   for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(200, IMPORT_ROW_BATCH_SIZE) })) {
     for (const sourceRow of batchRows) {
@@ -691,6 +836,9 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
         if (Object.prototype.hasOwnProperty.call(counts, issueType)) counts[issueType] += 1
       })
       if (conflict.type === 'new') counts.new += 1
+      if (productGroupsByName && normalizeReviewIdentifier(row.name)) {
+        addProductReviewGroup(productGroupsByName, row, conflict)
+      }
       if (!matchesReviewFilter(conflict, normalizedFilter)) continue
       if (!hasReviewQueryMatch(row, conflict, query)) continue
       matched += 1
@@ -711,6 +859,7 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
     pageSize: safePageSize,
     total: matched,
     counts,
+    groups: productGroupsByName ? finalizeProductReviewGroups(productGroupsByName) : [],
     rows,
   }
 }
@@ -723,7 +872,27 @@ function updateImportJobDecisions(jobId, decisions = {}) {
     ? policy.decisionsByRowNumber
     : {}
   const incoming = decisions && typeof decisions === 'object' ? decisions : {}
-  policy.decisionsByRowNumber = { ...current, ...incoming }
+  const incomingRows = incoming.rows && typeof incoming.rows === 'object'
+    ? incoming.rows
+    : incoming.byRow && typeof incoming.byRow === 'object'
+      ? incoming.byRow
+      : incoming.decisions && typeof incoming.decisions === 'object'
+        ? incoming.decisions
+        : incoming.groups
+          ? {}
+          : incoming
+  const incomingGroups = incoming.groups && typeof incoming.groups === 'object' ? incoming.groups : {}
+  const currentGroups = policy.groupDecisionsByKey && typeof policy.groupDecisionsByKey === 'object'
+    ? policy.groupDecisionsByKey
+    : {}
+  const normalizedGroups = {}
+  Object.entries(incomingGroups).forEach(([key, value]) => {
+    const normalizedKey = normalizeReviewIdentifier(String(key || '').replace(/^name:/i, ''))
+    if (!normalizedKey || !value || typeof value !== 'object') return
+    normalizedGroups[normalizedKey] = value
+  })
+  policy.decisionsByRowNumber = { ...current, ...incomingRows }
+  policy.groupDecisionsByKey = { ...currentGroups, ...normalizedGroups }
   updateJob(jobId, { policy_json: stringify(policy) })
   return getImportJob(jobId)
 }
@@ -833,24 +1002,6 @@ const DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 
 const MONEY_FIELDS = new Set([
@@ -1753,6 +1904,112 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
     imageLookup,
     actor,
   })
+}
+
+async function preflightImportJob(jobId) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const csvFile = getJobFiles(jobId, 'csv')[0]
+  if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) {
+    throw new Error('CSV file is required before preflight')
+  }
+  const decisionsByRow = getImportDecisionMap(jobId)
+  const failures = []
+  const warnings = []
+  const simulatedSignaturesByName = new Map()
+  const simulatedFamilyByName = new Set()
+  let checkedRows = 0
+
+  const addFailure = (row, message, code = 'preflight_failed') => {
+    failures.push({
+      rowNumber: getReviewRowNumber(row),
+      code,
+      name: normalizeText(row?.name),
+      message,
+    })
+  }
+
+  if (job.type !== 'products') {
+    return { ok: true, job, checkedRows: 0, failures, warnings, groups: [] }
+  }
+
+  const productIndex = buildProductReviewIndex()
+  const productImportState = await buildProductImportReviewState(csvFile)
+  const groupsByName = new Map()
+  for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(200, IMPORT_ROW_BATCH_SIZE) })) {
+    for (const sourceRow of batchRows) {
+      const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
+      checkedRows += 1
+      const actionLabel = normalizeLookup(row._action || row.action || row.decision || row._decision || '')
+      if (actionLabel === 'skip_row' || actionLabel === 'skip') continue
+      let conflict = null
+      let normalized = null
+      try {
+        normalized = normalizeRowForProduct(row)
+        conflict = getProductConflictForReview(row, productIndex, productImportState)
+        addProductReviewGroup(groupsByName, row, conflict)
+      } catch (error) {
+        addFailure(row, error?.message || 'Unable to preflight row')
+        continue
+      }
+      if (!normalized.name) {
+        addFailure(row, 'Product name required', 'missing_name')
+        continue
+      }
+      const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
+      if (isBlockingBarcodeIssue(barcodeIssue)) {
+        addFailure(row, `Invalid barcode "${normalized.barcode}". Clear it or change it in import review.`, barcodeIssue)
+        continue
+      }
+      if (barcodeIssue) {
+        warnings.push({
+          rowNumber: getReviewRowNumber(row),
+          code: barcodeIssue,
+          message: `Barcode "${normalized.barcode}" needs review but can be kept as text if you choose that decision.`,
+        })
+      }
+      const nameKey = normalizeReviewIdentifier(normalized.name)
+      const signature = normalizeProductSignature(normalized)
+      const sameName = productIndex.byName.get(nameKey) || []
+      const matchingExisting = sameName.find((product) => normalizeProductSignature(product) === signature) || null
+      const knownSignatures = simulatedSignaturesByName.get(nameKey) || new Set()
+      const normalizedAction = normalizeImportAction(actionLabel) || (conflict?.plannedAction ? normalizeImportAction(conflict.plannedAction) : 'new') || 'new'
+      const wantsMerge = normalizedAction === 'merge'
+      if (wantsMerge) {
+        const targetId = parseOptionalImportId(row, '_target_product_id')
+        if (!targetId && !matchingExisting && !knownSignatures.has(signature)) {
+          addFailure(row, 'Merge/add stock needs an existing product or an earlier imported row with the same details.', 'merge_target_missing')
+          continue
+        }
+      }
+      const identifierConflict = findProductIdentifierConflict({ sku: normalized.sku, barcode: normalized.barcode })
+      const identifierMode = normalizeIdentifierConflictMode(row._identifier_conflict_mode || row.identifier_conflict_mode)
+      if (identifierConflict && identifierMode === 'fail') {
+        addFailure(row, 'Duplicate barcode/SKU is set to reject. Choose keep, clear, or edit before applying.', 'identifier_rejected')
+        continue
+      }
+      if (!simulatedSignaturesByName.has(nameKey)) simulatedSignaturesByName.set(nameKey, new Set())
+      simulatedSignaturesByName.get(nameKey).add(signature)
+      simulatedFamilyByName.add(nameKey)
+    }
+    await yieldImportWorker()
+  }
+  const groups = finalizeProductReviewGroups(groupsByName)
+  return {
+    ok: failures.length === 0,
+    job: getImportJob(jobId),
+    checkedRows,
+    failures,
+    warnings,
+    groups,
+    summary: {
+      checkedRows,
+      failures: failures.length,
+      warnings: warnings.length,
+      groups: groups.length,
+      families: simulatedFamilyByName.size,
+    },
+  }
 }
 
 function buildImageLookup(files = []) {
@@ -2914,6 +3171,11 @@ async function approveImportJob(jobId) {
   if (!['awaiting_review', 'completed_with_errors', 'failed', 'cancelled', 'approved'].includes(String(job.status || '').toLowerCase())) {
     throw new Error('Import job is not ready to apply')
   }
+  const preflight = await preflightImportJob(jobId)
+  if (!preflight.ok) {
+    const firstFailure = preflight.failures[0]
+    throw new Error(firstFailure?.message || 'Import decisions need review before applying')
+  }
   updateJob(jobId, {
     status: 'approved',
     phase: 'approved',
@@ -3000,6 +3262,7 @@ module.exports = {
   initializeBullQueue,
   listImportJobs,
   markJobCancelled,
+  preflightImportJob,
   processImportJob,
   recoverImportJobs,
   startImportWorkers,

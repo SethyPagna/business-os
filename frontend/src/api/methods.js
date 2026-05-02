@@ -766,6 +766,7 @@ export const getImportJobReview = (id, params = {}) => {
 }
 export const updateImportJobDecisions = (id, decisions = {}) =>
   route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, { decisions }), null, true)
+export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, {}), null, true)
 export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
 export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
 export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)

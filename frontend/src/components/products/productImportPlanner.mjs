@@ -56,24 +56,6 @@ const DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 
 function normalizeText(value) {
@@ -223,6 +205,101 @@ function buildImportedIdentifierIndex(rows = []) {
   return { bySku, byBarcode }
 }
 
+function buildProductImportReviewGroups(rows = []) {
+  const byName = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const nameKey = normalizeImportProductName(row?.name)
+    if (!nameKey) return
+    if (!byName.has(nameKey)) {
+      byName.set(nameKey, {
+        key: nameKey,
+        title: normalizeText(row?.name),
+        rowIndexes: [],
+        rowNumbers: [],
+        rows: [],
+        subgroupsBySignature: new Map(),
+        issueTypes: new Set(['same_name']),
+      })
+    }
+    const group = byName.get(nameKey)
+    const rowIndex = Number(row?._import_row_index ?? index)
+    const rowNumber = Number(row?._rowNumber ?? rowIndex + 2)
+    const signature = row?._detail_signature || getProductImportDetailSignature(row)
+    group.rowIndexes.push(rowIndex)
+    group.rowNumbers.push(rowNumber)
+    group.rows.push({
+      rowIndex,
+      rowNumber,
+      name: row?.name || '',
+      sku: row?.sku || '',
+      barcode: row?.barcode || '',
+      brand: row?.brand || '',
+      category: row?.category || '',
+      unit: row?.unit || '',
+      supplier: row?.supplier || '',
+      stock_quantity: row?.stock_quantity ?? '',
+      selling_price_usd: row?.selling_price_usd ?? '',
+      purchase_price_usd: row?.purchase_price_usd ?? row?.cost_price_usd ?? '',
+      plannedAction: row?._planned_action || '',
+    })
+    if (!group.subgroupsBySignature.has(signature)) {
+      group.subgroupsBySignature.set(signature, {
+        signature,
+        rowIndexes: [],
+        rowNumbers: [],
+        rows: [],
+        suggestedAction: 'create_variant',
+      })
+    }
+    const subgroup = group.subgroupsBySignature.get(signature)
+    subgroup.rowIndexes.push(rowIndex)
+    subgroup.rowNumbers.push(rowNumber)
+    subgroup.rows.push(row)
+  })
+
+  return Array.from(byName.values())
+    .filter((group) => group.rowIndexes.length > 1)
+    .map((group) => {
+      const subgroups = Array.from(group.subgroupsBySignature.values())
+        .sort((left, right) => Math.min(...left.rowIndexes) - Math.min(...right.rowIndexes))
+        .map((subgroup, index, all) => ({
+          signature: subgroup.signature,
+          rowIndexes: subgroup.rowIndexes,
+          rowNumbers: subgroup.rowNumbers,
+          suggestedAction: subgroup.rowIndexes.length > 1
+            ? 'merge_stock'
+            : all.length > 1 || index > 0
+              ? 'create_variant'
+              : 'new',
+          rows: subgroup.rows.map((row) => ({
+            rowIndex: row._import_row_index,
+            rowNumber: row._rowNumber,
+            sku: row.sku || '',
+            barcode: row.barcode || '',
+            brand: row.brand || '',
+            category: row.category || '',
+            unit: row.unit || '',
+            supplier: row.supplier || '',
+            stock_quantity: row.stock_quantity ?? '',
+            selling_price_usd: row.selling_price_usd ?? '',
+            purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
+            plannedAction: row._planned_action || '',
+          })),
+        }))
+      return {
+        key: group.key,
+        title: group.title,
+        issueTypes: Array.from(group.issueTypes),
+        rowIndexes: group.rowIndexes,
+        rowNumbers: group.rowNumbers,
+        rows: group.rows,
+        subgroups,
+        suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
+      }
+    })
+    .sort((left, right) => Math.min(...left.rowIndexes) - Math.min(...right.rowIndexes))
+}
+
 export function analyzeProductImportRows(rows = [], existingProducts = []) {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .map((row, index) => normalizeProductImportRow(row, index))
@@ -367,6 +444,7 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     conflicts,
     decisions,
     errors,
+    groups: buildProductImportReviewGroups(normalizedRows),
     summary: {
       total: normalizedRows.length,
       newCount: normalizedRows.filter((row) => row._planned_action === 'new').length,

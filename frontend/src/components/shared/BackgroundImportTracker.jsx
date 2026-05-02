@@ -270,6 +270,13 @@ export default function BackgroundImportTracker() {
     if (!job?.id || busyJobId) return
     setBusyJobId(job.id)
     try {
+      const preflight = await window.api.preflightImportJob?.(job.id)
+      if (preflight && preflight.ok === false) {
+        const firstFailure = preflight.failures?.[0]
+        notify(firstFailure?.message || (t('import_review_needed') || 'Review import decisions before applying.'), 'error')
+        await loadJobs()
+        return
+      }
       await window.api.approveImportJob(job.id)
       await loadJobs()
       notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')

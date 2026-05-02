@@ -22,6 +22,7 @@ const {
   getJobFiles,
   getQueueStatus,
   listImportJobs,
+  preflightImportJob,
   updateImportJobDecisions,
 } = require('../services/importJobs')
 
@@ -217,6 +218,16 @@ router.patch('/:id/decisions', authToken, requireImportPermission, (req, res) =>
     ok(res, { job: updateImportJobDecisions(job.id, decisions) })
   } catch (error) {
     err(res, error?.message || 'Failed to save import decisions')
+  }
+})
+
+router.post('/:id/preflight', authToken, requireImportPermission, async (req, res) => {
+  try {
+    const job = getJobOr404(req, res)
+    if (!job) return
+    ok(res, await preflightImportJob(job.id))
+  } catch (error) {
+    err(res, error?.message || 'Failed to preflight import job')
   }
 })
 

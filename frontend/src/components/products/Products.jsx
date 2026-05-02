@@ -121,7 +121,7 @@ export default function Products() {
   const [branches,     setBranches]     = useState([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
-  const [groupFilter, setGroupFilter] = useState('all') // all | parent | variant | standalone
+  const [groupFilter, setGroupFilter] = useState('all') // all | grouped | parent | variant | standalone
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
   const [productSortDirection, setProductSortDirection] = useState('desc')
@@ -1324,6 +1324,7 @@ export default function Products() {
       label: t('product_group') || 'Product group',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+        { id: 'group-grouped', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
         { id: 'group-parent', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
         { id: 'group-variant', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1429,7 +1430,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0

@@ -182,24 +182,6 @@ const IMPORT_DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 const IMPORT_MONEY_FIELDS = new Set([
   'selling_price_usd',
@@ -329,6 +311,9 @@ function appendProductSearchFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || 'all').toLowerCase()
   if (groupState === 'parent') where.push('COALESCE(p.is_group, 0) = 1')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+    where.push('(COALESCE(p.is_group, 0) = 1 OR COALESCE(p.parent_id, 0) > 0)')
+  }
   if (groupState === 'standalone') where.push('COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0')
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockState = String(query.stockState || query.stock_state || 'all').toLowerCase()

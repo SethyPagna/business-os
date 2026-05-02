@@ -181,6 +181,76 @@ async function main() {
     }
   })
 
+  await runTest('product and inventory search support parents-and-variants only filter', async () => {
+    const runtimeDir = makeTempRoot('bos-parent-variant-filter-')
+    let server = null
+    try {
+      server = await startServer(runtimeDir)
+      const authToken = await loginAsAdmin(server.baseUrl)
+      const branches = await fetchJson(server.baseUrl, '/api/branches', { authToken })
+      const branch = branches.find((item) => item.is_default) || branches[0]
+      assert.ok(branch?.id, 'Expected default branch')
+
+      const familyName = `Grouped Filter Family ${Date.now()}`
+      const parent = await fetchJson(server.baseUrl, '/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        authToken,
+        body: JSON.stringify({
+          name: familyName,
+          sku: `GF-P-${Date.now()}`,
+          branch_id: branch.id,
+          stock_quantity: 0,
+          is_group: 1,
+          purchase_price_usd: 2,
+          selling_price_usd: 5,
+        }),
+      })
+      const variant = await fetchJson(server.baseUrl, '/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        authToken,
+        body: JSON.stringify({
+          name: `${familyName} Variant A`,
+          sku: `GF-V-${Date.now()}`,
+          parent_id: parent.id,
+          branch_id: branch.id,
+          stock_quantity: 3,
+          purchase_price_usd: 3,
+          selling_price_usd: 7,
+        }),
+      })
+      const standalone = await fetchJson(server.baseUrl, '/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        authToken,
+        body: JSON.stringify({
+          name: `${familyName} Standalone`,
+          sku: `GF-S-${Date.now()}`,
+          branch_id: branch.id,
+          stock_quantity: 3,
+          purchase_price_usd: 1,
+          selling_price_usd: 2,
+        }),
+      })
+
+      const productResult = await fetchJson(server.baseUrl, `/api/products/search?page=1&pageSize=20&groupState=grouped&query=${encodeURIComponent(familyName)}`, { authToken })
+      const productIds = productResult.items.map((item) => Number(item.id))
+      assert.ok(productIds.includes(Number(parent.id)), 'Expected parent in grouped product filter')
+      assert.ok(productIds.includes(Number(variant.id)), 'Expected variant in grouped product filter')
+      assert.equal(productIds.includes(Number(standalone.id)), false, 'Standalone product should be excluded')
+
+      const inventoryResult = await fetchJson(server.baseUrl, `/api/inventory/products/search?page=1&pageSize=20&groupState=grouped&query=${encodeURIComponent(familyName)}`, { authToken })
+      const inventoryIds = inventoryResult.items.map((item) => Number(item.id))
+      assert.ok(inventoryIds.includes(Number(parent.id)), 'Expected parent in grouped inventory filter')
+      assert.ok(inventoryIds.includes(Number(variant.id)), 'Expected variant in grouped inventory filter')
+      assert.equal(inventoryIds.includes(Number(standalone.id)), false, 'Standalone inventory product should be excluded')
+    } finally {
+      await stopServer(server?.child)
+      fs.rmSync(runtimeDir, { recursive: true, force: true })
+    }
+  })
+
   if (failed > 0) process.exitCode = 1
 }
 

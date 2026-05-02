@@ -38,6 +38,18 @@ await runTest('same product name and different details plans variant creation', 
   assert.equal(analysis.summary.variantCount, 1)
 })
 
+await runTest('same product name with only price changes plans stock merge', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '15', purchase_price_usd: '8', discount_percent: '10', stock_quantity: '2' },
+  ], [
+    { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12, purchase_price_usd: 6, discount_percent: 0 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 10)
+  assert.equal(analysis.summary.mergeCount, 1)
+})
+
 await runTest('malformed existing product rows do not crash import analysis', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Safe Cream', sku: 'SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
@@ -113,6 +125,22 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
   assert.deepEqual(analysis.rows.map((row) => row._planned_action), ['new', 'merge_stock', 'create_variant'])
   assert.equal(analysis.rows.some((row) => String(row._parent_id || '').startsWith('row:')), false)
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
+})
+
+await runTest('same imported name groups rows into detail subgroups for review', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Cream', barcode: 'BC-1', brand: 'A', unit: 'pcs', selling_price_usd: '3.001', stock_quantity: '1' },
+    { name: 'Cream', barcode: 'BC-1', brand: 'A', unit: 'pcs', selling_price_usd: '3.001', stock_quantity: '4' },
+    { name: 'Cream', barcode: 'BC-2', brand: 'B', unit: 'pcs', selling_price_usd: '4.001', stock_quantity: '2' },
+  ], [])
+
+  const group = (analysis.groups || []).find((entry) => entry.key === 'cream')
+  assert.ok(group, 'Expected same-name group in analysis')
+  assert.equal(group.rowNumbers.length, 3)
+  assert.equal(group.subgroups.length, 2)
+  assert.deepEqual(group.subgroups.map((entry) => entry.rowIndexes).sort((a, b) => b.length - a.length), [[0, 1], [2]])
+  assert.equal(group.subgroups[0].suggestedAction, 'merge_stock')
+  assert.equal(group.subgroups.some((entry) => entry.suggestedAction === 'create_variant'), true)
 })
 
 await runTest('large product import analysis keeps deterministic row counts', () => {

@@ -86,6 +86,9 @@ function appendInventoryProductFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || '').toLowerCase()
   if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+    where.push('((COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0) OR COALESCE(p.parent_id, 0) > 0)')
+  }
   if (groupState === 'standalone') where.push('(COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0)')
   const initial = String(query.initial || '').normalize('NFC').trim()
   if (initial && initial.toLowerCase() !== 'all') {

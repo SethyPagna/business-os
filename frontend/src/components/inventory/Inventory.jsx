@@ -69,7 +69,7 @@ export default function Inventory() {
   const deferredSearch = useDeferredValue(search)
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('all')
+  const [groupFilter,   setGroupFilter]   = useState('all') // all | grouped | parent | variant | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
@@ -1446,6 +1446,7 @@ export default function Inventory() {
         label: t('product_group') || 'Product group',
         options: [
           { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+          { id: 'parents-variants', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
           { id: 'parents', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
           { id: 'variants', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
           { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1477,6 +1478,7 @@ export default function Inventory() {
     stockFilter,
     t,
     tab,
+    tr,
   ])
 
   const activeInventoryFilterCount = useMemo(() => {
