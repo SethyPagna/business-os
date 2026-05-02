@@ -1534,6 +1534,7 @@ export default function CatalogPage({ publicView = false }) {
   const [portalProductInitial, setPortalProductInitial] = useState('all')
   const [portalProductInitials, setPortalProductInitials] = useState(() => Array.isArray(cachedPortal?.catalog?.initials) ? cachedPortal.catalog.initials : [])
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
+  const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [categories, setCategories] = useState(() => Array.isArray(cachedPortal?.categories) ? cachedPortal.categories : [])
   const [brands, setBrands] = useState(() => Array.isArray(cachedPortal?.brands) ? cachedPortal.brands : [])
   const [branches, setBranches] = useState(() => Array.isArray(cachedPortal?.branches) ? cachedPortal.branches : [])
@@ -1898,6 +1899,41 @@ export default function CatalogPage({ publicView = false }) {
   async function loadPortal() {
     if (!isPageActive) return
     const requestId = beginTrackedRequest(loadRequestRef)
+    if (publicView) {
+      const portalConfig = await window.api.getPortalConfig()
+      if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+
+      const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
+      setConfig(nextConfig)
+      setPortalConfigReady(true)
+      if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
+      setActiveTab((current) => resolveVisibleTab(current, nextConfig))
+      writePortalCache({
+        config: nextConfig,
+        categories,
+        brands,
+        branches,
+        products,
+        catalog: {
+          page: portalProductPage,
+          pageSize: portalProductPageSize,
+          total: portalProductTotal,
+          initials: portalProductInitials,
+        },
+        reviewItems: [],
+      })
+
+      window.api.getPortalCatalogMeta?.()
+        .then((metaResult) => {
+          if (!aliveRef.current || !isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+          setCategories(Array.isArray(metaResult?.categories) ? metaResult.categories : [])
+          setBrands(Array.isArray(metaResult?.brands) ? metaResult.brands : [])
+          setBranches(Array.isArray(metaResult?.branches) ? metaResult.branches : [])
+        })
+        .catch(() => {})
+      return
+    }
+
     const bootstrapResult = await window.api.getPortalBootstrap()
     if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
@@ -1916,6 +1952,7 @@ export default function CatalogPage({ publicView = false }) {
     const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
     setConfig(nextConfig)
+    setPortalConfigReady(true)
     if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
@@ -1986,7 +2023,7 @@ export default function CatalogPage({ publicView = false }) {
   }, [brandFilter, branchFilter, categoryFilter, deferredSearch, portalProductInitial, stockFilter])
 
   useEffect(() => {
-    if (!isPageActive || !previewConfig.showCatalog) return undefined
+    if (!isPageActive || !previewConfig.showCatalog || (publicView && !portalConfigReady)) return undefined
     const requestId = beginTrackedRequest(portalProductsRequestRef)
     setPortalProductRefreshing(products.length > 0)
 
@@ -2011,10 +2048,28 @@ export default function CatalogPage({ publicView = false }) {
         setPortalProductPage(Number(result?.page || portalProductPage) || 1)
         setPortalProductPageSize(Number(result?.pageSize || portalProductPageSize) || portalProductPageSize)
         setPortalProductInitials(Array.isArray(result?.initials) ? result.initials : [])
-        if (Array.isArray(result?.filters?.brands)) setBrands(result.filters.brands)
+        const nextBrands = Array.isArray(result?.filters?.brands) ? result.filters.brands : brands
+        const nextCategories = Array.isArray(result?.filters?.categories)
+          ? result.filters.categories.map((name, index) => ({ id: `server-${index}-${name}`, name }))
+          : categories
+        if (Array.isArray(result?.filters?.brands)) setBrands(nextBrands)
         if (Array.isArray(result?.filters?.categories)) {
-          setCategories(result.filters.categories.map((name, index) => ({ id: `server-${index}-${name}`, name })))
+          setCategories(nextCategories)
         }
+        writePortalCache({
+          config: previewConfig,
+          categories: nextCategories,
+          brands: nextBrands,
+          branches,
+          products: nextItems,
+          catalog: {
+            page: Number(result?.page || portalProductPage) || 1,
+            pageSize: Number(result?.pageSize || portalProductPageSize) || portalProductPageSize,
+            total: Number(result?.total || 0),
+            initials: Array.isArray(result?.initials) ? result.initials : portalProductInitials,
+          },
+          reviewItems: [],
+        })
       })
       .catch((error) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
@@ -2038,6 +2093,7 @@ export default function CatalogPage({ publicView = false }) {
     portalProductPage,
     portalProductPageSize,
     previewConfig.showCatalog,
+    portalConfigReady,
     stockFilter,
   ])
 
@@ -2915,6 +2971,7 @@ export default function CatalogPage({ publicView = false }) {
     initialFilter: portalProductInitial,
     setInitialFilter: setPortalProductInitial,
     refreshingProducts: portalProductRefreshing,
+    loadingProducts: loading && publicView && !products.length,
     categories,
     brands,
     branches,
@@ -4026,7 +4083,7 @@ export default function CatalogPage({ publicView = false }) {
     </aside>
   ) : null
 
-  if (loading) {
+  if (loading && !publicView) {
     return (
     <div
       data-portal-root="true"

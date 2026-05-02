@@ -1139,6 +1139,10 @@ function ScaleMigrationSection({ t, notify, active = true }) {
   const driveSafety = automation.driveSync || {}
   const driveSafetyOk = driveSafety.status === 'ok'
   const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
+  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'sqlite').toLowerCase()
+  const activeStorageLabel = activeDatabaseDriver === 'postgres'
+    ? copy('postgres_minio_storage', 'Postgres / MinIO')
+    : copy('sqlite_local_files', 'SQLite / Local files')
 
   return (
     <div className="card p-5 sm:p-6">
@@ -1146,10 +1150,10 @@ function ScaleMigrationSection({ t, notify, active = true }) {
         <div>
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <DatabaseZap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            {copy('scale_migration_title', 'Data migration')}
+            {copy('scale_migration_title', 'Docker storage safety')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('scale_migration_desc', 'SQLite and local files remain live until a verified migration is enabled. The safety step automatically creates a local backup and syncs Google Drive when connected.')}
+            {copy('scale_migration_desc', 'Use this safety workflow before migration, restore, or major maintenance. It creates a local backup first and syncs Google Drive when connected.')}
           </p>
         </div>
         <button type="button" className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm" onClick={loadStatus} disabled={!!busy}>
@@ -1161,7 +1165,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
           <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('current_data_source', 'Current data')}</div>
-          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{copy('sqlite_local_files', 'SQLite / Local files')}</div>
+          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{activeStorageLabel}</div>
           <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={status?.authoritativeData?.databasePath || ''}>
             {status?.authoritativeData?.databasePath || copy('loading', 'Loading...')}
           </div>
@@ -1454,7 +1458,7 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('export_backup_desc', 'Export a full folder backup, or download the legacy JSON version when needed.')}
+          subtitle={copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <div className="card p-5 sm:p-6">
@@ -1463,7 +1467,7 @@ export default function Backup() {
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Export a full folder backup, or download the legacy JSON version when needed.')}
+            {copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (
@@ -1481,7 +1485,7 @@ export default function Backup() {
                 className="input flex-1 font-mono text-sm"
                 value={folderExportPath}
                 onChange={(event) => setFolderExportPath(event.target.value)}
-                placeholder={copy('folder_backup_placeholder', 'Choose a parent folder for the backup copy')}
+                placeholder={copy('folder_backup_placeholder', 'Choose a parent folder on the server for the full backup')}
               />
               {hostUiAvailable ? (
                 <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
@@ -1495,7 +1499,7 @@ export default function Backup() {
               </PathActionButton>
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
-              {copy('server_folder_note', 'Folder actions use paths on the Business OS server device. When you are connected remotely, choose or paste a path that exists on that server machine.')}
+              {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. When you are connected remotely through Cloudflare, choose or paste a path that exists on the server machine, not your phone or browser device.')}
             </p>
 
             {exportBrowser ? (
@@ -1526,7 +1530,7 @@ export default function Backup() {
               </PrimaryActionButton>
               <PathActionButton onClick={handleExport} disabled={!!loading}>
                 <Download className="h-4 w-4" />
-                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'JSON')}
+                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Legacy JSON')}
               </PathActionButton>
             </div>
           </div>
@@ -1538,7 +1542,7 @@ export default function Backup() {
             {copy('import_backup_title', 'Restore backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('import_backup_desc', 'Restore a full folder backup, or choose a legacy JSON backup file if needed.')}
+            {copy('import_backup_desc', 'Restore a full Business OS backup folder from the server. This replaces current data, uploads, settings, users, portal files, stock, and custom tables.')}
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
@@ -1549,7 +1553,7 @@ export default function Backup() {
                 className="input flex-1 font-mono text-sm"
                 value={folderImportPath}
                 onChange={(event) => setFolderImportPath(event.target.value)}
-                placeholder={copy('folder_restore_placeholder', 'Choose a backup folder or business-os-data folder')}
+                placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
               />
               {hostUiAvailable ? (
                 <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
@@ -1563,7 +1567,7 @@ export default function Backup() {
               </PathActionButton>
             </div>
             <p className="text-xs text-amber-700 dark:text-amber-300">
-              {copy('server_restore_note', 'Restore uses a folder from the Business OS server device. Remote browsers cannot browse their own local disk into the server runtime.')}
+              {copy('server_restore_note', 'Restore uses a folder from the Business OS server/container. Remote browsers cannot browse their own local disk into the server runtime.')}
             </p>
 
             {restoreBrowser ? (
@@ -1599,7 +1603,7 @@ export default function Backup() {
               {pendingImport ? (
                 <PathActionButton onClick={handleConfirmImport} disabled={!!loading}>
                   <Upload className="h-4 w-4" />
-                  {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Import JSON')}
+                  {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Restore JSON backup')}
                 </PathActionButton>
               ) : null}
             </div>

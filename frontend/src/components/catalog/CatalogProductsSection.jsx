@@ -45,6 +45,7 @@ export default function CatalogProductsSection(props) {
     initialFilter: controlledInitialFilter,
     setInitialFilter: setControlledInitialFilter,
     refreshingProducts = false,
+    loadingProducts = false,
     categories,
     brands,
     branches,
@@ -213,6 +214,8 @@ export default function CatalogProductsSection(props) {
           <span className="font-semibold text-slate-600 dark:text-slate-200">
             {refreshingProducts
               ? copy('refreshing', 'Refreshing...')
+              : loadingProducts
+                ? copy('loadingProducts', 'Loading products...')
               : replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
           </span>
         </div>
@@ -267,6 +270,18 @@ export default function CatalogProductsSection(props) {
       />
 
       <div className={`grid gap-3 ${productGridClass}`}>
+        {loadingProducts ? (
+          Array.from({ length: Math.min(4, effectivePageSize || 4) }).map((_, index) => (
+            <div key={`portal-product-skeleton-${index}`} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+              <div className={`${compactTwoColumnMobile ? 'aspect-[5/4] sm:aspect-[4/3]' : 'aspect-[5/4]'} animate-pulse bg-slate-100 dark:bg-slate-800`} />
+              <div className="space-y-3 p-4">
+                <div className="h-4 w-1/2 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-5 w-4/5 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-12 rounded bg-slate-100 dark:bg-slate-800" />
+              </div>
+            </div>
+          ))
+        ) : null}
         {pagedProducts.map((product) => {
           const qty = getBranchQty(product, selectedStockBranch)
           const status = getStockStatus(product, qty, previewConfig)
@@ -395,7 +410,7 @@ export default function CatalogProductsSection(props) {
         />
       ) : null}
 
-      {totalProducts === 0 && !refreshingProducts ? (
+      {totalProducts === 0 && !refreshingProducts && !loadingProducts ? (
         <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
           {copy('noProducts', 'No products matched the current filters.')}
         </div>
