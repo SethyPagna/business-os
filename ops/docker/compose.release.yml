@@ -11,20 +11,24 @@ x-app-env: &app-env
   PORT: "4000"
   BUSINESS_OS_RUNTIME: docker
   BUSINESS_OS_DOCKER_RELEASE: "1"
-  BUSINESS_OS_DOCKER_DATA_MODE: "${BUSINESS_OS_DOCKER_DATA_MODE:-sqlite}"
-  BUSINESS_OS_BACKUP_DIR: "${BUSINESS_OS_BACKUP_DIR:-/runtime/business-os-data/backups}"
+  BUSINESS_OS_DOCKER_DATA_MODE: "${BUSINESS_OS_DOCKER_DATA_MODE:-postgres}"
+  BUSINESS_OS_DISABLE_SQLITE: "${BUSINESS_OS_DISABLE_SQLITE:-1}"
+  BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED: "${BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED:-0}"
+  BUSINESS_OS_BACKUP_DIR: "${BUSINESS_OS_BACKUP_DIR:-/runtime/backups}"
   BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
   BUSINESS_OS_REMOTE_PROVIDER: cloudflare
   PUBLIC_BASE_URL: "${BUSINESS_OS_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
   CLOUDFLARE_PUBLIC_URL: "${BUSINESS_OS_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
   CLOUDFLARE_ADMIN_URL: "${BUSINESS_OS_ADMIN_URL:-https://admin.leangcosmetics.dpdns.org}"
-  DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"
+  DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"
   DATABASE_URL: "${DATABASE_URL:-}"
-  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"
+  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
   S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-}"
   S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
+  ANALYTICS_ENGINE: "${ANALYTICS_ENGINE:-duckdb}"
+  PARQUET_STORE: "${PARQUET_STORE:-minio}"
   JOB_QUEUE_DRIVER: bullmq
   REDIS_URL: redis://redis-queue:6379
   RUNTIME_CACHE_ENABLED: "1"
@@ -125,34 +129,6 @@ services:
       start_period: 10s
     mem_limit: "${MINIO_MEMORY_LIMIT:-1536m}"
     cpus: "${MINIO_CPUS:-1.5}"
-    logging: *log-policy
-
-  legacy-adopter:
-    image: alpine:3.20
-    restart: "no"
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        if find /runtime/business-os-data -path '*/db/business.db' -type f -print -quit 2>/dev/null | grep -q .; then
-          echo "[legacy-adopter] Docker runtime data already exists; leaving it untouched."
-          exit 0
-        fi
-        if [ -d /legacy/business-os-data ]; then
-          mkdir -p /runtime/business-os-data
-          cp -a /legacy/business-os-data/. /runtime/business-os-data/
-          echo "[legacy-adopter] Copied legacy business-os-data into the Docker runtime volume."
-        else
-          echo "[legacy-adopter] No legacy business-os-data folder found; fresh Docker data will be created."
-        fi
-    volumes:
-      - business_os_runtime:/runtime
-      - type: bind
-        source: ${BUSINESS_OS_LEGACY_ROOT:-../..}
-        target: /legacy
-        read_only: true
-    profiles: ["migrate"]
     logging: *log-policy
 
   migrator:

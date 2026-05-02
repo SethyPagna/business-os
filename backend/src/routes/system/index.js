@@ -42,6 +42,9 @@ const {
   OBJECT_STORAGE_DRIVER,
   S3_ENDPOINT,
   S3_BUCKET,
+  ANALYTICS_ENGINE,
+  PARQUET_STORE,
+  BUSINESS_OS_DISABLE_SQLITE,
 } = require('../../config')
 const {
   summarizeDataRoot,
@@ -74,6 +77,7 @@ const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBull
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJobs')
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
+const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -388,10 +392,16 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       minioConfigured: OBJECT_STORAGE_DRIVER === 'minio',
       s3EndpointConfigured: !!S3_ENDPOINT,
       s3Bucket: S3_BUCKET || null,
+      analyticsEngine: ANALYTICS_ENGINE,
+      parquetStore: PARQUET_STORE,
+      duckdb: getDuckDbRuntimeStatus({ probe: false }),
     },
     target: {
       databaseDriver: DATABASE_DRIVER || 'sqlite',
       objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
+      analyticsEngine: ANALYTICS_ENGINE || 'none',
+      parquetStore: PARQUET_STORE || 'none',
+      sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
       postgresAvailableForMigration: !!DATABASE_URL && DATABASE_DRIVER === 'postgres',
       minioAvailableForMigration: OBJECT_STORAGE_DRIVER === 'minio',
     },
@@ -1404,9 +1414,13 @@ router.get('/storage-mode', authToken, requireAnyPermission(['backup', 'settings
         objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
         queueDriver: JOB_QUEUE_DRIVER || 'sqlite',
         cacheDriver: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
+        analyticsEngine: ANALYTICS_ENGINE || 'none',
+        parquetStore: PARQUET_STORE || 'none',
+        sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
         storageMode: status.mode,
         target: status.target,
         scaleServices: status.scaleServices,
+        analytics: getDuckDbRuntimeStatus(),
         authoritativeData: status.authoritativeData,
         migrationState: {
           canPrepareMigration: status.canPrepareMigration,

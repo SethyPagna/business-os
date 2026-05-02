@@ -72,6 +72,16 @@ runTest('system router registers non-blocking job and backup routes', () => {
   assert.ok(paths.includes('/backups/:id/restore'), 'missing /api/system/backups/:id/restore')
 })
 
+runTest('server health route exposes runtime driver diagnostics', () => {
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../server.js'), 'utf8')
+  assert.match(source, /drivers:\s*\{/)
+  assert.match(source, /database:\s*DATABASE_DRIVER/)
+  assert.match(source, /objectStorage:\s*OBJECT_STORAGE_DRIVER/)
+  assert.match(source, /analytics:\s*ANALYTICS_ENGINE/)
+  assert.match(source, /parquetStore:\s*PARQUET_STORE/)
+  assert.match(source, /getDuckDbRuntimeStatus/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

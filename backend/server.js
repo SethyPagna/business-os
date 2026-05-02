@@ -45,6 +45,7 @@ const { authToken, networkAccessGuard } = require('./src/middleware')
 const { db, runDatabaseMaintenance } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
 const { getRuntimeVersion } = require('./src/runtimeVersion')
+const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
@@ -59,7 +60,21 @@ const {
   setUploadStaticHeaders,
   mapServerError,
 } = require('./src/serverUtils')
-const { PORT, STORAGE_ROOT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN } = require('./src/config')
+const {
+  PORT,
+  STORAGE_ROOT,
+  DB_PATH,
+  UPLOADS_PATH,
+  FRONTEND_DIST,
+  SYNC_TOKEN,
+  DATABASE_DRIVER,
+  OBJECT_STORAGE_DRIVER,
+  JOB_QUEUE_DRIVER,
+  RUNTIME_CACHE_ENABLED,
+  ANALYTICS_ENGINE,
+  PARQUET_STORE,
+  BUSINESS_OS_DISABLE_SQLITE,
+} = require('./src/config')
 
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
@@ -132,6 +147,16 @@ function mountHealthRoute(target) {
       clients: wss_clients.size,
       uptime: process.uptime(),
       runtime: getRuntimeVersion(),
+      drivers: {
+        database: DATABASE_DRIVER,
+        objectStorage: OBJECT_STORAGE_DRIVER,
+        queue: JOB_QUEUE_DRIVER,
+        cache: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
+        analytics: ANALYTICS_ENGINE,
+        parquetStore: PARQUET_STORE,
+        sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
+      },
+      analytics: getDuckDbRuntimeStatus({ probe: false }),
     })
   })
 }

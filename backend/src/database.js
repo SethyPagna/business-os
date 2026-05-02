@@ -30,14 +30,15 @@ const {
   SQLITE_JOURNAL_SIZE_LIMIT_MB,
   SQLITE_SYNCHRONOUS,
   DATABASE_DRIVER,
+  BUSINESS_OS_DISABLE_SQLITE,
 } = require('./config')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
 
-if (process.env.BUSINESS_OS_ENFORCE_POSTGRES === '1' || DATABASE_DRIVER !== 'sqlite') {
+if (BUSINESS_OS_DISABLE_SQLITE || process.env.BUSINESS_OS_ENFORCE_POSTGRES === '1' || DATABASE_DRIVER !== 'sqlite') {
   throw new Error(
-    'This runtime is configured for Postgres, but the application data layer still contains SQLite-only route code. ' +
-    'Run the Docker release migrator first, then finish the Postgres data-layer cutover before serving production traffic.'
+    'This runtime disables SQLite or is configured for Postgres, but the application data layer still contains SQLite-only route code. ' +
+    'Run the verified migration first, then finish the Postgres/MinIO repository cutover before serving production traffic.'
   )
 }
 

@@ -368,6 +368,9 @@ const S3_ENDPOINT = trim(process.env.S3_ENDPOINT || 'http://127.0.0.1:9000')
 const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_ROOT_USER)
 const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
+const ANALYTICS_ENGINE = trim(process.env.ANALYTICS_ENGINE || 'none').toLowerCase()
+const PARQUET_STORE = trim(process.env.PARQUET_STORE || 'none').toLowerCase()
+const BUSINESS_OS_DISABLE_SQLITE = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_DISABLE_SQLITE || '').toLowerCase())
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
 const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '30000', 10) || 30000))
 const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '196608', 10) || 196608))
@@ -454,6 +457,9 @@ module.exports = {
   S3_ACCESS_KEY_ID,
   S3_SECRET_ACCESS_KEY,
   S3_BUCKET,
+  ANALYTICS_ENGINE,
+  PARQUET_STORE,
+  BUSINESS_OS_DISABLE_SQLITE,
   MINIO_LICENSE_FILE,
   SQLITE_BUSY_TIMEOUT_MS,
   SQLITE_CACHE_SIZE_KB,

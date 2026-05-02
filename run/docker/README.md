@@ -17,7 +17,7 @@ Setup/start also keeps Docker tidy:
 - setup pulls the current app, Redis, Postgres, MinIO, worker, and Cloudflare service images,
 - startup removes stopped Business OS containers before starting services,
 - data volumes are preserved and are not deleted by startup cleanup,
-- the app data lives in the Docker runtime volume for the runnable Docker release,
+- app data lives in Docker-managed Postgres and MinIO volumes,
 - Postgres 18 uses the supported parent data-volume layout so Docker image updates do not strand the service in a restart loop.
 
 ## Support Commands
@@ -25,8 +25,8 @@ Setup/start also keeps Docker tidy:
 - `install.bat` pulls/installs the Docker release.
 - `start.bat` starts the Docker release directly.
 - `update.bat` backs up, pulls the newest release, migrates, health-checks, and rolls back when possible.
-- `backup.bat` creates a Docker runtime-volume backup for the current runnable release. Postgres/MinIO backup mode is used after the verified Postgres data mode is enabled.
-- `restore.bat` restores a verified Docker runtime-volume or Postgres backup.
+- `backup.bat` creates a Docker/Drive-compatible folder with `manifest.json`, `postgres.sql`, `minio.tgz`, Parquet metadata, and checksums.
+- `restore.bat` restores a verified local backup folder or Google Drive `datasync-N` folder after validation.
 - `doctor.bat` diagnoses Docker, services, Cloudflare, workers, and storage.
 - `rotate-cloudflare.bat` rotates the Cloudflare Tunnel token after a secret leak.
 
@@ -34,8 +34,10 @@ Every command keeps the window open and prints the next step.
 
 ## Current Data Mode
 
-The Docker release now runs without source bind mounts. Live app data is stored in the Docker runtime volume, and first start copies existing `business-os-data` into that volume only if the volume is empty. This avoids a hidden second database while making the no-source Docker release usable today.
+The Docker release runs without source bind mounts. Live app data must use Postgres for business records and MinIO for files/images/backups. Loose `business-os-data` folders are not imported automatically.
 
-SQLite-in-Docker is intentionally capped to one import writer and conservative media concurrency. That is safer for current data, but it is not the final heavy-load architecture. Postgres and MinIO remain part of the Docker ecosystem and are ready for the verified migration path, but Business OS does not claim full Postgres serving until every route has been cut over and verified.
+SQLite/local storage is not a supported Docker production mode. If a remaining live route still imports the legacy SQLite module, startup must fail clearly until that route is cut over instead of pretending the release is ready.
+
+Local backups and Google Drive `datasync-N` versions use the same restore format, so Docker can recover either one through `restore.bat`.
 
 The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.

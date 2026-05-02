@@ -53,15 +53,18 @@ function main() {
   }
   ;[
     'BUSINESS_OS_DOCKER_DATA_MODE',
-    'DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"',
-    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"',
+    'BUSINESS_OS_DISABLE_SQLITE',
+    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED',
+    'DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"',
+    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"',
+    'ANALYTICS_ENGINE: "${ANALYTICS_ENGINE:-duckdb}"',
+    'PARQUET_STORE: "${PARQUET_STORE:-minio}"',
     'JOB_QUEUE_DRIVER: bullmq',
     'cloudflared:',
     'postgres:',
     'redis-queue:',
     'redis-cache:',
     'minio:',
-    'legacy-adopter:',
     'import-worker:',
     'media-worker:',
     'migrator:',
@@ -77,14 +80,25 @@ function main() {
     'npm run build:linux',
     'PKG_CACHE_PATH=/root/.pkg-cache',
     'COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp',
-    'BUSINESS_OS_DOCKER_DATA_MODE=sqlite',
-    'DATABASE_DRIVER=sqlite',
+    'BUSINESS_OS_DOCKER_DATA_MODE=postgres',
+    'BUSINESS_OS_DISABLE_SQLITE=1',
+    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=0',
+    'DATABASE_DRIVER=postgres',
+    'OBJECT_STORAGE_DRIVER=minio',
+    'ANALYTICS_ENGINE=duckdb',
+    'PARQUET_STORE=minio',
   ].forEach((token) => {
     if (!dockerfile.includes(token)) failures.push(`Production Dockerfile is missing ${token}`)
   })
 
-  if (dockerfile.includes('BUSINESS_OS_ENFORCE_POSTGRES=1')) {
-    failures.push('Production Dockerfile must not force Postgres before route-level Postgres serving is complete.')
+  if (dockerfile.includes('DATABASE_DRIVER=sqlite') || dockerfile.includes('OBJECT_STORAGE_DRIVER=local')) {
+    failures.push('Production Dockerfile must not ship SQLite/local storage defaults.')
+  }
+  if (compose.includes('DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"') || compose.includes('OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"')) {
+    failures.push('Production Compose must not ship SQLite/local storage defaults.')
+  }
+  if (compose.includes('legacy-adopter:')) {
+    failures.push('Production Compose must not auto-adopt loose legacy business-os-data folders.')
   }
 
   const automation = read(scriptPath)

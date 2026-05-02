@@ -48,7 +48,7 @@ Cloudflare requires a local tunnel token file. The Docker portable folder should
 
 1. On the old laptop, run a Business OS backup first.
 2. Copy the full Business OS folder or install the new release on the new laptop.
-3. Copy the backup or `business-os-data` folder to the new laptop.
+3. Copy the newest backup folder, or choose the matching Google Drive `datasync-N` folder.
 4. Double-click **`Start Business OS.bat`**.
 5. Restore the backup from the app or `run\docker\restore.bat` if support asks.
 6. Confirm products, contacts, sales, files, portal settings, and logos before using the new laptop for live work.
@@ -102,29 +102,38 @@ Current source-runtime business data stays under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Do **not** delete `business-os-data` manually when Docker looks mismatched. In source/runtime mode it can still be the live SQLite/local-file data and the legacy migration source. The Docker release adopts that folder into the Docker runtime volume only when the Docker volume is empty, then leaves the source folder untouched for safety. Use **Settings > Backup**, `run\docker\backup.bat`, restore tools, or support-guided archive steps instead.
+Do **not** delete `business-os-data` manually when Docker looks mismatched. It is legacy/source data only after the Docker cutover. The final Docker release does not auto-import loose folders because an old folder could overwrite newer Docker data. Use **Settings > Backup**, `run\docker\backup.bat`, `run\docker\restore.bat`, or support-guided migration instead.
 
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
-The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. SQLite-in-Docker is a compatibility bridge, not the final heavy-load database. In this mode Business OS deliberately uses one import writer and conservative worker concurrency so data stays safe. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
+The Docker release is the no-source-code runtime path. Its required data architecture is Postgres + MinIO + Redis + DuckDB/Parquet. SQLite/local files are not an allowed Docker production mode. If a live route still imports the legacy SQLite database module, Docker startup must fail loudly instead of silently running the wrong database. `BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED` stays `0` until the full repository data-layer cutover is proven.
+
+Final data architecture target:
+
+- Postgres owns live products, stock, POS, sales, returns, contacts, users, roles, settings, portal, audit, history, imports, and backup metadata.
+- MinIO owns uploads, product images, logos, avatars, portal/about images, file library assets, thumbnails, import media, backup assets, and Parquet snapshots.
+- Redis owns durable jobs and short-lived cache.
+- DuckDB/Parquet owns heavy staging and read-only workloads such as CSV import staging, conflict scans, exports, analytics snapshots, and backup verification. DuckDB is not used as the live multi-writer POS/inventory database.
+- SQLite/local files are only an explicit legacy migration source, never the production Docker runtime.
 
 ### Docker Data: Copy, Restore, Update
 
-For Docker, the live data is inside a Docker volume named like `business-os_business_os_runtime`. Do not manually edit that volume.
+For Docker, the live data is inside Docker-managed Postgres and MinIO volumes. Do not manually edit those volumes.
 
 Safest way to move data to another laptop:
 
 1. On the old laptop, run `run\docker\backup.bat`.
-2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`.
+2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`, or choose the matching Google Drive `datasync-N` folder.
 3. On the new laptop, copy the full `release\business-os\` folder.
 4. Run `run\docker\restore.bat -BackupPath "C:\path\to\that\backup-folder"`.
 5. Double-click **`Start Business OS.bat`** and check products, sales, files, settings, and portal content.
 
-First-start shortcut for old source data:
+Backup format:
 
-- If the Docker volume is empty and a `business-os-data` folder sits beside `Start Business OS.bat`, Business OS copies it into Docker once.
-- If Docker already has data, loose `business-os-data` folders are ignored so an old folder cannot overwrite newer Docker data.
-- If you are unsure which copy is newest, use backup/restore instead of copying folders.
+- Local backups and Google Drive `datasync-N` versions use the same folder shape.
+- Each recoverable folder contains `manifest.json`, `backup.json`, `postgres.sql`, `minio.tgz`, `parquet-manifest.json`, and `checksums.sha256`.
+- Docker restore validates that folder before replacing live data.
+- Loose `business-os-data` folders are not restored automatically. If you are unsure which copy is newest, use backup/restore instead of copying folders.
 
 Updating the app version does not require copying data. Run `run\docker\update.bat`; it backs up the Docker volume first, updates containers, and keeps the data volume.
 
@@ -141,7 +150,7 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 
 Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so temp files and queue state can be cleaned.
 
-For tens of thousands of rows plus heavy image batches, the durable target is Docker Postgres + MinIO + Redis workers. SQLite can be made stable with pagination, WAL, and a single writer, but it is not the right final database for many concurrent writers or large media-heavy imports.
+For tens of thousands of rows plus heavy image batches, the durable target is Docker Postgres + MinIO + Redis workers with DuckDB/Parquet for import staging, exports, analytics snapshots, and backup verification.
 
 ## Update, Backup, Restore
 

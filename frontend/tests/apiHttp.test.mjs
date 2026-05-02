@@ -149,6 +149,29 @@ await runTest('runtime version guard compares served frontend metadata, not back
   }, frontend), false)
 })
 
+await runTest('health payload exposes data, storage, queue, cache, and analytics drivers', () => {
+  const payload = {
+    status: 'ok',
+    drivers: {
+      database: 'sqlite',
+      objectStorage: 'local',
+      queue: 'bullmq',
+      cache: 'redis',
+      analytics: 'duckdb',
+      parquetStore: 'minio',
+      sqliteDisabled: false,
+    },
+    analytics: {
+      engine: 'duckdb',
+      parquetStore: 'minio',
+      roles: ['import_staging', 'analytics_snapshots'],
+    },
+  }
+  assert.equal(payload.drivers.analytics, 'duckdb')
+  assert.equal(payload.drivers.parquetStore, 'minio')
+  assert.equal(payload.analytics.roles.includes('import_staging'), true)
+})
+
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   assert.match(source, /return route\(`products:search:\$\{q\}`,\s*\(\) => apiFetch\('GET', `\/api\/products\/search/)
