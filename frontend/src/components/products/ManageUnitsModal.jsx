@@ -13,6 +13,7 @@ export default function ManageUnitsModal({ onClose, t }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
   const { notify } = useApp()
   const { syncChannel } = useSync()
 
@@ -21,6 +22,7 @@ export default function ManageUnitsModal({ onClose, t }) {
     try {
       const data = await window.api.getUnits()
       setUnits(Array.isArray(data) ? data : [])
+      setSelectedIds(new Set())
       setErr('')
     } catch (error) {
       setErr(error?.message || 'Failed to load units')
@@ -80,9 +82,58 @@ export default function ManageUnitsModal({ onClose, t }) {
     try {
       const unit = units.find((item) => Number(item.id) === Number(id))
       await window.api.deleteUnit(id, { expectedUpdatedAt: unit?.updated_at || undefined })
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(Number(id))
+        return next
+      })
       load()
     } catch (error) {
       notify(error.message || 'Failed', 'error')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const toggleSelected = (id) => {
+    const numericId = Number(id)
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(numericId)) next.delete(numericId)
+      else next.add(numericId)
+      return next
+    })
+  }
+
+  const toggleAllVisible = () => {
+    setSelectedIds((current) => {
+      const visibleIds = units.map((unit) => Number(unit.id))
+      const allSelected = visibleIds.length > 0 && visibleIds.every((id) => current.has(id))
+      const next = new Set(current)
+      for (const id of visibleIds) {
+        if (allSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleDeleteSelected = async () => {
+    if (saving || deletingId || selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} selected unit${selectedIds.size === 1 ? '' : 's'}?`)) return
+    const ids = Array.from(selectedIds)
+    setDeletingId('selected')
+    try {
+      for (const id of ids) {
+        const unit = units.find((item) => Number(item.id) === Number(id))
+        if (!unit) continue
+        await window.api.deleteUnit(id, { expectedUpdatedAt: unit?.updated_at || undefined })
+      }
+      notify(`Deleted ${ids.length} unit${ids.length === 1 ? '' : 's'}`, 'success')
+      setSelectedIds(new Set())
+      load()
+    } catch (error) {
+      notify(error?.message || 'Failed to delete selected units', 'error')
     } finally {
       setDeletingId(null)
     }
@@ -122,6 +173,26 @@ export default function ManageUnitsModal({ onClose, t }) {
 
         <div className="max-h-80 space-y-2 overflow-auto">
           {loading ? <div className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">{t('loading') || 'Loading...'}</div> : null}
+          {!loading && units.length > 0 ? (
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white/95 px-3 py-2 text-xs shadow-sm backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+              <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={units.length > 0 && units.every((unit) => selectedIds.has(Number(unit.id)))}
+                  onChange={toggleAllVisible}
+                />
+                <span>{selectedIds.size ? `${selectedIds.size} selected` : 'Select visible'}</span>
+              </label>
+              <button
+                type="button"
+                className="text-xs font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-gray-400"
+                onClick={handleDeleteSelected}
+                disabled={!selectedIds.size || saving || deletingId != null}
+              >
+                {deletingId === 'selected' ? (t('deleting') || 'Deleting...') : 'Delete selected'}
+              </button>
+            </div>
+          ) : null}
           {units.map((unit) => (
             <div key={unit.id} className="flex items-center gap-3 rounded-lg border border-gray-100 p-2 dark:border-gray-700">
               {editing?.id === unit.id ? (
@@ -150,6 +221,13 @@ export default function ManageUnitsModal({ onClose, t }) {
                 </>
               ) : (
                 <>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(Number(unit.id))}
+                    onChange={() => toggleSelected(unit.id)}
+                    disabled={saving || deletingId != null}
+                    aria-label={`Select ${unit.name}`}
+                  />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: unit.color || DEFAULT_UNIT_COLOR }} />
                   <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{unit.name}</span>
                   <button onClick={() => setEditing({ ...unit, color: unit.color || DEFAULT_UNIT_COLOR })} className="text-xs text-blue-500 hover:underline">

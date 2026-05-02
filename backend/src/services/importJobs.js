@@ -406,6 +406,7 @@ function getProductConflictForReview(row = {}, index, importState = null) {
   if (skuConflict) fields.push('sku')
   if (barcodeConflict && (!skuConflict || barcodeConflict.id !== skuConflict.id || barcodeConflict.barcode === normalized.barcode)) fields.push('barcode')
   const issueTypes = []
+  const nameRows = normalized.name && importState?.byName?.get(normalizeReviewIdentifier(normalized.name)) || []
   const barcodeRows = normalized.barcode && importState?.byBarcode?.get(normalizeReviewIdentifier(normalized.barcode)) || []
   const skuRows = normalized.sku && importState?.bySku?.get(normalizeReviewIdentifier(normalized.sku)) || []
   const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
@@ -418,13 +419,21 @@ function getProductConflictForReview(row = {}, index, importState = null) {
   const matching = sameName.find((product) => normalizeProductSignature(product) === normalizeProductSignature(normalized)) || null
   const selectedParent = chooseParentProduct(sameName)
   const hasIdentifier = fields.length > 0
-  const sameNameType = sameName.length
-    ? (hasIdentifier ? 'same_name_identifier' : (matching ? 'same_name_same_details' : 'same_name_different_details'))
+  const hasImportedSameName = nameRows.length > 1
+  const hasSameNameConflict = sameName.length > 0 || hasImportedSameName
+  const sameNameType = hasSameNameConflict
+    ? (hasIdentifier
+      ? 'same_name_identifier'
+      : sameName.length
+        ? (matching ? 'same_name_same_details' : 'same_name_different_details')
+        : 'same_name_import')
     : ''
   const issueType = issueTypes[0] || ''
   const type = issueType || sameNameType || (hasIdentifier ? 'identifier' : 'new')
   const plannedAction = sameName.length
     ? (matching ? 'merge_stock' : 'create_variant')
+    : hasImportedSameName
+      ? 'create_variant'
     : 'new'
   const conflictTarget = skuConflict || barcodeConflict || matching || sameName[0] || null
   return {
@@ -434,13 +443,14 @@ function getProductConflictForReview(row = {}, index, importState = null) {
     fields,
     labels: [
       sameName.length ? 'same name' : '',
+      !sameName.length && hasImportedSameName ? 'same name in file' : '',
       fields.includes('sku') ? 'same sku' : '',
       fields.includes('barcode') ? 'same barcode' : '',
       issueTypes.includes('missing_name') ? 'missing name' : '',
       issueTypes.includes('invalid_barcode') ? 'invalid barcode' : '',
       issueTypes.includes('duplicate_barcode') ? 'duplicate barcode in file' : '',
       issueTypes.includes('duplicate_sku') ? 'duplicate sku in file' : '',
-      !matching && sameName.length ? 'different details' : '',
+      !matching && hasSameNameConflict ? 'different details' : '',
     ].filter(Boolean),
     plannedAction,
     target_product_id: matching?.id || conflictTarget?.id || null,
@@ -453,8 +463,10 @@ function getProductConflictForReview(row = {}, index, importState = null) {
       parent_id: conflictTarget.parent_id || null,
     } : null,
     importConflict: {
+      nameRows,
       barcodeRows,
       skuRows,
+      duplicateNameGroup: nameRows.length > 1,
       duplicateBarcodeGroup: barcodeRows.length > 1,
       duplicateSkuGroup: skuRows.length > 1,
       barcodeIssue,
@@ -613,12 +625,14 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
     duplicate_barcode: 0,
     duplicate_sku: 0,
     malformed_number: 0,
+    duplicate_name_groups: 0,
     duplicate_barcode_groups: 0,
     duplicate_sku_groups: 0,
   }
   const productIndex = job.type === 'products' ? buildProductReviewIndex() : null
   const productImportState = job.type === 'products' ? await buildProductImportReviewState(csvFile) : null
   if (productImportState) {
+    counts.duplicate_name_groups = productImportState.duplicateNameGroups
     counts.duplicate_barcode_groups = productImportState.duplicateBarcodeGroups
     counts.duplicate_sku_groups = productImportState.duplicateSkuGroups
   }
@@ -1221,6 +1235,7 @@ function createProductContext() {
       branches: false,
       suppliers: false,
     },
+    importParentsByName: new Map(),
   }
 }
 
@@ -1364,9 +1379,14 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
     WHERE lower(trim(name)) = lower(trim(?))
     ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC
   `).all(normalized.name)
+  const nameKey = normalizeLookup(normalized.name)
+  const importedParent = nameKey ? ctx.importParentsByName.get(nameKey) || null : null
+  const candidateParents = importedParent
+    ? [...sameName, importedParent]
+    : sameName
   const signature = normalizeProductSignature(normalized)
   const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || null
-  const selectedParent = chooseParentProduct(sameName)
+  const selectedParent = chooseParentProduct(candidateParents)
 
   let importActionLabel = normalizeLookup(row._action || '')
   if (!importActionLabel || importActionLabel === 'ask') {
@@ -1385,8 +1405,9 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   const plannedTargetId = parseOptionalImportId(row, '_target_product_id')
   const explicitParentId = parseOptionalImportId(row, 'parent_id')
   const plannedParentId = parseOptionalImportId(row, '_parent_id')
-  const parentId = importActionLabel === 'create_variant'
-    ? (plannedParentId || selectedParent?.parent_id || selectedParent?.id || explicitParentId || null)
+  const wantsVariantParent = ['create_variant', 'link_variant'].includes(importActionLabel)
+  const parentId = wantsVariantParent
+    ? (plannedParentId || explicitParentId || selectedParent?.parent_id || selectedParent?.id || null)
     : explicitParentId
   const imageConflictMode = normalizeImageConflictMode(row._image_action || row.image_conflict_mode, action, incomingGallery.length > 0)
 
@@ -1448,6 +1469,26 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
       )
       const productId = result.lastInsertRowid
       syncProductImageGallery(productId, incomingGallery)
+      if (normalizedParentId) {
+        ctx.importParentsByName.set(nameKey, ctx.importParentsByName.get(nameKey) || {
+          ...normalized,
+          id: normalizedParentId,
+          is_group: 1,
+          parent_id: null,
+          created_at: nowIso(),
+        })
+      } else if (nameKey && !ctx.importParentsByName.has(nameKey)) {
+        ctx.importParentsByName.set(nameKey, {
+          ...normalized,
+          id: productId,
+          is_group: importActionLabel === 'create_variant' ? 1 : normalized.is_group,
+          parent_id: null,
+          created_at: nowIso(),
+        })
+        if (importActionLabel === 'create_variant') {
+          db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+        }
+      }
       seedBranchRows(productId, ctx)
       const branch = handleBranchStock(ctx, productId, normalized.branch, normalized.stock_quantity, true)
       insertInventoryMovement({
@@ -1501,7 +1542,10 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
       discount_ends_at: resolveImportValue(existing.discount_ends_at, normalized.discount_ends_at, hasImportValue(row, 'discount_ends_at') || hasImportValue(row, 'promotion_ends_at'), fieldRules.discount_ends_at, defaultRule),
     }, existing)
 
-    const parentRecord = ensureParentProductExists(resolved.parent_id || null, { childId: existing.id })
+    const resolvedParentCandidate = Number(resolved.parent_id || 0) === Number(existing.id || 0)
+      ? (existing.parent_id || null)
+      : (resolved.parent_id || null)
+    const parentRecord = ensureParentProductExists(resolvedParentCandidate, { childId: existing.id })
     const normalizedParentId = parentRecord?.id || null
     const normalizedIsGroup = normalizedParentId ? 0 : (resolved.is_group ? 1 : 0)
     const currentGallery = loadCurrentGallery(existing.id, existing.image_path)

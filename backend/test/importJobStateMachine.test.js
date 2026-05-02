@@ -193,6 +193,54 @@ async function main() {
     assert.equal(review.rows.some((entry) => entry.conflict.issueTypes.includes('missing_name')), true)
   })
 
+  await runTest('product import create_variant automatically creates a parent group for same-file rows', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const productName = `Same File Variant ${Date.now()}`
+    const csvPath = writeJobFile(job.id, 'same-file-variants.csv', [
+      '\uFEFFname,sku,brand,unit,purchase_price_usd,selling_price_usd,stock_quantity',
+      `${productName},,Brand A,pcs,5,10,2`,
+      `${productName},,Brand B,pcs,7,14,3`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'same-file-variants.csv', mimetype: 'text/csv' }, 'csv', 'same-file-variants.csv')
+    updateImportJobDecisions(job.id, {
+      2: { _action: 'create_variant' },
+      3: { _action: 'create_variant' },
+    })
+
+    const result = await processImportJob(job.id, { mode: 'apply' })
+    const products = db.prepare('SELECT id, name, brand, parent_id, is_group, stock_quantity FROM products WHERE name = ? ORDER BY id ASC').all(productName)
+
+    assert.equal(result.status, 'completed')
+    assert.equal(products.length, 2)
+    const parent = products.find((row) => Number(row.parent_id || 0) === 0)
+    const child = products.find((row) => Number(row.parent_id || 0) > 0)
+    assert.ok(parent, 'Expected one imported row to become the group parent')
+    assert.ok(child, 'Expected the other imported row to become a variant')
+    assert.equal(Number(parent.is_group), 1)
+    assert.equal(Number(child.parent_id), Number(parent.id))
+  })
+
+  await runTest('product import review defaults same-file same-name rows to create_variant', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const productName = `Review Same File Variant ${Date.now()}`
+    const csvPath = writeJobFile(job.id, 'review-same-file-variants.csv', [
+      '\uFEFFname,sku,brand,unit,purchase_price_usd,selling_price_usd,stock_quantity',
+      `${productName},,Brand A,pcs,5,10,2`,
+      `${productName},,Brand B,pcs,7,14,3`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'review-same-file-variants.csv', mimetype: 'text/csv' }, 'csv', 'review-same-file-variants.csv')
+
+    const review = await getImportJobReview(job.id, { filter: 'same_name', pageSize: 20 })
+
+    assert.equal(review.counts.total, 2)
+    assert.equal(review.counts.same_name, 2)
+    assert.equal(review.counts.duplicate_name_groups, 1)
+    assert.equal(review.rows.length, 2)
+    assert.equal(review.rows.every((entry) => entry.conflict.type === 'same_name_import'), true)
+    assert.equal(review.rows.every((entry) => entry.conflict.plannedAction === 'create_variant'), true)
+    assert.equal(review.rows.every((entry) => entry.conflict.decisionDefaults._action === 'create_variant'), true)
+  })
+
   await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {
     const jobs = [
       createImportJob({ type: 'products', actor: { userName: 'test' } }),

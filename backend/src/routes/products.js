@@ -1166,6 +1166,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     }
   }
 
+  const importParentsByName = new Map()
   db.transaction(() => {
     for (const p of products) {
       try {
@@ -1205,6 +1206,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           null,
         )
         const sameNameProducts = db.prepare("SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) ORDER BY is_group DESC, parent_id ASC, created_at ASC, id ASC").all(p.name.trim())
+        const nameKey = normalizeLookup(p.name)
+        const importedParent = nameKey ? importParentsByName.get(nameKey) || null : null
+        const candidateParents = importedParent ? [...sameNameProducts, importedParent] : sameNameProducts
         const importSignature = getProductImportDetailSignature({
           ...p,
           category: normalizedCategory,
@@ -1231,7 +1235,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           low_stock_threshold: thresh,
         })
         const matchingSameNameProduct = sameNameProducts.find((product) => getProductImportDetailSignature(product) === importSignature) || null
-        const selectedParent = chooseImportParentProduct(sameNameProducts)
+        const selectedParent = chooseImportParentProduct(candidateParents)
         if (!importActionLabel || importActionLabel === 'ask') {
           if (matchingSameNameProduct) {
             importActionLabel = sameNameProducts.length > 1 ? 'link_variant' : 'merge_stock'
@@ -1244,8 +1248,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           }
         }
         const action = normalizeImportAction(importActionLabel) || 'new'
-        const parentId = importActionLabel === 'create_variant'
-          ? (plannedParentId || selectedParent?.parent_id || selectedParent?.id || explicitParentId || null)
+        const wantsVariantParent = ['create_variant', 'link_variant'].includes(importActionLabel)
+        const parentId = wantsVariantParent
+          ? (plannedParentId || explicitParentId || selectedParent?.parent_id || selectedParent?.id || null)
           : explicitParentId
         const imageConflictMode = normalizeImageConflictMode(
           p._image_action || p.image_conflict_mode,
@@ -1288,7 +1293,15 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           )
           const pid = r.lastInsertRowid
           syncProductImageGallery(pid, newProductGallery)
-          if (normalizedParentId) markParentProductAsGroup(normalizedParentId)
+          if (normalizedParentId) {
+            markParentProductAsGroup(normalizedParentId)
+            if (nameKey && !importParentsByName.has(nameKey)) {
+              importParentsByName.set(nameKey, { ...p, id: normalizedParentId, is_group: 1, parent_id: null, created_at: new Date().toISOString() })
+            }
+          } else if (nameKey && !importParentsByName.has(nameKey)) {
+            importParentsByName.set(nameKey, { ...p, id: pid, is_group: importActionLabel === 'create_variant' ? 1 : isGroup, parent_id: null, created_at: new Date().toISOString() })
+            if (importActionLabel === 'create_variant') markParentProductAsGroup(pid)
+          }
           activeBranches.forEach(b => insertBS.run(pid, b.id, 0))
           const branch = determineBranch(p.branch)
           if (qty > 0) {
@@ -1331,8 +1344,11 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           const resolvedBuyKhr = resolveImportValue(ep.purchase_price_khr, buyKhr, hasImportValue(p, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultFieldRule)
           const resolvedThreshold = resolveImportValue(ep.low_stock_threshold, thresh, hasImportValue(p, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultFieldRule)
           const resolvedIsGroup = resolveImportValue(ep.is_group, isGroup, hasImportValue(p, 'is_group'), fieldRules.is_group, defaultFieldRule)
-          const resolvedParentId = resolveImportValue(ep.parent_id, parentId || null, hasImportValue(p, 'parent_id'), fieldRules.parent_id, defaultFieldRule)
-          const parentRecord = ensureParentProductExists(resolvedParentId || null, { childId: pid })
+          const resolvedParentId = resolveImportValue(ep.parent_id, parentId || null, hasImportValue(p, 'parent_id') || !!parentId, fieldRules.parent_id, defaultFieldRule)
+          const resolvedParentCandidate = Number(resolvedParentId || 0) === Number(pid)
+            ? (ep.parent_id || null)
+            : (resolvedParentId || null)
+          const parentRecord = ensureParentProductExists(resolvedParentCandidate, { childId: pid })
           const normalizedParentId = parentRecord?.id || null
           const normalizedIsGroup = normalizedParentId ? 0 : (resolvedIsGroup ? 1 : 0)
           const currentGallery = loadCurrentGallery(pid, ep.image_path || null)
