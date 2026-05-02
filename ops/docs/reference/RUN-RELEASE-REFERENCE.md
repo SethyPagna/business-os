@@ -2,26 +2,26 @@
 
 Auto-generated script inventory for startup, shutdown, setup, and release workflows.
 
-Total scripts documented: **17**
+Total scripts documented: **24**
 
 ## Start Business OS.bat
 
 - File type: `.bat`
-- Total lines: **43**
+- Total lines: **38**
 - Labels: **0**
 - Step markers: **0**
 
 ## run/setup.bat
 
 - File type: `.bat`
-- Total lines: **378**
+- Total lines: **382**
 - Labels: **0**
 - Step markers: **0**
 
 ## run/start-server.bat
 
 - File type: `.bat`
-- Total lines: **571**
+- Total lines: **563**
 - Labels: **6**
 - Step markers: **0**
 
@@ -29,12 +29,12 @@ Total scripts documented: **17**
 
 | Label | Line |
 |---|---:|
-| `after_pm2_start` | 247 |
-| `after_remote_access_provider` | 392 |
-| `background_start` | 402 |
-| `foreground` | 414 |
-| `after_start` | 443 |
-| `after_health_done` | 460 |
+| `after_pm2_start` | 239 |
+| `after_remote_access_provider` | 384 |
+| `background_start` | 394 |
+| `foreground` | 406 |
+| `after_start` | 435 |
+| `after_health_done` | 452 |
 
 ## run/stop-server.bat
 
@@ -52,7 +52,7 @@ Total scripts documented: **17**
 ## run/verify-local.bat
 
 - File type: `.bat`
-- Total lines: **130**
+- Total lines: **136**
 - Labels: **2**
 - Step markers: **0**
 
@@ -66,34 +66,9 @@ Total scripts documented: **17**
 ## run/build-release.bat
 
 - File type: `.bat`
-- Total lines: **634**
-- Labels: **3**
-- Step markers: **12**
-
-**Labels**
-
-| Label | Line |
-|---|---:|
-| `wait_for_frontend_dist` | 204 |
-| `frontend_dist_missing` | 211 |
-| `frontend_dist_ready` | 223 |
-
-**Step markers**
-
-| Step | Detail | Line |
-|---|---|---:|
-| STEP 0 | Checking prerequisites... | 63 |
-| STEP 0B | Stopping any running packaged server... | 113 |
-| STEP 1 | Installing backend dependencies... | 128 |
-| STEP 2 | Installing frontend dependencies... | 152 |
-| STEP 3 | Building frontend... | 175 |
-| STEP 3B | Running shared verification checks... | 233 |
-| STEP 4 | Staging frontend assets for packaging... | 252 |
-| STEP 5 | Ensuring @yao-pkg/pkg packager is available... | 271 |
-| STEP 6 | Packaging backend to .exe with @yao-pkg/pkg... | 280 |
-| STEP 7 | Copying Sharp native binaries... | 325 |
-| STEP 8 | Assembling release\business-os folder... | 349 |
-| STEP 9 | Building installer... | 562 |
+- Total lines: **54**
+- Labels: **0**
+- Step markers: **0**
 
 ## run/clean-generated.bat
 
@@ -102,23 +77,66 @@ Total scripts documented: **17**
 - Labels: **0**
 - Step markers: **0**
 
-## run/release/start-server.bat
+## run/docker/release.bat
 
 - File type: `.bat`
-- Total lines: **151**
-- Labels: **1**
+- Total lines: **15**
+- Labels: **0**
 - Step markers: **0**
 
-**Labels**
-
-| Label | Line |
-|---|---:|
-| `health_done` | 135 |
-
-## run/release/stop-server.bat
+## run/docker/publish-release.bat
 
 - File type: `.bat`
-- Total lines: **55**
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/install.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/start.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/update.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/backup.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/restore.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/doctor.bat
+
+- File type: `.bat`
+- Total lines: **15**
+- Labels: **0**
+- Step markers: **0**
+
+## run/docker/rotate-cloudflare.bat
+
+- File type: `.bat`
+- Total lines: **15**
 - Labels: **0**
 - Step markers: **0**
 
@@ -150,12 +168,12 @@ Total scripts documented: **17**
 ## ops/scripts/generate-doc-reference.js
 
 - File type: `.js`
-- Total lines: **474**
+- Total lines: **475**
 
 ## ops/scripts/generate-full-project-docs.js
 
 - File type: `.js`
-- Total lines: **638**
+- Total lines: **633**
 
 ## ops/scripts/performance-scan.js
 

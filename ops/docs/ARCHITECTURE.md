@@ -129,8 +129,8 @@ Returns write path updates:
 
 ## Release and Portability
 
-- `run\build-release.bat` assembles a portable folder and installer.
-- Release output includes the shared runtime bootstrapper and Docker Compose config.
-- `run\start-server.bat` is the one-button runtime path: it verifies scale service health before launching the app.
-- Existing `business-os-data` and `.env` in release folder are preserved on rebuild.
+- `run\build-release.bat` delegates to the final Docker release builder.
+- Release output is `release\business-os-docker\` with launcher/support scripts and Docker Compose config only.
+- `Start Business OS.bat` is the one-button runtime path and calls the Docker release launcher.
+- Existing Docker release runtime data and secrets are preserved on rebuild.
 - Data path can be relocated and persisted via `data-location.json`.

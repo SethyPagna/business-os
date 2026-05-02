@@ -8,10 +8,11 @@ If someone is setting up a blank business laptop, give them the installer or por
 
 - `Start Business OS.bat` starts the app, Docker services, workers, and Cloudflare access.
 - `run\setup.bat` prepares a source checkout on a developer laptop.
-- `run\start-server.bat` is the source/runtime launcher used by the root launcher.
+- `run\docker\start.bat` is the final Docker runtime launcher used by the root launcher.
+- `run\start-server.bat` is support-only for source troubleshooting.
 - `run\stop-server.bat` stops the app.
 - `run\verify-local.bat` runs local verification checks.
-- `run\build-release.bat` builds the portable Windows release.
+- `run\build-release.bat` builds the final Docker portable release in `release\business-os-docker\`.
 
 All user-facing `.bat` files keep the window open and print the next step or repair command.
 
@@ -30,6 +31,7 @@ These are for a private Docker release or support:
 ## Support-Only / Legacy
 
 - `run\cloudflare-origin.bat` helps switch Cloudflare origin style.
+- `run\start-server.bat` and `run\setup.bat` are source-checkout support tools, not the final customer runtime.
 - Scale-service commands were removed from the normal run folder. Startup handles Docker services automatically; use `run\docker\doctor.bat` for diagnostics.
 - `run\sh\` contains shell equivalents for non-Windows support.
 

@@ -8,13 +8,13 @@ Use **`Start Business OS.bat`** in the root folder.
 
 That is the normal button. Do not open Docker Desktop, Docker Compose, Redis, Postgres, MinIO, worker, Node, npm, or Cloudflare commands yourself for everyday use.
 
-The `run\` folder is for support, updates, backup/restore, diagnostics, and source-development tasks. The `ops\docker\` folder is internal configuration used by the launcher and support tools; normal users should not edit it.
+The `run\` folder is for support, updates, backup/restore, diagnostics, and source-development tasks. The final normal runtime is the Docker release path under `run\docker\`; the old standalone Windows EXE/installer release is no longer shipped. The `ops\docker\` folder is internal configuration used by the launcher and support tools; normal users should not edit it.
 
 ## Blank Windows Laptop To Running App
 
 Use this path for a normal business/user laptop.
 
-1. Download or copy the **Business OS portable folder** to the laptop, or run the Business OS installer.
+1. Download or copy the **Business OS Docker portable folder** to the laptop.
 2. Double-click **`Start Business OS.bat`**.
 3. Business OS checks Docker Desktop and Cloudflare Tunnel (`cloudflared`).
 4. If either tool is missing, Business OS tries to install it with Windows `winget`.
@@ -24,7 +24,7 @@ Use this path for a normal business/user laptop.
 8. Wait until the window says Business OS is ready.
 9. Open the URLs printed in the window.
 
-If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy only the beginner release/installer files to the new laptop, then double-click the root **`Start Business OS.bat`** inside that release. Do not copy only the `run\` folder.
+If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\build-release.bat` or `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy the complete `release\business-os-docker\` folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside that folder. Do not copy only the `run\` folder.
 
 What the launcher does for you:
 
@@ -42,7 +42,7 @@ Normal URLs:
 
 You do **not** need to run Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands by hand.
 
-Cloudflare requires a local tunnel token file. The installer/portable folder should include it in ignored runtime secret storage, or support can create it with `run\docker\rotate-cloudflare.bat`. Never paste that token into chat or commit it to Git.
+Cloudflare requires a local tunnel token file. The Docker portable folder should include it in ignored runtime secret storage, or support can create it with `run\docker\rotate-cloudflare.bat`. Never paste that token into chat or commit it to Git.
 
 ### Moving To A New Laptop With Data
 

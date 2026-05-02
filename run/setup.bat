@@ -372,7 +372,7 @@ echo ========================================================================
 echo.
 echo   Next steps:
 echo     1. Double-click Start Business OS.bat
-echo     2. Or run: run\start-server.bat
+echo     2. Support only: run\docker\doctor.bat if startup fails
 echo     3. Open http://localhost:4000 in your browser
 echo     4. Default login: admin / admin  ^(change after first login^)
 echo.

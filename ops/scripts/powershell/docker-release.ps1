@@ -19,6 +19,7 @@ function Resolve-Root {
 
 $Root = Resolve-Root
 $ComposeFile = Join-Path $Root 'ops\docker\compose.release.yml'
+$ScaleComposeFile = Join-Path $Root 'ops\docker\compose.scale.yml'
 $Dockerfile = Join-Path $Root 'ops\docker\Dockerfile.release'
 $RuntimeDir = Join-Path $Root 'ops\runtime\docker-release'
 $SecretDir = Join-Path $RuntimeDir 'secrets'
@@ -173,7 +174,13 @@ function Ensure-Env {
   $existing = Read-EnvFile
   $tag = if ($Version) { $Version } else { if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -split ':')[-1] } else { 'latest' } }
   $imageBase = if ($Image) { $Image } else { if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -replace ':[^/:]+$', '') } else { $DefaultImage } }
-  $tokenFile = if ($existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE) { $existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE } else { Join-Path $SecretDir 'cloudflare-tunnel.token' }
+  $defaultTokenFile = Join-Path $SecretDir 'cloudflare-tunnel.token'
+  $sourceTokenFile = Join-Path (Join-Path $Root 'ops\runtime\secrets') 'cloudflare-business-os-leangcosmetics.token'
+  $tokenFile = if ($existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE) { $existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE } else { $defaultTokenFile }
+  $tokenLooksEmpty = -not (Test-Path -LiteralPath $tokenFile) -or ((Get-Item -LiteralPath $tokenFile -ErrorAction SilentlyContinue).Length -le 0)
+  if ($tokenLooksEmpty -and (Test-Path -LiteralPath $sourceTokenFile) -and ((Get-Item -LiteralPath $sourceTokenFile).Length -gt 0)) {
+    $tokenFile = $sourceTokenFile
+  }
 
   if (-not (Test-Path -LiteralPath $tokenFile)) {
     New-Item -ItemType File -Force -Path $tokenFile | Out-Null
@@ -257,7 +264,25 @@ function Copy-Directory($source, $destination) {
   Copy-Item -Path (Join-Path $source '*') -Destination $destination -Recurse -Force
 }
 
+function Remove-RetiredReleaseOutputs {
+  $retired = @(
+    (Join-Path (Join-Path $Root 'release') 'business-os'),
+    (Join-Path (Join-Path $Root 'release') 'BusinessOS-Setup-v6.0.0.exe')
+  )
+  foreach ($target in $retired) {
+    if (-not (Test-Path -LiteralPath $target)) { continue }
+    $resolved = (Resolve-Path -LiteralPath $target).Path
+    $releaseRoot = (Join-Path $Root 'release')
+    if (-not $resolved.StartsWith($releaseRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Fail "Refusing to remove retired release output outside release folder: $resolved"
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+    Write-Ok "Removed retired standalone release output: $resolved"
+  }
+}
+
 function Write-DockerReleaseKit($imageName) {
+  Remove-RetiredReleaseOutputs
   $preserveRuntime = Join-Path $env:TEMP "business-os-docker-kit-runtime-$([guid]::NewGuid().ToString('N'))"
   $existingRuntime = Join-Path $DockerKitDir 'ops\runtime\docker-release'
   if (Test-Path -LiteralPath $existingRuntime) {
@@ -295,40 +320,54 @@ function Write-DockerReleaseKit($imageName) {
   if (-not (Test-Path -LiteralPath $kitToken)) {
     New-Item -ItemType File -Force -Path $kitToken | Out-Null
   }
-  if (-not (Test-Path -LiteralPath $kitEnvFile)) {
-    $values = [ordered]@{
-      BUSINESS_OS_IMAGE = $imageName
-      BUSINESS_OS_DOCKER_DATA_MODE = 'sqlite'
-      BUSINESS_OS_PUBLIC_URL = 'https://leangcosmetics.dpdns.org'
-      BUSINESS_OS_ADMIN_URL = 'https://admin.leangcosmetics.dpdns.org'
-      POSTGRES_DB = 'business_os'
-      POSTGRES_USER = 'business_os'
-      POSTGRES_PASSWORD = New-Secret 36
-      MINIO_ROOT_USER = 'businessos'
-      MINIO_ROOT_PASSWORD = New-Secret 36
-      S3_BUCKET = 'business-os-assets'
-      CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
-      BUSINESS_OS_LEGACY_ROOT = $DockerKitDir
-      DATABASE_DRIVER = 'sqlite'
-      OBJECT_STORAGE_DRIVER = 'local'
-      DATABASE_URL = ''
-      SQLITE_SAFE_WRITER_MODE = '1'
-      IMPORT_QUEUE_CONCURRENCY = '1'
-      MEDIA_QUEUE_CONCURRENCY = '2'
-      IMPORT_BATCH_PAUSE_MS = '50'
-      IMPORT_WORKER_REPLICAS = '1'
-      MEDIA_WORKER_REPLICAS = '1'
+  $sourceTokenFile = Join-Path (Join-Path $Root 'ops\runtime\secrets') 'cloudflare-business-os-leangcosmetics.token'
+  if ((Test-Path -LiteralPath $sourceTokenFile) -and ((Get-Item -LiteralPath $sourceTokenFile).Length -gt 0)) {
+    $kitTokenEmpty = -not (Test-Path -LiteralPath $kitToken) -or ((Get-Item -LiteralPath $kitToken).Length -le 0)
+    if ($kitTokenEmpty) {
+      Copy-Item -LiteralPath $sourceTokenFile -Destination $kitToken -Force
+      Write-Ok 'Cloudflare tunnel token copied into ignored Docker release secret storage.'
     }
-    $oldRuntimeDir = $RuntimeDir
-    $oldEnvFile = $EnvFile
-    try {
-      $script:RuntimeDir = $kitEnvDir
-      $script:EnvFile = $kitEnvFile
-      Write-EnvFile $values
-    } finally {
-      $script:RuntimeDir = $oldRuntimeDir
-      $script:EnvFile = $oldEnvFile
+  }
+  $kitExisting = @{}
+  if (Test-Path -LiteralPath $kitEnvFile) {
+    foreach ($line in Get-Content -LiteralPath $kitEnvFile) {
+      if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+      $parts = $line.Split('=', 2)
+      $kitExisting[$parts[0]] = $parts[1]
     }
+  }
+  $values = [ordered]@{
+    BUSINESS_OS_IMAGE = $imageName
+    BUSINESS_OS_DOCKER_DATA_MODE = 'sqlite'
+    BUSINESS_OS_PUBLIC_URL = if ($kitExisting.BUSINESS_OS_PUBLIC_URL) { $kitExisting.BUSINESS_OS_PUBLIC_URL } else { 'https://leangcosmetics.dpdns.org' }
+    BUSINESS_OS_ADMIN_URL = if ($kitExisting.BUSINESS_OS_ADMIN_URL) { $kitExisting.BUSINESS_OS_ADMIN_URL } else { 'https://admin.leangcosmetics.dpdns.org' }
+    POSTGRES_DB = if ($kitExisting.POSTGRES_DB) { $kitExisting.POSTGRES_DB } else { 'business_os' }
+    POSTGRES_USER = if ($kitExisting.POSTGRES_USER) { $kitExisting.POSTGRES_USER } else { 'business_os' }
+    POSTGRES_PASSWORD = if ($kitExisting.POSTGRES_PASSWORD) { $kitExisting.POSTGRES_PASSWORD } else { New-Secret 36 }
+    MINIO_ROOT_USER = if ($kitExisting.MINIO_ROOT_USER) { $kitExisting.MINIO_ROOT_USER } else { 'businessos' }
+    MINIO_ROOT_PASSWORD = if ($kitExisting.MINIO_ROOT_PASSWORD) { $kitExisting.MINIO_ROOT_PASSWORD } else { New-Secret 36 }
+    S3_BUCKET = if ($kitExisting.S3_BUCKET) { $kitExisting.S3_BUCKET } else { 'business-os-assets' }
+    CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
+    BUSINESS_OS_LEGACY_ROOT = $DockerKitDir
+    DATABASE_DRIVER = 'sqlite'
+    OBJECT_STORAGE_DRIVER = 'local'
+    DATABASE_URL = ''
+    SQLITE_SAFE_WRITER_MODE = '1'
+    IMPORT_QUEUE_CONCURRENCY = '1'
+    MEDIA_QUEUE_CONCURRENCY = '2'
+    IMPORT_BATCH_PAUSE_MS = '50'
+    IMPORT_WORKER_REPLICAS = '1'
+    MEDIA_WORKER_REPLICAS = '1'
+  }
+  $oldRuntimeDir = $RuntimeDir
+  $oldEnvFile = $EnvFile
+  try {
+    $script:RuntimeDir = $kitEnvDir
+    $script:EnvFile = $kitEnvFile
+    Write-EnvFile $values
+  } finally {
+    $script:RuntimeDir = $oldRuntimeDir
+    $script:EnvFile = $oldEnvFile
   }
 
   @"
@@ -400,6 +439,10 @@ function Invoke-Start {
   Ensure-DockerReady
   Ensure-Env | Out-Null
   $envMap = Read-EnvFile
+  if (Test-Path -LiteralPath $ScaleComposeFile) {
+    Write-Step 'Stopping retired source app/worker containers that could occupy port 4000...'
+    Invoke-Docker -DockerArgs @('compose', '-f', $ScaleComposeFile, 'stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
+  }
   if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -eq 'postgres') -or ($envMap.DATABASE_DRIVER -eq 'postgres')) {
     Write-Step 'Running Postgres migration profile...'
     Invoke-Compose -ComposeArgs @('--profile', 'postgres-migrate', 'run', '--rm', 'migrator')

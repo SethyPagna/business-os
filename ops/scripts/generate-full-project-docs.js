@@ -9,11 +9,7 @@ const { resolveProjectRoot } = require('./lib/fs-utils')
 // the repository root.
 const ROOT = resolveProjectRoot(__dirname)
 const DOCS_REF = path.join(ROOT, 'ops', 'docs', 'reference')
-const VARIANT_ROOTS = fs.readdirSync(ROOT, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && /^business-os-v\d/i.test(entry.name))
-  .map((entry) => entry.name)
-  .sort((a, b) => a.localeCompare(b))
-const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts', 'run', ...VARIANT_ROOTS]
+const TARGET_ROOTS = ['frontend', 'backend', 'ops/scripts', 'run']
 const EXCLUDED_DIRS = new Set([
   'node_modules',
   'dist',
@@ -156,10 +152,9 @@ function inferPurpose(filePath) {
   const p = rel(filePath)
   const base = path.basename(p)
   if (p === '.env') return 'Runtime environment configuration'
-  if (p === 'build-release.bat') return 'Release build orchestration script'
+  if (p === 'build-release.bat' || p === 'run/build-release.bat') return 'Final Docker release build wrapper'
   if (p === 'setup.bat' || p === 'setup.sh') return 'Environment setup script'
   if (p.startsWith('start-server') || p.startsWith('stop-server')) return 'Server lifecycle launcher script'
-  if (p === 'installer.nsi' || p === 'ops/config/installer.nsi') return 'NSIS installer definition'
   if (p === 'ecosystem.config.js' || p === 'ops/config/ecosystem.config.js') return 'PM2 ecosystem process configuration'
   if (p === 'README.md' || p === 'ops/readme/README.md') return 'Project documentation entrypoint'
   if (p.includes('/routes/')) return 'API route handler'
@@ -341,7 +336,6 @@ function folderPurpose(folderPath) {
   if (p === 'backend') return 'Backend project root'
   if (p === 'scripts' || p === 'ops/scripts') return 'Project-level automation scripts'
   if (p === 'run') return 'Project run-script home for bat and sh launchers'
-  if (p === 'run-tailscale') return 'Compatibility wrappers for Tailscale-oriented run commands'
   if (p === 'run/sh') return 'POSIX run/setup/stop scripts'
   if (p.startsWith('frontend/src/components')) return 'UI pages/components domain'
   if (p.startsWith('frontend/src/api')) return 'Frontend API and sync transport'

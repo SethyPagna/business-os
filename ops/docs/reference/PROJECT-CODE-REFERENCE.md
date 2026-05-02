@@ -102,40 +102,40 @@ Total files documented: **17**
 | 13 | `groupByPrefix` | function | 234 |
 | 14 | `writeTranslationReference` | function | 243 |
 | 15 | `writeRunReleaseReference` | function | 299 |
-| 16 | `writeModuleNamingGuide` | function | 373 |
-| 17 | `writeProjectCodeReference` | function | 421 |
-| 18 | `main` | function | 462 |
+| 16 | `writeModuleNamingGuide` | function | 374 |
+| 17 | `writeProjectCodeReference` | function | 422 |
+| 18 | `main` | function | 463 |
 
 ### 3.6 `ops/scripts/generate-full-project-docs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 48 |
-| 2 | `toPosix` | function | 52 |
-| 3 | `rel` | function | 56 |
-| 4 | `shouldSkipDir` | function | 60 |
-| 5 | `collectFilesAndFolders` | function | 64 |
-| 6 | `getAllProjectFilesAndFolders` | function | 85 |
-| 7 | `isProbablyText` | function | 108 |
-| 8 | `readText` | function | 121 |
-| 9 | `lineCount` | function | 129 |
-| 10 | `fileCategory` | function | 134 |
-| 11 | `inferPurpose` | function | 155 |
-| 12 | `markdownHeader` | function | 180 |
-| 13 | `markdownSection` | function | 184 |
-| 14 | `extractImportsExports` | function | 188 |
-| 15 | `findSymbols` | function | 228 |
-| 16 | `writeAllFunctionReference` | function | 254 |
-| 17 | `resolveInternalImport` | function | 292 |
-| 18 | `writeAllFileInventory` | function | 315 |
-| 19 | `folderPurpose` | function | 337 |
-| 20 | `writeFolderCoverage` | function | 355 |
-| 21 | `writeImportExportReference` | function | 414 |
-| 22 | `readJsonObject` | function | 488 |
-| 23 | `translationSectionForKey` | function | 496 |
-| 24 | `writeTranslationSectionReference` | function | 547 |
-| 25 | `writeMainCoverageSummary` | function | 596 |
-| 26 | `main` | function | 625 |
+| 1 | `ensureDir` | function | 44 |
+| 2 | `toPosix` | function | 48 |
+| 3 | `rel` | function | 52 |
+| 4 | `shouldSkipDir` | function | 56 |
+| 5 | `collectFilesAndFolders` | function | 60 |
+| 6 | `getAllProjectFilesAndFolders` | function | 81 |
+| 7 | `isProbablyText` | function | 104 |
+| 8 | `readText` | function | 117 |
+| 9 | `lineCount` | function | 125 |
+| 10 | `fileCategory` | function | 130 |
+| 11 | `inferPurpose` | function | 151 |
+| 12 | `markdownHeader` | function | 175 |
+| 13 | `markdownSection` | function | 179 |
+| 14 | `extractImportsExports` | function | 183 |
+| 15 | `findSymbols` | function | 223 |
+| 16 | `writeAllFunctionReference` | function | 249 |
+| 17 | `resolveInternalImport` | function | 287 |
+| 18 | `writeAllFileInventory` | function | 310 |
+| 19 | `folderPurpose` | function | 332 |
+| 20 | `writeFolderCoverage` | function | 350 |
+| 21 | `writeImportExportReference` | function | 409 |
+| 22 | `readJsonObject` | function | 483 |
+| 23 | `translationSectionForKey` | function | 491 |
+| 24 | `writeTranslationSectionReference` | function | 542 |
+| 25 | `writeMainCoverageSummary` | function | 591 |
+| 26 | `main` | function | 620 |
 
 ### 3.7 `ops/scripts/lib/fs-utils.js`
 
@@ -192,9 +192,9 @@ Total files documented: **17**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `read` | function | 24 |
-| 2 | `requireFile` | function | 28 |
-| 3 | `main` | function | 32 |
+| 1 | `read` | function | 33 |
+| 2 | `requireFile` | function | 37 |
+| 3 | `main` | function | 41 |
 
 ### 3.16 `ops/scripts/verify-runtime-deps.js`
 

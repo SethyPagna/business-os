@@ -11,7 +11,7 @@ Business OS now starts as one application, but it depends on local scale service
 - MinIO for the future verified asset-storage target
 - SQLite and local files as the current authoritative business data source
 
-`run\start-server.bat` starts Docker Desktop when possible, launches the Compose stack, waits for Redis/Postgres/MinIO health, starts the backend/frontend, starts Cloudflare Tunnel, and prints the local admin, Cloudflare admin, and customer portal URLs.
+`Start Business OS.bat` starts Docker Desktop when possible, launches the final Docker Compose stack, waits for Redis/Postgres/MinIO health, starts the app/workers, starts Cloudflare Tunnel, and prints the local admin, Cloudflare admin, and customer portal URLs.
 
 The app does not silently switch live business data to Postgres/MinIO. SQLite/local files stay authoritative until an admin uses Settings > Backup > Data migration and completes a verified migration workflow. The current one-button safety step does run automatically inside the app: it creates a local folder backup and then runs Google Drive sync when Drive is connected, without changing the live data source.
 
@@ -78,11 +78,11 @@ Typical organization contents:
 - `backups\`
 - `portal\`
 
-Packaged releases preserve:
+Docker releases preserve:
 
-- `release\business-os\business-os-data`
-- `release\business-os\.env`
-- `release\business-os\data-location.json`
+- Docker runtime volumes
+- `release\business-os-docker\ops\runtime\docker-release\docker-release.env`
+- `release\business-os-docker\ops\runtime\docker-release\secrets\`
 
 ## Environment Defaults
 
@@ -118,16 +118,16 @@ The bootstrapper copies root `minio.license` into ignored runtime secret storage
 run\build-release.bat
 ```
 
-The release output includes:
+The release output is `release\business-os-docker\` and includes:
 
-- `business-os-server.exe`
-- release `start-server.bat` / `stop-server.bat`
-- `ops\docker\compose.scale.yml`
-- `ops\scripts\powershell\runtime-bootstrap.ps1`
-- `.env` template with scale defaults
-- preserved data and data-location files
+- `Start Business OS.bat`
+- `run\docker\*.bat`
+- `ops\docker\compose.release.yml`
+- `ops\docker\Dockerfile.release`
+- `ops\scripts\powershell\docker-release.ps1`
+- ignored runtime env/secrets folders
 
-The desktop shortcut and portable release both use the same one-button start flow.
+The retired standalone Windows EXE/NSIS release is no longer produced. The Docker portable release is the final customer/runtime format.
 
 ## Verification
 

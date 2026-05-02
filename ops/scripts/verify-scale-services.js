@@ -131,7 +131,7 @@ function main() {
     }
     const info = run(dockerExe, ['info', '--format', '{{.ServerVersion}}'])
     if (!info.ok) {
-      const message = 'Docker Desktop engine is not reachable. Run run\\start-server.bat or run\\setup.bat so Business OS can start the required scale services.'
+      const message = 'Docker Desktop engine is not reachable. Double-click Start Business OS.bat or run run\\setup.bat so Business OS can start the required services.'
       if (requireServices) failures.push(message)
       else warnings.push(message)
     } else {

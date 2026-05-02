@@ -109,7 +109,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 if errorlevel 1 (
     echo.
     echo [ERROR] Required runtime services are not ready.
-    echo         Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.
+    echo         Open Docker Desktop, finish any setup/restart prompts, then double-click Start Business OS.bat again.
     echo.
     pause
     echo [%DATE% %TIME%] START failed: runtime bootstrap failed>>"%RUN_LOG%"
@@ -192,7 +192,7 @@ for %%g in (pm2.cmd pm2.exe pm2.bat pm2) do (
 
 if not defined PM2_CMD (
     echo [WARN] PM2 is not installed. Using background node mode.
-    echo [INFO] run\start-server.bat does not install global packages automatically.
+    echo [INFO] This support launcher does not install global packages automatically.
     if "!SERVER_ALREADY_RUNNING!"=="1" goto :after_pm2_start
     goto :background_start
 )

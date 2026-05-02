@@ -289,7 +289,7 @@ function Start-DockerDesktop($dockerExe) {
     'C:\Program Files\Docker Desktop\Docker Desktop.exe'
   )
   if (-not $dockerDesktop) {
-    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then run run\start-server.bat again.'
+    Fail 'Docker Desktop is installed incompletely or cannot be started. Open Docker Desktop manually, wait for it to say Running, then double-click Start Business OS.bat again.'
   }
 
   Write-Step 'Starting Docker Desktop. This can take 1-3 minutes on Windows...'
@@ -324,7 +324,7 @@ function Wait-DockerEngine($dockerExe, $timeoutSeconds = 90) {
     }
     Start-Sleep -Seconds 3
   } while ((Get-Date) -lt $deadline)
-  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then run run\start-server.bat again.'
+  Fail 'Docker Desktop did not become ready. Open Docker Desktop, finish any setup/restart prompts, then double-click Start Business OS.bat again.'
 }
 
 function Invoke-Compose($dockerExe, [string[]]$composeArgs) {

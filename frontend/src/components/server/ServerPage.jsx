@@ -599,7 +599,7 @@ export default function ServerPage() {
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">1.</span>
                 <div>
                   <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step1_title') || 'Run setup on the server PC'}</p>
-                  <p className="mt-0.5">{t('sync_step1_desc') || 'Double-click run\\start-server.bat (Windows) or run bash run/sh/start-server.sh (Mac/Linux).'}</p>
+                  <p className="mt-0.5">{t('sync_step1_desc') || 'Double-click Start Business OS.bat. It starts Docker, workers, and Cloudflare automatically.'}</p>
                 </div>
               </li>
               <li className="flex gap-2">

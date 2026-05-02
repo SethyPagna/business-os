@@ -4,13 +4,13 @@ Auto-generated import/export and dependency-link coverage for frontend/backend c
 
 ## 1. Coverage Summary
 
-Code files documented: **274**
+Code files documented: **285**
 
 ## 2. Dependency Matrix
 
 | No. | File | Imports | Exports | Internal deps | Referenced by |
 |---:|---|---:|---:|---:|---:|
-| 1 | `backend/server.js` | 40 | 0 | 34 | 0 |
+| 1 | `backend/server.js` | 41 | 0 | 35 | 0 |
 | 2 | `backend/src/accessControl.js` | 2 | 1 | 2 | 4 |
 | 3 | `backend/src/authOtpGuards.js` | 1 | 1 | 1 | 2 |
 | 4 | `backend/src/backupSchema.js` | 0 | 1 | 0 | 2 |
@@ -24,273 +24,284 @@ Code files documented: **274**
 | 12 | `backend/src/idempotency.js` | 0 | 1 | 0 | 4 |
 | 13 | `backend/src/importCsv.js` | 1 | 1 | 0 | 3 |
 | 14 | `backend/src/importParsing.js` | 1 | 1 | 1 | 3 |
-| 15 | `backend/src/middleware.js` | 10 | 1 | 6 | 23 |
-| 16 | `backend/src/money.js` | 0 | 1 | 0 | 5 |
-| 17 | `backend/src/netSecurity.js` | 1 | 1 | 0 | 5 |
-| 18 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
-| 19 | `backend/src/portalUtils.js` | 0 | 1 | 0 | 2 |
-| 20 | `backend/src/productDiscounts.js` | 1 | 1 | 1 | 3 |
-| 21 | `backend/src/productImportPolicies.js` | 1 | 1 | 1 | 3 |
-| 22 | `backend/src/requestContext.js` | 1 | 1 | 0 | 2 |
-| 23 | `backend/src/routes/actionHistory.js` | 4 | 1 | 3 | 1 |
-| 24 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
-| 25 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 1 |
-| 26 | `backend/src/routes/branches.js` | 5 | 1 | 4 | 1 |
-| 27 | `backend/src/routes/catalog.js` | 4 | 1 | 3 | 1 |
-| 28 | `backend/src/routes/categories.js` | 5 | 1 | 4 | 1 |
-| 29 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
-| 30 | `backend/src/routes/customTables.js` | 5 | 1 | 4 | 1 |
-| 31 | `backend/src/routes/files.js` | 5 | 1 | 4 | 1 |
-| 32 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
-| 33 | `backend/src/routes/inventory.js` | 6 | 1 | 5 | 1 |
-| 34 | `backend/src/routes/notifications.js` | 4 | 1 | 3 | 1 |
-| 35 | `backend/src/routes/organizations.js` | 3 | 1 | 2 | 1 |
-| 36 | `backend/src/routes/portal.js` | 12 | 1 | 11 | 1 |
-| 37 | `backend/src/routes/products.js` | 15 | 1 | 12 | 1 |
-| 38 | `backend/src/routes/returns.js` | 6 | 1 | 5 | 1 |
-| 39 | `backend/src/routes/runtime.js` | 6 | 1 | 5 | 1 |
-| 40 | `backend/src/routes/sales.js` | 6 | 1 | 5 | 1 |
-| 41 | `backend/src/routes/settings.js` | 6 | 1 | 5 | 1 |
-| 42 | `backend/src/routes/system/index.js` | 17 | 1 | 12 | 1 |
-| 43 | `backend/src/routes/units.js` | 5 | 1 | 4 | 1 |
-| 44 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
-| 45 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
-| 46 | `backend/src/runtimeState/index.js` | 4 | 1 | 1 | 2 |
-| 47 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
-| 48 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 3 |
-| 49 | `backend/src/services/aiGateway.js` | 2 | 1 | 2 | 2 |
-| 50 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
-| 51 | `backend/src/services/googleDriveSync/index.js` | 8 | 1 | 4 | 3 |
-| 52 | `backend/src/services/importJobs.js` | 18 | 1 | 12 | 6 |
-| 53 | `backend/src/services/mediaQueue.js` | 5 | 1 | 3 | 4 |
-| 54 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
-| 55 | `backend/src/services/supabaseAuth.js` | 0 | 1 | 0 | 2 |
-| 56 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
-| 57 | `backend/src/sessionAuth.js` | 2 | 1 | 1 | 4 |
-| 58 | `backend/src/settingsSnapshot.js` | 3 | 1 | 1 | 6 |
-| 59 | `backend/src/storage/organizationFolders.js` | 2 | 1 | 0 | 2 |
-| 60 | `backend/src/systemFsWorker.js` | 3 | 0 | 1 | 0 |
-| 61 | `backend/src/uploadReferenceCleanup.js` | 1 | 1 | 1 | 2 |
-| 62 | `backend/src/uploadSecurity.js` | 2 | 1 | 0 | 4 |
-| 63 | `backend/src/websocket.js` | 5 | 1 | 3 | 1 |
-| 64 | `backend/src/workers/importWorker.js` | 2 | 1 | 2 | 1 |
-| 65 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
-| 66 | `backend/src/workers/migrationWorker.js` | 7 | 1 | 0 | 1 |
-| 67 | `backend/test/accessControl.test.js` | 2 | 0 | 1 | 0 |
-| 68 | `backend/test/authOtpGuards.test.js` | 2 | 0 | 1 | 0 |
-| 69 | `backend/test/authSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
-| 70 | `backend/test/backupRoundtrip.test.js` | 6 | 0 | 0 | 0 |
-| 71 | `backend/test/backupSchema.test.js` | 2 | 0 | 1 | 0 |
-| 72 | `backend/test/configOrganizationRuntime.test.js` | 7 | 0 | 0 | 0 |
-| 73 | `backend/test/contactOptions.test.js` | 2 | 0 | 1 | 0 |
-| 74 | `backend/test/databaseRuntime.test.js` | 5 | 0 | 1 | 0 |
-| 75 | `backend/test/dataPath.test.js` | 5 | 0 | 1 | 0 |
-| 76 | `backend/test/fileRouteSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
-| 77 | `backend/test/idempotency.test.js` | 2 | 0 | 1 | 0 |
-| 78 | `backend/test/importCsv.test.js` | 6 | 0 | 2 | 0 |
-| 79 | `backend/test/importJobStateMachine.test.js` | 8 | 0 | 4 | 0 |
-| 80 | `backend/test/importScaleSmoke.test.js` | 6 | 0 | 2 | 0 |
-| 81 | `backend/test/netSecurity.test.js` | 2 | 0 | 1 | 0 |
-| 82 | `backend/test/portalUtils.test.js` | 2 | 0 | 1 | 0 |
-| 83 | `backend/test/productImportPolicies.test.js` | 2 | 0 | 1 | 0 |
-| 84 | `backend/test/runtimeCache.test.js` | 5 | 0 | 1 | 0 |
-| 85 | `backend/test/serverUtils.test.js` | 3 | 0 | 2 | 0 |
-| 86 | `backend/test/stockConsistency.test.js` | 7 | 0 | 0 | 0 |
-| 87 | `backend/test/systemRouteSecurity.test.js` | 6 | 0 | 0 | 0 |
-| 88 | `backend/test/uploadSecurity.test.js` | 3 | 0 | 2 | 0 |
-| 89 | `frontend/postcss.config.mjs` | 0 | 0 | 0 | 0 |
-| 90 | `frontend/public/runtime-noise-guard.js` | 0 | 0 | 0 | 0 |
-| 91 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 | 0 | 0 | 0 |
-| 92 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 | 0 | 0 | 0 |
-| 93 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 | 0 | 0 | 0 |
-| 94 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 | 0 | 0 | 0 |
-| 95 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 | 0 | 0 | 0 |
-| 96 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 | 0 | 0 | 0 |
-| 97 | `frontend/public/sw.js` | 0 | 0 | 0 | 0 |
-| 98 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
-| 99 | `frontend/src/api/http.js` | 2 | 24 | 2 | 5 |
-| 100 | `frontend/src/api/localDb.js` | 3 | 10 | 2 | 3 |
-| 101 | `frontend/src/api/methods.js` | 5 | 171 | 5 | 1 |
-| 102 | `frontend/src/api/websocket.js` | 2 | 4 | 2 | 2 |
-| 103 | `frontend/src/App.jsx` | 30 | 1 | 29 | 1 |
-| 104 | `frontend/src/app/appShellUtils.mjs` | 0 | 5 | 0 | 2 |
-| 105 | `frontend/src/app/publicErrorRecovery.mjs` | 0 | 3 | 0 | 1 |
-| 106 | `frontend/src/AppContext.jsx` | 11 | 6 | 10 | 51 |
-| 107 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
-| 108 | `frontend/src/components/branches/Branches.jsx` | 11 | 1 | 9 | 1 |
-| 109 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
-| 110 | `frontend/src/components/branches/TransferModal.jsx` | 2 | 1 | 1 | 1 |
-| 111 | `frontend/src/components/catalog/CatalogPage.jsx` | 13 | 1 | 12 | 1 |
-| 112 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 6 | 1 | 4 | 1 |
-| 113 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
-| 114 | `frontend/src/components/catalog/catalogUi.jsx` | 1 | 3 | 0 | 3 |
-| 115 | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | 1 | 7 | 1 | 1 |
-| 116 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 | 6 | 0 | 0 |
-| 117 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 | 19 | 0 | 0 |
-| 118 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 9 | 0 | 0 |
-| 119 | `frontend/src/components/contacts/Contacts.jsx` | 12 | 1 | 10 | 1 |
-| 120 | `frontend/src/components/contacts/CustomersTab.jsx` | 13 | 2 | 11 | 2 |
-| 121 | `frontend/src/components/contacts/DeliveryTab.jsx` | 13 | 2 | 11 | 1 |
-| 122 | `frontend/src/components/contacts/shared.jsx` | 7 | 5 | 5 | 4 |
-| 123 | `frontend/src/components/contacts/SuppliersTab.jsx` | 13 | 0 | 11 | 1 |
-| 124 | `frontend/src/components/custom-tables/CustomTables.jsx` | 5 | 1 | 4 | 0 |
-| 125 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
-| 126 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
-| 127 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
-| 128 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
-| 129 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
-| 130 | `frontend/src/components/dashboard/Dashboard.jsx` | 15 | 1 | 13 | 1 |
-| 131 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
-| 132 | `frontend/src/components/files/FilePickerModal.jsx` | 3 | 1 | 2 | 5 |
-| 133 | `frontend/src/components/files/FilesPage.jsx` | 7 | 1 | 6 | 1 |
-| 134 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
-| 135 | `frontend/src/components/inventory/Inventory.jsx` | 20 | 1 | 18 | 1 |
-| 136 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 3 | 1 | 2 | 1 |
-| 137 | `frontend/src/components/inventory/movementGroups.js` | 0 | 2 | 0 | 1 |
-| 138 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 1 | 1 | 1 | 1 |
-| 139 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 4 | 1 | 2 | 1 |
-| 140 | `frontend/src/components/navigation/Sidebar.jsx` | 6 | 1 | 5 | 1 |
-| 141 | `frontend/src/components/pos/CartItem.jsx` | 1 | 1 | 1 | 1 |
-| 142 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
-| 143 | `frontend/src/components/pos/POS.jsx` | 15 | 1 | 13 | 1 |
-| 144 | `frontend/src/components/pos/posCore.mjs` | 2 | 8 | 2 | 0 |
-| 145 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
-| 146 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
-| 147 | `frontend/src/components/products/barcodeImageScanner.mjs` | 1 | 1 | 0 | 2 |
-| 148 | `frontend/src/components/products/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
-| 149 | `frontend/src/components/products/barcodeScannerState.mjs` | 0 | 1 | 0 | 2 |
-| 150 | `frontend/src/components/products/BranchStockAdjuster.jsx` | 1 | 1 | 0 | 1 |
-| 151 | `frontend/src/components/products/BulkAddStockModal.jsx` | 1 | 1 | 0 | 1 |
-| 152 | `frontend/src/components/products/BulkImportModal.jsx` | 4 | 1 | 3 | 1 |
-| 153 | `frontend/src/components/products/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
-| 154 | `frontend/src/components/products/ManageBrandsModal.jsx` | 3 | 1 | 2 | 1 |
-| 155 | `frontend/src/components/products/ManageCategoriesModal.jsx` | 3 | 1 | 2 | 1 |
-| 156 | `frontend/src/components/products/ManageUnitsModal.jsx` | 3 | 1 | 2 | 1 |
-| 157 | `frontend/src/components/products/primitives.jsx` | 2 | 0 | 0 | 7 |
-| 158 | `frontend/src/components/products/ProductDetailModal.jsx` | 4 | 1 | 3 | 1 |
-| 159 | `frontend/src/components/products/ProductForm.jsx` | 8 | 1 | 6 | 1 |
-| 160 | `frontend/src/components/products/productHistoryHelpers.mjs` | 0 | 2 | 0 | 2 |
-| 161 | `frontend/src/components/products/productImportPlanner.mjs` | 0 | 8 | 0 | 3 |
-| 162 | `frontend/src/components/products/productImportWorker.mjs` | 1 | 0 | 1 | 0 |
-| 163 | `frontend/src/components/products/Products.jsx` | 28 | 1 | 26 | 1 |
-| 164 | `frontend/src/components/products/scanbotScanner.mjs` | 0 | 3 | 0 | 2 |
-| 165 | `frontend/src/components/products/VariantFormModal.jsx` | 6 | 1 | 5 | 1 |
-| 166 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
-| 167 | `frontend/src/components/receipt-settings/constants.js` | 0 | 3 | 0 | 4 |
-| 168 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
-| 169 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
-| 170 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
-| 171 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 | 1 | 1 | 1 |
-| 172 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 11 | 1 | 9 | 1 |
-| 173 | `frontend/src/components/receipt-settings/template.js` | 1 | 2 | 1 | 3 |
-| 174 | `frontend/src/components/receipt/Receipt.jsx` | 6 | 1 | 4 | 3 |
-| 175 | `frontend/src/components/returns/EditReturnModal.jsx` | 2 | 1 | 1 | 1 |
-| 176 | `frontend/src/components/returns/NewReturnModal.jsx` | 3 | 1 | 2 | 1 |
-| 177 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 2 | 1 | 1 | 1 |
-| 178 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
-| 179 | `frontend/src/components/returns/Returns.jsx` | 14 | 1 | 12 | 1 |
-| 180 | `frontend/src/components/sales/ExportModal.jsx` | 4 | 1 | 2 | 1 |
-| 181 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
-| 182 | `frontend/src/components/sales/Sales.jsx` | 17 | 1 | 15 | 1 |
-| 183 | `frontend/src/components/sales/SalesImportModal.jsx` | 3 | 1 | 2 | 1 |
-| 184 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 5 |
-| 185 | `frontend/src/components/server/ServerPage.jsx` | 4 | 1 | 3 | 1 |
-| 186 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 12 |
-| 187 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 3 | 1 | 1 | 1 |
-| 188 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 6 |
-| 189 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
-| 190 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
-| 191 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 21 |
-| 192 | `frontend/src/components/shared/navigationConfig.js` | 0 | 4 | 0 | 2 |
-| 193 | `frontend/src/components/shared/NotificationCenter.jsx` | 3 | 1 | 1 | 2 |
-| 194 | `frontend/src/components/shared/pageActivity.js` | 2 | 1 | 1 | 15 |
-| 195 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
-| 196 | `frontend/src/components/shared/PageHelpButton.jsx` | 4 | 1 | 2 | 1 |
-| 197 | `frontend/src/components/shared/pageHelpContent.js` | 0 | 2 | 0 | 1 |
-| 198 | `frontend/src/components/shared/PaginationControls.jsx` | 1 | 4 | 0 | 6 |
-| 199 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 8 |
-| 200 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
-| 201 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
-| 202 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 2 | 0 | 2 |
-| 203 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
-| 204 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
-| 205 | `frontend/src/components/users/Users.jsx` | 13 | 1 | 11 | 1 |
-| 206 | `frontend/src/components/utils-settings/AuditLog.jsx` | 8 | 1 | 6 | 1 |
-| 207 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
-| 208 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
-| 209 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
-| 210 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 | 1 | 1 | 2 |
-| 211 | `frontend/src/components/utils-settings/ResetData.jsx` | 4 | 0 | 2 | 1 |
-| 212 | `frontend/src/components/utils-settings/Settings.jsx` | 9 | 1 | 7 | 1 |
-| 213 | `frontend/src/constants.js` | 0 | 12 | 0 | 8 |
-| 214 | `frontend/src/index.jsx` | 5 | 0 | 3 | 0 |
-| 215 | `frontend/src/platform/runtime/clientRuntime.js` | 2 | 8 | 2 | 3 |
-| 216 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 8 | 0 | 0 |
-| 217 | `frontend/src/runtime/runtimeErrorClassifier.mjs` | 0 | 8 | 0 | 0 |
-| 218 | `frontend/src/utils/actionHistory.mjs` | 1 | 1 | 0 | 12 |
-| 219 | `frontend/src/utils/appRefresh.js` | 0 | 1 | 0 | 2 |
-| 220 | `frontend/src/utils/color.js` | 0 | 1 | 0 | 2 |
-| 221 | `frontend/src/utils/csv.js` | 0 | 6 | 0 | 13 |
-| 222 | `frontend/src/utils/csvImport.js` | 1 | 10 | 1 | 2 |
-| 223 | `frontend/src/utils/dateHelpers.js` | 0 | 2 | 0 | 1 |
-| 224 | `frontend/src/utils/deviceInfo.js` | 0 | 2 | 0 | 6 |
-| 225 | `frontend/src/utils/exportPackage.js` | 1 | 2 | 1 | 3 |
-| 226 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
-| 227 | `frontend/src/utils/favicon.js` | 0 | 1 | 0 | 3 |
-| 228 | `frontend/src/utils/formatters.js` | 0 | 4 | 0 | 16 |
-| 229 | `frontend/src/utils/groupedRecords.mjs` | 0 | 8 | 0 | 9 |
-| 230 | `frontend/src/utils/historyHelpers.mjs` | 0 | 3 | 0 | 10 |
-| 231 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
-| 232 | `frontend/src/utils/loaders.mjs` | 0 | 8 | 0 | 10 |
-| 233 | `frontend/src/utils/pricing.js` | 0 | 8 | 0 | 14 |
-| 234 | `frontend/src/utils/printReceipt.js` | 0 | 9 | 0 | 2 |
-| 235 | `frontend/src/utils/productGrouping.mjs` | 0 | 4 | 0 | 3 |
-| 236 | `frontend/src/web-api.js` | 6 | 0 | 6 | 1 |
-| 237 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
-| 238 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
-| 239 | `frontend/tests/appShellUtils.test.mjs` | 2 | 0 | 1 | 0 |
-| 240 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 241 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
-| 242 | `frontend/tests/csvImport.test.mjs` | 2 | 0 | 1 | 0 |
-| 243 | `frontend/tests/exportPackages.test.mjs` | 3 | 0 | 2 | 0 |
-| 244 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
-| 245 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
-| 246 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
-| 247 | `frontend/tests/portalCatalogDisplay.test.mjs` | 1 | 0 | 0 | 0 |
-| 248 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
-| 249 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
-| 250 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
-| 251 | `frontend/tests/pricingContacts.test.mjs` | 2 | 0 | 1 | 0 |
-| 252 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
-| 253 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
-| 254 | `frontend/tests/productImportPlanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 255 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 | 0 | 0 | 0 |
-| 256 | `frontend/tests/receiptTemplate.test.mjs` | 3 | 0 | 2 | 0 |
-| 257 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 1 | 0 | 0 | 0 |
-| 258 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
-| 259 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
-| 260 | `frontend/vite.config.mjs` | 2 | 1 | 0 | 0 |
-| 261 | `ops/scripts/backend/verify-data-integrity.js` | 4 | 0 | 3 | 0 |
-| 262 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
-| 263 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
-| 264 | `ops/scripts/frontend/verify-ui.js` | 2 | 0 | 0 | 0 |
-| 265 | `ops/scripts/generate-doc-reference.js` | 3 | 0 | 1 | 0 |
-| 266 | `ops/scripts/generate-full-project-docs.js` | 3 | 1 | 1 | 0 |
-| 267 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 4 |
-| 268 | `ops/scripts/performance-scan.js` | 3 | 0 | 1 | 0 |
-| 269 | `ops/scripts/runtime/check-public-url.mjs` | 2 | 0 | 0 | 0 |
-| 270 | `ops/scripts/runtime/rotate-cloudflare-tunnel-token.mjs` | 4 | 0 | 0 | 0 |
-| 271 | `ops/scripts/runtime/update-cloudflare-tunnel-origin.mjs` | 3 | 0 | 0 | 0 |
-| 272 | `ops/scripts/verify-docker-release.js` | 2 | 0 | 0 | 0 |
-| 273 | `ops/scripts/verify-runtime-deps.js` | 2 | 0 | 0 | 0 |
-| 274 | `ops/scripts/verify-scale-services.js` | 3 | 0 | 0 | 0 |
+| 15 | `backend/src/initials.js` | 0 | 1 | 0 | 4 |
+| 16 | `backend/src/middleware.js` | 10 | 1 | 6 | 23 |
+| 17 | `backend/src/money.js` | 0 | 1 | 0 | 5 |
+| 18 | `backend/src/netSecurity.js` | 1 | 1 | 0 | 5 |
+| 19 | `backend/src/organizationContext/index.js` | 7 | 1 | 4 | 6 |
+| 20 | `backend/src/portalUtils.js` | 0 | 1 | 0 | 2 |
+| 21 | `backend/src/productDiscounts.js` | 1 | 1 | 1 | 3 |
+| 22 | `backend/src/productImportPolicies.js` | 1 | 1 | 1 | 3 |
+| 23 | `backend/src/requestContext.js` | 1 | 1 | 0 | 2 |
+| 24 | `backend/src/routes/actionHistory.js` | 4 | 1 | 3 | 1 |
+| 25 | `backend/src/routes/ai.js` | 6 | 1 | 5 | 1 |
+| 26 | `backend/src/routes/auth.js` | 18 | 1 | 13 | 2 |
+| 27 | `backend/src/routes/branches.js` | 6 | 1 | 4 | 1 |
+| 28 | `backend/src/routes/catalog.js` | 4 | 1 | 3 | 1 |
+| 29 | `backend/src/routes/categories.js` | 5 | 1 | 4 | 1 |
+| 30 | `backend/src/routes/contacts.js` | 6 | 1 | 5 | 1 |
+| 31 | `backend/src/routes/customTables.js` | 5 | 1 | 4 | 1 |
+| 32 | `backend/src/routes/files.js` | 5 | 1 | 4 | 1 |
+| 33 | `backend/src/routes/importJobs.js` | 9 | 1 | 5 | 1 |
+| 34 | `backend/src/routes/inventory.js` | 7 | 1 | 6 | 2 |
+| 35 | `backend/src/routes/notifications.js` | 4 | 1 | 3 | 1 |
+| 36 | `backend/src/routes/organizations.js` | 3 | 1 | 2 | 1 |
+| 37 | `backend/src/routes/portal.js` | 13 | 1 | 12 | 2 |
+| 38 | `backend/src/routes/products.js` | 16 | 1 | 13 | 2 |
+| 39 | `backend/src/routes/returns.js` | 6 | 1 | 5 | 1 |
+| 40 | `backend/src/routes/runtime.js` | 7 | 1 | 6 | 1 |
+| 41 | `backend/src/routes/sales.js` | 6 | 1 | 5 | 1 |
+| 42 | `backend/src/routes/settings.js` | 6 | 1 | 5 | 1 |
+| 43 | `backend/src/routes/system/index.js` | 17 | 1 | 12 | 2 |
+| 44 | `backend/src/routes/units.js` | 5 | 1 | 4 | 1 |
+| 45 | `backend/src/routes/users.js` | 11 | 1 | 9 | 1 |
+| 46 | `backend/src/runtimeCache.js` | 2 | 1 | 1 | 4 |
+| 47 | `backend/src/runtimeState/index.js` | 4 | 1 | 1 | 2 |
+| 48 | `backend/src/runtimeVersion.js` | 5 | 1 | 1 | 3 |
+| 49 | `backend/src/security.js` | 1 | 1 | 0 | 7 |
+| 50 | `backend/src/serverUtils.js` | 1 | 1 | 1 | 3 |
+| 51 | `backend/src/services/aiGateway.js` | 2 | 1 | 2 | 2 |
+| 52 | `backend/src/services/firebaseAuth.js` | 2 | 1 | 0 | 0 |
+| 53 | `backend/src/services/googleDriveSync/index.js` | 8 | 1 | 4 | 3 |
+| 54 | `backend/src/services/importJobs.js` | 18 | 1 | 12 | 6 |
+| 55 | `backend/src/services/mediaQueue.js` | 5 | 1 | 3 | 4 |
+| 56 | `backend/src/services/portalAi.js` | 2 | 1 | 2 | 1 |
+| 57 | `backend/src/services/supabaseAuth.js` | 0 | 1 | 0 | 2 |
+| 58 | `backend/src/services/verification.js` | 2 | 1 | 1 | 2 |
+| 59 | `backend/src/sessionAuth.js` | 2 | 1 | 1 | 4 |
+| 60 | `backend/src/settingsSnapshot.js` | 3 | 1 | 1 | 6 |
+| 61 | `backend/src/storage/organizationFolders.js` | 2 | 1 | 0 | 2 |
+| 62 | `backend/src/systemFsWorker.js` | 3 | 0 | 1 | 0 |
+| 63 | `backend/src/uploadReferenceCleanup.js` | 1 | 1 | 1 | 2 |
+| 64 | `backend/src/uploadSecurity.js` | 2 | 1 | 0 | 4 |
+| 65 | `backend/src/websocket.js` | 5 | 1 | 3 | 1 |
+| 66 | `backend/src/workers/importWorker.js` | 2 | 1 | 2 | 1 |
+| 67 | `backend/src/workers/mediaWorker.js` | 2 | 1 | 2 | 1 |
+| 68 | `backend/src/workers/migrationWorker.js` | 7 | 1 | 0 | 1 |
+| 69 | `backend/test/accessControl.test.js` | 2 | 0 | 1 | 0 |
+| 70 | `backend/test/authOtpGuards.test.js` | 2 | 0 | 1 | 0 |
+| 71 | `backend/test/authSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
+| 72 | `backend/test/backupRoundtrip.test.js` | 6 | 0 | 0 | 0 |
+| 73 | `backend/test/backupSchema.test.js` | 2 | 0 | 1 | 0 |
+| 74 | `backend/test/configOrganizationRuntime.test.js` | 7 | 0 | 0 | 0 |
+| 75 | `backend/test/contactOptions.test.js` | 2 | 0 | 1 | 0 |
+| 76 | `backend/test/databaseRuntime.test.js` | 5 | 0 | 1 | 0 |
+| 77 | `backend/test/dataPath.test.js` | 5 | 0 | 1 | 0 |
+| 78 | `backend/test/fileRouteSecurityFlow.test.js` | 6 | 0 | 0 | 0 |
+| 79 | `backend/test/idempotency.test.js` | 2 | 0 | 1 | 0 |
+| 80 | `backend/test/importCsv.test.js` | 6 | 0 | 2 | 0 |
+| 81 | `backend/test/importJobStateMachine.test.js` | 8 | 0 | 4 | 0 |
+| 82 | `backend/test/importScaleSmoke.test.js` | 6 | 0 | 2 | 0 |
+| 83 | `backend/test/initials.test.js` | 2 | 0 | 1 | 0 |
+| 84 | `backend/test/netSecurity.test.js` | 2 | 0 | 1 | 0 |
+| 85 | `backend/test/portalUtils.test.js` | 2 | 0 | 1 | 0 |
+| 86 | `backend/test/productImportPolicies.test.js` | 2 | 0 | 1 | 0 |
+| 87 | `backend/test/routeContracts.test.js` | 6 | 0 | 5 | 0 |
+| 88 | `backend/test/runtimeCache.test.js` | 5 | 0 | 1 | 0 |
+| 89 | `backend/test/runtimeVersion.test.js` | 5 | 0 | 1 | 0 |
+| 90 | `backend/test/serverUtils.test.js` | 3 | 0 | 2 | 0 |
+| 91 | `backend/test/stockConsistency.test.js` | 7 | 0 | 0 | 0 |
+| 92 | `backend/test/systemRouteSecurity.test.js` | 6 | 0 | 0 | 0 |
+| 93 | `backend/test/uploadSecurity.test.js` | 3 | 0 | 2 | 0 |
+| 94 | `frontend/postcss.config.mjs` | 0 | 0 | 0 | 0 |
+| 95 | `frontend/public/runtime-noise-guard.js` | 0 | 0 | 0 | 0 |
+| 96 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 | 0 | 0 | 0 |
+| 97 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 | 0 | 0 | 0 |
+| 98 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 | 0 | 0 | 0 |
+| 99 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 | 0 | 0 | 0 |
+| 100 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 | 0 | 0 | 0 |
+| 101 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 | 0 | 0 | 0 |
+| 102 | `frontend/public/sw.js` | 0 | 0 | 0 | 0 |
+| 103 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
+| 104 | `frontend/src/api/http.js` | 2 | 31 | 2 | 6 |
+| 105 | `frontend/src/api/localDb.js` | 3 | 10 | 2 | 3 |
+| 106 | `frontend/src/api/methods.js` | 4 | 177 | 4 | 1 |
+| 107 | `frontend/src/api/websocket.js` | 2 | 4 | 2 | 2 |
+| 108 | `frontend/src/App.jsx` | 30 | 1 | 29 | 1 |
+| 109 | `frontend/src/app/appShellUtils.mjs` | 0 | 5 | 0 | 2 |
+| 110 | `frontend/src/app/publicErrorRecovery.mjs` | 0 | 3 | 0 | 1 |
+| 111 | `frontend/src/AppContext.jsx` | 11 | 6 | 10 | 51 |
+| 112 | `frontend/src/components/auth/Login.jsx` | 5 | 1 | 4 | 1 |
+| 113 | `frontend/src/components/branches/Branches.jsx` | 11 | 1 | 9 | 1 |
+| 114 | `frontend/src/components/branches/BranchForm.jsx` | 2 | 1 | 1 | 1 |
+| 115 | `frontend/src/components/branches/TransferModal.jsx` | 2 | 1 | 1 | 1 |
+| 116 | `frontend/src/components/catalog/CatalogPage.jsx` | 13 | 1 | 12 | 1 |
+| 117 | `frontend/src/components/catalog/CatalogProductsSection.jsx` | 7 | 1 | 5 | 1 |
+| 118 | `frontend/src/components/catalog/CatalogSecondaryTabs.jsx` | 2 | 1 | 1 | 1 |
+| 119 | `frontend/src/components/catalog/catalogUi.jsx` | 1 | 3 | 0 | 3 |
+| 120 | `frontend/src/components/catalog/portalCatalogDisplay.mjs` | 1 | 7 | 1 | 1 |
+| 121 | `frontend/src/components/catalog/portalContentI18n.mjs` | 0 | 5 | 0 | 0 |
+| 122 | `frontend/src/components/catalog/portalEditorUtils.mjs` | 0 | 6 | 0 | 0 |
+| 123 | `frontend/src/components/catalog/portalLanguagePacks.mjs` | 0 | 4 | 0 | 0 |
+| 124 | `frontend/src/components/catalog/portalTranslateController.mjs` | 0 | 19 | 0 | 0 |
+| 125 | `frontend/src/components/contacts/contactOptionUtils.js` | 0 | 9 | 0 | 0 |
+| 126 | `frontend/src/components/contacts/Contacts.jsx` | 12 | 1 | 10 | 1 |
+| 127 | `frontend/src/components/contacts/CustomersTab.jsx` | 13 | 2 | 11 | 2 |
+| 128 | `frontend/src/components/contacts/DeliveryTab.jsx` | 13 | 2 | 11 | 1 |
+| 129 | `frontend/src/components/contacts/shared.jsx` | 7 | 5 | 5 | 4 |
+| 130 | `frontend/src/components/contacts/SuppliersTab.jsx` | 13 | 0 | 11 | 1 |
+| 131 | `frontend/src/components/custom-tables/CustomTables.jsx` | 5 | 1 | 4 | 0 |
+| 132 | `frontend/src/components/dashboard/charts/BarChart.jsx` | 3 | 1 | 2 | 0 |
+| 133 | `frontend/src/components/dashboard/charts/DonutChart.jsx` | 3 | 1 | 2 | 0 |
+| 134 | `frontend/src/components/dashboard/charts/index.js` | 0 | 0 | 0 | 2 |
+| 135 | `frontend/src/components/dashboard/charts/LineChart.jsx` | 3 | 1 | 2 | 0 |
+| 136 | `frontend/src/components/dashboard/charts/NoData.jsx` | 1 | 1 | 1 | 3 |
+| 137 | `frontend/src/components/dashboard/Dashboard.jsx` | 15 | 1 | 13 | 1 |
+| 138 | `frontend/src/components/dashboard/MiniStat.jsx` | 0 | 1 | 0 | 1 |
+| 139 | `frontend/src/components/files/FilePickerModal.jsx` | 3 | 1 | 2 | 5 |
+| 140 | `frontend/src/components/files/FilesPage.jsx` | 7 | 1 | 6 | 1 |
+| 141 | `frontend/src/components/inventory/DualMoney.jsx` | 0 | 1 | 0 | 1 |
+| 142 | `frontend/src/components/inventory/Inventory.jsx` | 22 | 1 | 20 | 1 |
+| 143 | `frontend/src/components/inventory/InventoryImportModal.jsx` | 3 | 1 | 2 | 1 |
+| 144 | `frontend/src/components/inventory/movementGroups.js` | 0 | 2 | 0 | 1 |
+| 145 | `frontend/src/components/inventory/ProductDetailModal.jsx` | 1 | 1 | 1 | 1 |
+| 146 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx` | 4 | 1 | 2 | 1 |
+| 147 | `frontend/src/components/navigation/Sidebar.jsx` | 6 | 1 | 5 | 1 |
+| 148 | `frontend/src/components/pos/CartItem.jsx` | 1 | 1 | 1 | 1 |
+| 149 | `frontend/src/components/pos/FilterPanel.jsx` | 1 | 1 | 0 | 1 |
+| 150 | `frontend/src/components/pos/POS.jsx` | 16 | 1 | 14 | 1 |
+| 151 | `frontend/src/components/pos/posCore.mjs` | 2 | 8 | 2 | 0 |
+| 152 | `frontend/src/components/pos/ProductImage.jsx` | 1 | 1 | 1 | 1 |
+| 153 | `frontend/src/components/pos/QuickAddModal.jsx` | 0 | 1 | 0 | 1 |
+| 154 | `frontend/src/components/products/barcodeImageScanner.mjs` | 1 | 1 | 0 | 2 |
+| 155 | `frontend/src/components/products/BarcodeScannerModal.jsx` | 7 | 1 | 4 | 1 |
+| 156 | `frontend/src/components/products/barcodeScannerState.mjs` | 0 | 1 | 0 | 2 |
+| 157 | `frontend/src/components/products/BranchStockAdjuster.jsx` | 1 | 1 | 0 | 1 |
+| 158 | `frontend/src/components/products/BulkAddStockModal.jsx` | 1 | 1 | 0 | 1 |
+| 159 | `frontend/src/components/products/BulkImportModal.jsx` | 4 | 1 | 3 | 1 |
+| 160 | `frontend/src/components/products/HeaderActions.jsx` | 3 | 1 | 2 | 1 |
+| 161 | `frontend/src/components/products/ManageBrandsModal.jsx` | 3 | 1 | 2 | 1 |
+| 162 | `frontend/src/components/products/ManageCategoriesModal.jsx` | 3 | 1 | 2 | 1 |
+| 163 | `frontend/src/components/products/ManageUnitsModal.jsx` | 3 | 1 | 2 | 1 |
+| 164 | `frontend/src/components/products/primitives.jsx` | 2 | 0 | 0 | 7 |
+| 165 | `frontend/src/components/products/ProductDetailModal.jsx` | 4 | 1 | 3 | 1 |
+| 166 | `frontend/src/components/products/ProductForm.jsx` | 8 | 1 | 6 | 1 |
+| 167 | `frontend/src/components/products/productHistoryHelpers.mjs` | 0 | 2 | 0 | 2 |
+| 168 | `frontend/src/components/products/productImportPlanner.mjs` | 0 | 8 | 0 | 3 |
+| 169 | `frontend/src/components/products/productImportWorker.mjs` | 1 | 0 | 1 | 0 |
+| 170 | `frontend/src/components/products/Products.jsx` | 30 | 1 | 28 | 1 |
+| 171 | `frontend/src/components/products/scanbotScanner.mjs` | 0 | 3 | 0 | 2 |
+| 172 | `frontend/src/components/products/VariantFormModal.jsx` | 6 | 1 | 5 | 1 |
+| 173 | `frontend/src/components/receipt-settings/AllFieldsPanel.jsx` | 3 | 1 | 2 | 1 |
+| 174 | `frontend/src/components/receipt-settings/constants.js` | 0 | 3 | 0 | 4 |
+| 175 | `frontend/src/components/receipt-settings/ErrorBoundary.jsx` | 1 | 1 | 0 | 1 |
+| 176 | `frontend/src/components/receipt-settings/FieldOrderManager.jsx` | 2 | 1 | 0 | 1 |
+| 177 | `frontend/src/components/receipt-settings/PrintSettings.jsx` | 3 | 1 | 1 | 1 |
+| 178 | `frontend/src/components/receipt-settings/ReceiptPreview.jsx` | 2 | 1 | 1 | 1 |
+| 179 | `frontend/src/components/receipt-settings/ReceiptSettings.jsx` | 11 | 1 | 9 | 1 |
+| 180 | `frontend/src/components/receipt-settings/template.js` | 1 | 2 | 1 | 3 |
+| 181 | `frontend/src/components/receipt/Receipt.jsx` | 6 | 1 | 4 | 3 |
+| 182 | `frontend/src/components/returns/EditReturnModal.jsx` | 2 | 1 | 1 | 1 |
+| 183 | `frontend/src/components/returns/NewReturnModal.jsx` | 3 | 1 | 2 | 1 |
+| 184 | `frontend/src/components/returns/NewSupplierReturnModal.jsx` | 2 | 1 | 1 | 1 |
+| 185 | `frontend/src/components/returns/ReturnDetailModal.jsx` | 2 | 1 | 2 | 1 |
+| 186 | `frontend/src/components/returns/Returns.jsx` | 14 | 1 | 12 | 1 |
+| 187 | `frontend/src/components/sales/ExportModal.jsx` | 4 | 1 | 2 | 1 |
+| 188 | `frontend/src/components/sales/SaleDetailModal.jsx` | 3 | 1 | 2 | 1 |
+| 189 | `frontend/src/components/sales/Sales.jsx` | 17 | 1 | 15 | 1 |
+| 190 | `frontend/src/components/sales/SalesImportModal.jsx` | 3 | 1 | 2 | 1 |
+| 191 | `frontend/src/components/sales/StatusBadge.jsx` | 0 | 5 | 0 | 5 |
+| 192 | `frontend/src/components/server/ServerPage.jsx` | 4 | 1 | 3 | 1 |
+| 193 | `frontend/src/components/shared/ActionHistoryBar.jsx` | 3 | 1 | 1 | 12 |
+| 194 | `frontend/src/components/shared/BackgroundImportTracker.jsx` | 3 | 1 | 1 | 1 |
+| 195 | `frontend/src/components/shared/ExportMenu.jsx` | 2 | 1 | 1 | 6 |
+| 196 | `frontend/src/components/shared/FilterMenu.jsx` | 2 | 1 | 1 | 8 |
+| 197 | `frontend/src/components/shared/ImageGalleryLightbox.jsx` | 2 | 1 | 0 | 3 |
+| 198 | `frontend/src/components/shared/Modal.jsx` | 0 | 1 | 0 | 21 |
+| 199 | `frontend/src/components/shared/navigationConfig.js` | 0 | 4 | 0 | 2 |
+| 200 | `frontend/src/components/shared/NotificationCenter.jsx` | 3 | 1 | 1 | 2 |
+| 201 | `frontend/src/components/shared/pageActivity.js` | 2 | 1 | 1 | 15 |
+| 202 | `frontend/src/components/shared/PageHeader.jsx` | 0 | 1 | 0 | 6 |
+| 203 | `frontend/src/components/shared/PageHelpButton.jsx` | 4 | 1 | 2 | 1 |
+| 204 | `frontend/src/components/shared/pageHelpContent.js` | 0 | 2 | 0 | 1 |
+| 205 | `frontend/src/components/shared/PaginationControls.jsx` | 1 | 4 | 0 | 6 |
+| 206 | `frontend/src/components/shared/PortalMenu.jsx` | 3 | 2 | 0 | 8 |
+| 207 | `frontend/src/components/shared/QuickPreferenceToggles.jsx` | 2 | 1 | 1 | 3 |
+| 208 | `frontend/src/components/shared/WriteConflictModal.jsx` | 1 | 1 | 1 | 1 |
+| 209 | `frontend/src/components/users/PermissionEditor.jsx` | 0 | 2 | 0 | 2 |
+| 210 | `frontend/src/components/users/UserDetailSheet.jsx` | 2 | 1 | 2 | 1 |
+| 211 | `frontend/src/components/users/UserProfileModal.jsx` | 10 | 1 | 8 | 2 |
+| 212 | `frontend/src/components/users/Users.jsx` | 13 | 1 | 11 | 1 |
+| 213 | `frontend/src/components/utils-settings/AuditLog.jsx` | 8 | 1 | 6 | 1 |
+| 214 | `frontend/src/components/utils-settings/Backup.jsx` | 10 | 1 | 8 | 1 |
+| 215 | `frontend/src/components/utils-settings/FontFamilyPicker.jsx` | 1 | 1 | 0 | 1 |
+| 216 | `frontend/src/components/utils-settings/index.js` | 0 | 0 | 0 | 0 |
+| 217 | `frontend/src/components/utils-settings/OtpModal.jsx` | 2 | 1 | 1 | 2 |
+| 218 | `frontend/src/components/utils-settings/ResetData.jsx` | 4 | 0 | 2 | 1 |
+| 219 | `frontend/src/components/utils-settings/Settings.jsx` | 9 | 1 | 7 | 1 |
+| 220 | `frontend/src/constants.js` | 0 | 12 | 0 | 8 |
+| 221 | `frontend/src/index.jsx` | 5 | 0 | 3 | 0 |
+| 222 | `frontend/src/platform/runtime/clientRuntime.js` | 2 | 8 | 2 | 3 |
+| 223 | `frontend/src/platform/storage/storagePolicy.mjs` | 0 | 8 | 0 | 0 |
+| 224 | `frontend/src/runtime/runtimeErrorClassifier.mjs` | 0 | 8 | 0 | 0 |
+| 225 | `frontend/src/utils/actionHistory.mjs` | 1 | 1 | 0 | 12 |
+| 226 | `frontend/src/utils/appRefresh.js` | 0 | 1 | 0 | 2 |
+| 227 | `frontend/src/utils/color.js` | 0 | 1 | 0 | 2 |
+| 228 | `frontend/src/utils/csv.js` | 0 | 6 | 0 | 13 |
+| 229 | `frontend/src/utils/csvImport.js` | 1 | 10 | 1 | 2 |
+| 230 | `frontend/src/utils/dateHelpers.js` | 0 | 2 | 0 | 1 |
+| 231 | `frontend/src/utils/deviceInfo.js` | 0 | 2 | 0 | 6 |
+| 232 | `frontend/src/utils/exportPackage.js` | 1 | 2 | 1 | 3 |
+| 233 | `frontend/src/utils/exportReports.jsx` | 3 | 1 | 2 | 2 |
+| 234 | `frontend/src/utils/favicon.js` | 0 | 1 | 0 | 3 |
+| 235 | `frontend/src/utils/formatters.js` | 0 | 4 | 0 | 16 |
+| 236 | `frontend/src/utils/groupedRecords.mjs` | 1 | 8 | 1 | 9 |
+| 237 | `frontend/src/utils/historyHelpers.mjs` | 0 | 3 | 0 | 10 |
+| 238 | `frontend/src/utils/index.js` | 0 | 0 | 0 | 0 |
+| 239 | `frontend/src/utils/initials.mjs` | 0 | 6 | 0 | 6 |
+| 240 | `frontend/src/utils/loaders.mjs` | 0 | 8 | 0 | 10 |
+| 241 | `frontend/src/utils/pricing.js` | 0 | 8 | 0 | 14 |
+| 242 | `frontend/src/utils/printReceipt.js` | 0 | 9 | 0 | 2 |
+| 243 | `frontend/src/utils/productGrouping.mjs` | 1 | 4 | 1 | 3 |
+| 244 | `frontend/src/web-api.js` | 6 | 0 | 6 | 1 |
+| 245 | `frontend/tailwind.config.mjs` | 0 | 0 | 0 | 0 |
+| 246 | `frontend/tests/apiHttp.test.mjs` | 2 | 0 | 0 | 0 |
+| 247 | `frontend/tests/appShellUtils.test.mjs` | 2 | 0 | 1 | 0 |
+| 248 | `frontend/tests/barcodeImageScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 249 | `frontend/tests/barcodeScannerState.test.mjs` | 2 | 0 | 1 | 0 |
+| 250 | `frontend/tests/csvImport.test.mjs` | 2 | 0 | 1 | 0 |
+| 251 | `frontend/tests/exportPackages.test.mjs` | 3 | 0 | 2 | 0 |
+| 252 | `frontend/tests/groupedRecords.test.mjs` | 2 | 0 | 1 | 0 |
+| 253 | `frontend/tests/historyHelpers.test.mjs` | 1 | 0 | 0 | 0 |
+| 254 | `frontend/tests/loaders.test.mjs` | 1 | 0 | 0 | 0 |
+| 255 | `frontend/tests/portalCatalogDisplay.test.mjs` | 1 | 0 | 0 | 0 |
+| 256 | `frontend/tests/portalContentI18n.test.mjs` | 1 | 0 | 0 | 0 |
+| 257 | `frontend/tests/portalEditorUtils.test.mjs` | 1 | 0 | 0 | 0 |
+| 258 | `frontend/tests/portalLanguagePacks.test.mjs` | 1 | 0 | 0 | 0 |
+| 259 | `frontend/tests/portalTranslateController.test.mjs` | 1 | 0 | 0 | 0 |
+| 260 | `frontend/tests/posCore.test.mjs` | 1 | 0 | 0 | 0 |
+| 261 | `frontend/tests/pricingContacts.test.mjs` | 2 | 0 | 1 | 0 |
+| 262 | `frontend/tests/productGrouping.test.mjs` | 2 | 0 | 1 | 0 |
+| 263 | `frontend/tests/productHistoryHelpers.test.mjs` | 2 | 0 | 1 | 0 |
+| 264 | `frontend/tests/productImportPlanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 265 | `frontend/tests/publicErrorRecovery.test.mjs` | 1 | 0 | 0 | 0 |
+| 266 | `frontend/tests/receiptTemplate.test.mjs` | 3 | 0 | 2 | 0 |
+| 267 | `frontend/tests/runtimeErrorClassifier.test.mjs` | 1 | 0 | 0 | 0 |
+| 268 | `frontend/tests/scanbotScanner.test.mjs` | 2 | 0 | 1 | 0 |
+| 269 | `frontend/tests/storagePolicy.test.mjs` | 1 | 0 | 0 | 0 |
+| 270 | `frontend/vite.config.mjs` | 4 | 1 | 0 | 0 |
+| 271 | `ops/scripts/backend/verify-data-integrity.js` | 4 | 0 | 3 | 0 |
+| 272 | `ops/scripts/frontend/verify-i18n.js` | 2 | 0 | 1 | 0 |
+| 273 | `ops/scripts/frontend/verify-performance.js` | 3 | 0 | 0 | 0 |
+| 274 | `ops/scripts/frontend/verify-ui.js` | 2 | 0 | 0 | 0 |
+| 275 | `ops/scripts/generate-doc-reference.js` | 3 | 0 | 1 | 0 |
+| 276 | `ops/scripts/generate-full-project-docs.js` | 3 | 1 | 1 | 0 |
+| 277 | `ops/scripts/lib/fs-utils.js` | 2 | 1 | 0 | 4 |
+| 278 | `ops/scripts/performance-scan.js` | 3 | 0 | 1 | 0 |
+| 279 | `ops/scripts/runtime/check-public-url.mjs` | 2 | 0 | 0 | 0 |
+| 280 | `ops/scripts/runtime/check-route-contract.mjs` | 0 | 0 | 0 | 0 |
+| 281 | `ops/scripts/runtime/rotate-cloudflare-tunnel-token.mjs` | 4 | 0 | 0 | 0 |
+| 282 | `ops/scripts/runtime/update-cloudflare-tunnel-origin.mjs` | 3 | 0 | 0 | 0 |
+| 283 | `ops/scripts/verify-docker-release.js` | 2 | 0 | 0 | 0 |
+| 284 | `ops/scripts/verify-runtime-deps.js` | 2 | 0 | 0 | 0 |
+| 285 | `ops/scripts/verify-scale-services.js` | 3 | 0 | 0 | 0 |
 
 ## 3. Detailed File Dependency Commentary
 
 ### 3.1 `backend/server.js`
 
 - Declared exports: none detected
-- Imports (40)
+- Imports (41)
   - `./src/config`
   - `./src/database`
   - `./src/helpers`
@@ -319,6 +330,7 @@ Code files documented: **274**
   - `./src/routes/system`
   - `./src/routes/units`
   - `./src/routes/users`
+  - `./src/runtimeVersion`
   - `./src/serverUtils`
   - `./src/services/importJobs`
   - `./src/websocket`
@@ -331,7 +343,7 @@ Code files documented: **274**
   - `fs`
   - `http`
   - `path`
-- Internal dependencies (34)
+- Internal dependencies (35)
   - `backend/src/config/index.js`
   - `backend/src/database.js`
   - `backend/src/helpers.js`
@@ -360,6 +372,7 @@ Code files documented: **274**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
+  - `backend/src/runtimeVersion.js`
   - `backend/src/serverUtils.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/websocket.js`
@@ -640,7 +653,20 @@ Code files documented: **274**
   - `backend/test/importCsv.test.js`
   - `backend/test/importScaleSmoke.test.js`
 
-### 3.15 `backend/src/middleware.js`
+### 3.15 `backend/src/initials.js`
+
+- Declared exports: `module.exports`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (4)
+  - `backend/src/routes/inventory.js`
+  - `backend/src/routes/portal.js`
+  - `backend/src/routes/products.js`
+  - `backend/test/initials.test.js`
+
+### 3.16 `backend/src/middleware.js`
 
 - Declared exports: `module.exports`
 - Imports (10)
@@ -686,7 +712,7 @@ Code files documented: **274**
   - `backend/src/routes/units.js`
   - `backend/src/routes/users.js`
 
-### 3.16 `backend/src/money.js`
+### 3.17 `backend/src/money.js`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -700,7 +726,7 @@ Code files documented: **274**
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
 
-### 3.17 `backend/src/netSecurity.js`
+### 3.18 `backend/src/netSecurity.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -714,7 +740,7 @@ Code files documented: **274**
   - `backend/src/services/importJobs.js`
   - `backend/test/netSecurity.test.js`
 
-### 3.18 `backend/src/organizationContext/index.js`
+### 3.19 `backend/src/organizationContext/index.js`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -738,7 +764,7 @@ Code files documented: **274**
   - `backend/src/routes/system/index.js`
   - `backend/src/routes/users.js`
 
-### 3.19 `backend/src/portalUtils.js`
+### 3.20 `backend/src/portalUtils.js`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -749,7 +775,7 @@ Code files documented: **274**
   - `backend/src/routes/portal.js`
   - `backend/test/portalUtils.test.js`
 
-### 3.20 `backend/src/productDiscounts.js`
+### 3.21 `backend/src/productDiscounts.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -761,7 +787,7 @@ Code files documented: **274**
   - `backend/src/routes/products.js`
   - `backend/src/services/importJobs.js`
 
-### 3.21 `backend/src/productImportPolicies.js`
+### 3.22 `backend/src/productImportPolicies.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -773,7 +799,7 @@ Code files documented: **274**
   - `backend/src/services/importJobs.js`
   - `backend/test/productImportPolicies.test.js`
 
-### 3.22 `backend/src/requestContext.js`
+### 3.23 `backend/src/requestContext.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -784,7 +810,7 @@ Code files documented: **274**
   - `backend/server.js`
   - `backend/src/helpers.js`
 
-### 3.23 `backend/src/routes/actionHistory.js`
+### 3.24 `backend/src/routes/actionHistory.js`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -799,7 +825,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.24 `backend/src/routes/ai.js`
+### 3.25 `backend/src/routes/ai.js`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -818,7 +844,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.25 `backend/src/routes/auth.js`
+### 3.26 `backend/src/routes/auth.js`
 
 - Declared exports: `module.exports`
 - Imports (18)
@@ -854,17 +880,19 @@ Code files documented: **274**
   - `backend/src/services/verification.js`
   - `backend/src/sessionAuth.js`
   - `backend/src/settingsSnapshot.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.js`
 
-### 3.26 `backend/src/routes/branches.js`
+### 3.27 `backend/src/routes/branches.js`
 
 - Declared exports: `module.exports`
-- Imports (5)
+- Imports (6)
   - `../conflictControl`
   - `../database`
   - `../helpers`
   - `../middleware`
+  - `crypto`
   - `express`
 - Internal dependencies (4)
   - `backend/src/conflictControl.js`
@@ -874,7 +902,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.27 `backend/src/routes/catalog.js`
+### 3.28 `backend/src/routes/catalog.js`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -889,7 +917,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.28 `backend/src/routes/categories.js`
+### 3.29 `backend/src/routes/categories.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -906,7 +934,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.29 `backend/src/routes/contacts.js`
+### 3.30 `backend/src/routes/contacts.js`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -925,7 +953,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.30 `backend/src/routes/customTables.js`
+### 3.31 `backend/src/routes/customTables.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -942,7 +970,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.31 `backend/src/routes/files.js`
+### 3.32 `backend/src/routes/files.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -959,7 +987,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.32 `backend/src/routes/importJobs.js`
+### 3.33 `backend/src/routes/importJobs.js`
 
 - Declared exports: `module.exports`
 - Imports (9)
@@ -981,26 +1009,29 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.33 `backend/src/routes/inventory.js`
+### 3.34 `backend/src/routes/inventory.js`
 
 - Declared exports: `module.exports`
-- Imports (6)
+- Imports (7)
   - `../database`
   - `../helpers`
+  - `../initials`
   - `../middleware`
   - `../money`
   - `../productDiscounts`
   - `express`
-- Internal dependencies (5)
+- Internal dependencies (6)
   - `backend/src/database.js`
   - `backend/src/helpers.js`
+  - `backend/src/initials.js`
   - `backend/src/middleware.js`
   - `backend/src/money.js`
   - `backend/src/productDiscounts.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.js`
 
-### 3.34 `backend/src/routes/notifications.js`
+### 3.35 `backend/src/routes/notifications.js`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -1015,7 +1046,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.35 `backend/src/routes/organizations.js`
+### 3.36 `backend/src/routes/organizations.js`
 
 - Declared exports: `module.exports`
 - Imports (3)
@@ -1028,13 +1059,14 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.36 `backend/src/routes/portal.js`
+### 3.37 `backend/src/routes/portal.js`
 
 - Declared exports: `module.exports`
-- Imports (12)
+- Imports (13)
   - `../database`
   - `../fileAssets`
   - `../helpers`
+  - `../initials`
   - `../middleware`
   - `../netSecurity`
   - `../organizationContext`
@@ -1044,10 +1076,11 @@ Code files documented: **274**
   - `../services/portalAi`
   - `../settingsSnapshot`
   - `express`
-- Internal dependencies (11)
+- Internal dependencies (12)
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
+  - `backend/src/initials.js`
   - `backend/src/middleware.js`
   - `backend/src/netSecurity.js`
   - `backend/src/organizationContext/index.js`
@@ -1056,19 +1089,21 @@ Code files documented: **274**
   - `backend/src/security.js`
   - `backend/src/services/portalAi.js`
   - `backend/src/settingsSnapshot.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.js`
 
-### 3.37 `backend/src/routes/products.js`
+### 3.38 `backend/src/routes/products.js`
 
 - Declared exports: `module.exports`
-- Imports (15)
+- Imports (16)
   - `../config`
   - `../conflictControl`
   - `../database`
   - `../fileAssets`
   - `../helpers`
   - `../idempotency`
+  - `../initials`
   - `../middleware`
   - `../money`
   - `../netSecurity`
@@ -1078,23 +1113,25 @@ Code files documented: **274**
   - `express`
   - `fs`
   - `path`
-- Internal dependencies (12)
+- Internal dependencies (13)
   - `backend/src/config/index.js`
   - `backend/src/conflictControl.js`
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
   - `backend/src/helpers.js`
   - `backend/src/idempotency.js`
+  - `backend/src/initials.js`
   - `backend/src/middleware.js`
   - `backend/src/money.js`
   - `backend/src/netSecurity.js`
   - `backend/src/productDiscounts.js`
   - `backend/src/productImportPolicies.js`
   - `backend/src/settingsSnapshot.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.js`
 
-### 3.38 `backend/src/routes/returns.js`
+### 3.39 `backend/src/routes/returns.js`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1113,26 +1150,28 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.39 `backend/src/routes/runtime.js`
+### 3.40 `backend/src/routes/runtime.js`
 
 - Declared exports: `module.exports`
-- Imports (6)
+- Imports (7)
   - `../helpers`
   - `../middleware`
   - `../runtimeCache`
+  - `../runtimeVersion`
   - `../services/importJobs`
   - `../services/mediaQueue`
   - `express`
-- Internal dependencies (5)
+- Internal dependencies (6)
   - `backend/src/helpers.js`
   - `backend/src/middleware.js`
   - `backend/src/runtimeCache.js`
+  - `backend/src/runtimeVersion.js`
   - `backend/src/services/importJobs.js`
   - `backend/src/services/mediaQueue.js`
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.40 `backend/src/routes/sales.js`
+### 3.41 `backend/src/routes/sales.js`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1151,7 +1190,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.41 `backend/src/routes/settings.js`
+### 3.42 `backend/src/routes/settings.js`
 
 - Declared exports: `module.exports`
 - Imports (6)
@@ -1170,7 +1209,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.42 `backend/src/routes/system/index.js`
+### 3.43 `backend/src/routes/system/index.js`
 
 - Declared exports: `module.exports`
 - Imports (17)
@@ -1204,10 +1243,11 @@ Code files documented: **274**
   - `backend/src/security.js`
   - `backend/src/services/googleDriveSync/index.js`
   - `backend/src/services/importJobs.js`
-- Referenced by (1)
+- Referenced by (2)
   - `backend/server.js`
+  - `backend/test/routeContracts.test.js`
 
-### 3.43 `backend/src/routes/units.js`
+### 3.44 `backend/src/routes/units.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -1224,7 +1264,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.44 `backend/src/routes/users.js`
+### 3.45 `backend/src/routes/users.js`
 
 - Declared exports: `module.exports`
 - Imports (11)
@@ -1252,7 +1292,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.45 `backend/src/runtimeCache.js`
+### 3.46 `backend/src/runtimeCache.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1266,7 +1306,7 @@ Code files documented: **274**
   - `backend/src/routes/runtime.js`
   - `backend/test/runtimeCache.test.js`
 
-### 3.46 `backend/src/runtimeState/index.js`
+### 3.47 `backend/src/runtimeState/index.js`
 
 - Declared exports: `module.exports`
 - Imports (4)
@@ -1280,7 +1320,23 @@ Code files documented: **274**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/system/index.js`
 
-### 3.47 `backend/src/security.js`
+### 3.48 `backend/src/runtimeVersion.js`
+
+- Declared exports: `module.exports`
+- Imports (5)
+  - `../package.json`
+  - `child_process`
+  - `crypto`
+  - `fs`
+  - `path`
+- Internal dependencies (1)
+  - `backend/package.json`
+- Referenced by (3)
+  - `backend/server.js`
+  - `backend/src/routes/runtime.js`
+  - `backend/test/runtimeVersion.test.js`
+
+### 3.49 `backend/src/security.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1296,7 +1352,7 @@ Code files documented: **274**
   - `backend/src/services/aiGateway.js`
   - `backend/src/services/googleDriveSync/index.js`
 
-### 3.48 `backend/src/serverUtils.js`
+### 3.50 `backend/src/serverUtils.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1308,7 +1364,7 @@ Code files documented: **274**
   - `backend/src/websocket.js`
   - `backend/test/serverUtils.test.js`
 
-### 3.49 `backend/src/services/aiGateway.js`
+### 3.51 `backend/src/services/aiGateway.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1321,7 +1377,7 @@ Code files documented: **274**
   - `backend/src/routes/ai.js`
   - `backend/src/services/portalAi.js`
 
-### 3.50 `backend/src/services/firebaseAuth.js`
+### 3.52 `backend/src/services/firebaseAuth.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1332,7 +1388,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.51 `backend/src/services/googleDriveSync/index.js`
+### 3.53 `backend/src/services/googleDriveSync/index.js`
 
 - Declared exports: `module.exports`
 - Imports (8)
@@ -1354,7 +1410,7 @@ Code files documented: **274**
   - `backend/src/routes/notifications.js`
   - `backend/src/routes/system/index.js`
 
-### 3.52 `backend/src/services/importJobs.js`
+### 3.54 `backend/src/services/importJobs.js`
 
 - Declared exports: `module.exports`
 - Imports (18)
@@ -1397,7 +1453,7 @@ Code files documented: **274**
   - `backend/src/workers/importWorker.js`
   - `backend/test/importJobStateMachine.test.js`
 
-### 3.53 `backend/src/services/mediaQueue.js`
+### 3.55 `backend/src/services/mediaQueue.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -1416,7 +1472,7 @@ Code files documented: **274**
   - `backend/src/workers/mediaWorker.js`
   - `backend/test/importJobStateMachine.test.js`
 
-### 3.54 `backend/src/services/portalAi.js`
+### 3.56 `backend/src/services/portalAi.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1428,7 +1484,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/src/routes/portal.js`
 
-### 3.55 `backend/src/services/supabaseAuth.js`
+### 3.57 `backend/src/services/supabaseAuth.js`
 
 - Declared exports: `module.exports`
 - Imports (0)
@@ -1439,7 +1495,7 @@ Code files documented: **274**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
 
-### 3.56 `backend/src/services/verification.js`
+### 3.58 `backend/src/services/verification.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1451,7 +1507,7 @@ Code files documented: **274**
   - `backend/src/routes/auth.js`
   - `backend/src/routes/users.js`
 
-### 3.57 `backend/src/sessionAuth.js`
+### 3.59 `backend/src/sessionAuth.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1465,7 +1521,7 @@ Code files documented: **274**
   - `backend/src/routes/users.js`
   - `backend/src/websocket.js`
 
-### 3.58 `backend/src/settingsSnapshot.js`
+### 3.60 `backend/src/settingsSnapshot.js`
 
 - Declared exports: `module.exports`
 - Imports (3)
@@ -1482,7 +1538,7 @@ Code files documented: **274**
   - `backend/src/routes/settings.js`
   - `backend/src/uploadReferenceCleanup.js`
 
-### 3.59 `backend/src/storage/organizationFolders.js`
+### 3.61 `backend/src/storage/organizationFolders.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1494,7 +1550,7 @@ Code files documented: **274**
   - `backend/src/config/index.js`
   - `backend/src/organizationContext/index.js`
 
-### 3.60 `backend/src/systemFsWorker.js`
+### 3.62 `backend/src/systemFsWorker.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -1506,7 +1562,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.61 `backend/src/uploadReferenceCleanup.js`
+### 3.63 `backend/src/uploadReferenceCleanup.js`
 
 - Declared exports: `module.exports`
 - Imports (1)
@@ -1517,7 +1573,7 @@ Code files documented: **274**
   - `backend/src/database.js`
   - `backend/src/fileAssets.js`
 
-### 3.62 `backend/src/uploadSecurity.js`
+### 3.64 `backend/src/uploadSecurity.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1531,7 +1587,7 @@ Code files documented: **274**
   - `backend/src/services/importJobs.js`
   - `backend/test/uploadSecurity.test.js`
 
-### 3.63 `backend/src/websocket.js`
+### 3.65 `backend/src/websocket.js`
 
 - Declared exports: `module.exports`
 - Imports (5)
@@ -1547,7 +1603,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.64 `backend/src/workers/importWorker.js`
+### 3.66 `backend/src/workers/importWorker.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1559,7 +1615,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.65 `backend/src/workers/mediaWorker.js`
+### 3.67 `backend/src/workers/mediaWorker.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -1571,7 +1627,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.66 `backend/src/workers/migrationWorker.js`
+### 3.68 `backend/src/workers/migrationWorker.js`
 
 - Declared exports: `module.exports`
 - Imports (7)
@@ -1587,7 +1643,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `backend/server.js`
 
-### 3.67 `backend/test/accessControl.test.js`
+### 3.69 `backend/test/accessControl.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1598,7 +1654,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.68 `backend/test/authOtpGuards.test.js`
+### 3.70 `backend/test/authOtpGuards.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1609,7 +1665,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.69 `backend/test/authSecurityFlow.test.js`
+### 3.71 `backend/test/authSecurityFlow.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1624,7 +1680,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.70 `backend/test/backupRoundtrip.test.js`
+### 3.72 `backend/test/backupRoundtrip.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1639,7 +1695,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.71 `backend/test/backupSchema.test.js`
+### 3.73 `backend/test/backupSchema.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1650,7 +1706,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.72 `backend/test/configOrganizationRuntime.test.js`
+### 3.74 `backend/test/configOrganizationRuntime.test.js`
 
 - Declared exports: none detected
 - Imports (7)
@@ -1666,7 +1722,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.73 `backend/test/contactOptions.test.js`
+### 3.75 `backend/test/contactOptions.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1677,7 +1733,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.74 `backend/test/databaseRuntime.test.js`
+### 3.76 `backend/test/databaseRuntime.test.js`
 
 - Declared exports: none detected
 - Imports (5)
@@ -1691,7 +1747,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.75 `backend/test/dataPath.test.js`
+### 3.77 `backend/test/dataPath.test.js`
 
 - Declared exports: none detected
 - Imports (5)
@@ -1705,7 +1761,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.76 `backend/test/fileRouteSecurityFlow.test.js`
+### 3.78 `backend/test/fileRouteSecurityFlow.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1720,7 +1776,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.77 `backend/test/idempotency.test.js`
+### 3.79 `backend/test/idempotency.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1731,7 +1787,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.78 `backend/test/importCsv.test.js`
+### 3.80 `backend/test/importCsv.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1747,7 +1803,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.79 `backend/test/importJobStateMachine.test.js`
+### 3.81 `backend/test/importJobStateMachine.test.js`
 
 - Declared exports: none detected
 - Imports (8)
@@ -1767,7 +1823,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.80 `backend/test/importScaleSmoke.test.js`
+### 3.82 `backend/test/importScaleSmoke.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1783,7 +1839,18 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.81 `backend/test/netSecurity.test.js`
+### 3.83 `backend/test/initials.test.js`
+
+- Declared exports: none detected
+- Imports (2)
+  - `../src/initials`
+  - `assert`
+- Internal dependencies (1)
+  - `backend/src/initials.js`
+- Referenced by (0)
+  - none
+
+### 3.84 `backend/test/netSecurity.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1794,7 +1861,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.82 `backend/test/portalUtils.test.js`
+### 3.85 `backend/test/portalUtils.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1805,7 +1872,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.83 `backend/test/productImportPolicies.test.js`
+### 3.86 `backend/test/productImportPolicies.test.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -1816,7 +1883,26 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.84 `backend/test/runtimeCache.test.js`
+### 3.87 `backend/test/routeContracts.test.js`
+
+- Declared exports: none detected
+- Imports (6)
+  - `../src/routes/auth`
+  - `../src/routes/inventory`
+  - `../src/routes/portal`
+  - `../src/routes/products`
+  - `../src/routes/system`
+  - `node:assert/strict`
+- Internal dependencies (5)
+  - `backend/src/routes/auth.js`
+  - `backend/src/routes/inventory.js`
+  - `backend/src/routes/portal.js`
+  - `backend/src/routes/products.js`
+  - `backend/src/routes/system/index.js`
+- Referenced by (0)
+  - none
+
+### 3.88 `backend/test/runtimeCache.test.js`
 
 - Declared exports: none detected
 - Imports (5)
@@ -1830,7 +1916,21 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.85 `backend/test/serverUtils.test.js`
+### 3.89 `backend/test/runtimeVersion.test.js`
+
+- Declared exports: none detected
+- Imports (5)
+  - `../src/runtimeVersion`
+  - `fs`
+  - `node:assert/strict`
+  - `os`
+  - `path`
+- Internal dependencies (1)
+  - `backend/src/runtimeVersion.js`
+- Referenced by (0)
+  - none
+
+### 3.90 `backend/test/serverUtils.test.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -1843,7 +1943,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.86 `backend/test/stockConsistency.test.js`
+### 3.91 `backend/test/stockConsistency.test.js`
 
 - Declared exports: none detected
 - Imports (7)
@@ -1859,7 +1959,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.87 `backend/test/systemRouteSecurity.test.js`
+### 3.92 `backend/test/systemRouteSecurity.test.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -1874,7 +1974,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.88 `backend/test/uploadSecurity.test.js`
+### 3.93 `backend/test/uploadSecurity.test.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -1887,7 +1987,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.89 `frontend/postcss.config.mjs`
+### 3.94 `frontend/postcss.config.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1897,7 +1997,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.90 `frontend/public/runtime-noise-guard.js`
+### 3.95 `frontend/public/runtime-noise-guard.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1907,7 +2007,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.91 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
+### 3.96 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1917,7 +2017,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.92 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
+### 3.97 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1927,7 +2027,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.93 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
+### 3.98 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1937,7 +2037,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.94 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
+### 3.99 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1947,7 +2047,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.95 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
+### 3.100 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1957,7 +2057,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.96 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
+### 3.101 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1967,7 +2067,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.97 `frontend/public/sw.js`
+### 3.102 `frontend/public/sw.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1977,7 +2077,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.98 `frontend/public/theme-bootstrap.js`
+### 3.103 `frontend/public/theme-bootstrap.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -1987,23 +2087,24 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.99 `frontend/src/api/http.js`
+### 3.104 `frontend/src/api/http.js`
 
-- Declared exports: `__resetApiWriteDedupeForTests`, `apiFetch`, `buildApiRequestDedupeKey`, `cacheClearAll`, `cacheGet`, `cacheGetStale`, `cacheInvalidate`, `cacheSet`, `clearCallLog`, `getAuthSessionToken`, `getCallLog`, `getSyncServerUrl`, `getSyncToken`, `isInvalidSessionError`, `isNetErr`, `isServerOnline`, `isWriteBlockedError`, `isWriteConflictError`, `requireLiveServerWrite`, `route`, `setAuthSessionToken`, `setSyncServerUrl`, `setSyncToken`, `startHealthCheck`
+- Declared exports: `FRONTEND_BUILD_INFO`, `__resetApiWriteDedupeForTests`, `apiFetch`, `buildApiRequestDedupeKey`, `cacheClearAll`, `cacheGet`, `cacheGetStale`, `cacheInvalidate`, `cacheSet`, `clearCallLog`, `createApiVersionMismatchError`, `getApiVersionMismatchCooldown`, `getAuthSessionToken`, `getCallLog`, `getSyncServerUrl`, `getSyncToken`, `isApiVersionMismatchError`, `isInvalidSessionError`, `isNetErr`, `isRequiredRuntimeApiPath`, `isServerOnline`, `isWriteBlockedError`, `isWriteConflictError`, `markApiVersionMismatch`, `requireLiveServerWrite`, `route`, `setAuthSessionToken`, `setSyncServerUrl`, `setSyncToken`, `shouldCompareRuntimeVersions`, `startHealthCheck`
 - Imports (2)
   - `../constants.js`
   - `../utils/deviceInfo.js`
 - Internal dependencies (2)
   - `frontend/src/constants.js`
   - `frontend/src/utils/deviceInfo.js`
-- Referenced by (5)
-  - `frontend/src/api/methods.js`
+- Referenced by (6)
   - `frontend/src/api/websocket.js`
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/web-api.js`
 
-### 3.100 `frontend/src/api/localDb.js`
+### 3.105 `frontend/src/api/localDb.js`
 
 - Declared exports: `buildCSVTemplate`, `clearLocalMirrorTables`, `dexieDb`, `localGetSettings`, `localGetSettingsMeta`, `localSaveSettings`, `localSaveSettingsMeta`, `parseCSV`, `replaceTableContents`, `resetLocalMirrorDb`
 - Imports (3)
@@ -2018,17 +2119,15 @@ Code files documented: **274**
   - `frontend/src/platform/runtime/clientRuntime.js`
   - `frontend/src/web-api.js`
 
-### 3.101 `frontend/src/api/methods.js`
+### 3.106 `frontend/src/api/methods.js`
 
-- Declared exports: `adjustStock`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `changeUserPassword`, `completePasswordReset`, `completeSupabaseOauth`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomTable`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteBranch`, `deleteCategory`, `deleteCustomRow`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackup`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getAuditLogs`, `getBranchStock`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomTableData`, `getCustomTables`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getInventoryMovements`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProducts`, `getReturn`, `getReturns`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemConfig`, `getSystemDebugLog`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackup`, `importBackupData`, `importBackupFolder`, `insertCustomRow`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pickBackupFile`, `prepareScaleMigration`, `redoActionHistory`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveSettings`, `searchOrganizations`, `setDataPath`, `startGoogleDriveSyncOauth`, `startImportJob`, `startSupabaseOauth`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferStock`, `undoActionHistory`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomRow`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
-- Imports (5)
+- Declared exports: `adjustStock`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `changeUserPassword`, `completePasswordReset`, `completeSupabaseOauth`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomTable`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteBranch`, `deleteCategory`, `deleteCustomRow`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackup`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getAuditLogs`, `getBranchStock`, `getBranchStockIntegrity`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomTableData`, `getCustomTables`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getInventoryMovements`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProductFilters`, `getProducts`, `getReturn`, `getReturns`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemConfig`, `getSystemDebugLog`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackup`, `importBackupData`, `importBackupFolder`, `insertCustomRow`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pickBackupFile`, `prepareScaleMigration`, `redoActionHistory`, `repairBranchStockIntegrity`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveSettings`, `searchInventoryProducts`, `searchOrganizations`, `searchPortalCatalogProducts`, `searchProducts`, `setDataPath`, `startGoogleDriveSyncOauth`, `startImportJob`, `startSupabaseOauth`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferStock`, `undoActionHistory`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomRow`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
+- Imports (4)
   - `../constants`
   - `../platform/runtime/clientRuntime.js`
   - `../utils/deviceInfo.js`
-  - `./http.js`
   - `./localDb.js`
-- Internal dependencies (5)
-  - `frontend/src/api/http.js`
+- Internal dependencies (4)
   - `frontend/src/api/localDb.js`
   - `frontend/src/constants.js`
   - `frontend/src/platform/runtime/clientRuntime.js`
@@ -2036,7 +2135,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/web-api.js`
 
-### 3.102 `frontend/src/api/websocket.js`
+### 3.107 `frontend/src/api/websocket.js`
 
 - Declared exports: `connectWS`, `disconnectWS`, `isWSConnected`, `reconnectWS`
 - Imports (2)
@@ -2049,7 +2148,7 @@ Code files documented: **274**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.js`
 
-### 3.103 `frontend/src/App.jsx`
+### 3.108 `frontend/src/App.jsx`
 
 - Declared exports: `function`
 - Imports (30)
@@ -2116,7 +2215,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/index.jsx`
 
-### 3.104 `frontend/src/app/appShellUtils.mjs`
+### 3.109 `frontend/src/app/appShellUtils.mjs`
 
 - Declared exports: `MAX_MOUNTED_PAGES`, `getNotificationColor`, `getNotificationPrefix`, `isPublicCatalogPath`, `updateMountedPages`
 - Imports (0)
@@ -2127,7 +2226,7 @@ Code files documented: **274**
   - `frontend/src/App.jsx`
   - `frontend/tests/appShellUtils.test.mjs`
 
-### 3.105 `frontend/src/app/publicErrorRecovery.mjs`
+### 3.110 `frontend/src/app/publicErrorRecovery.mjs`
 
 - Declared exports: `clearPublicDomRecoveryMarker`, `isPublicDomMutationError`, `shouldAttemptPublicDomRecovery`
 - Imports (0)
@@ -2137,7 +2236,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.106 `frontend/src/AppContext.jsx`
+### 3.111 `frontend/src/AppContext.jsx`
 
 - Declared exports: `AppProvider`, `PAGE_PERMISSIONS`, `isBrokenLocalizedString`, `useApp`, `useSync`, `useT`
 - Imports (11)
@@ -2216,7 +2315,7 @@ Code files documented: **274**
   - `frontend/src/components/utils-settings/Settings.jsx`
   - `frontend/src/index.jsx`
 
-### 3.107 `frontend/src/components/auth/Login.jsx`
+### 3.112 `frontend/src/components/auth/Login.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -2233,7 +2332,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.108 `frontend/src/components/branches/Branches.jsx`
+### 3.113 `frontend/src/components/branches/Branches.jsx`
 
 - Declared exports: `function`
 - Imports (11)
@@ -2261,7 +2360,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.109 `frontend/src/components/branches/BranchForm.jsx`
+### 3.114 `frontend/src/components/branches/BranchForm.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2272,7 +2371,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.jsx`
 
-### 3.110 `frontend/src/components/branches/TransferModal.jsx`
+### 3.115 `frontend/src/components/branches/TransferModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2283,7 +2382,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/branches/Branches.jsx`
 
-### 3.111 `frontend/src/components/catalog/CatalogPage.jsx`
+### 3.116 `frontend/src/components/catalog/CatalogPage.jsx`
 
 - Declared exports: `function`
 - Imports (13)
@@ -2316,25 +2415,27 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.112 `frontend/src/components/catalog/CatalogProductsSection.jsx`
+### 3.117 `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
 - Declared exports: `function`
-- Imports (6)
+- Imports (7)
+  - `../../utils/initials.mjs`
   - `../products/primitives`
   - `../shared/PaginationControls.jsx`
   - `./catalogUi`
   - `./portalCatalogDisplay.mjs`
   - `lucide-react`
   - `react`
-- Internal dependencies (4)
+- Internal dependencies (5)
   - `frontend/src/components/catalog/catalogUi.jsx`
   - `frontend/src/components/catalog/portalCatalogDisplay.mjs`
   - `frontend/src/components/products/primitives.jsx`
   - `frontend/src/components/shared/PaginationControls.jsx`
+  - `frontend/src/utils/initials.mjs`
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.113 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
+### 3.118 `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -2345,7 +2446,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogPage.jsx`
 
-### 3.114 `frontend/src/components/catalog/catalogUi.jsx`
+### 3.119 `frontend/src/components/catalog/catalogUi.jsx`
 
 - Declared exports: `SectionShell`, `StatusPill`, `SummaryTile`
 - Imports (1)
@@ -2357,7 +2458,7 @@ Code files documented: **274**
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
   - `frontend/src/components/catalog/CatalogSecondaryTabs.jsx`
 
-### 3.115 `frontend/src/components/catalog/portalCatalogDisplay.mjs`
+### 3.120 `frontend/src/components/catalog/portalCatalogDisplay.mjs`
 
 - Declared exports: `buildPortalHighlightBadges`, `buildPortalPricePresentation`, `getPortalGridClass`, `getPortalMobileGridClass`, `getPortalPromotionDetails`, `normalizeRecommendedProductIds`, `productMatchesPortalBranches`
 - Imports (1)
@@ -2367,7 +2468,17 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/catalog/CatalogProductsSection.jsx`
 
-### 3.116 `frontend/src/components/catalog/portalEditorUtils.mjs`
+### 3.121 `frontend/src/components/catalog/portalContentI18n.mjs`
+
+- Declared exports: `localizePortalConfig`, `localizePortalProduct`, `localizePortalProducts`, `normalizePortalTranslations`, `stringifyPortalTranslations`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.122 `frontend/src/components/catalog/portalEditorUtils.mjs`
 
 - Declared exports: `createAboutBlock`, `extractGoogleMapsEmbedUrl`, `moveListItem`, `normalizeAboutBlocks`, `normalizeGoogleMapsEmbed`, `serializeAboutBlocks`
 - Imports (0)
@@ -2377,7 +2488,17 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.117 `frontend/src/components/catalog/portalTranslateController.mjs`
+### 3.123 `frontend/src/components/catalog/portalLanguagePacks.mjs`
+
+- Declared exports: `FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS`, `getPortalLanguageText`, `isFirstPartyPortalLanguage`, `normalizeFirstPartyPortalLanguage`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.124 `frontend/src/components/catalog/portalTranslateController.mjs`
 
 - Declared exports: `PORTAL_TRANSLATE_RELOAD_KEY`, `PORTAL_TRANSLATE_SCRIPT_ID`, `PORTAL_TRANSLATE_STORAGE_KEY`, `PORTAL_TRANSLATE_WIDGET_HOST_ID`, `applyGoogleTranslateSelection`, `canonicalTranslateLanguage`, `clearGoogleTranslateCookies`, `ensurePortalTranslateScript`, `ensurePortalTranslateWidgetHost`, `getPortalTranslateCookieTarget`, `hasPortalTranslatedMarker`, `isPortalTranslateApplied`, `normalizeTranslateTarget`, `readStoredTranslateTarget`, `removePortalTranslateWidgetHost`, `requestPortalTranslateReload`, `storePortalTranslatePreference`, `warmPortalTranslateNetwork`, `writePortalTranslateTarget`
 - Imports (0)
@@ -2387,7 +2508,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.118 `frontend/src/components/contacts/contactOptionUtils.js`
+### 3.125 `frontend/src/components/contacts/contactOptionUtils.js`
 
 - Declared exports: `CONTACT_OPTION_LIMIT`, `buildContactOptionSummary`, `createContactOption`, `getPrimaryContactOption`, `hasContactOptionData`, `limitContactOptions`, `parseContactOptionsFromImportRow`, `parseStoredContactOptions`, `serializeContactOptions`
 - Imports (0)
@@ -2397,7 +2518,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.119 `frontend/src/components/contacts/Contacts.jsx`
+### 3.126 `frontend/src/components/contacts/Contacts.jsx`
 
 - Declared exports: `function`
 - Imports (12)
@@ -2427,7 +2548,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.120 `frontend/src/components/contacts/CustomersTab.jsx`
+### 3.127 `frontend/src/components/contacts/CustomersTab.jsx`
 
 - Declared exports: `parseContactOptions`, `serializeContactOptions`
 - Imports (13)
@@ -2460,7 +2581,7 @@ Code files documented: **274**
   - `frontend/src/components/contacts/Contacts.jsx`
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.121 `frontend/src/components/contacts/DeliveryTab.jsx`
+### 3.128 `frontend/src/components/contacts/DeliveryTab.jsx`
 
 - Declared exports: `parseDeliveryOptions`, `serializeDeliveryOptions`
 - Imports (13)
@@ -2492,7 +2613,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.122 `frontend/src/components/contacts/shared.jsx`
+### 3.129 `frontend/src/components/contacts/shared.jsx`
 
 - Declared exports: `ContactTable`, `DetailModal`, `ImportModal`, `ThreeDotMenu`, `useContactSelection`
 - Imports (7)
@@ -2515,7 +2636,7 @@ Code files documented: **274**
   - `frontend/src/components/contacts/DeliveryTab.jsx`
   - `frontend/src/components/contacts/SuppliersTab.jsx`
 
-### 3.123 `frontend/src/components/contacts/SuppliersTab.jsx`
+### 3.130 `frontend/src/components/contacts/SuppliersTab.jsx`
 
 - Declared exports: none detected
 - Imports (13)
@@ -2547,7 +2668,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/contacts/Contacts.jsx`
 
-### 3.124 `frontend/src/components/custom-tables/CustomTables.jsx`
+### 3.131 `frontend/src/components/custom-tables/CustomTables.jsx`
 
 - Declared exports: `function`
 - Imports (5)
@@ -2564,7 +2685,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.125 `frontend/src/components/dashboard/charts/BarChart.jsx`
+### 3.132 `frontend/src/components/dashboard/charts/BarChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2577,7 +2698,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.126 `frontend/src/components/dashboard/charts/DonutChart.jsx`
+### 3.133 `frontend/src/components/dashboard/charts/DonutChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2590,7 +2711,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.127 `frontend/src/components/dashboard/charts/index.js`
+### 3.134 `frontend/src/components/dashboard/charts/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -2601,7 +2722,7 @@ Code files documented: **274**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.128 `frontend/src/components/dashboard/charts/LineChart.jsx`
+### 3.135 `frontend/src/components/dashboard/charts/LineChart.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2614,7 +2735,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.129 `frontend/src/components/dashboard/charts/NoData.jsx`
+### 3.136 `frontend/src/components/dashboard/charts/NoData.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2626,7 +2747,7 @@ Code files documented: **274**
   - `frontend/src/components/dashboard/charts/DonutChart.jsx`
   - `frontend/src/components/dashboard/charts/LineChart.jsx`
 
-### 3.130 `frontend/src/components/dashboard/Dashboard.jsx`
+### 3.137 `frontend/src/components/dashboard/Dashboard.jsx`
 
 - Declared exports: `function`
 - Imports (15)
@@ -2662,7 +2783,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.131 `frontend/src/components/dashboard/MiniStat.jsx`
+### 3.138 `frontend/src/components/dashboard/MiniStat.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2672,7 +2793,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.132 `frontend/src/components/files/FilePickerModal.jsx`
+### 3.139 `frontend/src/components/files/FilePickerModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2689,7 +2810,7 @@ Code files documented: **274**
   - `frontend/src/components/products/ProductForm.jsx`
   - `frontend/src/components/users/UserProfileModal.jsx`
 
-### 3.133 `frontend/src/components/files/FilesPage.jsx`
+### 3.140 `frontend/src/components/files/FilesPage.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -2710,7 +2831,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.134 `frontend/src/components/inventory/DualMoney.jsx`
+### 3.141 `frontend/src/components/inventory/DualMoney.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2720,11 +2841,12 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.135 `frontend/src/components/inventory/Inventory.jsx`
+### 3.142 `frontend/src/components/inventory/Inventory.jsx`
 
 - Declared exports: `function`
-- Imports (20)
+- Imports (22)
   - `../../AppContext`
+  - `../../api/http.js`
   - `../../utils/actionHistory.mjs`
   - `../../utils/csv`
   - `../../utils/exportPackage`
@@ -2732,6 +2854,7 @@ Code files documented: **274**
   - `../../utils/formatters`
   - `../../utils/groupedRecords.mjs`
   - `../../utils/historyHelpers.mjs`
+  - `../../utils/initials.mjs`
   - `../../utils/pricing.js`
   - `../shared/ActionHistoryBar.jsx`
   - `../shared/ExportMenu`
@@ -2744,8 +2867,9 @@ Code files documented: **274**
   - `./movementGroups`
   - `lucide-react`
   - `react`
-- Internal dependencies (18)
+- Internal dependencies (20)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/api/http.js`
   - `frontend/src/components/inventory/DualMoney.jsx`
   - `frontend/src/components/inventory/InventoryImportModal.jsx`
   - `frontend/src/components/inventory/ProductDetailModal.jsx`
@@ -2762,11 +2886,12 @@ Code files documented: **274**
   - `frontend/src/utils/formatters.js`
   - `frontend/src/utils/groupedRecords.mjs`
   - `frontend/src/utils/historyHelpers.mjs`
+  - `frontend/src/utils/initials.mjs`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.136 `frontend/src/components/inventory/InventoryImportModal.jsx`
+### 3.143 `frontend/src/components/inventory/InventoryImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -2779,7 +2904,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.137 `frontend/src/components/inventory/movementGroups.js`
+### 3.144 `frontend/src/components/inventory/movementGroups.js`
 
 - Declared exports: `buildMovementGroups`, `movementGroupHaystack`
 - Imports (0)
@@ -2789,7 +2914,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.138 `frontend/src/components/inventory/ProductDetailModal.jsx`
+### 3.145 `frontend/src/components/inventory/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2799,7 +2924,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.139 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
+### 3.146 `frontend/src/components/loyalty-points/LoyaltyPointsPage.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2813,7 +2938,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.140 `frontend/src/components/navigation/Sidebar.jsx`
+### 3.147 `frontend/src/components/navigation/Sidebar.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -2832,7 +2957,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.141 `frontend/src/components/pos/CartItem.jsx`
+### 3.148 `frontend/src/components/pos/CartItem.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2842,7 +2967,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.142 `frontend/src/components/pos/FilterPanel.jsx`
+### 3.149 `frontend/src/components/pos/FilterPanel.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2852,12 +2977,13 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.143 `frontend/src/components/pos/POS.jsx`
+### 3.150 `frontend/src/components/pos/POS.jsx`
 
 - Declared exports: `function`
-- Imports (15)
+- Imports (16)
   - `../../AppContext`
   - `../../utils/deviceInfo`
+  - `../../utils/initials.mjs`
   - `../../utils/pricing.js`
   - `../contacts/CustomersTab`
   - `../receipt/Receipt`
@@ -2871,7 +2997,7 @@ Code files documented: **274**
   - `./QuickAddModal`
   - `lucide-react`
   - `react`
-- Internal dependencies (13)
+- Internal dependencies (14)
   - `frontend/src/AppContext.jsx`
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/pos/CartItem.jsx`
@@ -2884,11 +3010,12 @@ Code files documented: **274**
   - `frontend/src/components/shared/PaginationControls.jsx`
   - `frontend/src/components/shared/pageActivity.js`
   - `frontend/src/utils/deviceInfo.js`
+  - `frontend/src/utils/initials.mjs`
   - `frontend/src/utils/pricing.js`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.144 `frontend/src/components/pos/posCore.mjs`
+### 3.151 `frontend/src/components/pos/posCore.mjs`
 
 - Declared exports: `buildProductsById`, `buildVariantChildrenByParentId`, `buildVisibleProductCards`, `findMatchingCartLineIndex`, `getCartLineId`, `getVariantChoices`, `getVariantRootProduct`, `resolveCartPriceValues`
 - Imports (2)
@@ -2900,7 +3027,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.145 `frontend/src/components/pos/ProductImage.jsx`
+### 3.152 `frontend/src/components/pos/ProductImage.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2910,7 +3037,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.146 `frontend/src/components/pos/QuickAddModal.jsx`
+### 3.153 `frontend/src/components/pos/QuickAddModal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -2920,7 +3047,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/pos/POS.jsx`
 
-### 3.147 `frontend/src/components/products/barcodeImageScanner.mjs`
+### 3.154 `frontend/src/components/products/barcodeImageScanner.mjs`
 
 - Declared exports: `scanBarcodeFromImageFile`
 - Imports (1)
@@ -2931,7 +3058,7 @@ Code files documented: **274**
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
   - `frontend/tests/barcodeImageScanner.test.mjs`
 
-### 3.148 `frontend/src/components/products/BarcodeScannerModal.jsx`
+### 3.155 `frontend/src/components/products/BarcodeScannerModal.jsx`
 
 - Declared exports: `function`
 - Imports (7)
@@ -2950,7 +3077,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/ProductForm.jsx`
 
-### 3.149 `frontend/src/components/products/barcodeScannerState.mjs`
+### 3.156 `frontend/src/components/products/barcodeScannerState.mjs`
 
 - Declared exports: `deriveScannerPresentation`
 - Imports (0)
@@ -2961,7 +3088,7 @@ Code files documented: **274**
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
   - `frontend/tests/barcodeScannerState.test.mjs`
 
-### 3.150 `frontend/src/components/products/BranchStockAdjuster.jsx`
+### 3.157 `frontend/src/components/products/BranchStockAdjuster.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2971,7 +3098,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/ProductForm.jsx`
 
-### 3.151 `frontend/src/components/products/BulkAddStockModal.jsx`
+### 3.158 `frontend/src/components/products/BulkAddStockModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -2981,7 +3108,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.152 `frontend/src/components/products/BulkImportModal.jsx`
+### 3.159 `frontend/src/components/products/BulkImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -2996,7 +3123,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.153 `frontend/src/components/products/HeaderActions.jsx`
+### 3.160 `frontend/src/components/products/HeaderActions.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3009,7 +3136,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.154 `frontend/src/components/products/ManageBrandsModal.jsx`
+### 3.161 `frontend/src/components/products/ManageBrandsModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3022,7 +3149,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.155 `frontend/src/components/products/ManageCategoriesModal.jsx`
+### 3.162 `frontend/src/components/products/ManageCategoriesModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3035,7 +3162,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.156 `frontend/src/components/products/ManageUnitsModal.jsx`
+### 3.163 `frontend/src/components/products/ManageUnitsModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3048,7 +3175,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.157 `frontend/src/components/products/primitives.jsx`
+### 3.164 `frontend/src/components/products/primitives.jsx`
 
 - Declared exports: none detected
 - Imports (2)
@@ -3065,7 +3192,7 @@ Code files documented: **274**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/products/VariantFormModal.jsx`
 
-### 3.158 `frontend/src/components/products/ProductDetailModal.jsx`
+### 3.165 `frontend/src/components/products/ProductDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -3080,7 +3207,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.159 `frontend/src/components/products/ProductForm.jsx`
+### 3.166 `frontend/src/components/products/ProductForm.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3102,7 +3229,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.160 `frontend/src/components/products/productHistoryHelpers.mjs`
+### 3.167 `frontend/src/components/products/productHistoryHelpers.mjs`
 
 - Declared exports: `createProductHistoryRequestId`, `orderProductRestoreSnapshots`
 - Imports (0)
@@ -3113,7 +3240,7 @@ Code files documented: **274**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productHistoryHelpers.test.mjs`
 
-### 3.161 `frontend/src/components/products/productImportPlanner.mjs`
+### 3.168 `frontend/src/components/products/productImportPlanner.mjs`
 
 - Declared exports: `PRODUCT_MONEY_FIELDS`, `PRODUCT_NUMBER_FIELDS`, `PRODUCT_PERCENT_FIELDS`, `analyzeProductImportRows`, `analyzeProductImportText`, `getProductImportDetailSignature`, `normalizeImportProductName`, `normalizeProductImportRow`
 - Imports (0)
@@ -3125,7 +3252,7 @@ Code files documented: **274**
   - `frontend/src/components/products/productImportWorker.mjs`
   - `frontend/tests/productImportPlanner.test.mjs`
 
-### 3.162 `frontend/src/components/products/productImportWorker.mjs`
+### 3.169 `frontend/src/components/products/productImportWorker.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -3135,16 +3262,18 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.163 `frontend/src/components/products/Products.jsx`
+### 3.170 `frontend/src/components/products/Products.jsx`
 
 - Declared exports: `function`
-- Imports (28)
+- Imports (30)
   - `../../AppContext`
+  - `../../api/http.js`
   - `../../utils/actionHistory.mjs`
   - `../../utils/color.js`
   - `../../utils/csv`
   - `../../utils/groupedRecords.mjs`
   - `../../utils/historyHelpers.mjs`
+  - `../../utils/initials.mjs`
   - `../../utils/pricing.js`
   - `../../utils/productGrouping.mjs`
   - `../shared/ActionHistoryBar.jsx`
@@ -3167,8 +3296,9 @@ Code files documented: **274**
   - `./productHistoryHelpers.mjs`
   - `lucide-react`
   - `react`
-- Internal dependencies (26)
+- Internal dependencies (28)
   - `frontend/src/AppContext.jsx`
+  - `frontend/src/api/http.js`
   - `frontend/src/components/products/BulkAddStockModal.jsx`
   - `frontend/src/components/products/BulkImportModal.jsx`
   - `frontend/src/components/products/HeaderActions.jsx`
@@ -3192,12 +3322,13 @@ Code files documented: **274**
   - `frontend/src/utils/csv.js`
   - `frontend/src/utils/groupedRecords.mjs`
   - `frontend/src/utils/historyHelpers.mjs`
+  - `frontend/src/utils/initials.mjs`
   - `frontend/src/utils/pricing.js`
   - `frontend/src/utils/productGrouping.mjs`
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.164 `frontend/src/components/products/scanbotScanner.mjs`
+### 3.171 `frontend/src/components/products/scanbotScanner.mjs`
 
 - Declared exports: `getPreferredScannerMode`, `isCameraBlockedByDocumentPolicy`, `scanBarcodeWithScanbot`
 - Imports (0)
@@ -3208,7 +3339,7 @@ Code files documented: **274**
   - `frontend/src/components/products/BarcodeScannerModal.jsx`
   - `frontend/tests/scanbotScanner.test.mjs`
 
-### 3.165 `frontend/src/components/products/VariantFormModal.jsx`
+### 3.172 `frontend/src/components/products/VariantFormModal.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -3227,7 +3358,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/products/Products.jsx`
 
-### 3.166 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
+### 3.173 `frontend/src/components/receipt-settings/AllFieldsPanel.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3240,7 +3371,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.167 `frontend/src/components/receipt-settings/constants.js`
+### 3.174 `frontend/src/components/receipt-settings/constants.js`
 
 - Declared exports: `ALL_FIELD_ITEMS`, `DEFAULT_TEMPLATE`, `getFieldItems`
 - Imports (0)
@@ -3253,7 +3384,7 @@ Code files documented: **274**
   - `frontend/src/components/receipt-settings/template.js`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.168 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
+### 3.175 `frontend/src/components/receipt-settings/ErrorBoundary.jsx`
 
 - Declared exports: `class`
 - Imports (1)
@@ -3263,7 +3394,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.169 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
+### 3.176 `frontend/src/components/receipt-settings/FieldOrderManager.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3274,7 +3405,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.170 `frontend/src/components/receipt-settings/PrintSettings.jsx`
+### 3.177 `frontend/src/components/receipt-settings/PrintSettings.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3286,7 +3417,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.171 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
+### 3.178 `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3297,7 +3428,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
-### 3.172 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
+### 3.179 `frontend/src/components/receipt-settings/ReceiptSettings.jsx`
 
 - Declared exports: `function`
 - Imports (11)
@@ -3325,7 +3456,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.173 `frontend/src/components/receipt-settings/template.js`
+### 3.180 `frontend/src/components/receipt-settings/template.js`
 
 - Declared exports: `parseReceiptTemplate`, `serializeReceiptTemplate`
 - Imports (1)
@@ -3337,7 +3468,7 @@ Code files documented: **274**
   - `frontend/src/components/receipt/Receipt.jsx`
   - `frontend/tests/receiptTemplate.test.mjs`
 
-### 3.174 `frontend/src/components/receipt/Receipt.jsx`
+### 3.181 `frontend/src/components/receipt/Receipt.jsx`
 
 - Declared exports: `function`
 - Imports (6)
@@ -3357,7 +3488,7 @@ Code files documented: **274**
   - `frontend/src/components/receipt-settings/ReceiptPreview.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.175 `frontend/src/components/returns/EditReturnModal.jsx`
+### 3.182 `frontend/src/components/returns/EditReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3368,7 +3499,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.176 `frontend/src/components/returns/NewReturnModal.jsx`
+### 3.183 `frontend/src/components/returns/NewReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3381,7 +3512,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.177 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
+### 3.184 `frontend/src/components/returns/NewSupplierReturnModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3392,7 +3523,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.178 `frontend/src/components/returns/ReturnDetailModal.jsx`
+### 3.185 `frontend/src/components/returns/ReturnDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3404,7 +3535,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.179 `frontend/src/components/returns/Returns.jsx`
+### 3.186 `frontend/src/components/returns/Returns.jsx`
 
 - Declared exports: `function`
 - Imports (14)
@@ -3438,7 +3569,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.180 `frontend/src/components/sales/ExportModal.jsx`
+### 3.187 `frontend/src/components/sales/ExportModal.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -3452,7 +3583,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.181 `frontend/src/components/sales/SaleDetailModal.jsx`
+### 3.188 `frontend/src/components/sales/SaleDetailModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3465,7 +3596,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.182 `frontend/src/components/sales/Sales.jsx`
+### 3.189 `frontend/src/components/sales/Sales.jsx`
 
 - Declared exports: `function`
 - Imports (17)
@@ -3505,7 +3636,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.183 `frontend/src/components/sales/SalesImportModal.jsx`
+### 3.190 `frontend/src/components/sales/SalesImportModal.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3518,7 +3649,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.184 `frontend/src/components/sales/StatusBadge.jsx`
+### 3.191 `frontend/src/components/sales/StatusBadge.jsx`
 
 - Declared exports: `ALL_STATUSES`, `STATUS_COLORS`, `STATUS_LABELS`, `function`, `getStatusLabel`
 - Imports (0)
@@ -3532,7 +3663,7 @@ Code files documented: **274**
   - `frontend/src/components/sales/SaleDetailModal.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.185 `frontend/src/components/server/ServerPage.jsx`
+### 3.192 `frontend/src/components/server/ServerPage.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -3547,7 +3678,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.186 `frontend/src/components/shared/ActionHistoryBar.jsx`
+### 3.193 `frontend/src/components/shared/ActionHistoryBar.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3570,7 +3701,7 @@ Code files documented: **274**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.187 `frontend/src/components/shared/BackgroundImportTracker.jsx`
+### 3.194 `frontend/src/components/shared/BackgroundImportTracker.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3582,7 +3713,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.188 `frontend/src/components/shared/ExportMenu.jsx`
+### 3.195 `frontend/src/components/shared/ExportMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3598,7 +3729,7 @@ Code files documented: **274**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.189 `frontend/src/components/shared/FilterMenu.jsx`
+### 3.196 `frontend/src/components/shared/FilterMenu.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3616,7 +3747,7 @@ Code files documented: **274**
   - `frontend/src/components/sales/Sales.jsx`
   - `frontend/src/components/utils-settings/AuditLog.jsx`
 
-### 3.190 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
+### 3.197 `frontend/src/components/shared/ImageGalleryLightbox.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3629,7 +3760,7 @@ Code files documented: **274**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.191 `frontend/src/components/shared/Modal.jsx`
+### 3.198 `frontend/src/components/shared/Modal.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -3659,7 +3790,7 @@ Code files documented: **274**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.192 `frontend/src/components/shared/navigationConfig.js`
+### 3.199 `frontend/src/components/shared/navigationConfig.js`
 
 - Declared exports: `DEFAULT_MOBILE_PINNED`, `NAV_ITEMS`, `orderNavItems`, `parseNavSetting`
 - Imports (0)
@@ -3670,7 +3801,7 @@ Code files documented: **274**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.193 `frontend/src/components/shared/NotificationCenter.jsx`
+### 3.200 `frontend/src/components/shared/NotificationCenter.jsx`
 
 - Declared exports: `function`
 - Imports (3)
@@ -3683,7 +3814,7 @@ Code files documented: **274**
   - `frontend/src/App.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.194 `frontend/src/components/shared/pageActivity.js`
+### 3.201 `frontend/src/components/shared/pageActivity.js`
 
 - Declared exports: `useIsPageActive`
 - Imports (2)
@@ -3708,7 +3839,7 @@ Code files documented: **274**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.195 `frontend/src/components/shared/PageHeader.jsx`
+### 3.202 `frontend/src/components/shared/PageHeader.jsx`
 
 - Declared exports: `function`
 - Imports (0)
@@ -3723,7 +3854,7 @@ Code files documented: **274**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.196 `frontend/src/components/shared/PageHelpButton.jsx`
+### 3.203 `frontend/src/components/shared/PageHelpButton.jsx`
 
 - Declared exports: `function`
 - Imports (4)
@@ -3737,7 +3868,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.197 `frontend/src/components/shared/pageHelpContent.js`
+### 3.204 `frontend/src/components/shared/pageHelpContent.js`
 
 - Declared exports: `PAGE_HELP_CONTENT`, `getPageHelpContent`
 - Imports (0)
@@ -3747,7 +3878,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/shared/PageHelpButton.jsx`
 
-### 3.198 `frontend/src/components/shared/PaginationControls.jsx`
+### 3.205 `frontend/src/components/shared/PaginationControls.jsx`
 
 - Declared exports: `PAGE_SIZE_OPTIONS`, `clampPage`, `function`, `paginateItems`
 - Imports (1)
@@ -3762,7 +3893,7 @@ Code files documented: **274**
   - `frontend/src/components/products/Products.jsx`
   - `frontend/src/components/returns/Returns.jsx`
 
-### 3.199 `frontend/src/components/shared/PortalMenu.jsx`
+### 3.206 `frontend/src/components/shared/PortalMenu.jsx`
 
 - Declared exports: `ThreeDotPortal`, `function`
 - Imports (3)
@@ -3781,7 +3912,7 @@ Code files documented: **274**
   - `frontend/src/components/shared/FilterMenu.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.200 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
+### 3.207 `frontend/src/components/shared/QuickPreferenceToggles.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3794,7 +3925,7 @@ Code files documented: **274**
   - `frontend/src/components/auth/Login.jsx`
   - `frontend/src/components/navigation/Sidebar.jsx`
 
-### 3.201 `frontend/src/components/shared/WriteConflictModal.jsx`
+### 3.208 `frontend/src/components/shared/WriteConflictModal.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -3804,7 +3935,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.202 `frontend/src/components/users/PermissionEditor.jsx`
+### 3.209 `frontend/src/components/users/PermissionEditor.jsx`
 
 - Declared exports: `PERMISSION_DEFS`, `function`
 - Imports (0)
@@ -3815,7 +3946,7 @@ Code files documented: **274**
   - `frontend/src/components/users/UserDetailSheet.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.203 `frontend/src/components/users/UserDetailSheet.jsx`
+### 3.210 `frontend/src/components/users/UserDetailSheet.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3827,7 +3958,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/users/Users.jsx`
 
-### 3.204 `frontend/src/components/users/UserProfileModal.jsx`
+### 3.211 `frontend/src/components/users/UserProfileModal.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -3854,7 +3985,7 @@ Code files documented: **274**
   - `frontend/src/components/navigation/Sidebar.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.205 `frontend/src/components/users/Users.jsx`
+### 3.212 `frontend/src/components/users/Users.jsx`
 
 - Declared exports: `function`
 - Imports (13)
@@ -3886,7 +4017,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.206 `frontend/src/components/utils-settings/AuditLog.jsx`
+### 3.213 `frontend/src/components/utils-settings/AuditLog.jsx`
 
 - Declared exports: `function`
 - Imports (8)
@@ -3908,7 +4039,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.207 `frontend/src/components/utils-settings/Backup.jsx`
+### 3.214 `frontend/src/components/utils-settings/Backup.jsx`
 
 - Declared exports: `function`
 - Imports (10)
@@ -3934,7 +4065,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.208 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
+### 3.215 `frontend/src/components/utils-settings/FontFamilyPicker.jsx`
 
 - Declared exports: `function`
 - Imports (1)
@@ -3944,7 +4075,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.209 `frontend/src/components/utils-settings/index.js`
+### 3.216 `frontend/src/components/utils-settings/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -3954,7 +4085,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.210 `frontend/src/components/utils-settings/OtpModal.jsx`
+### 3.217 `frontend/src/components/utils-settings/OtpModal.jsx`
 
 - Declared exports: `function`
 - Imports (2)
@@ -3966,7 +4097,7 @@ Code files documented: **274**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.211 `frontend/src/components/utils-settings/ResetData.jsx`
+### 3.218 `frontend/src/components/utils-settings/ResetData.jsx`
 
 - Declared exports: none detected
 - Imports (4)
@@ -3980,7 +4111,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.212 `frontend/src/components/utils-settings/Settings.jsx`
+### 3.219 `frontend/src/components/utils-settings/Settings.jsx`
 
 - Declared exports: `function`
 - Imports (9)
@@ -4004,7 +4135,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/App.jsx`
 
-### 3.213 `frontend/src/constants.js`
+### 3.220 `frontend/src/constants.js`
 
 - Declared exports: `CURRENCY`, `DELIVERY_FEE_PAYER`, `EMPTY_CUSTOMER`, `LAYOUT`, `PAYMENT_METHODS`, `STOCK`, `STORAGE_KEYS`, `SYNC`, `WRITE_CHANNELS`, `createEmptyOrder`, `formatDate`, `isNetworkError`
 - Imports (0)
@@ -4021,7 +4152,7 @@ Code files documented: **274**
   - `frontend/src/platform/runtime/clientRuntime.js`
   - `frontend/src/web-api.js`
 
-### 3.214 `frontend/src/index.jsx`
+### 3.221 `frontend/src/index.jsx`
 
 - Declared exports: none detected
 - Imports (5)
@@ -4037,7 +4168,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.215 `frontend/src/platform/runtime/clientRuntime.js`
+### 3.222 `frontend/src/platform/runtime/clientRuntime.js`
 
 - Declared exports: `buildQueuedOperationScope`, `doesQueuedScopeMatchCurrent`, `normalizeRuntimeDescriptor`, `readStoredRuntimeDescriptor`, `resetClientRuntimeState`, `sanitizeSyncServerUrl`, `shouldResetForRuntimeChange`, `writeStoredRuntimeDescriptor`
 - Imports (2)
@@ -4051,7 +4182,7 @@ Code files documented: **274**
   - `frontend/src/AppContext.jsx`
   - `frontend/src/web-api.js`
 
-### 3.216 `frontend/src/platform/storage/storagePolicy.mjs`
+### 3.223 `frontend/src/platform/storage/storagePolicy.mjs`
 
 - Declared exports: `DRIVE_SYNC_STATUS_COOLDOWN_KEY`, `DRIVE_SYNC_STATUS_COOLDOWN_MS`, `LIVE_SERVER_SENSITIVE_MIRROR_TABLES`, `NOTIFICATION_SUMMARY_MISSING_TTL_MS`, `NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY`, `isCooldownActive`, `maxStoredNumber`, `shouldPersistLocalMirror`
 - Imports (0)
@@ -4061,7 +4192,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.217 `frontend/src/runtime/runtimeErrorClassifier.mjs`
+### 3.224 `frontend/src/runtime/runtimeErrorClassifier.mjs`
 
 - Declared exports: `isFirstPartyBuiltAssetSource`, `isGuardableStyleSheetError`, `isKnownBridgeMessage`, `isKnownEvalCspNoise`, `isKnownStyleInjectionNoise`, `isLikelyInjectedRuntimeSource`, `shouldSuppressRuntimeError`, `shouldSuppressSecurityPolicyViolation`
 - Imports (0)
@@ -4071,7 +4202,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.218 `frontend/src/utils/actionHistory.mjs`
+### 3.225 `frontend/src/utils/actionHistory.mjs`
 
 - Declared exports: `useActionHistory`
 - Imports (1)
@@ -4092,7 +4223,7 @@ Code files documented: **274**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/components/utils-settings/Backup.jsx`
 
-### 3.219 `frontend/src/utils/appRefresh.js`
+### 3.226 `frontend/src/utils/appRefresh.js`
 
 - Declared exports: `refreshAppData`
 - Imports (0)
@@ -4103,7 +4234,7 @@ Code files documented: **274**
   - `frontend/src/components/utils-settings/Backup.jsx`
   - `frontend/src/components/utils-settings/ResetData.jsx`
 
-### 3.220 `frontend/src/utils/color.js`
+### 3.227 `frontend/src/utils/color.js`
 
 - Declared exports: `getContrastingTextColor`
 - Imports (0)
@@ -4114,7 +4245,7 @@ Code files documented: **274**
   - `frontend/src/components/products/ProductDetailModal.jsx`
   - `frontend/src/components/products/Products.jsx`
 
-### 3.221 `frontend/src/utils/csv.js`
+### 3.228 `frontend/src/utils/csv.js`
 
 - Declared exports: `UTF8_BOM`, `buildCSV`, `buildZip`, `downloadBlob`, `downloadCSV`, `downloadZipFiles`
 - Imports (0)
@@ -4136,7 +4267,7 @@ Code files documented: **274**
   - `frontend/src/utils/exportPackage.js`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.222 `frontend/src/utils/csvImport.js`
+### 3.229 `frontend/src/utils/csvImport.js`
 
 - Declared exports: `detectCsvDelimiter`, `normalizeCsvKey`, `normalizeCsvMoney`, `normalizeCsvPercent`, `normalizeNumericText`, `parseCsvNumber`, `parseCsvRows`, `parseDelimitedRows`, `parseRequiredCsvNumber`, `splitCsvLine`
 - Imports (1)
@@ -4147,7 +4278,7 @@ Code files documented: **274**
   - `frontend/src/api/localDb.js`
   - `frontend/tests/csvImport.test.mjs`
 
-### 3.223 `frontend/src/utils/dateHelpers.js`
+### 3.230 `frontend/src/utils/dateHelpers.js`
 
 - Declared exports: `offsetDate`, `todayStr`
 - Imports (0)
@@ -4157,7 +4288,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/components/dashboard/Dashboard.jsx`
 
-### 3.224 `frontend/src/utils/deviceInfo.js`
+### 3.231 `frontend/src/utils/deviceInfo.js`
 
 - Declared exports: `getClientDeviceInfo`, `getClientMetaHeaders`
 - Imports (0)
@@ -4172,7 +4303,7 @@ Code files documented: **274**
   - `frontend/src/components/pos/POS.jsx`
   - `frontend/src/components/sales/Sales.jsx`
 
-### 3.225 `frontend/src/utils/exportPackage.js`
+### 3.232 `frontend/src/utils/exportPackage.js`
 
 - Declared exports: `buildReportManifestRows`, `buildReportPackageFiles`
 - Imports (1)
@@ -4184,7 +4315,7 @@ Code files documented: **274**
   - `frontend/src/components/inventory/Inventory.jsx`
   - `frontend/tests/exportPackages.test.mjs`
 
-### 3.226 `frontend/src/utils/exportReports.jsx`
+### 3.233 `frontend/src/utils/exportReports.jsx`
 
 - Declared exports: `buildStandaloneReportHtml`
 - Imports (3)
@@ -4198,7 +4329,7 @@ Code files documented: **274**
   - `frontend/src/components/dashboard/Dashboard.jsx`
   - `frontend/src/components/inventory/Inventory.jsx`
 
-### 3.227 `frontend/src/utils/favicon.js`
+### 3.234 `frontend/src/utils/favicon.js`
 
 - Declared exports: `createCircularFaviconDataUrl`
 - Imports (0)
@@ -4210,7 +4341,7 @@ Code files documented: **274**
   - `frontend/src/components/catalog/CatalogPage.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.228 `frontend/src/utils/formatters.js`
+### 3.235 `frontend/src/utils/formatters.js`
 
 - Declared exports: `fmtCount`, `fmtDate`, `fmtShort`, `fmtTime`
 - Imports (0)
@@ -4235,13 +4366,13 @@ Code files documented: **274**
   - `frontend/src/components/users/Users.jsx`
   - `frontend/src/utils/exportReports.jsx`
 
-### 3.229 `frontend/src/utils/groupedRecords.mjs`
+### 3.236 `frontend/src/utils/groupedRecords.mjs`
 
 - Declared exports: `buildAlphabetActionSections`, `buildTimeActionSections`, `getAlphabetInitialSection`, `getAvailableYears`, `getTimeGroupingMode`, `getTimeParts`, `matchesYearMonthFilters`, `toggleIdSet`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Imports (1)
+  - `./initials.mjs`
+- Internal dependencies (1)
+  - `frontend/src/utils/initials.mjs`
 - Referenced by (9)
   - `frontend/src/components/contacts/CustomersTab.jsx`
   - `frontend/src/components/contacts/DeliveryTab.jsx`
@@ -4253,7 +4384,7 @@ Code files documented: **274**
   - `frontend/src/components/utils-settings/AuditLog.jsx`
   - `frontend/tests/groupedRecords.test.mjs`
 
-### 3.230 `frontend/src/utils/historyHelpers.mjs`
+### 3.237 `frontend/src/utils/historyHelpers.mjs`
 
 - Declared exports: `cloneHistorySnapshot`, `extractHistoryResultId`, `resolveCreatedHistorySnapshot`
 - Imports (0)
@@ -4272,7 +4403,7 @@ Code files documented: **274**
   - `frontend/src/components/products/VariantFormModal.jsx`
   - `frontend/src/components/users/Users.jsx`
 
-### 3.231 `frontend/src/utils/index.js`
+### 3.238 `frontend/src/utils/index.js`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4282,7 +4413,22 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.232 `frontend/src/utils/loaders.mjs`
+### 3.239 `frontend/src/utils/initials.mjs`
+
+- Declared exports: `KHMER_INITIALS`, `aggregateInitialOptions`, `compareInitialKeys`, `getInitialKey`, `getInitialType`, `normalizeInitialText`
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (6)
+  - `frontend/src/components/catalog/CatalogProductsSection.jsx`
+  - `frontend/src/components/inventory/Inventory.jsx`
+  - `frontend/src/components/pos/POS.jsx`
+  - `frontend/src/components/products/Products.jsx`
+  - `frontend/src/utils/groupedRecords.mjs`
+  - `frontend/src/utils/productGrouping.mjs`
+
+### 3.240 `frontend/src/utils/loaders.mjs`
 
 - Declared exports: `beginTrackedRequest`, `createLoaderTimeoutError`, `getFirstLoaderError`, `getLoaderErrorMessage`, `invalidateTrackedRequest`, `isTrackedRequestCurrent`, `settleLoaderMap`, `withLoaderTimeout`
 - Imports (0)
@@ -4301,7 +4447,7 @@ Code files documented: **274**
   - `frontend/src/components/users/UserProfileModal.jsx`
   - `frontend/src/components/utils-settings/Settings.jsx`
 
-### 3.233 `frontend/src/utils/pricing.js`
+### 3.241 `frontend/src/utils/pricing.js`
 
 - Declared exports: `calculateProductDiscount`, `formatPriceNumber`, `isProductDiscountActive`, `normalizeDiscountPercent`, `normalizeDiscountType`, `normalizePriceValue`, `roundUpToDecimals`, `toFiniteNumber`
 - Imports (0)
@@ -4324,7 +4470,7 @@ Code files documented: **274**
   - `frontend/src/utils/csvImport.js`
   - `frontend/tests/pricingContacts.test.mjs`
 
-### 3.234 `frontend/src/utils/printReceipt.js`
+### 3.242 `frontend/src/utils/printReceipt.js`
 
 - Declared exports: `PRINT_DEFAULTS`, `createReceiptPdfBlob`, `downloadReceiptPdf`, `getPaperWidthMm`, `getPrintSettings`, `openPrintableReceiptPreview`, `openReceiptPdf`, `printReceipt`, `savePrintSettings`
 - Imports (0)
@@ -4335,19 +4481,19 @@ Code files documented: **274**
   - `frontend/src/components/receipt-settings/PrintSettings.jsx`
   - `frontend/src/components/receipt/Receipt.jsx`
 
-### 3.235 `frontend/src/utils/productGrouping.mjs`
+### 3.243 `frontend/src/utils/productGrouping.mjs`
 
 - Declared exports: `buildProductGroupSections`, `buildProductGroups`, `getNameInitialSection`, `normalizeProductGroupName`
-- Imports (0)
-  - none
-- Internal dependencies (0)
-  - none
+- Imports (1)
+  - `./initials.mjs`
+- Internal dependencies (1)
+  - `frontend/src/utils/initials.mjs`
 - Referenced by (3)
   - `frontend/src/components/pos/posCore.mjs`
   - `frontend/src/components/products/Products.jsx`
   - `frontend/tests/productGrouping.test.mjs`
 
-### 3.236 `frontend/src/web-api.js`
+### 3.244 `frontend/src/web-api.js`
 
 - Declared exports: none detected
 - Imports (6)
@@ -4367,7 +4513,7 @@ Code files documented: **274**
 - Referenced by (1)
   - `frontend/src/AppContext.jsx`
 
-### 3.237 `frontend/tailwind.config.mjs`
+### 3.245 `frontend/tailwind.config.mjs`
 
 - Declared exports: none detected
 - Imports (0)
@@ -4377,7 +4523,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.238 `frontend/tests/apiHttp.test.mjs`
+### 3.246 `frontend/tests/apiHttp.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4388,7 +4534,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.239 `frontend/tests/appShellUtils.test.mjs`
+### 3.247 `frontend/tests/appShellUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4399,7 +4545,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.240 `frontend/tests/barcodeImageScanner.test.mjs`
+### 3.248 `frontend/tests/barcodeImageScanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4410,7 +4556,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.241 `frontend/tests/barcodeScannerState.test.mjs`
+### 3.249 `frontend/tests/barcodeScannerState.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4421,7 +4567,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.242 `frontend/tests/csvImport.test.mjs`
+### 3.250 `frontend/tests/csvImport.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4432,7 +4578,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.243 `frontend/tests/exportPackages.test.mjs`
+### 3.251 `frontend/tests/exportPackages.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4445,7 +4591,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.244 `frontend/tests/groupedRecords.test.mjs`
+### 3.252 `frontend/tests/groupedRecords.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4456,7 +4602,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.245 `frontend/tests/historyHelpers.test.mjs`
+### 3.253 `frontend/tests/historyHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4466,7 +4612,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.246 `frontend/tests/loaders.test.mjs`
+### 3.254 `frontend/tests/loaders.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4476,7 +4622,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.247 `frontend/tests/portalCatalogDisplay.test.mjs`
+### 3.255 `frontend/tests/portalCatalogDisplay.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4486,7 +4632,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.248 `frontend/tests/portalEditorUtils.test.mjs`
+### 3.256 `frontend/tests/portalContentI18n.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4496,7 +4642,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.249 `frontend/tests/portalTranslateController.test.mjs`
+### 3.257 `frontend/tests/portalEditorUtils.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4506,7 +4652,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.250 `frontend/tests/posCore.test.mjs`
+### 3.258 `frontend/tests/portalLanguagePacks.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4516,7 +4662,27 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.251 `frontend/tests/pricingContacts.test.mjs`
+### 3.259 `frontend/tests/portalTranslateController.test.mjs`
+
+- Declared exports: none detected
+- Imports (1)
+  - `node:assert/strict`
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.260 `frontend/tests/posCore.test.mjs`
+
+- Declared exports: none detected
+- Imports (1)
+  - `node:assert/strict`
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.261 `frontend/tests/pricingContacts.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4527,7 +4693,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.252 `frontend/tests/productGrouping.test.mjs`
+### 3.262 `frontend/tests/productGrouping.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4538,7 +4704,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.253 `frontend/tests/productHistoryHelpers.test.mjs`
+### 3.263 `frontend/tests/productHistoryHelpers.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4549,7 +4715,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.254 `frontend/tests/productImportPlanner.test.mjs`
+### 3.264 `frontend/tests/productImportPlanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4560,7 +4726,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.255 `frontend/tests/publicErrorRecovery.test.mjs`
+### 3.265 `frontend/tests/publicErrorRecovery.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4570,7 +4736,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.256 `frontend/tests/receiptTemplate.test.mjs`
+### 3.266 `frontend/tests/receiptTemplate.test.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4583,7 +4749,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.257 `frontend/tests/runtimeErrorClassifier.test.mjs`
+### 3.267 `frontend/tests/runtimeErrorClassifier.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4593,7 +4759,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.258 `frontend/tests/scanbotScanner.test.mjs`
+### 3.268 `frontend/tests/scanbotScanner.test.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4604,7 +4770,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.259 `frontend/tests/storagePolicy.test.mjs`
+### 3.269 `frontend/tests/storagePolicy.test.mjs`
 
 - Declared exports: none detected
 - Imports (1)
@@ -4614,18 +4780,20 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.260 `frontend/vite.config.mjs`
+### 3.270 `frontend/vite.config.mjs`
 
 - Declared exports: `defineConfig`
-- Imports (2)
+- Imports (4)
   - `@vitejs/plugin-react`
+  - `node:child_process`
+  - `node:crypto`
   - `vite`
 - Internal dependencies (0)
   - none
 - Referenced by (0)
   - none
 
-### 3.261 `ops/scripts/backend/verify-data-integrity.js`
+### 3.271 `ops/scripts/backend/verify-data-integrity.js`
 
 - Declared exports: none detected
 - Imports (4)
@@ -4640,7 +4808,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.262 `ops/scripts/frontend/verify-i18n.js`
+### 3.272 `ops/scripts/frontend/verify-i18n.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4651,7 +4819,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.263 `ops/scripts/frontend/verify-performance.js`
+### 3.273 `ops/scripts/frontend/verify-performance.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4663,7 +4831,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.264 `ops/scripts/frontend/verify-ui.js`
+### 3.274 `ops/scripts/frontend/verify-ui.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4674,7 +4842,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.265 `ops/scripts/generate-doc-reference.js`
+### 3.275 `ops/scripts/generate-doc-reference.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4686,7 +4854,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.266 `ops/scripts/generate-full-project-docs.js`
+### 3.276 `ops/scripts/generate-full-project-docs.js`
 
 - Declared exports: `push`
 - Imports (3)
@@ -4698,7 +4866,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.267 `ops/scripts/lib/fs-utils.js`
+### 3.277 `ops/scripts/lib/fs-utils.js`
 
 - Declared exports: `module.exports`
 - Imports (2)
@@ -4712,7 +4880,7 @@ Code files documented: **274**
   - `ops/scripts/generate-full-project-docs.js`
   - `ops/scripts/performance-scan.js`
 
-### 3.268 `ops/scripts/performance-scan.js`
+### 3.278 `ops/scripts/performance-scan.js`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4724,7 +4892,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.269 `ops/scripts/runtime/check-public-url.mjs`
+### 3.279 `ops/scripts/runtime/check-public-url.mjs`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4735,7 +4903,17 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.270 `ops/scripts/runtime/rotate-cloudflare-tunnel-token.mjs`
+### 3.280 `ops/scripts/runtime/check-route-contract.mjs`
+
+- Declared exports: none detected
+- Imports (0)
+  - none
+- Internal dependencies (0)
+  - none
+- Referenced by (0)
+  - none
+
+### 3.281 `ops/scripts/runtime/rotate-cloudflare-tunnel-token.mjs`
 
 - Declared exports: none detected
 - Imports (4)
@@ -4748,7 +4926,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.271 `ops/scripts/runtime/update-cloudflare-tunnel-origin.mjs`
+### 3.282 `ops/scripts/runtime/update-cloudflare-tunnel-origin.mjs`
 
 - Declared exports: none detected
 - Imports (3)
@@ -4760,7 +4938,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.272 `ops/scripts/verify-docker-release.js`
+### 3.283 `ops/scripts/verify-docker-release.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4771,7 +4949,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.273 `ops/scripts/verify-runtime-deps.js`
+### 3.284 `ops/scripts/verify-runtime-deps.js`
 
 - Declared exports: none detected
 - Imports (2)
@@ -4782,7 +4960,7 @@ Code files documented: **274**
 - Referenced by (0)
   - none
 
-### 3.274 `ops/scripts/verify-scale-services.js`
+### 3.285 `ops/scripts/verify-scale-services.js`
 
 - Declared exports: none detected
 - Imports (3)

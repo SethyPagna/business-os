@@ -50,7 +50,7 @@ The app expects the tunnel token in ignored local secret storage:
 ops\runtime\secrets\cloudflare-business-os-leangcosmetics.token
 ```
 
-The token file should contain only the Cloudflare tunnel token. Never commit it. `run\start-server.bat` starts `cloudflared` automatically when this file exists.
+The token file should contain only the Cloudflare tunnel token. Never commit it. `Start Business OS.bat` starts the Docker `cloudflared` connector automatically when this file exists.
 
 If you have a scoped Cloudflare API token with Tunnel configuration permission,
 the origin can be corrected from the repo:

@@ -4,9 +4,9 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 
 ## 1. Coverage Summary
 
-- Total unique keys: **1845**
-- English keys: **1840**
-- Khmer keys: **1845**
+- Total unique keys: **1846**
+- English keys: **1841**
+- Khmer keys: **1846**
 
 ## 2. Domain Group Matrix
 
@@ -14,7 +14,7 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 |---:|---|---:|
 | 1 | Audit Log | 2 |
 | 2 | Authentication | 77 |
-| 3 | Backup | 86 |
+| 3 | Backup | 87 |
 | 4 | Branch | 22 |
 | 5 | Contacts | 116 |
 | 6 | Customer Portal | 5 |
@@ -199,18 +199,19 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 72 | `import_running_background` | YES | YES |
 | 73 | `import_select_type` | YES | YES |
 | 74 | `import_step_desc` | YES | YES |
-| 75 | `imported` | YES | YES |
-| 76 | `imported_records` | YES | YES |
-| 77 | `imported_rows_count` | YES | YES |
-| 78 | `importing` | YES | YES |
-| 79 | `importing_backup` | YES | YES |
-| 80 | `importing_images` | YES | YES |
-| 81 | `match_import_images` | YES | YES |
-| 82 | `No data to export` | YES | YES |
-| 83 | `no_data_to_export` | YES | YES |
-| 84 | `perm_backup` | YES | YES |
-| 85 | `remove_import` | YES | YES |
-| 86 | `remove_import_confirm` | YES | YES |
+| 75 | `import_waiting_for_worker` | YES | YES |
+| 76 | `imported` | YES | YES |
+| 77 | `imported_records` | YES | YES |
+| 78 | `imported_rows_count` | YES | YES |
+| 79 | `importing` | YES | YES |
+| 80 | `importing_backup` | YES | YES |
+| 81 | `importing_images` | YES | YES |
+| 82 | `match_import_images` | YES | YES |
+| 83 | `No data to export` | YES | YES |
+| 84 | `no_data_to_export` | YES | YES |
+| 85 | `perm_backup` | YES | YES |
+| 86 | `remove_import` | YES | YES |
+| 87 | `remove_import_confirm` | YES | YES |
 
 ### 3.4 Branch
 

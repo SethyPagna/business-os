@@ -1,6 +1,6 @@
 # Docker Release Commands
 
-Normal users should start Business OS with **`Start Business OS.bat`**. These files are for support, updates, and private Docker release operations.
+Normal users should start Business OS with **`Start Business OS.bat`**. These files are the final Docker release support, update, backup, restore, and private-image operations.
 
 ## Beginner Path
 
@@ -37,3 +37,5 @@ Every command keeps the window open and prints the next step.
 The Docker release now runs without source bind mounts. Live app data is stored in the Docker runtime volume, and first start copies existing `business-os-data` into that volume only if the volume is empty. This avoids a hidden second database while making the no-source Docker release usable today.
 
 SQLite-in-Docker is intentionally capped to one import writer and conservative media concurrency. That is safer for current data, but it is not the final heavy-load architecture. Postgres and MinIO remain part of the Docker ecosystem and are ready for the verified migration path, but Business OS does not claim full Postgres serving until every route has been cut over and verified.
+
+The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.

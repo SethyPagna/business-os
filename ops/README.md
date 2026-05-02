@@ -4,8 +4,8 @@
 
 ## Folder Guide
 
-- `config\` installer and release configuration.
-- `docker\` Docker Compose and Dockerfile assets for Redis, Postgres, MinIO, app, workers, and Cloudflare.
+- `config\` support configuration. The retired NSIS/standalone EXE installer is no longer the release path.
+- `docker\` final Docker Compose and Dockerfile assets for Redis, Postgres, MinIO, app, workers, and Cloudflare.
 - `docs\` generated/reference documentation. Not required for everyday users.
 - `reports\` tracked verification and audit reports.
 - `runtime\` ignored local runtime output: logs, generated Docker profile, local secrets, temp data, and Docker config.
