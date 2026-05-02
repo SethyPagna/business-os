@@ -63,6 +63,12 @@ import {
   normalizeFirstPartyPortalLanguage,
 } from './portalLanguagePacks.mjs'
 import {
+  localizePortalConfig,
+  localizePortalProducts,
+  normalizePortalTranslations,
+  stringifyPortalTranslations,
+} from './portalContentI18n.mjs'
+import {
   applyGoogleTranslateSelection,
   ensurePortalTranslateScript,
   ensurePortalTranslateWidgetHost,
@@ -543,6 +549,7 @@ const DEFAULT_CONFIG = {
   aboutTitle: 'About us',
   aboutContent: '',
   aboutBlocks: [],
+  translations: {},
   heroGradientStart: '#0f172a',
   heroGradientMid: '#14532d',
   heroGradientEnd: '#ea580c',
@@ -582,7 +589,7 @@ const DEFAULT_CONFIG = {
   publicPath: '/customer-portal',
 }
 
-const PORTAL_CACHE_KEY = 'business-os.portal.cache.v2'
+const PORTAL_CACHE_KEY = 'business-os.portal.cache.v3'
 const PORTAL_CACHE_PRODUCT_LIMIT = 80
 
 const PORTAL_KM_FALLBACKS = {
@@ -1096,6 +1103,7 @@ function buildDraft(config) {
     customer_portal_about_title: config.aboutTitle || '',
     customer_portal_about_content: config.aboutContent || '',
     customer_portal_about_blocks: serializeAboutBlocks(config.aboutBlocks || []),
+    customer_portal_translations: stringifyPortalTranslations(config.translations || {}),
     customer_portal_hero_gradient_start: config.heroGradientStart || '#0f172a',
     customer_portal_hero_gradient_mid: config.heroGradientMid || '#14532d',
     customer_portal_hero_gradient_end: config.heroGradientEnd || '#ea580c',
@@ -1215,6 +1223,7 @@ function applyDraft(config, draft) {
     aboutTitle: String(draft.customer_portal_about_title || config.aboutTitle || 'About us').trim() || 'About us',
     aboutContent: String(draft.customer_portal_about_content || config.aboutContent || '').trim(),
     aboutBlocks: normalizeAboutBlocks(draft.customer_portal_about_blocks || config.aboutBlocks || []),
+    translations: normalizePortalTranslations(draft.customer_portal_translations || config.translations || {}),
     heroGradientStart: normalizeHexColor(draft.customer_portal_hero_gradient_start, config.heroGradientStart || '#0f172a'),
     heroGradientMid: normalizeHexColor(draft.customer_portal_hero_gradient_mid, config.heroGradientMid || '#14532d'),
     heroGradientEnd: normalizeHexColor(draft.customer_portal_hero_gradient_end, config.heroGradientEnd || '#ea580c'),
@@ -1665,6 +1674,14 @@ export default function CatalogPage({ publicView = false }) {
     if (global && global !== key && !isBrokenLocalizedString(global)) return global
     return tt(activeCopyLanguage, key, fallback, fallbackKm)
   }
+  const displayConfig = useMemo(
+    () => (publicView ? localizePortalConfig(previewConfig, language) : previewConfig),
+    [language, previewConfig, publicView]
+  )
+  const displayProducts = useMemo(
+    () => (publicView ? localizePortalProducts(products, language, previewConfig.translations) : products),
+    [language, previewConfig.translations, products, publicView]
+  )
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'
     : 'radial-gradient(circle at top, #fef3c7 0%, #fff7ed 35%, #f8fafc 80%)'
@@ -2342,7 +2359,7 @@ export default function CatalogPage({ publicView = false }) {
   const filteredProducts = useMemo(() => {
     const terms = deferredSearch.toLowerCase().split(/[\s,]+/).map((term) => term.trim()).filter(Boolean)
 
-    return products.filter((product) => {
+    return displayProducts.filter((product) => {
       const haystack = [
         product.name,
         product.category,
@@ -2358,13 +2375,13 @@ export default function CatalogPage({ publicView = false }) {
 
       const statusBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
       const qty = getBranchQty(product, statusBranch)
-      const status = getStockStatus(product, qty, previewConfig)
+      const status = getStockStatus(product, qty, displayConfig)
       if (stockFilter.length && !stockFilter.includes(status)) return false
-      if (!previewConfig.showOutOfStockProducts && status === 'out_of_stock') return false
+      if (!displayConfig.showOutOfStockProducts && status === 'out_of_stock') return false
 
       return true
     })
-  }, [products, deferredSearch, categoryFilter, brandFilter, branchFilter, stockFilter, previewConfig])
+  }, [displayProducts, deferredSearch, categoryFilter, brandFilter, branchFilter, stockFilter, displayConfig])
 
   function toggleFilterValue(values, setter, value) {
     setter((current) => (
@@ -2589,6 +2606,18 @@ export default function CatalogPage({ publicView = false }) {
         notify(copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The portal will render it as an interactive map card.'), 'error')
         return
       }
+      let sanitizedTranslations = '{}'
+      try {
+        const rawTranslations = String(editorDraft.customer_portal_translations || '{}').trim() || '{}'
+        const parsedTranslations = JSON.parse(rawTranslations)
+        if (!parsedTranslations || typeof parsedTranslations !== 'object' || Array.isArray(parsedTranslations)) {
+          throw new Error('Translation overrides must be a JSON object')
+        }
+        sanitizedTranslations = stringifyPortalTranslations(parsedTranslations)
+      } catch (_) {
+        notify(copy('translationJsonInvalid', 'Translation overrides must be valid JSON.'), 'error')
+        return
+      }
 
       setEditorSaving(true)
       await saveSettings({
@@ -2642,6 +2671,7 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
         customer_portal_about_blocks: serializeAboutBlocks(aboutBlocks),
+        customer_portal_translations: sanitizedTranslations,
         customer_portal_hero_gradient_start: normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a'),
         customer_portal_hero_gradient_mid: normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d'),
         customer_portal_hero_gradient_end: normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c'),
@@ -2881,56 +2911,56 @@ export default function CatalogPage({ publicView = false }) {
     }
   }
 
-  const mapEmbedUrl = previewConfig.showGoogleMap
-    ? normalizeGoogleMapsEmbed(previewConfig.googleMapsEmbed || '')
+  const mapEmbedUrl = displayConfig.showGoogleMap
+    ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '')
     : ''
   const socialLinks = [
     {
       key: 'website',
-      enabled: previewConfig.showWebsite,
-      label: String(previewConfig.linkLabels?.website || copy('website', 'Website')).trim() || copy('website', 'Website'),
-      value: previewConfig.links?.website,
+      enabled: displayConfig.showWebsite,
+      label: String(displayConfig.linkLabels?.website || copy('website', 'Website')).trim() || copy('website', 'Website'),
+      value: displayConfig.links?.website,
       icon: Globe,
     },
     {
       key: 'facebook',
-      enabled: previewConfig.showFacebook,
-      label: String(previewConfig.linkLabels?.facebook || copy('facebook', 'Facebook')).trim() || copy('facebook', 'Facebook'),
-      value: previewConfig.links?.facebook,
+      enabled: displayConfig.showFacebook,
+      label: String(displayConfig.linkLabels?.facebook || copy('facebook', 'Facebook')).trim() || copy('facebook', 'Facebook'),
+      value: displayConfig.links?.facebook,
       icon: Facebook,
     },
     {
       key: 'instagram',
-      enabled: previewConfig.showInstagram,
-      label: String(previewConfig.linkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'),
-      value: previewConfig.links?.instagram,
+      enabled: displayConfig.showInstagram,
+      label: String(displayConfig.linkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'),
+      value: displayConfig.links?.instagram,
       icon: Instagram,
     },
     {
       key: 'telegram',
-      enabled: previewConfig.showTelegram,
-      label: String(previewConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'),
-      value: previewConfig.links?.telegram,
+      enabled: displayConfig.showTelegram,
+      label: String(displayConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'),
+      value: displayConfig.links?.telegram,
       icon: Send,
     },
   ].filter((item) => item.enabled && item.value)
 
   const businessFacts = [
-    { key: 'phone', enabled: previewConfig.showPhone, label: copy('phone', 'Phone'), value: previewConfig.businessPhone, href: previewConfig.businessPhone ? `tel:${previewConfig.businessPhone}` : '', icon: Phone },
-    { key: 'email', enabled: previewConfig.showEmail, label: copy('email', 'Email'), value: previewConfig.businessEmail, href: previewConfig.businessEmail ? `mailto:${previewConfig.businessEmail}` : '', icon: Mail },
-    { key: 'address', enabled: previewConfig.showAddress, label: copy('address', 'Address'), value: previewConfig.businessAddress, href: normalizeExternalUrl(previewConfig.addressLink), icon: MapPin },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '', icon: Phone },
+    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: displayConfig.businessEmail ? `mailto:${displayConfig.businessEmail}` : '', icon: Mail },
+    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
     copy('redeemSummary', 'Minimum {points} points per unit. Available now: {units} unit(s).'),
     {
-      points: membershipData?.points?.minimumRedeemPoints ?? previewConfig.redeemPoints,
+      points: membershipData?.points?.minimumRedeemPoints ?? displayConfig.redeemPoints,
       units: membershipData?.points?.redeemableUnits ?? 0,
     }
   )
-  const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(previewConfig.gridColumnsMobile, 1))))
-  const desktopGridColumns = Math.min(8, Math.max(2, Math.round(toNumber(previewConfig.gridColumnsDesktop, 4))))
+  const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
+  const desktopGridColumns = Math.min(8, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
@@ -2993,7 +3023,7 @@ export default function CatalogPage({ publicView = false }) {
     stockFilter,
     setStockFilter,
     toggleFilterValue,
-    previewConfig,
+    previewConfig: displayConfig,
     portalError,
     productGridClass,
     compactTwoColumnMobile,
@@ -3008,7 +3038,7 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   function renderCatalogSection() {
-    if (!(activeTab === 'products' && previewConfig.showCatalog)) return null
+    if (!(activeTab === 'products' && displayConfig.showCatalog)) return null
 
     return (
       <Suspense fallback={(
@@ -3021,7 +3051,7 @@ export default function CatalogPage({ publicView = false }) {
     )
   }
 
-  const publicFaqItems = Array.isArray(previewConfig.faqItems) ? previewConfig.faqItems.filter((item) => item?.question && item?.answer) : []
+  const publicFaqItems = Array.isArray(displayConfig.faqItems) ? displayConfig.faqItems.filter((item) => item?.question && item?.answer) : []
   const aiUsageSummary = assistantUsage || null
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
   const handleUploadSubmissionImages = async () => {
@@ -3035,7 +3065,7 @@ export default function CatalogPage({ publicView = false }) {
   const secondaryTabProps = {
     tab: activeTab,
     copy,
-    previewConfig,
+    previewConfig: displayConfig,
     formatDateTime,
     formatPortalPrice,
     membershipNumber,
@@ -3078,10 +3108,10 @@ export default function CatalogPage({ publicView = false }) {
 
   function renderSecondaryTabSection() {
     const tabEnabled = (
-      (activeTab === 'membership' && previewConfig.showMembership)
-      || (activeTab === 'about' && previewConfig.showAbout)
-      || (activeTab === 'faq' && previewConfig.showFaq)
-      || (activeTab === 'ai' && previewConfig.aiEnabled)
+      (activeTab === 'membership' && displayConfig.showMembership)
+      || (activeTab === 'about' && displayConfig.showAbout)
+      || (activeTab === 'faq' && displayConfig.showFaq)
+      || (activeTab === 'ai' && displayConfig.aiEnabled)
     )
     if (!tabEnabled) return null
 
@@ -3640,6 +3670,37 @@ export default function CatalogPage({ publicView = false }) {
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <label htmlFor="portal-translations-json" className="block text-sm font-medium text-slate-700">{copy('translationOverrides', 'Dynamic content translations')}</label>
+              <p className="mt-1 text-xs text-slate-500">
+                {copy('translationOverridesHint', 'Optional JSON for About, FAQ, assistant, submission, social labels, and product description translations. Business name, short tagline, and portal intro stay original.')}
+              </p>
+              <textarea
+                id="portal-translations-json"
+                name="customer_portal_translations"
+                className="input mt-3 min-h-[160px] resize-y font-mono text-xs"
+                spellCheck={false}
+                value={editorDraft.customer_portal_translations || '{}'}
+                onChange={(event) => setDraft('customer_portal_translations', event.target.value)}
+              />
+              <details className="mt-2 text-xs text-slate-500">
+                <summary className="cursor-pointer font-semibold text-slate-600">{copy('translationOverridesExample', 'Example format')}</summary>
+                <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-600">{`{
+  "zh-CN": {
+    "aboutTitle": "关于我们",
+    "aboutBlocks": {
+      "block-id": { "title": "标题", "body": "内容" }
+    },
+    "faqItems": {
+      "faq-id": { "question": "问题", "answer": "答案" }
+    },
+    "products": {
+      "123": { "description": "产品说明" }
+    }
+  }
+}`}</pre>
+              </details>
+            </div>
             <a className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-sky-700 hover:text-sky-800" href={publicPortalUrl} target="_blank" rel="noreferrer">
               <ExternalLink className="h-4 w-4" />
               {copy('openEmbeddedPreview', 'Open public preview')}
@@ -4105,8 +4166,8 @@ export default function CatalogPage({ publicView = false }) {
     )
   }
 
-  const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
-  const previewBusinessName = String(previewConfig.businessName || '').trim()
+  const previewTitle = String(displayConfig.businessName || displayConfig.title || '').trim()
+  const previewBusinessName = String(displayConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const previewTitleIsBusinessName = previewBusinessName
     && previewTitle
@@ -4142,10 +4203,10 @@ export default function CatalogPage({ publicView = false }) {
               <div
                 className="relative overflow-hidden px-6 py-8 text-white sm:px-8 sm:py-10"
                 style={{
-                  backgroundColor: normalizeHexColor(previewConfig.heroGradientStart, '#0f172a'),
-                  backgroundImage: (previewConfig.showCover && versionedBusinessCover)
-                    ? `linear-gradient(135deg, ${hexToRgba(previewConfig.heroGradientStart, 0.88)} 0%, ${hexToRgba(previewConfig.heroGradientMid, 0.74)} 55%, ${hexToRgba(previewConfig.heroGradientEnd, 0.72)} 100%), url(${versionedBusinessCover})`
-                    : `linear-gradient(135deg, ${normalizeHexColor(previewConfig.heroGradientStart, '#0f172a')} 0%, ${normalizeHexColor(previewConfig.heroGradientMid, '#14532d')} 45%, ${normalizeHexColor(previewConfig.heroGradientEnd, '#ea580c')} 100%)`,
+                  backgroundColor: normalizeHexColor(displayConfig.heroGradientStart, '#0f172a'),
+                  backgroundImage: (displayConfig.showCover && versionedBusinessCover)
+                    ? `linear-gradient(135deg, ${hexToRgba(displayConfig.heroGradientStart, 0.88)} 0%, ${hexToRgba(displayConfig.heroGradientMid, 0.74)} 55%, ${hexToRgba(displayConfig.heroGradientEnd, 0.72)} 100%), url(${versionedBusinessCover})`
+                    : `linear-gradient(135deg, ${normalizeHexColor(displayConfig.heroGradientStart, '#0f172a')} 0%, ${normalizeHexColor(displayConfig.heroGradientMid, '#14532d')} 45%, ${normalizeHexColor(displayConfig.heroGradientEnd, '#ea580c')} 100%)`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                 }}
@@ -4164,38 +4225,38 @@ export default function CatalogPage({ publicView = false }) {
                       <div
                         className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
                         style={{
-                          height: `${previewConfig.logoSize || 80}px`,
-                          width: `${previewConfig.logoSize || 80}px`,
+                          height: `${displayConfig.logoSize || 80}px`,
+                          width: `${displayConfig.logoSize || 80}px`,
                         }}
                       >
-                        {previewConfig.showLogo && versionedBusinessLogo ? (
+                        {displayConfig.showLogo && versionedBusinessLogo ? (
                           <button
                             type="button"
                             className="flex h-full w-full items-center justify-center"
-                            onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
+                            onClick={() => openPortalImage(displayConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
                           >
                               <img
                                 src={versionedBusinessLogo}
-                                alt={previewConfig.businessName}
+                                alt={displayConfig.businessName}
                                 className="h-full w-full"
                                 style={{
-                                  objectFit: previewConfig.logoFit === 'cover' ? 'cover' : 'contain',
-                                  objectPosition: `${previewConfig.logoPositionX || 50}% ${previewConfig.logoPositionY || 50}%`,
-                                  transform: `scale(${Math.max(0.8, Math.min(1.8, (previewConfig.logoZoom || 100) / 100))})`,
+                                  objectFit: displayConfig.logoFit === 'cover' ? 'cover' : 'contain',
+                                  objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
+                                  transform: `scale(${Math.max(0.8, Math.min(1.8, (displayConfig.logoZoom || 100) / 100))})`,
                                   transformOrigin: 'center',
                                 }}
                               />
                             </button>
                         ) : (
-                          <span className="text-xl font-semibold">{(previewConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
+                          <span className="text-xl font-semibold">{(displayConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
                         )}
                       </div>
                       <div>
                         {showBrandLabel ? (
-                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{previewConfig.businessName}</div>
+                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{displayConfig.businessName}</div>
                         ) : null}
-                        {previewConfig.businessTagline ? (
-                          <div className="notranslate mt-1 text-sm text-slate-100/90" translate="no">{previewConfig.businessTagline}</div>
+                        {displayConfig.businessTagline ? (
+                          <div className="notranslate mt-1 text-sm text-slate-100/90" translate="no">{displayConfig.businessTagline}</div>
                         ) : null}
                       </div>
                     </div>
@@ -4204,7 +4265,7 @@ export default function CatalogPage({ publicView = false }) {
                       <h1
                         className={`mt-5 font-semibold tracking-tight text-white${previewTitleIsBusinessName ? ' notranslate' : ''}`}
                         translate={previewTitleIsBusinessName ? 'no' : undefined}
-                        style={{ fontSize: `${previewConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
+                        style={{ fontSize: `${displayConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
                       >
                         {previewTitle}
                       </h1>
@@ -4214,7 +4275,7 @@ export default function CatalogPage({ publicView = false }) {
                       translate="no"
                       style={{ textShadow: '0 6px 18px rgba(15, 23, 42, 0.28)' }}
                     >
-                      {previewConfig.intro}
+                      {displayConfig.intro}
                     </p>
 
                     {businessFacts.length || socialLinks.length ? (
@@ -4258,7 +4319,7 @@ export default function CatalogPage({ publicView = false }) {
                   {showHeroToolsPanel ? (
                     <div className="flex w-full items-start justify-end lg:w-auto">
                       <div className="flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/35 px-2 py-2 shadow-xl backdrop-blur">
-                        {previewConfig.translateWidgetEnabled ? (
+                        {displayConfig.translateWidgetEnabled ? (
                           <PortalMenu
                             align="right"
                             trigger={(
@@ -4374,7 +4435,7 @@ export default function CatalogPage({ publicView = false }) {
 
               <div className="border-t border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-900/95 sm:px-8">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                  {previewConfig.showCatalog ? (
+                  {displayConfig.showCatalog ? (
                     <button
                       className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('products')}
@@ -4383,7 +4444,7 @@ export default function CatalogPage({ publicView = false }) {
                       {copy('products', 'Products')}
                     </button>
                   ) : null}
-                  {previewConfig.showMembership ? (
+                  {displayConfig.showMembership ? (
                     <button
                       className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('membership')}
@@ -4392,7 +4453,7 @@ export default function CatalogPage({ publicView = false }) {
                       {copy('membership', 'Membership')}
                     </button>
                   ) : null}
-                  {previewConfig.showAbout ? (
+                  {displayConfig.showAbout ? (
                     <button
                       className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('about')}
@@ -4401,7 +4462,7 @@ export default function CatalogPage({ publicView = false }) {
                       {copy('about', 'About')}
                     </button>
                   ) : null}
-                  {previewConfig.showFaq ? (
+                  {displayConfig.showFaq ? (
                     <button
                       className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('faq')}
@@ -4410,13 +4471,13 @@ export default function CatalogPage({ publicView = false }) {
                       {copy('faq', 'FAQ')}
                     </button>
                   ) : null}
-                  {previewConfig.aiEnabled ? (
+                  {displayConfig.aiEnabled ? (
                     <button
                       className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
                       onClick={() => setActiveTab('ai')}
                     >
                       <Bot className="h-4 w-4" />
-                      {previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
+                      {displayConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
                     </button>
                   ) : null}
                 </div>

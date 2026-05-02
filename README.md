@@ -78,11 +78,31 @@ The customer portal uses first-party language packs for fast public switching. E
 
 Google Translate remains only a slower fallback for unsupported languages. Business name, portal intro, and short tagline stay in the original business text instead of being auto-translated.
 
+Fixed portal labels translate from built-in language packs. Custom content you type yourself, such as About blocks, FAQ answers, assistant text, submission instructions, social labels, and product descriptions, can use optional translation overrides in **Customer Portal > Publishing > Dynamic content translations**. This keeps edited content accurate instead of guessing a machine translation.
+
+Example override:
+
+```json
+{
+  "zh-CN": {
+    "aboutTitle": "关于我们",
+    "faqItems": {
+      "faq-id": { "question": "问题", "answer": "答案" }
+    },
+    "products": {
+      "123": { "description": "产品说明" }
+    }
+  }
+}
+```
+
 ## Data And Backups
 
 Current source-runtime business data stays under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
+
+Do **not** delete `business-os-data` manually when Docker looks mismatched. In source/runtime mode it can still be the live SQLite/local-file data and the legacy migration source. Use **Settings > Backup**, `run\docker\backup.bat`, restore tools, or support-guided archive steps instead.
 
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 

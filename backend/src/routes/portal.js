@@ -103,6 +103,21 @@ function normalizeFaqItems(value) {
     .slice(0, 24)
 }
 
+/** Sanitize optional per-language public portal dynamic content overrides. */
+function normalizePortalTranslations(value) {
+  const input = value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : tryParse(value, {})
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
+  const normalized = {}
+  Object.entries(input).forEach(([language, block]) => {
+    const languageKey = String(language || '').trim()
+    if (!languageKey || !block || typeof block !== 'object' || Array.isArray(block)) return
+    normalized[languageKey] = block
+  })
+  return normalized
+}
+
 function normalizeProductIdList(value) {
   const input = Array.isArray(value) ? value : tryParse(value, [])
   if (!Array.isArray(input)) return []
@@ -203,6 +218,7 @@ function buildPortalConfig() {
     aboutTitle: String(settings.customer_portal_about_title || 'About us').trim() || 'About us',
     aboutContent: String(settings.customer_portal_about_content || '').trim(),
     aboutBlocks: normalizeAboutBlocks(settings.customer_portal_about_blocks || '[]'),
+    translations: normalizePortalTranslations(settings.customer_portal_translations || '{}'),
     heroGradientStart: normalizeHexColor(settings.customer_portal_hero_gradient_start, '#0f172a'),
     heroGradientMid: normalizeHexColor(settings.customer_portal_hero_gradient_mid, '#14532d'),
     heroGradientEnd: normalizeHexColor(settings.customer_portal_hero_gradient_end, '#ea580c'),
