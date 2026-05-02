@@ -31,6 +31,8 @@ $DockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os'
 $OldDockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os-docker'
 $ReleaseProjectName = 'business-os'
 $OldReleaseProjectName = 'business-os-release'
+$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\check-route-contract.mjs'
+$RouteContractLog = Join-Path $RuntimeDir 'route-contract.log'
 
 function Ensure-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -475,7 +477,17 @@ function Invoke-Start {
     Invoke-Compose -ComposeArgs @('--profile', 'migrate', 'run', '--rm', 'legacy-adopter')
   }
   Write-Step 'Starting Business OS Docker release runtime...'
-  Invoke-Compose -ComposeArgs @('up', '-d', '--remove-orphans')
+  $importReplicas = if ($envMap.IMPORT_WORKER_REPLICAS) { [int]$envMap.IMPORT_WORKER_REPLICAS } else { 1 }
+  $mediaReplicas = if ($envMap.MEDIA_WORKER_REPLICAS) { [int]$envMap.MEDIA_WORKER_REPLICAS } else { 1 }
+  $importReplicas = [Math]::Max(1, [Math]::Min(6, $importReplicas))
+  $mediaReplicas = [Math]::Max(1, [Math]::Min(6, $mediaReplicas))
+  Invoke-Compose -ComposeArgs @(
+    'up', '-d',
+    '--remove-orphans',
+    '--force-recreate',
+    '--scale', "import-worker=$importReplicas",
+    '--scale', "media-worker=$mediaReplicas"
+  )
   Test-ReleaseHealth
   Write-Ok 'Docker release runtime is healthy.'
 }
@@ -575,15 +587,38 @@ function Test-ReleaseHealth {
   $url = "http://127.0.0.1:$port/health"
   Write-Step "Waiting for Docker release health at $url"
   $deadline = (Get-Date).AddSeconds(180)
+  $healthy = $false
   do {
     try {
       $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
-      if ([int]$response.StatusCode -eq 200) { return $true }
+      if ([int]$response.StatusCode -eq 200) {
+        $healthy = $true
+        break
+      }
     } catch {}
     Start-Sleep -Seconds 3
   } while ((Get-Date) -lt $deadline)
-  Invoke-Compose -ComposeArgs @('logs', '--tail', '120', 'app') -AllowFailure
-  Fail "Docker release app did not become healthy at $url"
+  if (-not $healthy) {
+    Invoke-Compose -ComposeArgs @('logs', '--tail', '120', 'app') -AllowFailure
+    Fail "Docker release app did not become healthy at $url"
+  }
+
+  if (Test-Path -LiteralPath $RouteContractScript) {
+    Write-Step 'Checking Docker release API route contract...'
+    $node = Find-Executable @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe')
+    if ($node) {
+      $contract = Invoke-ProcessWithTimeout $node @($RouteContractScript, "http://127.0.0.1:$port") 30
+      Set-Content -LiteralPath $RouteContractLog -Encoding UTF8 -Value (($contract.Stdout, $contract.Stderr) -join [Environment]::NewLine)
+      if ($contract.ExitCode -ne 0) {
+        if (Test-Path -LiteralPath $RouteContractLog) { Get-Content -LiteralPath $RouteContractLog -Tail 80 }
+        Fail "Docker release route contract failed. Log: $RouteContractLog"
+      }
+      Write-Ok 'Docker release API route contract passed.'
+    } else {
+      Write-Warn 'Node.js was not found on the host, so the route contract smoke could not run.'
+    }
+  }
+  return $true
 }
 
 function Invoke-Backup {

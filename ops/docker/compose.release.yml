@@ -235,13 +235,13 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token"]
+    command: ["tunnel", "--no-autoupdate", "--loglevel", "warn", "run", "--token-file", "/run/secrets/cloudflare.token", "--url", "http://app:4000"]
+    network_mode: "service:app"
     volumes:
       - type: bind
         source: ${CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE:?CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE is required}
         target: /run/secrets/cloudflare.token
         read_only: true
-    networks: [business_os_internal]
     depends_on:
       app:
         condition: service_healthy

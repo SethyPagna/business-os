@@ -72,6 +72,7 @@ const {
 } = require('../../services/googleDriveSync')
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
+const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJobs')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -721,6 +722,85 @@ function recreateCustomTable(tableName, columns = []) {
   db.exec(sql)
 }
 
+function broadcastDataRestored() {
+  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
+}
+
+async function createFolderBackup({ destinationDir, actor = {}, progress = null } = {}) {
+  const rawDestination = String(destinationDir || '').trim()
+  if (!rawDestination) throw new Error('destinationDir is required')
+  const resolvedDestination = path.resolve(rawDestination)
+  if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
+    throw new Error('Choose a backup destination outside the current live data folder.')
+  }
+  progress?.({
+    phase: 'snapshotting',
+    progress: 10,
+    message: 'Creating a safe filesystem snapshot',
+  })
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
+  const workerResult = await runFsWorker('export-folder', {
+    sourceRoot: DATA_ROOT,
+    destinationDir: resolvedDestination,
+    dataFolderName: DATA_FOLDER_NAME,
+    backupVersion: BACKUP_VERSION,
+  })
+  audit(actor.userId, actor.userName, 'backup_export', 'system', null, {
+    destinationDir: resolvedDestination,
+    backupRoot: workerResult.backupRoot,
+    files: workerResult.copyStats?.copiedFileCount || 0,
+  })
+  return {
+    backupRoot: workerResult.backupRoot,
+    dataRoot: workerResult.dataRoot,
+    infoPath: workerResult.infoPath,
+    summary: workerResult.summary,
+    copyStats: workerResult.copyStats,
+    message: 'Folder backup created successfully.',
+  }
+}
+
+async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = {}) {
+  const rawSource = String(sourceDir || '').trim()
+  if (!rawSource) throw new Error('sourceDir is required')
+  progress?.({
+    phase: 'validating',
+    progress: 5,
+    message: 'Validating backup folder',
+  })
+  const snapshot = readBackupTablesFromDataRoot(rawSource)
+  if (isSamePath(snapshot.root, DATA_ROOT)) {
+    throw new Error('Choose a backup folder, not the current live data folder.')
+  }
+  progress?.({
+    phase: 'stopping_imports',
+    progress: 20,
+    message: 'Stopping background imports before restore',
+  })
+  await stopImportsBeforeDestructiveAction('Folder backup restore')
+  progress?.({
+    phase: 'restoring',
+    progress: 45,
+    message: 'Restoring database tables and uploads',
+  })
+  restoreSnapshotTables({
+    tables: snapshot.tables,
+    customTableRows: snapshot.customTableRows,
+    uploadSourceRoot: snapshot.root,
+  })
+  bumpStorageVersion('backup-import-folder')
+  audit(actor.userId, actor.userName, 'backup_restore', 'system', null, {
+    sourceDir: snapshot.root,
+    tableRows: snapshot.summary?.totals?.tableRowCount || 0,
+  })
+  broadcastDataRestored()
+  return {
+    message: 'Folder backup restored successfully',
+    sourceRoot: snapshot.root,
+    summary: snapshot.summary,
+  }
+}
+
 // ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.get('/audit-logs', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all())
@@ -770,6 +850,16 @@ router.get('/drive-sync/status', authToken, requireAnyPermission(['backup', 'set
   ok(res, {
     item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
   })
+})
+
+router.get('/jobs/:id', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
+  const item = getSystemJob(req.params.id)
+  if (!item) return err(res, 'Job not found', 404)
+  ok(res, { item })
+})
+
+router.get('/jobs', authToken, requireAnyPermission(['backup', 'settings']), (req, res) => {
+  ok(res, { items: listSystemJobs({ limit: req.query?.limit || 25 }) })
 })
 
 router.post('/drive-sync/preferences', authToken, requirePermission('settings'), (req, res) => {
@@ -880,16 +970,130 @@ router.post('/drive-sync/forget-credentials', authToken, requirePermission('sett
   }
 })
 
+router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  try {
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('google_drive_sync', async ({ progress }) => {
+      progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
+      const summary = await runDriveSync('manual')
+      audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+        reason: 'manual',
+        uploaded: summary?.uploaded || 0,
+        updated: summary?.updated || 0,
+        skipped: summary?.skipped || 0,
+      })
+      return {
+        summary,
+        item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
+      }
+    }, {
+      prefix: 'drive',
+      message: 'Google Drive sync queued',
+      runningMessage: 'Google Drive sync running',
+      completedMessage: 'Google Drive sync complete',
+    })
+    ok(res, { job_id: job.id, item: job })
+  } catch (error) {
+    err(res, error?.message || 'Google Drive sync failed')
+  }
+})
+
 router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
   try {
-    const summary = await runDriveSync('manual')
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('google_drive_sync', async ({ progress }) => {
+      progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
+      const summary = await runDriveSync('manual')
+      audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+        reason: 'manual',
+        uploaded: summary?.uploaded || 0,
+        updated: summary?.updated || 0,
+        skipped: summary?.skipped || 0,
+      })
+      return {
+        summary,
+        item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
+      }
+    }, {
+      prefix: 'drive',
+      message: 'Google Drive sync queued',
+      runningMessage: 'Google Drive sync running',
+      completedMessage: 'Google Drive sync complete',
+    })
     ok(res, {
-      summary,
+      queued: true,
+      job_id: job.id,
+      job,
       item: getDriveSyncStatus(resolveDriveRedirectUri(req)),
     })
   } catch (error) {
     err(res, error?.message || 'Google Drive sync failed')
   }
+})
+
+router.get('/backups/:id', authToken, requirePermission('backup'), (req, res) => {
+  const item = getSystemJob(req.params.id)
+  if (!item) return err(res, 'Backup job not found', 404)
+  ok(res, { item })
+})
+
+router.post('/backups', authToken, requirePermission('backup'), async (req, res) => {
+  if (!applyRouteRateLimit(req, res, { name: 'system:backup_job', max: 12, windowMs: 10 * 60 * 1000 })) return
+  const type = String(req.body?.type || 'export-folder').trim().toLowerCase()
+  const actor = getAuditActor(req, req.body || {})
+  try {
+    if (type === 'export-folder' || type === 'export_folder') {
+      const destinationDir = String(req.body?.destinationDir || '').trim()
+      if (!destinationDir) return err(res, 'destinationDir is required')
+      const job = startSystemJob('backup_export_folder', ({ progress }) => createFolderBackup({
+        destinationDir,
+        actor,
+        progress,
+      }), {
+        prefix: 'backup',
+        message: 'Backup export queued',
+        runningMessage: 'Backup export running',
+        completedMessage: 'Backup export complete',
+      })
+      return ok(res, { job_id: job.id, item: job })
+    }
+    if (['import-folder', 'import_folder', 'restore-folder', 'restore_folder'].includes(type)) {
+      const sourceDir = String(req.body?.sourceDir || '').trim()
+      if (!sourceDir) return err(res, 'sourceDir is required')
+      const job = startSystemJob('backup_restore_folder', ({ progress }) => restoreFolderBackup({
+        sourceDir,
+        actor,
+        progress,
+      }), {
+        prefix: 'restore',
+        message: 'Backup restore queued',
+        runningMessage: 'Backup restore running',
+        completedMessage: 'Backup restore complete',
+      })
+      return ok(res, { job_id: job.id, item: job })
+    }
+    return err(res, `Unsupported backup job type: ${type}`, 400)
+  } catch (error) {
+    return err(res, error?.message || 'Failed to start backup job')
+  }
+})
+
+router.post('/backups/:id/restore', authToken, requirePermission('backup'), async (req, res) => {
+  if (!applyRouteRateLimit(req, res, { name: 'system:backup_restore_job', max: 6, windowMs: 10 * 60 * 1000 })) return
+  const sourceDir = String(req.body?.sourceDir || req.body?.backupRoot || '').trim()
+  if (!sourceDir) return err(res, 'sourceDir is required')
+  const actor = getAuditActor(req, req.body || {})
+  const job = startSystemJob('backup_restore_folder', ({ progress }) => restoreFolderBackup({
+    sourceDir,
+    actor,
+    progress,
+  }), {
+    prefix: 'restore',
+    message: 'Backup restore queued',
+    runningMessage: 'Backup restore running',
+    completedMessage: 'Backup restore complete',
+  })
+  ok(res, { job_id: job.id, item: job })
 })
 
 router.get('/backup/export', authToken, requirePermission('backup'), (req, res) => {
@@ -926,32 +1130,10 @@ router.post('/backup/export-folder', authToken, requirePermission('backup'), asy
   if (!destinationDir) return err(res, 'destinationDir is required')
 
   try {
-    const resolvedDestination = path.resolve(destinationDir)
-    if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
-      return err(res, 'Choose a backup destination outside the current live data folder.')
-    }
-    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-    const workerResult = await runFsWorker('export-folder', {
-      sourceRoot: DATA_ROOT,
-      destinationDir: resolvedDestination,
-      dataFolderName: DATA_FOLDER_NAME,
-      backupVersion: BACKUP_VERSION,
-    })
-
-    audit(req.user?.id, req.user?.name, 'backup_export', 'system', null, {
-      destinationDir: resolvedDestination,
-      backupRoot: workerResult.backupRoot,
-      files: workerResult.copyStats?.copiedFileCount || 0,
-    })
-
-    return ok(res, {
-      backupRoot: workerResult.backupRoot,
-      dataRoot: workerResult.dataRoot,
-      infoPath: workerResult.infoPath,
-      summary: workerResult.summary,
-      copyStats: workerResult.copyStats,
-      message: 'Folder backup created successfully.',
-    })
+    return ok(res, await createFolderBackup({
+      destinationDir,
+      actor: { userId: req.user?.id, userName: req.user?.name },
+    }))
   } catch (e) {
     return err(res, `Failed to create folder backup: ${e.message}`)
   }
@@ -988,39 +1170,15 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), asy
   const sourceDir = String(req.body?.sourceDir || '').trim()
   if (!sourceDir) return err(res, 'sourceDir is required')
 
-  let snapshot
   try {
-    snapshot = readBackupTablesFromDataRoot(sourceDir)
-    if (isSamePath(snapshot.root, DATA_ROOT)) {
-      return err(res, 'Choose a backup folder, not the current live data folder.')
-    }
-  } catch (e) {
-    return err(res, e.message)
-  }
-
-  try {
-    await stopImportsBeforeDestructiveAction('Folder backup restore')
-    restoreSnapshotTables({
-      tables: snapshot.tables,
-      customTableRows: snapshot.customTableRows,
-      uploadSourceRoot: snapshot.root,
+    const result = await restoreFolderBackup({
+      sourceDir,
+      actor: { userId: req.user?.id, userName: req.user?.name },
     })
-    bumpStorageVersion('backup-import-folder')
+    return ok(res, result)
   } catch (e) {
     return err(res, `Failed to restore folder backup: ${e.message}`)
   }
-
-  audit(req.user?.id, req.user?.name, 'backup_restore', 'system', null, {
-    sourceDir: snapshot.root,
-    tableRows: snapshot.summary?.totals?.tableRowCount || 0,
-  })
-
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
-  ok(res, {
-    message: 'Folder backup restored successfully',
-    sourceRoot: snapshot.root,
-    summary: snapshot.summary,
-  })
 })
 
 // ?€?€ Reset business data ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€

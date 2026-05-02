@@ -58,6 +58,17 @@ runTest('system router registers Google Drive sync connect and disconnect routes
   assert.ok(paths.includes('/drive-sync/disconnect'), 'missing /api/system/drive-sync/disconnect')
   assert.ok(paths.includes('/drive-sync/forget-credentials'), 'missing /api/system/drive-sync/forget-credentials')
   assert.ok(paths.includes('/drive-sync/sync-now'), 'missing /api/system/drive-sync/sync-now')
+  assert.ok(paths.includes('/drive-sync/jobs'), 'missing /api/system/drive-sync/jobs')
+})
+
+runTest('system router registers non-blocking job and backup routes', () => {
+  const router = require('../src/routes/system')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/jobs/:id'), 'missing /api/system/jobs/:id')
+  assert.ok(paths.includes('/jobs'), 'missing /api/system/jobs')
+  assert.ok(paths.includes('/backups'), 'missing /api/system/backups')
+  assert.ok(paths.includes('/backups/:id'), 'missing /api/system/backups/:id')
+  assert.ok(paths.includes('/backups/:id/restore'), 'missing /api/system/backups/:id/restore')
 })
 
 if (failed > 0) {

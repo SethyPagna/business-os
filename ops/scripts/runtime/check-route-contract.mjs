@@ -11,6 +11,15 @@ const routes = [
   { name: 'products filters', path: '/api/products/filters', allowed: new Set([200, 401, 403]) },
   { name: 'inventory products search', path: '/api/inventory/products/search?page=1&pageSize=1', allowed: new Set([200, 401, 403]) },
   { name: 'portal catalog search', path: '/api/portal/catalog/products/search?page=1&pageSize=1', allowed: new Set([200]) },
+  { name: 'branch stock search', path: '/api/branches/1/stock?page=1&pageSize=1', allowed: new Set([200, 401, 403]) },
+  { name: 'import review', path: '/api/import-jobs/contract-smoke/review?page=1&pageSize=1', allowed: new Set([200, 401, 403]) },
+  { name: 'import decisions', method: 'PATCH', path: '/api/import-jobs/contract-smoke/decisions', allowed: new Set([200, 401, 403]) },
+  { name: 'import delete', method: 'DELETE', path: '/api/import-jobs/contract-smoke?force=1', allowed: new Set([200, 401, 403]) },
+  { name: 'action history undo', method: 'POST', path: '/api/action-history/contract-smoke/undo', allowed: new Set([200, 401, 403]) },
+  { name: 'action history redo', method: 'POST', path: '/api/action-history/contract-smoke/redo', allowed: new Set([200, 401, 403]) },
+  { name: 'backup job create', method: 'POST', path: '/api/backups', allowed: new Set([200, 401, 403]) },
+  { name: 'backup job restore', method: 'POST', path: '/api/backups/contract-smoke/restore', allowed: new Set([200, 401, 403]) },
+  { name: 'drive sync job create', method: 'POST', path: '/api/system/drive-sync/jobs', allowed: new Set([200, 401, 403]) },
 ]
 
 function fail(message) {
@@ -23,6 +32,7 @@ async function checkRoute(route) {
   let response
   try {
     response = await fetch(url, {
+      method: route.method || 'GET',
       headers: { 'bypass-tunnel-reminder': 'true' },
       signal: AbortSignal.timeout(10_000),
     })

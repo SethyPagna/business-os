@@ -1167,8 +1167,47 @@ export async function exportBackup() {
   return { success: true }
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function getSystemJob(id) {
+  if (!id) throw new Error('Missing job id')
+  return apiFetch('GET', `/api/system/jobs/${encodeURIComponent(id)}`)
+}
+
+async function waitForSystemJob(jobId, {
+  timeoutMs = LONG_SYSTEM_ACTION_TIMEOUT_MS,
+  pollMs = 1200,
+  reason = 'system-job',
+} = {}) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await getSystemJob(jobId)
+    const item = result?.item || result
+    if (item?.status === 'completed') {
+      return {
+        success: true,
+        job: item,
+        ...(item.result || {}),
+      }
+    }
+    if (item?.status === 'failed' || item?.status === 'cancelled') {
+      throw new Error(item.error || item.message || `${reason} failed`)
+    }
+    await wait(pollMs)
+  }
+  throw new Error(`${reason} is still running. Check the Backup page or server logs for progress.`)
+}
+
 export async function exportBackupFolder(destinationDir) {
-  return apiFetch('POST', '/api/system/backup/export-folder', { destinationDir }, LONG_SYSTEM_ACTION_TIMEOUT_MS)
+  const queued = await apiFetch('POST', '/api/backups', {
+    type: 'export-folder',
+    destinationDir,
+  }, SYNC.REQUEST_TIMEOUT_MS)
+  const jobId = queued?.job_id || queued?.item?.id
+  if (!jobId) return queued
+  return waitForSystemJob(jobId, { reason: 'backup export' })
 }
 
 export function pickBackupFile() {
@@ -1194,7 +1233,14 @@ export async function importBackupData(data) {
 }
 
 export async function importBackupFolder(sourceDir) {
-  const result = await apiFetch('POST', '/api/system/backup/import-folder', { sourceDir }, LONG_SYSTEM_ACTION_TIMEOUT_MS)
+  const queued = await apiFetch('POST', '/api/backups', {
+    type: 'import-folder',
+    sourceDir,
+  }, SYNC.REQUEST_TIMEOUT_MS)
+  const jobId = queued?.job_id || queued?.item?.id
+  const result = jobId
+    ? await waitForSystemJob(jobId, { reason: 'backup restore' })
+    : queued
   await invalidateClientRuntimeState('backup-import-folder')
   cacheClearAll()
   return result
@@ -1262,7 +1308,20 @@ export const forgetGoogleDriveSyncCredentials = (payload = {}) =>
   route('system:driveSyncForgetCredentials', () => apiFetch('POST', '/api/system/drive-sync/forget-credentials', payload), null, true)
 
 export const syncGoogleDriveNow = () =>
-  route('system:driveSyncNow', () => apiFetch('POST', '/api/system/drive-sync/sync-now', {}), null, true)
+  route('system:driveSyncNow', async () => {
+    const queued = await apiFetch('POST', '/api/system/drive-sync/jobs', {}, SYNC.REQUEST_TIMEOUT_MS)
+    const jobId = queued?.job_id || queued?.item?.id
+    if (!jobId) return queued
+    const result = await waitForSystemJob(jobId, {
+      reason: 'Google Drive sync',
+      timeoutMs: LONG_SYSTEM_ACTION_TIMEOUT_MS,
+    })
+    return {
+      ...result,
+      summary: result.summary || result.result?.summary || result.job?.result?.summary || {},
+      item: result.item || result.result?.item || result.job?.result?.item || null,
+    }
+  }, null, true)
 
 export async function resetData(mode = 'sales') {
   const result = await route('data:reset', () => apiFetch('POST', '/api/system/reset-data', { mode }), null, true)
