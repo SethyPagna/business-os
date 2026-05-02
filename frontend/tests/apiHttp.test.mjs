@@ -5,6 +5,7 @@ import {
   apiFetch,
   buildApiRequestDedupeKey,
   createApiVersionMismatchError,
+  shouldCompareRuntimeVersions,
   isApiVersionMismatchError,
   isRequiredRuntimeApiPath,
   setAuthSessionToken,
@@ -131,6 +132,21 @@ await runTest('api version mismatch errors are explicit and detectable', () => {
   assert.equal(error.reason, 'missing_required_api')
   assert.equal(error.status, 404)
   assert.equal(isApiVersionMismatchError(error), true)
+})
+
+await runTest('runtime version guard compares served frontend metadata, not backend source revision', () => {
+  const frontend = { revision: 'browser-rev', hash: 'browser-hash' }
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+    frontend: { revision: 'browser-rev', hash: 'browser-hash' },
+  }, frontend), false)
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+    frontend: { revision: 'server-frontend-rev', hash: 'server-frontend-hash' },
+  }, frontend), true)
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-newer-rev',
+  }, frontend), false)
 })
 
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {

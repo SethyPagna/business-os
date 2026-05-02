@@ -66,6 +66,34 @@ function computeSourceHash() {
   }
 }
 
+function emptyFrontendBuildInfo() {
+  return {
+    revision: '',
+    hash: '',
+    builtAt: '',
+  }
+}
+
+function readFrontendBuildInfoFromRoot(rootDir = PROJECT_ROOT) {
+  const candidates = [
+    path.join(rootDir, 'frontend', 'dist', 'business-os-build.json'),
+    path.join(rootDir, 'backend', 'frontend-dist', 'business-os-build.json'),
+    path.join(BACKEND_ROOT, 'frontend-dist', 'business-os-build.json'),
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue
+      const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'))
+      return {
+        revision: String(parsed?.revision || '').trim(),
+        hash: String(parsed?.hash || '').trim(),
+        builtAt: String(parsed?.builtAt || '').trim(),
+      }
+    } catch (_) {}
+  }
+  return emptyFrontendBuildInfo()
+}
+
 const runtimeVersion = {
   app: 'business-os',
   packageVersion: (() => {
@@ -77,6 +105,7 @@ const runtimeVersion = {
   })(),
   revision: readGitRevision(),
   sourceHash: computeSourceHash(),
+  frontend: readFrontendBuildInfoFromRoot(PROJECT_ROOT),
   bootedAt: new Date().toISOString(),
 }
 
@@ -86,4 +115,5 @@ function getRuntimeVersion() {
 
 module.exports = {
   getRuntimeVersion,
+  readFrontendBuildInfoFromRoot,
 }

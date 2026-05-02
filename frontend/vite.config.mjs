@@ -66,6 +66,23 @@ function fixCrossorigin() {
   }
 }
 
+function emitBuildManifest() {
+  return {
+    name: 'business-os-build-manifest',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'business-os-build.json',
+        source: JSON.stringify({
+          revision: buildRevision,
+          hash: buildHash,
+          builtAt: new Date().toISOString(),
+        }, null, 2),
+      })
+    },
+  }
+}
+
 function manualChunks(id) {
   // Keep the shared vendor graph stable while still letting route chunks stay
   // small enough that first-open admin pages do not drag the whole app shell
@@ -88,7 +105,7 @@ function manualChunks(id) {
 }
 
 export default defineConfig({
-  plugins: [react(), fixCrossorigin()],
+  plugins: [react(), fixCrossorigin(), emitBuildManifest()],
 
   build: {
     outDir: 'dist',

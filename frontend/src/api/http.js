@@ -221,12 +221,18 @@ function createApiError(status, parsed, text) {
   return error
 }
 
-function shouldCompareRuntimeVersions(serverRuntime = {}) {
+export function shouldCompareRuntimeVersions(serverRuntime = {}, frontendBuildInfo = FRONTEND_BUILD_INFO) {
+  const servedFrontend = serverRuntime?.frontend || {}
+  const servedFrontendRevision = String(servedFrontend.revision || '').trim()
+  const servedFrontendHash = String(servedFrontend.hash || '').trim()
   const frontendRevision = String(FRONTEND_BUILD_INFO.revision || '').trim()
-  const backendRevision = String(serverRuntime.revision || '').trim()
-  if (!frontendRevision || !backendRevision) return false
-  if (frontendRevision === 'dev' || backendRevision === 'dev') return false
-  return frontendRevision !== backendRevision
+  const frontendHash = String(frontendBuildInfo.hash || FRONTEND_BUILD_INFO.hash || '').trim()
+  const effectiveFrontendRevision = String(frontendBuildInfo.revision || frontendRevision || '').trim()
+  if (!servedFrontendRevision && !servedFrontendHash) return false
+  if (!effectiveFrontendRevision || !servedFrontendRevision) return false
+  if (effectiveFrontendRevision === 'dev' || servedFrontendRevision === 'dev') return false
+  if (servedFrontendHash && frontendHash && servedFrontendHash !== frontendHash) return true
+  return effectiveFrontendRevision !== servedFrontendRevision
 }
 
 function dispatchRuntimeVersionMismatch(serverRuntime = {}) {
