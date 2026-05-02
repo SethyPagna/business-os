@@ -22,7 +22,7 @@ echo   Business OS  ^|  Build Final Docker Release
 echo ========================================================================
 echo.
 echo   This builds the no-source Docker release kit.
-echo   Output: release\business-os-docker\
+echo   Output: release\business-os\
 echo.
 
 if not exist "%ROOT%\run\docker\release.bat" (
@@ -43,7 +43,7 @@ echo.
 if "%EXIT_CODE%"=="0" (
   echo [DONE] Final Docker release built.
   echo        Next: run run\docker\publish-release.bat when ready to publish private images.
-  echo        New laptop folder: release\business-os-docker\
+  echo        New laptop folder: release\business-os\
 ) else (
   echo [ERROR] Final Docker release failed.
   echo         Check ops\runtime\logs and run run\docker\doctor.bat.

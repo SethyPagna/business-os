@@ -81,8 +81,8 @@ Typical organization contents:
 Docker releases preserve:
 
 - Docker runtime volumes
-- `release\business-os-docker\ops\runtime\docker-release\docker-release.env`
-- `release\business-os-docker\ops\runtime\docker-release\secrets\`
+- `release\business-os\ops\runtime\docker-release\docker-release.env`
+- `release\business-os\ops\runtime\docker-release\secrets\`
 
 ## Environment Defaults
 
@@ -118,7 +118,7 @@ The bootstrapper copies root `minio.license` into ignored runtime secret storage
 run\build-release.bat
 ```
 
-The release output is `release\business-os-docker\` and includes:
+The release output is `release\business-os\` and includes:
 
 - `Start Business OS.bat`
 - `run\docker\*.bat`

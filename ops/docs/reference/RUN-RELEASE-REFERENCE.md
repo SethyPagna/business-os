@@ -122,7 +122,7 @@ Total scripts documented: **24**
 ## run/docker/restore.bat
 
 - File type: `.bat`
-- Total lines: **15**
+- Total lines: **29**
 - Labels: **0**
 - Step markers: **0**
 
@@ -173,7 +173,7 @@ Total scripts documented: **24**
 ## ops/scripts/generate-full-project-docs.js
 
 - File type: `.js`
-- Total lines: **633**
+- Total lines: **632**
 
 ## ops/scripts/performance-scan.js
 

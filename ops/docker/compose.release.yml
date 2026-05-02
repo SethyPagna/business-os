@@ -1,4 +1,4 @@
-name: business-os-release
+name: business-os
 
 x-log-policy: &log-policy
   driver: json-file
@@ -254,6 +254,8 @@ volumes:
   business_os_redis_queue:
   business_os_minio:
   business_os_runtime:
+    name: business-os_business_os_runtime
+    external: true
 
 networks:
   business_os_internal:

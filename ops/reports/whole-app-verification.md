@@ -16,7 +16,7 @@ This report tracks the risk-first verification pass for Business OS. It is inten
 | Backend security/core/import/stock tests | Pass | `npm.cmd run test:utils` passed, including the streaming import smoke. |
 | Backend data integrity | Pass | `npm.cmd run verify:integrity` passed against the current SQLite data root. |
 | Worker queue smoke | Pass | Import and media workers started against Redis/BullMQ and reported active queues. |
-| Release build/start smoke | Pass | `cmd /c run\build-release.bat` now builds the final Docker release kit under `release\business-os-docker\`. |
+| Release build/start smoke | Pass | `cmd /c run\build-release.bat` now builds the final Docker release kit under `release\business-os\`. |
 | Cloudflare Tunnel route check | Pass | `node ops/scripts/runtime/check-public-url.mjs https://leangcosmetics.dpdns.org /public` is the active public-route smoke for `/`, `/health`, `/public`, and `/api/portal/bootstrap`. |
 
 ## High-Risk Findings Addressed In This Pass

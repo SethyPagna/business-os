@@ -315,7 +315,7 @@ Total files documented: **340**
 | 303 | `ops/scripts/lib/fs-utils.js` | project-scripts | 122 | 2.8 | Project source/support file |
 | 304 | `ops/scripts/performance-scan.js` | project-scripts | 135 | 4.1 | Project source/support file |
 | 305 | `ops/scripts/powershell/clean-generated.ps1` | project-scripts | 194 | 5.4 | Project source/support file |
-| 306 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 597 | 25.2 | Project source/support file |
+| 306 | `ops/scripts/powershell/docker-release.ps1` | project-scripts | 689 | 29.7 | Project source/support file |
 | 307 | `ops/scripts/powershell/runtime-bootstrap.ps1` | project-scripts | 559 | 19.5 | Project source/support file |
 | 308 | `ops/scripts/powershell/start-runtime.ps1` | project-scripts | 351 | 15.0 | Project source/support file |
 | 309 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | project-scripts | 240 | 7.5 | Project source/support file |
@@ -324,10 +324,10 @@ Total files documented: **340**
 | 312 | `ops/scripts/runtime/rotate-cloudflare-tunnel-token.mjs` | project-scripts | 244 | 10.6 | Project source/support file |
 | 313 | `ops/scripts/runtime/update-cloudflare-tunnel-origin.mjs` | project-scripts | 144 | 5.9 | Project source/support file |
 | 314 | `ops/scripts/sync-firebase-release-env.ps1` | project-scripts | 55 | 1.7 | Project source/support file |
-| 315 | `ops/scripts/verify-docker-release.js` | project-scripts | 110 | 3.8 | Project source/support file |
+| 315 | `ops/scripts/verify-docker-release.js` | project-scripts | 113 | 3.9 | Project source/support file |
 | 316 | `ops/scripts/verify-runtime-deps.js` | project-scripts | 81 | 2.5 | Project source/support file |
 | 317 | `ops/scripts/verify-scale-services.js` | project-scripts | 158 | 5.3 | Project source/support file |
-| 318 | `README.md` | project-root | 151 | 8.5 | Project documentation entrypoint |
+| 318 | `README.md` | project-root | 171 | 9.6 | Project documentation entrypoint |
 | 319 | `run/build-release.bat` | project-scripts | 54 | 1.7 | Final Docker release build wrapper |
 | 320 | `run/clean-generated.bat` | project-scripts | 60 | 1.7 | Project source/support file |
 | 321 | `run/cloudflare-origin.bat` | project-scripts | 34 | 1.0 | Project source/support file |
@@ -337,7 +337,7 @@ Total files documented: **340**
 | 325 | `run/docker/publish-release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
 | 326 | `run/docker/README.md` | project-scripts | 42 | 2.7 | Documentation |
 | 327 | `run/docker/release.bat` | project-scripts | 15 | 0.5 | Project source/support file |
-| 328 | `run/docker/restore.bat` | project-scripts | 15 | 0.5 | Project source/support file |
+| 328 | `run/docker/restore.bat` | project-scripts | 29 | 1.0 | Project source/support file |
 | 329 | `run/docker/rotate-cloudflare.bat` | project-scripts | 15 | 0.5 | Project source/support file |
 | 330 | `run/docker/start.bat` | project-scripts | 15 | 0.6 | Project source/support file |
 | 331 | `run/docker/update.bat` | project-scripts | 15 | 0.5 | Project source/support file |

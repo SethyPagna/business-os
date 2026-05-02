@@ -24,7 +24,7 @@ Use this path for a normal business/user laptop.
 8. Wait until the window says Business OS is ready.
 9. Open the URLs printed in the window.
 
-If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\build-release.bat` or `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy the complete `release\business-os-docker\` folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside that folder. Do not copy only the `run\` folder.
+If you are moving to a laptop that should not expose source code, use the Docker release produced by `run\build-release.bat` or `run\docker\release.bat` and published with `run\docker\publish-release.bat`. Copy the complete `release\business-os\` folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside that folder. Do not copy only the `run\` folder.
 
 What the launcher does for you:
 
@@ -107,6 +107,26 @@ Do **not** delete `business-os-data` manually when Docker looks mismatched. In s
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
 The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. SQLite-in-Docker is a compatibility bridge, not the final heavy-load database. In this mode Business OS deliberately uses one import writer and conservative worker concurrency so data stays safe. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
+
+### Docker Data: Copy, Restore, Update
+
+For Docker, the live data is inside a Docker volume named like `business-os_business_os_runtime`. Do not manually edit that volume.
+
+Safest way to move data to another laptop:
+
+1. On the old laptop, run `run\docker\backup.bat`.
+2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`.
+3. On the new laptop, copy the full `release\business-os\` folder.
+4. Run `run\docker\restore.bat -BackupPath "C:\path\to\that\backup-folder"`.
+5. Double-click **`Start Business OS.bat`** and check products, sales, files, settings, and portal content.
+
+First-start shortcut for old source data:
+
+- If the Docker volume is empty and a `business-os-data` folder sits beside `Start Business OS.bat`, Business OS copies it into Docker once.
+- If Docker already has data, loose `business-os-data` folders are ignored so an old folder cannot overwrite newer Docker data.
+- If you are unsure which copy is newest, use backup/restore instead of copying folders.
+
+Updating the app version does not require copying data. Run `run\docker\update.bat`; it backs up the Docker volume first, updates containers, and keeps the data volume.
 
 ## Large Imports
 

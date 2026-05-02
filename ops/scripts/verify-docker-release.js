@@ -24,7 +24,7 @@ const retiredReleaseFiles = [
   'run/release/start-server.bat',
   'run/release/stop-server.bat',
   'ops/config/installer.nsi',
-  'release/business-os',
+  'release/business-os-docker',
   'release/BusinessOS-Setup-v6.0.0.exe',
 ].map((file) => path.join(root, file))
 
@@ -45,6 +45,9 @@ function main() {
   })
 
   const compose = read(composePath)
+  if (!compose.includes('name: business-os')) {
+    failures.push('Production release Compose project must be named business-os.')
+  }
   if (compose.includes('../../:/app') || compose.includes('node_modules')) {
     failures.push('Production release Compose must not bind-mount the source tree or node_modules.')
   }

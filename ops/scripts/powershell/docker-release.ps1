@@ -27,7 +27,10 @@ $BackupDir = Join-Path $RuntimeDir 'backups'
 $EnvFile = Join-Path $RuntimeDir 'docker-release.env'
 $DockerConfig = Join-Path $RuntimeDir 'docker-config'
 $DefaultImage = 'ghcr.io/leangcosmetics/business-os'
-$DockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os-docker'
+$DockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os'
+$OldDockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os-docker'
+$ReleaseProjectName = 'business-os'
+$OldReleaseProjectName = 'business-os-release'
 
 function Ensure-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -266,7 +269,7 @@ function Copy-Directory($source, $destination) {
 
 function Remove-RetiredReleaseOutputs {
   $retired = @(
-    (Join-Path (Join-Path $Root 'release') 'business-os'),
+    $OldDockerKitDir,
     (Join-Path (Join-Path $Root 'release') 'BusinessOS-Setup-v6.0.0.exe')
   )
   foreach ($target in $retired) {
@@ -288,6 +291,13 @@ function Write-DockerReleaseKit($imageName) {
   if (Test-Path -LiteralPath $existingRuntime) {
     Ensure-Dir $preserveRuntime
     Copy-Item -LiteralPath $existingRuntime -Destination $preserveRuntime -Recurse -Force
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $preserveRuntime 'docker-release'))) {
+    $oldExistingRuntime = Join-Path $OldDockerKitDir 'ops\runtime\docker-release'
+    if (Test-Path -LiteralPath $oldExistingRuntime) {
+      Ensure-Dir $preserveRuntime
+      Copy-Item -LiteralPath $oldExistingRuntime -Destination $preserveRuntime -Recurse -Force
+    }
   }
 
   if (Test-Path -LiteralPath $DockerKitDir) {
@@ -388,9 +398,20 @@ This folder contains launcher/support scripts and Docker configuration only.
 The app itself runs from the private Docker image:
   $imageName
 
-Live app data is stored in a Docker volume. If this folder contains a
-business-os-data folder on first start, Business OS copies it into the Docker
-runtime volume once and leaves the source folder untouched.
+Live app data is stored in the Docker volume named business-os_business_os_runtime.
+
+Moving data safely:
+1. Preferred: run run\docker\backup.bat on the old laptop.
+2. Copy the newest backup folder from ops\runtime\docker-release\backups.
+3. On the new laptop run:
+   run\docker\restore.bat -BackupPath "C:\path\to\backup-folder"
+
+First-start shortcut:
+- If this folder contains business-os-data and the Docker volume is empty,
+  Business OS copies it into Docker once.
+- If Docker already has data, loose business-os-data folders are ignored so
+  an outdated folder cannot overwrite newer Docker data.
+- If you are unsure which copy is newest, use backup/restore instead.
 "@ | Set-Content -LiteralPath (Join-Path $DockerKitDir 'README.txt') -Encoding UTF8
 
   if (Test-Path -LiteralPath $preserveRuntime) {
@@ -443,6 +464,9 @@ function Invoke-Start {
     Write-Step 'Stopping retired source app/worker containers that could occupy port 4000...'
     Invoke-Docker -DockerArgs @('compose', '-f', $ScaleComposeFile, 'stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
   }
+  Write-Step 'Stopping retired Docker release containers if they exist...'
+  Invoke-Docker -DockerArgs @('compose', '-p', $OldReleaseProjectName, '--env-file', $EnvFile, '-f', $ComposeFile, 'down', '--remove-orphans') -AllowFailure | Out-Null
+  Adopt-PreviousDockerReleaseVolume
   if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -eq 'postgres') -or ($envMap.DATABASE_DRIVER -eq 'postgres')) {
     Write-Step 'Running Postgres migration profile...'
     Invoke-Compose -ComposeArgs @('--profile', 'postgres-migrate', 'run', '--rm', 'migrator')
@@ -460,14 +484,63 @@ function Get-ComposeVolumeName($volumeKey) {
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
   $names = & $docker volume ls `
-    --filter 'label=com.docker.compose.project=business-os-release' `
+    --filter "label=com.docker.compose.project=$ReleaseProjectName" `
     --filter "label=com.docker.compose.volume=$volumeKey" `
     --format '{{.Name}}' 2>$null
   if ($LASTEXITCODE -eq 0) {
     $name = @($names | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1)
     if ($name) { return [string]$name }
   }
-  return "business-os-release_$volumeKey"
+  return "$ReleaseProjectName`_$volumeKey"
+}
+
+function Test-DockerVolumeHasBusinessData($volumeName) {
+  if (-not $volumeName) { return $false }
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  $inspect = Invoke-ProcessWithTimeout $docker @('volume', 'inspect', $volumeName) 10
+  if ($inspect.ExitCode -ne 0) { return $false }
+  $probe = Invoke-ProcessWithTimeout $docker @(
+    'run', '--rm',
+    '-v', "${volumeName}:/runtime:ro",
+    'alpine:3.20',
+    'sh', '-lc',
+    "find /runtime/business-os-data -path '*/db/business.db' -type f -print -quit 2>/dev/null | grep -q ."
+  ) 20
+  return ($probe.ExitCode -eq 0)
+}
+
+function Copy-DockerVolume($sourceVolume, $targetVolume) {
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  Invoke-Docker -DockerArgs @(
+    'volume', 'create',
+    '--label', "com.docker.compose.project=$ReleaseProjectName",
+    '--label', 'com.docker.compose.volume=business_os_runtime',
+    $targetVolume
+  ) | Out-Null
+  & $docker run --rm -v "${sourceVolume}:/from:ro" -v "${targetVolume}:/to" alpine:3.20 sh -lc "set -eu; mkdir -p /to; cp -a /from/. /to/"
+  if ($LASTEXITCODE -ne 0) { Fail "Could not copy Docker data volume $sourceVolume to $targetVolume" }
+}
+
+function Adopt-PreviousDockerReleaseVolume {
+  $targetVolume = Get-ComposeVolumeName 'business_os_runtime'
+  if (Test-DockerVolumeHasBusinessData $targetVolume) {
+    Write-Ok "Docker runtime data already exists in $targetVolume; loose business-os-data folders will not overwrite it."
+    return
+  }
+  $oldVolume = "$OldReleaseProjectName`_business_os_runtime"
+  if (Test-DockerVolumeHasBusinessData $oldVolume) {
+    Write-Step "Copying existing Docker runtime data from $oldVolume to $targetVolume..."
+    Copy-DockerVolume $oldVolume $targetVolume
+    Write-Ok 'Previous Docker data copied into the final business-os Docker volume.'
+  }
+  Invoke-Docker -DockerArgs @(
+    'volume', 'create',
+    '--label', "com.docker.compose.project=$ReleaseProjectName",
+    '--label', 'com.docker.compose.volume=business_os_runtime',
+    $targetVolume
+  ) | Out-Null
 }
 
 function Invoke-VolumeTar($volumeName, $targetDir, $archiveName, [switch]$Restore) {

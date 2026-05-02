@@ -12,7 +12,7 @@ If someone is setting up a blank business laptop, give them the installer or por
 - `run\start-server.bat` is support-only for source troubleshooting.
 - `run\stop-server.bat` stops the app.
 - `run\verify-local.bat` runs local verification checks.
-- `run\build-release.bat` builds the final Docker portable release in `release\business-os-docker\`.
+- `run\build-release.bat` builds the final Docker portable release in `release\business-os\`.
 
 All user-facing `.bat` files keep the window open and print the next step or repair command.
 

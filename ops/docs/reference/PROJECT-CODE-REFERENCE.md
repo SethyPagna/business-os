@@ -129,13 +129,13 @@ Total files documented: **17**
 | 17 | `resolveInternalImport` | function | 287 |
 | 18 | `writeAllFileInventory` | function | 310 |
 | 19 | `folderPurpose` | function | 332 |
-| 20 | `writeFolderCoverage` | function | 350 |
-| 21 | `writeImportExportReference` | function | 409 |
-| 22 | `readJsonObject` | function | 483 |
-| 23 | `translationSectionForKey` | function | 491 |
-| 24 | `writeTranslationSectionReference` | function | 542 |
-| 25 | `writeMainCoverageSummary` | function | 591 |
-| 26 | `main` | function | 620 |
+| 20 | `writeFolderCoverage` | function | 349 |
+| 21 | `writeImportExportReference` | function | 408 |
+| 22 | `readJsonObject` | function | 482 |
+| 23 | `translationSectionForKey` | function | 490 |
+| 24 | `writeTranslationSectionReference` | function | 541 |
+| 25 | `writeMainCoverageSummary` | function | 590 |
+| 26 | `main` | function | 619 |
 
 ### 3.7 `ops/scripts/lib/fs-utils.js`
 
