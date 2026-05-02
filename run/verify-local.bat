@@ -47,6 +47,12 @@ if errorlevel 1 exit /b 1
 echo [OK] Required scale services are ready
 echo.
 
+echo [1c/6] Checking running app API route contract when available...
+node ops\scripts\runtime\check-route-contract.mjs http://127.0.0.1:4000 --skip-if-unavailable
+if errorlevel 1 exit /b 1
+echo [OK] Running app API route contract check passed or was skipped
+echo.
+
 cd /d "%ROOT%\frontend"
 echo [2/6] Ensuring frontend dependencies...
 set "FRONTEND_INSTALL_MODE=install"

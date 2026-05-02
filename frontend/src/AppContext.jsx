@@ -512,6 +512,12 @@ export function AppProvider({ children }) {
       writeBlockedNoticeAtRef.current = now
       setNotification({ message, type: 'error', id: now })
     }
+    const onRuntimeMismatch = (e) => {
+      const message = e?.detail?.message
+        || 'Business OS server update is required. Restart the server, then refresh this page.'
+      setSyncServerUnreachable(true)
+      setNotification({ message, type: 'error', id: Date.now() })
+    }
     const onConflict = (e) => {
       const detail = e?.detail || {}
       const entity = String(detail.entity || '').trim().toLowerCase()
@@ -622,6 +628,8 @@ export function AppProvider({ children }) {
     window.addEventListener('sync:status', onStatus)
     window.addEventListener('sync:error',  onError)
     window.addEventListener('sync:write-blocked', onWriteBlocked)
+    window.addEventListener('runtime:api-mismatch', onRuntimeMismatch)
+    window.addEventListener('runtime:version-mismatch', onRuntimeMismatch)
     window.addEventListener('sync:conflict', onConflict)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
@@ -631,6 +639,8 @@ export function AppProvider({ children }) {
       window.removeEventListener('sync:status', onStatus)
       window.removeEventListener('sync:error',  onError)
       window.removeEventListener('sync:write-blocked', onWriteBlocked)
+      window.removeEventListener('runtime:api-mismatch', onRuntimeMismatch)
+      window.removeEventListener('runtime:version-mismatch', onRuntimeMismatch)
       window.removeEventListener('sync:conflict', onConflict)
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)

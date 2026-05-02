@@ -29,6 +29,7 @@ import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnap
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
+import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -209,6 +210,11 @@ export default function Products() {
         const brs = result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        if (versionMismatchError) {
+          setLoadError(versionMismatchError.message)
+          throw versionMismatchError
+        }
         if (Array.isArray(prods)) setProducts(prods)
         setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
         setProductFilterMeta({

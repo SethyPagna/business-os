@@ -22,6 +22,7 @@ import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -146,6 +147,11 @@ export default function Inventory() {
         const dash = result.values.dashboard
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+        const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
+        if (versionMismatchError) {
+          setLoadError(versionMismatchError.message)
+          throw versionMismatchError
+        }
         if (Array.isArray(sum)) {
           setSummary(sum || [])
           if (sumResult && !Array.isArray(sumResult)) {

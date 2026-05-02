@@ -11,7 +11,18 @@ function getDeviceInfo() {
  * where available, a local Dexie fallback for offline-first reads.
  */
 
-import { apiFetch, route, getSyncServerUrl, getAuthSessionToken, cacheInvalidate, cacheClearAll, requireLiveServerWrite, isNetErr } from './http.js'
+import {
+  apiFetch,
+  route,
+  getSyncServerUrl,
+  getAuthSessionToken,
+  cacheInvalidate,
+  cacheClearAll,
+  requireLiveServerWrite,
+  isNetErr,
+  getApiVersionMismatchCooldown,
+  markApiVersionMismatch,
+} from './http.js'
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS } from '../constants'
@@ -539,9 +550,12 @@ export const repairBranchStockIntegrity = payload => route('branches:stockIntegr
 export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
 export const searchProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`), () => ({ items: [], total: 0, page: 1, pageSize: Number(params.pageSize || 20) || 20 }))
+  return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`))
 }
-export const getProductFilters = () => route('products:filters', () => apiFetch('GET', '/api/products/filters'), () => ({ brands: [], categories: [], suppliers: [], initials: [], total: 0 }))
+export const getProductFilters = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`products:filters:${q}`, () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`))
+}
 export async function getCatalogMeta() {
   const base = getPortalBaseUrl()
   const res = await fetchJsonWithTimeout(`${base}/api/catalog/meta`, {
@@ -593,9 +607,12 @@ export async function getPortalCatalogProducts() {
 export async function searchPortalCatalogProducts(params = {}) {
   const base = getPortalBaseUrl()
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const mismatchError = getApiVersionMismatchCooldown('/api/portal/catalog/products/search')
+  if (mismatchError) throw mismatchError
   const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/products/search${q ? `?${q}` : ''}`, {
     headers: { 'bypass-tunnel-reminder': 'true' },
   })
+  if (res.status === 404) throw markApiVersionMismatch('/api/portal/catalog/products/search', res.status)
   if (!res.ok) throw new Error(`Portal catalog search failed: ${res.status}`)
   return res.json()
 }
@@ -1012,7 +1029,7 @@ export const redoActionHistory = id =>
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`), () => ({ items: [], total: 0, page: 1, pageSize: Number(params.pageSize || 20) || 20, initials: [], filters: { brands: [] } }))
+  return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
 export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
 

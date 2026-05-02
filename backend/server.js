@@ -44,6 +44,7 @@ const { requestContextMiddleware } = require('./src/requestContext')
 const { authToken, networkAccessGuard } = require('./src/middleware')
 const { db, runDatabaseMaintenance } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
+const { getRuntimeVersion } = require('./src/runtimeVersion')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
@@ -130,6 +131,7 @@ function mountHealthRoute(target) {
       status: 'ok',
       clients: wss_clients.size,
       uptime: process.uptime(),
+      runtime: getRuntimeVersion(),
     })
   })
 }

@@ -25,7 +25,9 @@ $DockerConfig = Join-Path $Root 'ops\runtime\docker-config'
 $DockerAppLog = Join-Path $LogDir 'docker-compose-app.log'
 $DockerWorkerLog = Join-Path $LogDir 'docker-compose-workers.log'
 $CloudflaredLog = Join-Path $LogDir 'cloudflared.log'
+$RouteContractLog = Join-Path $LogDir 'route-contract.log'
 $Bootstrap = Join-Path $Root 'ops\scripts\powershell\runtime-bootstrap.ps1'
+$RouteContractScript = Join-Path $Root 'ops\scripts\runtime\check-route-contract.mjs'
 
 New-Item -ItemType Directory -Force -Path $LogDir, $DockerConfig | Out-Null
 Add-Content -LiteralPath $RunLog -Value "[$(Get-Date -Format s)] Runtime start requested"
@@ -195,8 +197,8 @@ $env:PUBLIC_BASE_URL = $publicUrl
 $env:CLOUDFLARE_PUBLIC_URL = $publicUrl
 $env:CLOUDFLARE_ADMIN_URL = $adminUrl
 
-Write-Step 'Starting Docker app container...'
-$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--remove-orphans', 'app') $DockerAppLog
+Write-Step 'Starting Docker app container with source/runtime refresh...'
+$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--remove-orphans', '--force-recreate', 'app') $DockerAppLog
 if ($code -ne 0) {
   if (Test-Path -LiteralPath $DockerAppLog) { Get-Content -LiteralPath $DockerAppLog -Tail 80 }
   Fail "Docker app runtime failed to start. Log: $DockerAppLog"
@@ -208,8 +210,16 @@ if (-not (Wait-HttpOk "$localApi/health" $TimeoutSeconds)) {
 }
 Write-Ok "Business OS app is healthy at $localApi"
 
+Write-Step 'Checking required API route contract...'
+$routeCode = Invoke-ProcessLogged 'node' @($RouteContractScript, $localApi) $RouteContractLog
+if ($routeCode -ne 0) {
+  if (Test-Path -LiteralPath $RouteContractLog) { Get-Content -LiteralPath $RouteContractLog -Tail 80 }
+  Fail "Business OS started, but required API routes are missing or stale. Log: $RouteContractLog"
+}
+Write-Ok 'Required API route contract passed.'
+
 Write-Step 'Starting Docker import/media workers...'
-$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--scale', "import-worker=$importWorkerReplicas", '--scale', "media-worker=$mediaWorkerReplicas", 'import-worker', 'media-worker') $DockerWorkerLog
+$code = Invoke-ProcessLogged $docker @('compose', '--env-file', $DockerEnv, '-f', $ComposeFile, '--progress', 'quiet', '--profile', 'runtime', 'up', '-d', '--force-recreate', '--scale', "import-worker=$importWorkerReplicas", '--scale', "media-worker=$mediaWorkerReplicas", 'import-worker', 'media-worker') $DockerWorkerLog
 if ($code -ne 0) {
   Write-Warn "Docker workers could not be started. Large jobs will stay queued. Log: $DockerWorkerLog"
   if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 80 }
@@ -230,6 +240,7 @@ if ($repairTunnel -and $preTunnelStatus -ne 0) {
 $tunnelStarted = Start-Cloudflared $cloudflared $tokenFile $localApi $CloudflaredLog -RepairMode:$repairTunnel
 Start-Sleep -Seconds 4
 $publicStatus = Test-PublicUrl $publicUrl
+$adminStatus = Test-PublicUrl $adminUrl
 if ($publicStatus -eq 200) {
   Write-Ok "Cloudflare public health passed: $publicUrl/health"
 } elseif ($tunnelStarted) {
@@ -237,6 +248,11 @@ if ($publicStatus -eq 200) {
   Write-Warn 'If this remains 1033/530, rotate/reinstall the tunnel token or confirm the Cloudflare hostname routes to this tunnel.'
 } else {
   Write-Warn 'Cloudflare connector is not running. Public/admin links will show a tunnel error until it is repaired.'
+}
+if ($adminStatus -eq 200) {
+  Write-Ok "Cloudflare admin health passed: $adminUrl/health"
+} elseif ($tunnelStarted) {
+  Write-Warn "Cloudflare admin health returned status $adminStatus."
 }
 
 Write-Host ''

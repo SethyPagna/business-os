@@ -1,5 +1,20 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+
+function readGitRevision() {
+  if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
+  try {
+    return execSync('git rev-parse --short=12 HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch (_) {
+    return 'dev'
+  }
+}
+
+const buildRevision = readGitRevision()
+const buildHash = process.env.BUSINESS_OS_BUILD_HASH
+  || createHash('sha256').update(`frontend:${buildRevision}:${Date.now()}`).digest('hex').slice(0, 16)
 
 /**
  * vite.config.mjs
@@ -109,5 +124,7 @@ export default defineConfig({
 
   define: {
     __SERVER_URL__: JSON.stringify(process.env.VITE_SERVER_URL || ''),
+    __FRONTEND_BUILD_HASH__: JSON.stringify(buildHash),
+    __FRONTEND_BUILD_REVISION__: JSON.stringify(buildRevision),
   },
 })
