@@ -36,4 +36,4 @@ Every command keeps the window open and prints the next step.
 
 The Docker release now runs without source bind mounts. Live app data is stored in the Docker runtime volume, and first start copies existing `business-os-data` into that volume only if the volume is empty. This avoids a hidden second database while making the no-source Docker release usable today.
 
-Postgres and MinIO remain part of the Docker ecosystem and are ready for the verified migration path, but Business OS does not claim full Postgres serving until every route has been cut over and verified.
+SQLite-in-Docker is intentionally capped to one import writer and conservative media concurrency. That is safer for current data, but it is not the final heavy-load architecture. Postgres and MinIO remain part of the Docker ecosystem and are ready for the verified migration path, but Business OS does not claim full Postgres serving until every route has been cut over and verified.

@@ -106,7 +106,7 @@ Do **not** delete `business-os-data` manually when Docker looks mismatched. In s
 
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
-The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
+The Docker release is the no-source-code runtime path. Today it keeps live app data in a Docker-managed runtime volume so the app can actually run with the current route layer. SQLite-in-Docker is a compatibility bridge, not the final heavy-load database. In this mode Business OS deliberately uses one import writer and conservative worker concurrency so data stays safe. Postgres and MinIO containers are still started and ready for the verified migration/cutover path, but the app will not pretend to serve every route from Postgres until that adapter is complete.
 
 ## Large Imports
 
@@ -120,6 +120,8 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 - Cancel, retry, failed-row download, remove, undo, and redo are available from the tracker or history tools where supported.
 
 Keep using the app while imports run. If an import is no longer needed, remove it from the tracker so temp files and queue state can be cleaned.
+
+For tens of thousands of rows plus heavy image batches, the durable target is Docker Postgres + MinIO + Redis workers. SQLite can be made stable with pagination, WAL, and a single writer, but it is not the right final database for many concurrent writers or large media-heavy imports.
 
 ## Update, Backup, Restore
 

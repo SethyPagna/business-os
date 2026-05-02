@@ -151,6 +151,12 @@ function Write-EnvFile($values) {
     "DATABASE_DRIVER=$($values.DATABASE_DRIVER)",
     "OBJECT_STORAGE_DRIVER=$($values.OBJECT_STORAGE_DRIVER)",
     "DATABASE_URL=$($values.DATABASE_URL)",
+    "SQLITE_SAFE_WRITER_MODE=$($values.SQLITE_SAFE_WRITER_MODE)",
+    "IMPORT_QUEUE_CONCURRENCY=$($values.IMPORT_QUEUE_CONCURRENCY)",
+    "MEDIA_QUEUE_CONCURRENCY=$($values.MEDIA_QUEUE_CONCURRENCY)",
+    "IMPORT_BATCH_PAUSE_MS=$($values.IMPORT_BATCH_PAUSE_MS)",
+    "IMPORT_WORKER_REPLICAS=$($values.IMPORT_WORKER_REPLICAS)",
+    "MEDIA_WORKER_REPLICAS=$($values.MEDIA_WORKER_REPLICAS)",
     'JOB_QUEUE_DRIVER=bullmq',
     'BUSINESS_OS_RUNTIME=docker'
   )
@@ -191,11 +197,22 @@ function Ensure-Env {
     DATABASE_DRIVER = if ($existing.DATABASE_DRIVER) { $existing.DATABASE_DRIVER } else { 'sqlite' }
     OBJECT_STORAGE_DRIVER = if ($existing.OBJECT_STORAGE_DRIVER) { $existing.OBJECT_STORAGE_DRIVER } else { 'local' }
     DATABASE_URL = if ($existing.DATABASE_URL) { $existing.DATABASE_URL } else { '' }
+    SQLITE_SAFE_WRITER_MODE = if ($existing.SQLITE_SAFE_WRITER_MODE) { $existing.SQLITE_SAFE_WRITER_MODE } else { '1' }
+    IMPORT_QUEUE_CONCURRENCY = if ($existing.IMPORT_QUEUE_CONCURRENCY) { $existing.IMPORT_QUEUE_CONCURRENCY } else { '1' }
+    MEDIA_QUEUE_CONCURRENCY = if ($existing.MEDIA_QUEUE_CONCURRENCY) { $existing.MEDIA_QUEUE_CONCURRENCY } else { '2' }
+    IMPORT_BATCH_PAUSE_MS = if ($existing.IMPORT_BATCH_PAUSE_MS) { $existing.IMPORT_BATCH_PAUSE_MS } else { '50' }
+    IMPORT_WORKER_REPLICAS = if ($existing.IMPORT_WORKER_REPLICAS) { $existing.IMPORT_WORKER_REPLICAS } else { '1' }
+    MEDIA_WORKER_REPLICAS = if ($existing.MEDIA_WORKER_REPLICAS) { $existing.MEDIA_WORKER_REPLICAS } else { '1' }
   }
   if ($values.BUSINESS_OS_DOCKER_DATA_MODE -eq 'sqlite') {
     $values.DATABASE_DRIVER = 'sqlite'
     $values.OBJECT_STORAGE_DRIVER = 'local'
     $values.DATABASE_URL = ''
+    $values.SQLITE_SAFE_WRITER_MODE = '1'
+    $values.IMPORT_QUEUE_CONCURRENCY = '1'
+    $values.IMPORT_BATCH_PAUSE_MS = '50'
+    $values.IMPORT_WORKER_REPLICAS = '1'
+    $values.MEDIA_WORKER_REPLICAS = '1'
   }
   Write-EnvFile $values
   return $values
@@ -295,6 +312,12 @@ function Write-DockerReleaseKit($imageName) {
       DATABASE_DRIVER = 'sqlite'
       OBJECT_STORAGE_DRIVER = 'local'
       DATABASE_URL = ''
+      SQLITE_SAFE_WRITER_MODE = '1'
+      IMPORT_QUEUE_CONCURRENCY = '1'
+      MEDIA_QUEUE_CONCURRENCY = '2'
+      IMPORT_BATCH_PAUSE_MS = '50'
+      IMPORT_WORKER_REPLICAS = '1'
+      MEDIA_WORKER_REPLICAS = '1'
     }
     $oldRuntimeDir = $RuntimeDir
     $oldEnvFile = $EnvFile

@@ -236,6 +236,24 @@ if ($LASTEXITCODE -ne 0) { Fail 'Runtime bootstrap failed. Open Docker Desktop, 
 $dockerEnvMap = Read-EnvFile $DockerEnv
 $importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 2 }
 $mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
+$databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'sqlite' }
+if ($databaseDriver.Trim().ToLowerInvariant() -eq 'sqlite') {
+  if ($importWorkerReplicas -gt 1) {
+    Write-Warn 'SQLite mode supports one import writer. Capping import-worker replicas to 1 for data safety.'
+  }
+  if ($mediaWorkerReplicas -gt 1) {
+    Write-Warn 'SQLite mode keeps media workers conservative so metadata writes do not starve the app.'
+  }
+  $importWorkerReplicas = 1
+  $mediaWorkerReplicas = [Math]::Min(2, $mediaWorkerReplicas)
+  $env:IMPORT_WORKER_REPLICAS = '1'
+  $env:IMPORT_QUEUE_CONCURRENCY = '1'
+  $env:MEDIA_WORKER_REPLICAS = [string]$mediaWorkerReplicas
+  $pauseMs = 0
+  if (-not [int]::TryParse([string]$env:IMPORT_BATCH_PAUSE_MS, [ref]$pauseMs) -or $pauseMs -lt 50) {
+    $env:IMPORT_BATCH_PAUSE_MS = '50'
+  }
+}
 $importWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $importWorkerReplicas))
 $mediaWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $mediaWorkerReplicas))
 
