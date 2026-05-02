@@ -149,6 +149,60 @@ function Wait-HttpOk($url, $timeoutSeconds) {
   return $false
 }
 
+function Get-ComposeContainers($docker, $service) {
+  $containers = @()
+  try {
+    $output = & $docker ps `
+      --filter 'label=com.docker.compose.project=business-os-scale' `
+      --filter "label=com.docker.compose.service=$service" `
+      --format '{{.Names}}'
+    if ($LASTEXITCODE -ne 0) { return @() }
+    $containers = @($output | Where-Object { $_ -and $_.Trim() })
+  } catch {
+    return @()
+  }
+  return $containers
+}
+
+function Test-WorkerContainerReady($docker, $container, $workerScript) {
+  if (-not $container) { return $false }
+  $script = "test -f node_modules/better-sqlite3/package.json && find node_modules/better-sqlite3 -name better_sqlite3.node -print -quit | grep -q . && ps -ef | grep '[s]rc/workers/$workerScript' >/dev/null"
+  & $docker exec $container sh -lc $script *> $null
+  return $LASTEXITCODE -eq 0
+}
+
+function Wait-WorkerServiceReady($docker, $service, $workerScript, $expectedCount, $timeoutSeconds, $logPath) {
+  $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+  $attempt = 0
+  do {
+    $attempt++
+    $containers = @(Get-ComposeContainers $docker $service)
+    if ($containers.Count -ge $expectedCount) {
+      $ready = 0
+      foreach ($container in $containers) {
+        if (Test-WorkerContainerReady $docker $container $workerScript) { $ready++ }
+      }
+      if ($ready -ge $expectedCount) { return $true }
+      if (($attempt -eq 1) -or (($attempt % 6) -eq 0)) {
+        Write-Step "Waiting for $service readiness ($ready/$expectedCount ready). Native modules may be preparing..."
+      }
+    } elseif (($attempt -eq 1) -or (($attempt % 6) -eq 0)) {
+      Write-Step "Waiting for $service containers ($($containers.Count)/$expectedCount visible)..."
+    }
+    Start-Sleep -Seconds 5
+  } while ((Get-Date) -lt $deadline)
+
+  Add-Content -LiteralPath $logPath -Value "[$(Get-Date -Format s)] $service readiness timed out."
+  foreach ($container in @(Get-ComposeContainers $docker $service)) {
+    Add-Content -LiteralPath $logPath -Value "===== docker logs $container ====="
+    try {
+      $logs = & $docker logs --tail 120 $container 2>&1
+      if ($logs) { Add-Content -LiteralPath $logPath -Value $logs }
+    } catch {}
+  }
+  return $false
+}
+
 function Test-PublicUrl($baseUrl) {
   try {
     $response = Invoke-WebRequest -Uri "$baseUrl/health" -UseBasicParsing -TimeoutSec 15
@@ -224,7 +278,14 @@ if ($code -ne 0) {
   Write-Warn "Docker workers could not be started. Large jobs will stay queued. Log: $DockerWorkerLog"
   if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 80 }
 } else {
-  Write-Ok "Docker import/media workers are running or starting (import=$importWorkerReplicas, media=$mediaWorkerReplicas)."
+  Write-Step 'Waiting for Docker import/media worker readiness...'
+  $importReady = Wait-WorkerServiceReady $docker 'import-worker' 'importWorker.js' $importWorkerReplicas 240 $DockerWorkerLog
+  $mediaReady = Wait-WorkerServiceReady $docker 'media-worker' 'mediaWorker.js' $mediaWorkerReplicas 240 $DockerWorkerLog
+  if (-not $importReady -or -not $mediaReady) {
+    if (Test-Path -LiteralPath $DockerWorkerLog) { Get-Content -LiteralPath $DockerWorkerLog -Tail 140 }
+    Fail "Docker workers did not become ready. Large jobs would stay queued, so startup stopped. Log: $DockerWorkerLog"
+  }
+  Write-Ok "Docker import/media workers are ready (import=$importWorkerReplicas, media=$mediaWorkerReplicas)."
 }
 
 $cloudflared = Find-Executable @('cloudflared.exe', 'cloudflared') @(

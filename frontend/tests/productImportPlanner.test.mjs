@@ -77,6 +77,32 @@ await runTest('same product name with same barcode still exposes identifier hand
   assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
 })
 
+await runTest('same-file duplicate barcode rows become review conflicts', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum A', barcode: '651986410538', selling_price_usd: '12', stock_quantity: '1' },
+    { name: 'Serum B', barcode: '651986410538', selling_price_usd: '14', stock_quantity: '2' },
+  ], [])
+
+  assert.equal(analysis.conflicts.length, 2)
+  assert.deepEqual(analysis.conflicts.map((entry) => entry.conflictFields), [['barcode'], ['barcode']])
+  assert.deepEqual(analysis.conflicts[0].importDuplicateRows.barcode, [0, 1])
+  assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
+  assert.equal(analysis.rows[1]._identifier_conflict_mode, 'clear_imported')
+})
+
+await runTest('missing product name rows stay visible as review issues', () => {
+  const analysis = analyzeProductImportRows([
+    { name: '', barcode: 'HAS-BARCODE', selling_price_usd: '12', stock_quantity: '1' },
+    { name: 'Named Product', barcode: 'OK-1', selling_price_usd: '14', stock_quantity: '2' },
+  ], [])
+
+  assert.equal(analysis.rows.length, 2)
+  assert.equal(analysis.rows[0]._planned_action, 'skip_row')
+  assert.equal(analysis.conflicts[0].conflictType, 'missing_name')
+  assert.deepEqual(analysis.conflicts[0].issueTypes, ['missing_name'])
+  assert.equal(analysis.errors.length, 1)
+})
+
 await runTest('duplicate imported same-name rows avoid unsafe temporary row ids', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', sku: 'C-1', selling_price_usd: '3.001', stock_quantity: '1' },

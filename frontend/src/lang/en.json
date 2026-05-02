@@ -526,6 +526,7 @@
   "import_retry_started": "Import retry started",
   "import_rows_label": "rows",
   "import_running_background": "Import running in background",
+  "import_waiting_for_worker": "Queued - waiting for worker",
   "remove_import": "Remove import",
   "remove_import_confirm": "Remove this import from the tracker and delete its uploaded import files?",
   "import_n_imported": "imported",
