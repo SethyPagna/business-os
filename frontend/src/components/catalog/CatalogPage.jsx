@@ -57,6 +57,12 @@ import {
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import { ProductImg } from '../products/primitives'
 import {
+  FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
+  getPortalLanguageText,
+  isFirstPartyPortalLanguage,
+  normalizeFirstPartyPortalLanguage,
+} from './portalLanguagePacks.mjs'
+import {
   applyGoogleTranslateSelection,
   ensurePortalTranslateScript,
   ensurePortalTranslateWidgetHost,
@@ -1440,6 +1446,8 @@ function replaceVars(template, values) {
 }
 
 function getPortalResourceText(lang, key) {
+  const packed = getPortalLanguageText(lang, key)
+  if (packed) return packed
   const bundle = lang === 'km' ? kmTranslations : enTranslations
   const scoped = bundle?.pages?.portalEditor?.[key] || bundle?.portalEditor?.[key]
   if (typeof scoped === 'string' && scoped.trim() && !isBrokenLocalizedString(scoped)) return scoped
@@ -1448,31 +1456,22 @@ function getPortalResourceText(lang, key) {
   return ''
 }
 
-const FIRST_PARTY_TRANSLATE_VALUES = new Set(['original', 'en', 'km'])
 const FIRST_PARTY_TRANSLATE_LANG_OPTIONS = [
   { value: 'original', label: 'Original', kind: 'first_party' },
-  { value: 'en', label: 'English', kind: 'first_party' },
-  { value: 'km', label: 'Khmer', kind: 'first_party' },
+  ...FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.nativeLabel && option.nativeLabel !== option.label
+      ? `${option.label} - ${option.nativeLabel}`
+      : option.label,
+    kind: 'first_party',
+    dir: option.dir,
+  })),
 ]
+const FIRST_PARTY_TRANSLATE_BY_LOWER = new Map(
+  FIRST_PARTY_TRANSLATE_LANG_OPTIONS.map((option) => [option.value.toLowerCase(), option.value])
+)
 
-const PUBLIC_TRANSLATE_LANG_OPTIONS = [
-  { value: 'zh-CN', label: 'Chinese (Simplified)' },
-  { value: 'zh-TW', label: 'Chinese (Traditional)' },
-  { value: 'th', label: 'Thai' },
-  { value: 'vi', label: 'Vietnamese' },
-  { value: 'ja', label: 'Japanese' },
-  { value: 'ko', label: 'Korean' },
-  { value: 'fr', label: 'French' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'de', label: 'German' },
-  { value: 'it', label: 'Italian' },
-  { value: 'pt', label: 'Portuguese' },
-  { value: 'ru', label: 'Russian' },
-  { value: 'ar', label: 'Arabic' },
-  { value: 'hi', label: 'Hindi' },
-  { value: 'id', label: 'Indonesian' },
-  { value: 'ms', label: 'Malay' },
-  { value: 'tr', label: 'Turkish' },
+const GOOGLE_TRANSLATE_FALLBACK_OPTIONS = [
   { value: 'nl', label: 'Dutch' },
   { value: 'sv', label: 'Swedish' },
   { value: 'pl', label: 'Polish' },
@@ -1486,17 +1485,21 @@ const PUBLIC_TRANSLATE_LANG_OPTIONS = [
 
 const ALL_PUBLIC_TRANSLATE_OPTIONS = [
   ...FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
-  ...PUBLIC_TRANSLATE_LANG_OPTIONS,
+  ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
 ]
 
 function isFirstPartyTranslateTarget(value) {
-  return FIRST_PARTY_TRANSLATE_VALUES.has(String(value || '').trim().toLowerCase())
+  const raw = String(value || '').trim()
+  if (!raw) return false
+  if (FIRST_PARTY_TRANSLATE_BY_LOWER.has(raw.toLowerCase())) return true
+  return isFirstPartyPortalLanguage(raw)
 }
 
 function normalizePortalTranslateChoice(value, sourceLang = 'en') {
   const raw = String(value || 'original').trim()
   const lower = raw.toLowerCase()
-  if (FIRST_PARTY_TRANSLATE_VALUES.has(lower)) return lower
+  const firstParty = FIRST_PARTY_TRANSLATE_BY_LOWER.get(lower) || normalizeFirstPartyPortalLanguage(raw)
+  if (firstParty) return firstParty
   return normalizeTranslateTarget(raw, sourceLang)
 }
 
@@ -1610,7 +1613,7 @@ export default function CatalogPage({ publicView = false }) {
     ),
     [editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
-  const configuredPortalLanguage = previewConfig.language === 'km' ? 'km' : 'en'
+  const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(previewConfig.language) || 'en'
   const normalizedTranslateTarget = normalizePortalTranslateChoice(translateTarget, configuredPortalLanguage)
   const externalTranslateTarget = publicView
     && previewConfig.translateWidgetEnabled
@@ -1652,7 +1655,7 @@ export default function CatalogPage({ publicView = false }) {
     products,
     publicView,
   ])
-  const editorLanguage = appLanguage === 'km' ? 'km' : 'en'
+  const editorLanguage = normalizeFirstPartyPortalLanguage(appLanguage) || 'en'
   const activeCopyLanguage = publicView ? language : editorLanguage
   const copy = (key, fallback, fallbackKm = fallback) => {
     const portalResource = getPortalResourceText(activeCopyLanguage, key)
@@ -2229,7 +2232,7 @@ export default function CatalogPage({ publicView = false }) {
         window.google.translate.TranslateElement(
           {
             pageLanguage: configuredPortalLanguage === 'km' ? 'km' : 'en',
-            includedLanguages: PUBLIC_TRANSLATE_LANG_OPTIONS
+            includedLanguages: GOOGLE_TRANSLATE_FALLBACK_OPTIONS
               .map((option) => option.value)
               .filter((value) => value !== 'original')
               .join(','),

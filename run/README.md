@@ -2,6 +2,8 @@
 
 Normal users should only need **`Start Business OS.bat`** in the root folder.
 
+If someone is setting up a blank business laptop, give them the installer or portable release folder and tell them to double-click the root launcher. They should not start here in `run\` unless support asks.
+
 ## User Commands
 
 - `Start Business OS.bat` starts the app, Docker services, workers, and Cloudflare access.

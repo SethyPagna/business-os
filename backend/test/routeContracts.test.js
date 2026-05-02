@@ -42,6 +42,24 @@ runTest('portal router registers required public catalog search route', () => {
   assert.ok(paths.indexOf('/catalog/products/search') > paths.indexOf('/catalog/products'), 'public search route should be explicit and registered')
 })
 
+runTest('auth router registers Google OAuth start and completion routes', () => {
+  const router = require('../src/routes/auth')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/oauth/start'), 'missing /api/auth/oauth/start')
+  assert.ok(paths.includes('/oauth/complete'), 'missing /api/auth/oauth/complete')
+})
+
+runTest('system router registers Google Drive sync connect and disconnect routes', () => {
+  const router = require('../src/routes/system')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/drive-sync/status'), 'missing /api/system/drive-sync/status')
+  assert.ok(paths.includes('/drive-sync/oauth/start'), 'missing /api/system/drive-sync/oauth/start')
+  assert.ok(paths.includes('/drive-sync/oauth/callback'), 'missing /api/system/drive-sync/oauth/callback')
+  assert.ok(paths.includes('/drive-sync/disconnect'), 'missing /api/system/drive-sync/disconnect')
+  assert.ok(paths.includes('/drive-sync/forget-credentials'), 'missing /api/system/drive-sync/forget-credentials')
+  assert.ok(paths.includes('/drive-sync/sync-now'), 'missing /api/system/drive-sync/sync-now')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

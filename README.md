@@ -2,6 +2,14 @@
 
 Business OS is meant to feel like normal Windows business software: one launcher starts the app, required Docker services, workers, and Cloudflare access.
 
+## Which File Do I Use?
+
+Use **`Start Business OS.bat`** in the root folder.
+
+That is the normal button. Do not open Docker Desktop, Docker Compose, Redis, Postgres, MinIO, worker, Node, npm, or Cloudflare commands yourself for everyday use.
+
+The `run\` folder is for support, updates, backup/restore, diagnostics, and source-development tasks. The `ops\docker\` folder is internal configuration used by the launcher and support tools; normal users should not edit it.
+
 ## Blank Windows Laptop To Running App
 
 Use this path for a normal business/user laptop.
@@ -15,6 +23,8 @@ Use this path for a normal business/user laptop.
 7. Double-click **`Start Business OS.bat`** again.
 8. Wait until the window says Business OS is ready.
 9. Open the URLs printed in the window.
+
+If you are moving to a laptop that should not expose source code, use the installer or portable release folder produced by `run\build-release.bat` / `run\docker\release.bat`. Copy that release folder to the new laptop, then double-click the root **`Start Business OS.bat`** inside the release. Do not copy only the `run\` folder.
 
 What the launcher does for you:
 
@@ -61,6 +71,12 @@ The root folder intentionally has no `package.json` and no root `node_modules`. 
 4. Run `run\stop-server.bat` before shutting the laptop down.
 
 If the public URL fails but `http://localhost:4000` works, the app is running and Cloudflare Tunnel needs attention. Use `run\docker\doctor.bat` first.
+
+## Public Languages
+
+The customer portal uses first-party language packs for fast public switching. English, Khmer, Chinese simplified/traditional, Vietnamese, Thai, Russian, French, Spanish, German, Japanese, Korean, Portuguese, Italian, Arabic, Hindi, Indonesian, Malay, and Turkish switch without loading Google Translate.
+
+Google Translate remains only a slower fallback for unsupported languages. Business name, portal intro, and short tagline stay in the original business text instead of being auto-translated.
 
 ## Data And Backups
 
