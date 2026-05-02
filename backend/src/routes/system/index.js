@@ -73,6 +73,7 @@ const {
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJobs')
+const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -364,9 +365,10 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const tableCounts = buildMigrationTableCounts()
   const totalRows = Object.values(tableCounts).reduce((sum, value) => sum + (Number(value) || 0), 0)
   const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
-  const migrationEngineReady = false
+  const cutoverReadiness = analyzePostgresCutoverReadiness()
+  const migrationEngineReady = cutoverReadiness.ready
   return {
-    mode: 'sqlite_authoritative',
+    mode: migrationEngineReady ? 'postgres_cutover_ready' : 'sqlite_authoritative',
     authoritativeData: {
       databaseDriver: 'sqlite',
       databasePath: DB_PATH,
@@ -399,7 +401,15 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
     canRunMigration: migrationEngineReady,
     blockedReason: migrationEngineReady
       ? ''
-      : 'SQLite/local files remain authoritative. The app can automate local backup and Google Drive safety sync now; switching live storage to Postgres/MinIO stays locked until verified adapter migration is enabled.',
+      : `SQLite/local files remain authoritative. ${cutoverReadiness.blockerCount} live SQLite data-layer references remain. Docker production must stay locked until these routes/services move behind Postgres repositories and MinIO storage adapters.`,
+    cutoverReadiness: {
+      ready: cutoverReadiness.ready,
+      blockerCount: cutoverReadiness.blockerCount,
+      summary: cutoverReadiness.summary,
+      blockers: cutoverReadiness.blockers.slice(0, 100),
+      allowedLegacyFiles: cutoverReadiness.allowedLegacyFiles,
+      scannedRoot: cutoverReadiness.scannedRoot,
+    },
     verification: {
       tableCounts,
       totalRows,
@@ -1382,6 +1392,34 @@ router.get('/data-path', authToken, requireAnyPermission(['backup', 'settings'])
     organizationStorage,
     organizationStorageStatus,
   })
+})
+
+router.get('/storage-mode', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  try {
+    const queueStatus = await initializeBullQueue()
+    const status = buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus })
+    ok(res, {
+      item: {
+        databaseDriver: DATABASE_DRIVER || 'sqlite',
+        objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
+        queueDriver: JOB_QUEUE_DRIVER || 'sqlite',
+        cacheDriver: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
+        storageMode: status.mode,
+        target: status.target,
+        scaleServices: status.scaleServices,
+        authoritativeData: status.authoritativeData,
+        migrationState: {
+          canPrepareMigration: status.canPrepareMigration,
+          canRunMigration: status.canRunMigration,
+          blockedReason: status.blockedReason,
+          verification: status.verification,
+        },
+        cutoverReadiness: status.cutoverReadiness,
+      },
+    })
+  } catch (e) {
+    err(res, `Storage mode diagnostics failed: ${e.message}`)
+  }
 })
 
 router.get('/scale-migration/status', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {

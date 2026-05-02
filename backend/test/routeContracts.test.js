@@ -59,6 +59,7 @@ runTest('system router registers Google Drive sync connect and disconnect routes
   assert.ok(paths.includes('/drive-sync/forget-credentials'), 'missing /api/system/drive-sync/forget-credentials')
   assert.ok(paths.includes('/drive-sync/sync-now'), 'missing /api/system/drive-sync/sync-now')
   assert.ok(paths.includes('/drive-sync/jobs'), 'missing /api/system/drive-sync/jobs')
+  assert.ok(paths.includes('/storage-mode'), 'missing /api/system/storage-mode')
 })
 
 runTest('system router registers non-blocking job and backup routes', () => {
