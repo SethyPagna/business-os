@@ -54,7 +54,7 @@ run\stop-server.bat --with-services
 
 ## Support Service Commands
 
-Scale services are started automatically by the launcher. The old `run\scale-services.bat` wrapper remains only for compatibility with older support notes; prefer `run\docker\doctor.bat` for diagnostics.
+Scale services are started automatically by the launcher. The old manual scale-service wrapper was removed from the normal run folder; use `run\docker\doctor.bat` for diagnostics.
 
 ```bat
 run\docker\doctor.bat

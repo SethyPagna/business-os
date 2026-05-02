@@ -54,9 +54,8 @@ export IMPORT_BATCH_PAUSE_MS="${IMPORT_BATCH_PAUSE_MS:-20}"
 export IMPORT_IMAGE_CONCURRENCY="${IMPORT_IMAGE_CONCURRENCY:-4}"
 export UPLOAD_CHUNK_MB="${UPLOAD_CHUNK_MB:-12}"
 
-info "Starting required Docker scale services..."
-"$ROOT/run/sh/scale-services.sh" up
-ok "Required scale services ready"
+info "Skipping shell scale-service bootstrap."
+warn "Windows launchers now own Docker service startup automatically."
 
 if [ ! -d "$BACKEND_DIR/node_modules" ]; then
   info "Installing backend dependencies..."

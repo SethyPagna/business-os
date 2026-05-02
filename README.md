@@ -2,15 +2,18 @@
 
 Business OS is meant to feel like normal Windows business software: one launcher starts the app, required Docker services, workers, and Cloudflare access.
 
-## Blank Windows Laptop
+## Blank Windows Laptop To Running App
 
 Use this path for a normal business/user laptop.
 
-1. Install **Docker Desktop for Windows** if the installer did not include it.
-2. Copy the Business OS portable folder or run the Business OS installer.
-3. Double-click **`Start Business OS.bat`**.
-4. If Windows or Docker asks for a restart, restart once and double-click **`Start Business OS.bat`** again.
-5. Open the URLs printed in the window.
+1. Download or copy the **Business OS portable folder** to the laptop, or run the Business OS installer.
+2. Double-click **`Start Business OS.bat`**.
+3. If Docker Desktop is missing, install **Docker Desktop for Windows** from the prompt or from Docker's website.
+4. If Docker asks to enable WSL2 or Windows virtualization, accept it. Business OS does not require you to use Linux commands; Docker Desktop may need WSL2 internally.
+5. Restart Windows if Docker asks.
+6. Double-click **`Start Business OS.bat`** again.
+7. Wait until the window says Business OS is ready.
+8. Open the URLs printed in the window.
 
 Normal URLs:
 
@@ -19,6 +22,15 @@ Normal URLs:
 - Public customer portal: `https://leangcosmetics.dpdns.org/public`
 
 You do **not** need to run Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands by hand.
+
+### Moving To A New Laptop With Data
+
+1. On the old laptop, run a Business OS backup first.
+2. Copy the full Business OS folder or install the new release on the new laptop.
+3. Copy the backup or `business-os-data` folder to the new laptop.
+4. Double-click **`Start Business OS.bat`**.
+5. Restore the backup from the app or `run\docker\restore.bat` if support asks.
+6. Confirm products, contacts, sales, files, portal settings, and logos before using the new laptop for live work.
 
 ## Source Checkout Setup
 

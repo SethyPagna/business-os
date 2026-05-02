@@ -28,7 +28,7 @@ These are for a private Docker release or support:
 ## Support-Only / Legacy
 
 - `run\cloudflare-origin.bat` helps switch Cloudflare origin style.
-- `run\scale-services.bat` is retained only as a compatibility shim for old support notes. Normal users should not run it; startup handles services automatically.
+- Scale-service commands were removed from the normal run folder. Startup handles Docker services automatically; use `run\docker\doctor.bat` for diagnostics.
 - `run\sh\` contains shell equivalents for non-Windows support.
 
 Do not add new normal-user commands unless the root launcher cannot own the workflow.

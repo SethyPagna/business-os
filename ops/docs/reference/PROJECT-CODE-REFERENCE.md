@@ -4,7 +4,7 @@ Auto-generated symbol inventory for root-level code files and project scripts.
 
 ## 1. Coverage Summary
 
-Total files documented: **13**
+Total files documented: **17**
 
 ## 2. Symbol Count by File
 
@@ -19,10 +19,14 @@ Total files documented: **13**
 | 7 | `ops/scripts/lib/fs-utils.js` | 8 |
 | 8 | `ops/scripts/performance-scan.js` | 3 |
 | 9 | `ops/scripts/powershell/clean-generated.ps1` | 0 |
-| 10 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
-| 11 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
-| 12 | `ops/scripts/verify-runtime-deps.js` | 4 |
-| 13 | `ops/scripts/verify-scale-services.js` | 8 |
+| 10 | `ops/scripts/powershell/docker-release.ps1` | 1 |
+| 11 | `ops/scripts/powershell/runtime-bootstrap.ps1` | 1 |
+| 12 | `ops/scripts/powershell/start-runtime.ps1` | 1 |
+| 13 | `ops/scripts/powershell/tailscale-health-monitor.ps1` | 0 |
+| 14 | `ops/scripts/sync-firebase-release-env.ps1` | 0 |
+| 15 | `ops/scripts/verify-docker-release.js` | 3 |
+| 16 | `ops/scripts/verify-runtime-deps.js` | 4 |
+| 17 | `ops/scripts/verify-scale-services.js` | 8 |
 
 ## 3. Detailed Function Commentary
 
@@ -98,9 +102,9 @@ Total files documented: **13**
 | 13 | `groupByPrefix` | function | 234 |
 | 14 | `writeTranslationReference` | function | 243 |
 | 15 | `writeRunReleaseReference` | function | 299 |
-| 16 | `writeModuleNamingGuide` | function | 374 |
-| 17 | `writeProjectCodeReference` | function | 422 |
-| 18 | `main` | function | 463 |
+| 16 | `writeModuleNamingGuide` | function | 373 |
+| 17 | `writeProjectCodeReference` | function | 421 |
+| 18 | `main` | function | 462 |
 
 ### 3.6 `ops/scripts/generate-full-project-docs.js`
 
@@ -158,17 +162,41 @@ Total files documented: **13**
 
 - No top-level named function/class symbols detected.
 
-### 3.10 `ops/scripts/powershell/runtime-bootstrap.ps1`
+### 3.10 `ops/scripts/powershell/docker-release.ps1`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `Fail` | function | 14 |
+
+### 3.11 `ops/scripts/powershell/runtime-bootstrap.ps1`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Fail` | function | 25 |
 
-### 3.11 `ops/scripts/sync-firebase-release-env.ps1`
+### 3.12 `ops/scripts/powershell/start-runtime.ps1`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `Fail` | function | 11 |
+
+### 3.13 `ops/scripts/powershell/tailscale-health-monitor.ps1`
 
 - No top-level named function/class symbols detected.
 
-### 3.12 `ops/scripts/verify-runtime-deps.js`
+### 3.14 `ops/scripts/sync-firebase-release-env.ps1`
+
+- No top-level named function/class symbols detected.
+
+### 3.15 `ops/scripts/verify-docker-release.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---:|---:|
+| 1 | `read` | function | 24 |
+| 2 | `requireFile` | function | 28 |
+| 3 | `main` | function | 32 |
+
+### 3.16 `ops/scripts/verify-runtime-deps.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -177,16 +205,16 @@ Total files documented: **13**
 | 3 | `hasLockDependency` | function | 32 |
 | 4 | `main` | function | 38 |
 
-### 3.13 `ops/scripts/verify-scale-services.js`
+### 3.17 `ops/scripts/verify-scale-services.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ensureDir` | function | 17 |
-| 2 | `run` | function | 21 |
-| 3 | `firstExisting` | function | 39 |
-| 4 | `whereDocker` | function | 43 |
-| 5 | `resolveDocker` | function | 56 |
-| 6 | `checkSecretIgnoreRules` | function | 66 |
-| 7 | `trackedLicenses` | const arrow | 67 |
-| 8 | `main` | function | 93 |
+| 1 | `ensureDir` | function | 18 |
+| 2 | `run` | function | 22 |
+| 3 | `firstExisting` | function | 40 |
+| 4 | `whereDocker` | function | 44 |
+| 5 | `resolveDocker` | function | 57 |
+| 6 | `checkSecretIgnoreRules` | function | 67 |
+| 7 | `trackedLicenses` | const arrow | 68 |
+| 8 | `main` | function | 94 |
 

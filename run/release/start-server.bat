@@ -103,9 +103,9 @@ if not defined CLOUDFLARED_CMD (
   for %%p in ("%ProgramFiles%\cloudflared\cloudflared.exe" "%ProgramFiles(x86)%\cloudflared\cloudflared.exe" "%LOCALAPPDATA%\cloudflared\cloudflared.exe") do if exist "%%~p" if not defined CLOUDFLARED_CMD set "CLOUDFLARED_CMD=%%~p"
 )
 
-if defined CLOUDFLARED_CMD if exist "%CLOUDFLARE_TUNNEL_TOKEN_FILE%" (
+if defined CLOUDFLARED_CMD if exist "!CLOUDFLARE_TUNNEL_TOKEN_FILE!" (
   echo [INFO] Starting Cloudflare Tunnel...
-  powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','%CLOUDFLARE_TUNNEL_TOKEN_FILE%'); Start-Process -FilePath '%CLOUDFLARED_CMD%' -ArgumentList $argsList -WindowStyle Hidden | Out-Null" >nul 2>&1
+  powershell -NoProfile -Command "$argsList=@('tunnel','--no-autoupdate','--loglevel','warn','--logfile','%LOG_DIR%\cloudflared.log','run','--url','http://127.0.0.1:%PORT%','--token-file','!CLOUDFLARE_TUNNEL_TOKEN_FILE!'); Start-Process -FilePath '!CLOUDFLARED_CMD!' -ArgumentList $argsList -WindowStyle Hidden | Out-Null" >nul 2>&1
 )
 
 echo [INFO] Starting Business OS server...

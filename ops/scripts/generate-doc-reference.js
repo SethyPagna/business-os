@@ -298,7 +298,7 @@ function writeTranslationReference() {
 
 function writeRunReleaseReference() {
   const scriptPaths = [
-    'run/scale-services.bat',
+    'Start Business OS.bat',
     'run/setup.bat',
     'run/start-server.bat',
     'run/stop-server.bat',
@@ -313,7 +313,6 @@ function writeRunReleaseReference() {
     'run-tailscale/verify-local.bat',
     'run-tailscale/build-release.bat',
     'run-tailscale/clean-generated.bat',
-    'run/sh/scale-services.sh',
     'run/sh/setup.sh',
     'run/sh/start-server.sh',
     'run/sh/stop-server.sh',
