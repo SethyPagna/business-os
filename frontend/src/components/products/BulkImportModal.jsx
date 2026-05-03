@@ -9,6 +9,20 @@ const IMAGE_CONFLICT_OPTIONS = [
   { value: 'append_csv', label: 'Append CSV images' },
 ]
 
+const IMPORT_DECISION_OPTIONS = [
+  { value: 'merge_stock', label: 'Add stock' },
+  { value: 'create_variant', label: 'Variant' },
+  { value: 'override_add', label: 'Override + stock' },
+  { value: 'override_replace', label: 'Override + replace' },
+  { value: 'new', label: 'New' },
+  { value: 'skip_row', label: 'Skip' },
+]
+
+const IDENTIFIER_DECISION_OPTIONS = [
+  { value: 'clear_imported', label: 'Clear duplicate ID' },
+  { value: 'allow_duplicate', label: 'Keep same ID' },
+]
+
 function getBaseName(value) {
   return String(value || '')
     .split(/[\\/]/)
@@ -164,7 +178,6 @@ const IMPORT_REVIEW_EDIT_FIELDS = [
   ['description', 'Description'],
 ]
 
-const IMPORTANT_IMPORT_DETAILS = ['name', 'brand', 'category', 'unit', 'supplier', 'stock_quantity']
 const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
 
 function compactImportValue(value) {
@@ -176,16 +189,43 @@ function isBlankImportValue(value) {
   return String(value ?? '').trim() === ''
 }
 
-function hasMissingImportDetails(row = {}) {
-  return IMPORTANT_IMPORT_DETAILS.some((field) => isBlankImportValue(row?.[field]))
-}
-
-function hasPriceReviewIssue(row = {}) {
+function hasPriceReviewIssue(row = {}, existing = null, samePricing = true) {
+  if (existing && samePricing === false) return true
   return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
 }
 
 function valuesDiffer(left, right) {
   return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
+}
+
+function normalizeImageMatchKey(value) {
+  return String(value || '')
+    .split(/[\\/]/)
+    .pop()
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .normalize('NFC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function getImageReference(entryKey, entryValue) {
+  const textValue = typeof entryValue === 'string' ? entryValue.trim() : ''
+  if (textValue && (/^data:image\//i.test(textValue) || /^https?:\/\//i.test(textValue) || textValue.startsWith('/uploads/') || textValue.startsWith('uploads/'))) {
+    return textValue.startsWith('uploads/') ? `/${textValue}` : textValue
+  }
+  return getBaseName(entryKey || textValue || entryValue?.name || '')
+}
+
+function findImageReferenceForRow(row = {}, imageFiles = {}) {
+  const keys = [row.name, row.sku, row.barcode].map(normalizeImageMatchKey).filter(Boolean)
+  if (!keys.length) return ''
+  for (const [entryKey, entryValue] of Object.entries(imageFiles || {})) {
+    const imageKey = normalizeImageMatchKey(entryKey || entryValue?.name || '')
+    if (imageKey && keys.includes(imageKey)) return getImageReference(entryKey, entryValue)
+  }
+  return ''
 }
 
 function ImportDetailGrid({ title, row = {}, compareTo = null }) {
@@ -228,9 +268,12 @@ function ImportDetailEditor({ row = {}, onChange, title = 'Edit imported row det
 }
 
 function buildImageOnlyCsv(imageFiles = {}) {
-  const rows = Object.keys(imageFiles || {})
+  const rows = Object.entries(imageFiles || {})
     .filter(Boolean)
-    .map((name) => [name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(), name])
+    .map(([name, value]) => [
+      getBaseName(name).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(),
+      getImageReference(name, value),
+    ])
   return [
     'name,image_filename_1,image_conflict_mode,_action',
     ...rows.map(([name, fileName]) => [
@@ -360,13 +403,18 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     const instructions = rows.map((row, index) => {
       const rowIndex = Number(row?._import_row_index ?? index)
       const action = decisions[rowIndex] || row?._planned_action || 'new'
-      return {
+      const editedRow = {
         ...row,
         ...(rowOverrides[rowIndex] || {}),
         sku: identifierOverrides[rowIndex]?.sku ?? row.sku,
         barcode: identifierOverrides[rowIndex]?.barcode ?? row.barcode,
+      }
+      const matchedImageRef = getIncomingImageFilenames(editedRow).length ? '' : findImageReferenceForRow(editedRow, imageFiles)
+      return {
+        ...editedRow,
+        ...(matchedImageRef ? { image_filename_1: matchedImageRef } : {}),
         _action: action,
-        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
+        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(editedRow).length || matchedImageRef ? 'replace_with_csv' : 'keep_existing'),
         _field_rules: JSON.stringify(fieldRules || {}),
         _identifier_conflict_mode: identifierDecisions[rowIndex] || row?._identifier_conflict_mode || 'clear_imported',
         _target_product_id: row?._target_product_id || '',
@@ -572,11 +620,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     identifier: conflicts.filter((entry) => (entry.conflictFields || []).length).length,
     barcode: conflicts.filter((entry) => (entry.conflictFields || []).includes('barcode')).length,
     sku: conflicts.filter((entry) => (entry.conflictFields || []).includes('sku')).length,
-    missingDetails: conflicts.filter((entry) => hasMissingImportDetails({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) })).length,
-    pricing: conflicts.filter((entry) => hasPriceReviewIssue({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) })).length,
+    pricing: conflicts.filter((entry) => hasPriceReviewIssue({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }, entry.existing, entry.samePricing)).length,
     existing: conflicts.filter((entry) => !!entry.existing).length,
     variant: conflicts.filter((entry) => ['create_variant', 'link_variant'].includes(String(decisions[entry.index] || entry.plannedAction || ''))).length,
     merge: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '') === 'merge_stock').length,
+    override: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '').startsWith('override')).length,
     errors: conflicts.filter((entry) => String(entry.conflictType || '').includes('missing_name') || (entry.issueTypes || []).length || (entry.conflictFields || []).includes('errors')).length,
   }), [conflicts, decisions, rowOverrides])
   const visibleConflicts = useMemo(() => {
@@ -590,13 +638,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (conflictFilter === 'identifier' && !fields.length) return false
       if (conflictFilter === 'barcode' && !fields.includes('barcode')) return false
       if (conflictFilter === 'sku' && !fields.includes('sku')) return false
-      if (conflictFilter === 'missing_details' && !hasMissingImportDetails(editedRow)) return false
-      if (conflictFilter === 'pricing' && !hasPriceReviewIssue(editedRow)) return false
+      if (conflictFilter === 'pricing' && !hasPriceReviewIssue(editedRow, entry.existing, entry.samePricing)) return false
       if (conflictFilter === 'existing' && !entry.existing) return false
       if (conflictFilter === 'variant' && !['create_variant', 'link_variant'].includes(planned)) return false
       if (conflictFilter === 'merge' && planned !== 'merge_stock') return false
+      if (conflictFilter === 'override' && !planned.startsWith('override')) return false
       if (conflictFilter === 'errors' && !type.includes('missing_name') && !(entry.issueTypes || []).length && !fields.includes('errors')) return false
-      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'missing_details', 'pricing', 'existing', 'variant', 'merge', 'errors'].includes(conflictFilter)) return false
+      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'pricing', 'existing', 'variant', 'merge', 'override', 'errors'].includes(conflictFilter)) return false
       if (!query) return true
       const existing = entry.existing || {}
       const hay = [
@@ -651,7 +699,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setImageDecisions((current) => {
       const next = { ...current }
       conflicts.forEach((entry) => {
-        if (selectedConflictIds.has(entry.index) && entry.incomingImages.length) next[entry.index] = value
+        const editedRow = { ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }
+        const hasImage = entry.incomingImages.length || findImageReferenceForRow(editedRow, imageFiles)
+        if (selectedConflictIds.has(entry.index) && hasImage) next[entry.index] = value
       })
       return next
     })
@@ -811,19 +861,19 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           </div>
 
           {reviewGroups.length ? (
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 dark:border-indigo-900/40 dark:bg-indigo-950/20">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <details className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm dark:border-indigo-900/40 dark:bg-indigo-950/20">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-100">Same-name family review</p>
                   <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                    Matching detail groups merge stock. Different detail groups become variants in the same family.
+                    Open to review grouped families. Matching detail groups merge stock; different details become variants.
                   </p>
                 </div>
                 <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-indigo-700 dark:bg-slate-900 dark:text-indigo-200">
                   {reviewGroups.length} group{reviewGroups.length === 1 ? '' : 's'}
                 </span>
-              </div>
-              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              </summary>
+              <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
                 {reviewGroups.slice(0, 20).map((group) => (
                   <div key={group.key || group.title} className="rounded-xl border border-indigo-100 bg-white p-3 dark:border-indigo-900/40 dark:bg-slate-900">
                     <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -878,7 +928,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   </p>
                 ) : null}
               </div>
-            </div>
+            </details>
           ) : null}
 
           {conflicts.length ? (
@@ -897,15 +947,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   <div className="flex flex-wrap gap-1.5 text-xs">
                     {[
                       ['all', `All (${conflicts.length})`],
-                      ['same_name', `Same name (${conflictGroups.sameName})`],
+                      ['same_name', `Family (${conflictGroups.sameName})`],
                       ['identifier', `SKU/barcode (${conflictGroups.identifier})`],
                       ['barcode', `Barcode (${conflictGroups.barcode})`],
                       ['sku', `SKU (${conflictGroups.sku})`],
-                      ['missing_details', `Missing details (${conflictGroups.missingDetails})`],
                       ['pricing', `Pricing (${conflictGroups.pricing})`],
-                      ['existing', `Existing match (${conflictGroups.existing})`],
+                      ['existing', `Matched (${conflictGroups.existing})`],
                       ['variant', `Variants (${conflictGroups.variant})`],
                       ['merge', `Add stock (${conflictGroups.merge})`],
+                      ['override', `Override (${conflictGroups.override})`],
                       ['errors', `Errors (${conflictGroups.errors})`],
                     ].map(([value, label]) => (
                       <button
@@ -928,20 +978,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     />
                     Visible matches
                   </label>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge_stock')}>Add stock only</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('create_variant')}>Create variants</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_add')}>Override + add stock</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_replace')}>Override + replace stock</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('new')}>Create selected as new</button>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  {IMAGE_CONFLICT_OPTIONS.map((item) => (
-                    <button key={item.value} type="button" className="btn-secondary text-xs" onClick={() => applyImageDecisionToSelection(item.value)}>
-                      {item.label}
-                    </button>
-                  ))}
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('clear_imported')}>Clear duplicate SKU/barcode</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('allow_duplicate')}>Allow same SKU/barcode</button>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">Action</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply to selected...</option>
+                      {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">SKU/barcode</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyIdentifierDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply...</option>
+                      {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">Images</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyImageDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply...</option>
+                      {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
                   <label className="ml-auto inline-flex min-w-[13rem] items-center gap-2">
                     <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
                     <select
@@ -971,127 +1028,118 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       setIdentifierDecisions((state) => ({ ...state, [index]: value === (row?.[field] || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
                     }
                   }
+                  const decisionValue = decisions[index] || plannedAction || 'merge_stock'
+                  const identifierDecision = identifierDecisions[index] || row?._identifier_conflict_mode || 'clear_imported'
+                  const imageDecision = imageDecisions[index] || row?.image_conflict_mode || 'keep_existing'
+                  const matchedLibraryImage = incomingImages.length ? '' : findImageReferenceForRow(editedRow, imageFiles)
+                  const rowIncomingImages = incomingImages.length ? incomingImages : (matchedLibraryImage ? [matchedLibraryImage] : [])
                   return (
-                <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
-                      <span className="font-medium text-gray-900 dark:text-white">Row {editedRow._rowNumber || index + 2}: {editedRow.name || 'Needs a product name'}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-xs">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
-                      {String(conflictType || '').includes('same_name') ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">Same name</span> : null}
-                      {conflictFields.length ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
-                      {!sameBasic || !samePricing ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">Different details</span> : <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">Same details</span>}
-                      {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 xl:grid-cols-2">
-                    <ImportDetailGrid title={T('csv_row_details', 'CSV row details')} row={editedRow} compareTo={existing} />
-                    {existing ? (
-                      <ImportDetailGrid title={T('existing_product_match', 'Existing product match')} row={existing} compareTo={editedRow} />
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                        {T('no_existing_product_match_hint', 'No existing product match. This row can be created as new, merged with a selected family action, or skipped.')}
-                      </div>
-                    )}
-                  </div>
-
-                  <ImportDetailEditor row={editedRow} onChange={updateEditedRow} title={T('edit_imported_row_details', 'Edit imported row details before apply')} />
-
-                  {incomingImages.length ? (
-                    <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
-                      <div>CSV images: {incomingImages.join(', ')}</div>
-                      <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
-                    </div>
-                  ) : null}
-
-                  {conflictFields.length ? (
-                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
-                      <div className="font-semibold">Identifier conflict</div>
-                      <div>Imported: SKU {(identifierOverrides[index]?.sku ?? row.sku) || '-'} / Barcode {(identifierOverrides[index]?.barcode ?? row.barcode) || '-'}</div>
-                      <div>Existing: {existing?.name || '-'} - SKU {existing?.sku || '-'} / Barcode {existing?.barcode || '-'}</div>
-                      {importDuplicateRows?.sku?.length > 1 || importDuplicateRows?.barcode?.length > 1 ? (
-                        <div className="mt-1 rounded bg-white/70 px-2 py-1 dark:bg-slate-900/60">
-                          {importDuplicateRows?.sku?.length > 1 ? <div>Same SKU appears in CSV rows: {importDuplicateRows.sku.join(', ')}</div> : null}
-                          {importDuplicateRows?.barcode?.length > 1 ? <div>Same barcode appears in CSV rows: {importDuplicateRows.barcode.join(', ')}</div> : null}
+                    <div key={index} className={`rounded-xl border p-2 text-sm ${decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
+                        <div className="min-w-[12rem] flex-1">
+                          <div className="truncate font-medium text-gray-900 dark:text-white">Row {editedRow._rowNumber || index + 2}: {editedRow.name || 'Needs a product name'}</div>
+                          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                            {String(conflictType || '').includes('same_name') ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">Family</span> : null}
+                            {conflictFields.length ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
+                            {!sameBasic || !samePricing ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">Different details</span> : <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">Same details</span>}
+                            {existing ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Matched: {existing.name}</span> : null}
+                            {rowIncomingImages.length ? <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Image ready</span> : null}
+                            {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
+                          </div>
                         </div>
-                      ) : null}
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <label className="block">
-                          <span className="mb-1 block font-medium">New SKU</span>
-                          <input
-                            className="input h-8 py-1 text-xs"
-                            value={identifierOverrides[index]?.sku ?? row.sku ?? ''}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), sku: value } }))
-                              setIdentifierDecisions((state) => ({ ...state, [index]: value === (row.sku || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
-                            }}
-                            placeholder="Keep, clear, or type new SKU"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block font-medium">New barcode</span>
-                          <input
-                            className="input h-8 py-1 text-xs"
-                            value={identifierOverrides[index]?.barcode ?? row.barcode ?? ''}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), barcode: value } }))
-                              setIdentifierDecisions((state) => ({ ...state, [index]: value === (row.barcode || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
-                            }}
-                            placeholder="Keep, clear, or type new barcode"
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIdentifierDecisions((state) => ({ ...state, [index]: 'clear_imported' }))
-                            setIdentifierOverrides((state) => ({ ...state, [index]: { sku: '', barcode: '' } }))
-                          }}
-                          className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] !== 'allow_duplicate' && identifierDecisions[index] !== 'change_identifier' ? 'border-orange-600 bg-orange-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}
-                        >Clear duplicate SKU/barcode</button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIdentifierDecisions((state) => ({ ...state, [index]: 'allow_duplicate' }))
-                            setIdentifierOverrides((state) => ({ ...state, [index]: { sku: row.sku || '', barcode: row.barcode || '' } }))
-                          }}
-                          className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] === 'allow_duplicate' ? 'border-purple-600 bg-purple-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}
-                        >Keep same SKU/barcode</button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-1.5 text-xs">
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'merge_stock' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'merge_stock' ? 'border-green-600 bg-green-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Add stock only</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'create_variant' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'create_variant' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create variant</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_add' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_add' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override info + add stock</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_replace' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_replace' ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override all + replace stock</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'new' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'new' ? 'border-purple-600 bg-purple-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create new row</button>
-                  </div>
-
-                  {incomingImages.length ? (
-                    <div className="flex flex-wrap gap-1.5 text-xs">
-                      {IMAGE_CONFLICT_OPTIONS.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onClick={() => setImageDecisions((state) => ({ ...state, [index]: item.value }))}
-                          className={`rounded-lg border px-2.5 py-1.5 font-medium ${imageDecisions[index] === item.value ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                        <select
+                          className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                          value={decisionValue}
+                          onChange={(event) => setDecisions((state) => ({ ...state, [index]: event.target.value }))}
                         >
-                          {item.label}
-                        </button>
-                      ))}
+                          {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                        {conflictFields.length ? (
+                          <select
+                            className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                            value={identifierDecision}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setIdentifierDecisions((state) => ({ ...state, [index]: value }))
+                              if (value === 'allow_duplicate') {
+                                setIdentifierOverrides((state) => ({ ...state, [index]: { sku: row.sku || '', barcode: row.barcode || '' } }))
+                              }
+                              if (value === 'clear_imported') {
+                                setIdentifierOverrides((state) => ({ ...state, [index]: { sku: '', barcode: '' } }))
+                              }
+                            }}
+                          >
+                            {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          </select>
+                        ) : null}
+                        {rowIncomingImages.length ? (
+                          <select
+                            className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                            value={imageDecision}
+                            onChange={(event) => setImageDecisions((state) => ({ ...state, [index]: event.target.value }))}
+                          >
+                            {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          </select>
+                        ) : null}
+                      </div>
+
+                      <details className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+                        <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-200">Details, existing match, and edits</summary>
+                        <div className="mt-2 grid gap-2 xl:grid-cols-2">
+                          <ImportDetailGrid title={T('csv_row_details', 'CSV row details')} row={editedRow} compareTo={existing} />
+                          {existing ? (
+                            <details className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+                              <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-100">
+                                {T('existing_product_match', 'Existing product match')}: {existing.name || `#${existing.id}`}
+                              </summary>
+                              <div className="mt-2">
+                                <ImportDetailGrid title={T('existing_product_match', 'Existing product match')} row={existing} compareTo={editedRow} />
+                              </div>
+                            </details>
+                          ) : (
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                              {T('no_existing_product_match_hint', 'No existing product match. This row can be created as new, merged with a selected family action, or skipped.')}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-2">
+                          <ImportDetailEditor row={editedRow} onChange={updateEditedRow} title={T('edit_imported_row_details', 'Edit imported row details before apply')} />
+                        </div>
+
+                        {conflictFields.length ? (
+                          <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
+                            <div className="font-semibold">Identifier conflict</div>
+                            <div>Imported: SKU {(identifierOverrides[index]?.sku ?? row.sku) || '-'} / Barcode {(identifierOverrides[index]?.barcode ?? row.barcode) || '-'}</div>
+                            <div>Existing: {existing?.name || '-'} - SKU {existing?.sku || '-'} / Barcode {existing?.barcode || '-'}</div>
+                            {importDuplicateRows?.sku?.length > 1 || importDuplicateRows?.barcode?.length > 1 ? (
+                              <div className="mt-1 rounded bg-white/70 px-2 py-1 dark:bg-slate-900/60">
+                                {importDuplicateRows?.sku?.length > 1 ? <div>Same SKU appears in CSV rows: {importDuplicateRows.sku.join(', ')}</div> : null}
+                                {importDuplicateRows?.barcode?.length > 1 ? <div>Same barcode appears in CSV rows: {importDuplicateRows.barcode.join(', ')}</div> : null}
+                              </div>
+                            ) : null}
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="mb-1 block font-medium">New SKU</span>
+                                <input className="input h-8 py-1 text-xs" value={identifierOverrides[index]?.sku ?? row.sku ?? ''} onChange={(event) => updateEditedRow('sku', event.target.value)} placeholder="Keep, clear, or type new SKU" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block font-medium">New barcode</span>
+                                <input className="input h-8 py-1 text-xs" value={identifierOverrides[index]?.barcode ?? row.barcode ?? ''} onChange={(event) => updateEditedRow('barcode', event.target.value)} placeholder="Keep, clear, or type new barcode" />
+                              </label>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {rowIncomingImages.length ? (
+                          <div className="mt-2 rounded-lg bg-white p-2 text-xs text-gray-500 dark:bg-slate-950/50 dark:text-gray-400">
+                            <div>Incoming images: {rowIncomingImages.join(', ')}</div>
+                            <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
+                          </div>
+                        ) : null}
+                      </details>
                     </div>
-                  ) : (
-                    <p className="text-xs text-gray-400">No incoming image columns for this row.</p>
-                  )}
-                </div>
                   )
                 })}
                 {conflicts.length > visibleConflicts.length ? (
