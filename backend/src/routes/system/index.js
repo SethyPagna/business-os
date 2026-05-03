@@ -71,10 +71,12 @@ const {
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
+const { createFinalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJobs')
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime')
+const { testObjectStore } = require('../../objectStore')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -363,13 +365,14 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
   const cutoverReadiness = analyzePostgresCutoverReadiness()
   const migrationEngineReady = cutoverReadiness.ready
-  const postgresLive = DATABASE_DRIVER === 'postgres' && OBJECT_STORAGE_DRIVER === 'minio'
+  const objectStorageLive = ['r2', 'minio'].includes(OBJECT_STORAGE_DRIVER)
+  const postgresLive = DATABASE_DRIVER === 'postgres' && objectStorageLive
   return {
-    mode: postgresLive && migrationEngineReady ? 'postgres_minio_live' : 'migration_required',
+    mode: postgresLive && migrationEngineReady ? `postgres_${OBJECT_STORAGE_DRIVER}_live` : 'migration_required',
     authoritativeData: {
       databaseDriver: DATABASE_DRIVER || 'postgres',
       databasePath: DATABASE_DRIVER === 'postgres' ? 'Postgres service: business_os/postgres' : DB_PATH,
-      uploadsPath: OBJECT_STORAGE_DRIVER === 'minio' ? `MinIO bucket: ${S3_BUCKET}` : UPLOADS_PATH,
+      uploadsPath: objectStorageLive ? `${OBJECT_STORAGE_DRIVER.toUpperCase()} bucket: ${S3_BUCKET}` : UPLOADS_PATH,
       importsPath: IMPORTS_PATH,
       storageRoot: STORAGE_ROOT,
       dataRoot: DATA_ROOT,
@@ -382,6 +385,8 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       redisConfigured: !!REDIS_URL,
       cacheRedisConfigured: RUNTIME_CACHE_ENABLED && !!CACHE_REDIS_URL,
       postgresConfigured: !!DATABASE_URL || DATABASE_DRIVER === 'postgres',
+      objectStorageConfigured: objectStorageLive,
+      r2Configured: OBJECT_STORAGE_DRIVER === 'r2',
       minioConfigured: OBJECT_STORAGE_DRIVER === 'minio',
       s3EndpointConfigured: !!S3_ENDPOINT,
       s3Bucket: S3_BUCKET || null,
@@ -395,7 +400,7 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       analyticsEngine: ANALYTICS_ENGINE || 'none',
       parquetStore: PARQUET_STORE || 'none',
       postgresAvailableForMigration: !!DATABASE_URL && DATABASE_DRIVER === 'postgres',
-      minioAvailableForMigration: OBJECT_STORAGE_DRIVER === 'minio',
+      objectStorageAvailableForMigration: objectStorageLive,
     },
     backupRequired: true,
     automation: getMigrationSafetyState(),
@@ -403,7 +408,7 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
     canRunMigration: migrationEngineReady,
     blockedReason: postgresLive && migrationEngineReady
       ? ''
-      : `Postgres/MinIO live mode is not fully verified. ${cutoverReadiness.blockerCount} final-runtime blockers remain or runtime drivers are not set to Postgres/MinIO.`,
+      : `Postgres/${String(OBJECT_STORAGE_DRIVER || 'object storage').toUpperCase()} live mode is not fully verified. ${cutoverReadiness.blockerCount} final-runtime blockers remain or runtime drivers are not set correctly.`,
     cutoverReadiness: {
       ready: cutoverReadiness.ready,
       blockerCount: cutoverReadiness.blockerCount,
@@ -430,25 +435,7 @@ function deleteAllUploads() {
 }
 
 function readFinalBackupManifest(sourceRoot) {
-  const root = path.resolve(String(sourceRoot || ''))
-  const manifestPath = path.join(root, 'manifest.json')
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`No final Business OS manifest.json was found in "${sourceRoot}". Restore accepts final backup packages only.`)
-  }
-  const manifest = safeJsonParse(fs.readFileSync(manifestPath, 'utf8'), null)
-  if (!manifest || typeof manifest !== 'object') {
-    throw new Error('Backup manifest is not valid JSON.')
-  }
-  if (!String(manifest.format || '').startsWith('business-os-backup-v')) {
-    throw new Error('Unsupported backup format. Choose a final Business OS backup package or Google Drive datasync version.')
-  }
-  if (!fs.existsSync(path.join(root, 'postgres.sql'))) {
-    throw new Error('Backup package is missing postgres.sql.')
-  }
-  if (!fs.existsSync(path.join(root, 'minio.tgz'))) {
-    throw new Error('Backup package is missing minio.tgz.')
-  }
-  return { root, manifest }
+  return validateLocalBackupPackage(sourceRoot)
 }
 
 function getCustomTableNames(rows = []) {
@@ -469,22 +456,14 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null 
   if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
     throw new Error('Choose a backup destination outside the current live data folder.')
   }
-  progress?.({
-    phase: 'host_backup_required',
-    progress: 100,
-    message: 'Final backups are created by the Docker host backup command',
+  const result = await createFinalBackupPackage({ destinationDir: resolvedDestination, actor, progress })
+  audit(actor.userId, actor.userName, 'backup_export', 'system', null, {
+    packageId: result.packageId,
+    objectPrefix: result.objectPrefix,
+    localPath: result.localPath,
+    storageDriver: result.storageDriver,
   })
-  audit(actor.userId, actor.userName, 'backup_export_handoff', 'system', null, {
-    destinationDir: resolvedDestination,
-    command: 'run\\docker\\backup.bat',
-  })
-  return {
-    requiresHostAction: true,
-    action: 'backup',
-    destinationDir: resolvedDestination,
-    command: 'run\\docker\\backup.bat',
-    message: 'Final backups are created by the Docker host so Postgres and MinIO are captured atomically. Run run\\docker\\backup.bat from this Business OS folder, then sync/copy the generated backup folder or Google Drive datasync version.',
-  }
+  return result
 }
 
 async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = {}) {
@@ -500,23 +479,22 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = 
     throw new Error('Choose a backup folder, not the current live data folder.')
   }
   progress?.({
-    phase: 'host_restore_required',
+    phase: 'validated',
     progress: 100,
-    message: 'Validated final package. Docker restore must replace Postgres and MinIO atomically.',
+    message: 'Validated final package. Confirm restore before replacing live data.',
   })
-  audit(actor.userId, actor.userName, 'backup_restore_handoff', 'system', null, {
+  audit(actor.userId, actor.userName, 'backup_restore_validated', 'system', null, {
     sourceDir: snapshot.root,
-    command: `run\\docker\\restore.bat -BackupPath "${snapshot.root}"`,
     backupFormat: snapshot.manifest?.format || '',
     backupCreatedAt: snapshot.manifest?.created_at || snapshot.manifest?.createdAt || '',
   })
   return {
-    requiresHostAction: true,
+    validated: true,
+    requiresConfirmation: true,
     action: 'restore',
     sourceDir: snapshot.root,
     manifest: snapshot.manifest,
-    command: `run\\docker\\restore.bat -BackupPath "${snapshot.root}"`,
-    message: 'Backup package is valid. Final restore must be applied by the Docker host so Postgres and MinIO are replaced atomically.',
+    message: 'Backup package is valid. Restore apply is intentionally gated behind confirmation so live data is not replaced by accident.',
   }
 }
 
@@ -753,10 +731,37 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
   }
 })
 
+async function sendBackupVersions(req, res) {
+  try {
+    ok(res, { items: await listBackupVersions({ limit: req.query?.limit || 50 }) })
+  } catch (error) {
+    err(res, error?.message || 'Failed to list backup versions')
+  }
+}
+
+router.get('/backups/versions', authToken, requirePermission('backup'), sendBackupVersions)
+router.get('/backups/versions/list', authToken, requirePermission('backup'), sendBackupVersions)
+
 router.get('/backups/:id', authToken, requirePermission('backup'), (req, res) => {
   const item = getSystemJob(req.params.id)
   if (!item) return err(res, 'Backup job not found', 404)
   ok(res, { item })
+})
+
+router.get('/object-storage/doctor', authToken, requireAnyPermission(['backup', 'settings']), async (_req, res) => {
+  try {
+    ok(res, { item: await testObjectStore() })
+  } catch (error) {
+    err(res, error?.message || 'Object storage doctor failed', 503)
+  }
+})
+
+router.post('/object-storage/test-write', authToken, requireAnyPermission(['backup', 'settings']), async (_req, res) => {
+  try {
+    ok(res, { item: await testObjectStore() })
+  } catch (error) {
+    err(res, error?.message || 'Object storage test failed', 503)
+  }
 })
 
 router.post('/backups', authToken, requirePermission('backup'), async (req, res) => {
@@ -818,7 +823,7 @@ router.post('/backups/:id/restore', authToken, requirePermission('backup'), asyn
 })
 
 router.get('/backup/export', authToken, requirePermission('backup'), (req, res) => {
-  err(res, 'Use /api/system/backups with type export-folder, or run run\\docker\\backup.bat. Old single-file table downloads are not part of the final backup format.', 410)
+  err(res, 'Old single-file table downloads are not part of the final backup format. Use /api/system/backups with type export-folder.', 410)
 })
 
 router.post('/backup/export-folder', authToken, requirePermission('backup'), async (req, res) => {
@@ -826,12 +831,20 @@ router.post('/backup/export-folder', authToken, requirePermission('backup'), asy
   const destinationDir = String(req.body?.destinationDir || '').trim() || getDefaultBackupDestinationDir()
 
   try {
-    return ok(res, await createFolderBackup({
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('backup_export_folder', ({ progress }) => createFolderBackup({
       destinationDir,
-      actor: { userId: req.user?.id, userName: req.user?.name },
-    }))
+      actor,
+      progress,
+    }), {
+      prefix: 'backup',
+      message: 'Backup export queued',
+      runningMessage: 'Backup export running',
+      completedMessage: 'Backup export complete',
+    })
+    return ok(res, { job_id: job.id, item: job })
   } catch (e) {
-    return err(res, `Failed to create folder backup: ${e.message}`)
+    return err(res, `Failed to queue backup: ${e.message}`)
   }
 })
 
@@ -846,13 +859,20 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), asy
   if (!sourceDir) return err(res, 'sourceDir is required')
 
   try {
-    const result = await restoreFolderBackup({
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('backup_restore_folder', ({ progress }) => restoreFolderBackup({
       sourceDir,
-      actor: { userId: req.user?.id, userName: req.user?.name },
+      actor,
+      progress,
+    }), {
+      prefix: 'restore',
+      message: 'Backup restore validation queued',
+      runningMessage: 'Backup restore validation running',
+      completedMessage: 'Backup restore validation complete',
     })
-    return ok(res, result)
+    return ok(res, { job_id: job.id, item: job })
   } catch (e) {
-    return err(res, `Failed to restore folder backup: ${e.message}`)
+    return err(res, `Failed to queue restore validation: ${e.message}`)
   }
 })
 
@@ -1061,6 +1081,10 @@ router.get('/storage-mode', authToken, requireAnyPermission(['backup', 'settings
       item: {
         databaseDriver: DATABASE_DRIVER || 'postgres',
         objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
+        objectStorageEndpoint: S3_ENDPOINT || null,
+        objectStorageBucket: S3_BUCKET || null,
+        r2Configured: OBJECT_STORAGE_DRIVER === 'r2',
+        offlineMinioAvailable: OBJECT_STORAGE_DRIVER === 'minio',
         queueDriver: JOB_QUEUE_DRIVER || 'bullmq',
         cacheDriver: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
         analyticsEngine: ANALYTICS_ENGINE || 'none',
@@ -1132,7 +1156,7 @@ router.post('/scale-migration/run', authToken, requireAnyPermission(['backup', '
   audit(req.user?.id, req.user?.name, 'blocked_migration_run', 'system', null, {
     reason: 'migration_runner_locked',
   }, { deviceName: req.body?.device_name, deviceTz: req.body?.device_tz })
-  return err(res, 'Postgres/MinIO is the only supported runtime. Restore a final backup package if this Docker volume is missing data.', 409)
+  return err(res, 'Postgres plus the configured object-storage adapter is the only supported runtime. Restore a final backup package if this Docker volume is missing data.', 409)
 })
 
 /**

@@ -7,7 +7,7 @@ const { spawnSync } = require('child_process')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { UPLOADS_PATH } = require('./config')
-const { deleteObject, isMinioEnabled, putObject } = require('./objectStore')
+const { deleteObject, isObjectStorageEnabled, putObject } = require('./objectStore')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 
@@ -93,7 +93,7 @@ function buildUniqueStoredName(originalName = '') {
   const safeName = sanitizeOriginalFileName(originalName)
   const ext = path.extname(safeName) || '.bin'
   const base = path.basename(safeName, ext) || 'file'
-  if (isMinioEnabled()) {
+  if (isObjectStorageEnabled()) {
     return `${base}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`
   }
   ensureUploadsDirectory()
@@ -432,7 +432,7 @@ async function registerStoredAsset({
   const effectiveOptimization = optimization || imageOptimization || videoOptimization
   const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const dimensions = mediaType === 'image' ? await readImageDimensions(absPath) : { width: null, height: null }
-  if (isMinioEnabled() && fs.existsSync(absPath)) {
+  if (isObjectStorageEnabled() && fs.existsSync(absPath)) {
     await putObject(`uploads/${storedName}`, fs.createReadStream(absPath), {
       contentType: mimeType || getMimeTypeFromName(storedName),
     })
@@ -495,7 +495,7 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
 }
 
 async function backfillUploadAssets() {
-  if (isMinioEnabled()) return
+  if (isObjectStorageEnabled()) return
   ensureUploadsDirectory()
   const files = fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -532,7 +532,7 @@ async function deleteFileAsset(id) {
   }
   const absPath = getUploadFilePath(asset.public_path)
   if (fs.existsSync(absPath)) fs.unlinkSync(absPath)
-  if (isMinioEnabled()) await deleteObject(String(asset.public_path || '').replace(/^\/+/, ''))
+  if (isObjectStorageEnabled()) await deleteObject(String(asset.public_path || '').replace(/^\/+/, ''))
   getDb().prepare('DELETE FROM file_assets WHERE id = ?').run(id)
   return asset
 }

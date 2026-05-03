@@ -30,7 +30,7 @@ Normal URLs:
 ## Final Data Architecture
 
 - Postgres owns live products, stock, POS, sales, returns, contacts, users, roles, settings, portal, audit, history, imports, and backup metadata.
-- MinIO owns uploads, product images, logos, avatars, portal/about images, file library assets, thumbnails, import media, backup assets, and Parquet snapshots.
+- R2 owns uploads, product images, logos, avatars, portal/about images, file library assets, thumbnails, import media, backup assets, and Parquet snapshots. Emergency/offline mode can use MinIO through the same object-storage keys.
 - Redis owns durable jobs and short-lived cache.
 - DuckDB/Parquet owns heavy staging and read-only workloads such as CSV import staging, conflict scans, exports, analytics snapshots, and backup verification.
 
@@ -56,7 +56,7 @@ Safest way to move data:
 Backup format:
 
 - Local backups and Google Drive `datasync-N` versions use the same folder shape.
-- Each recoverable folder contains `manifest.json`, `backup.json`, `postgres.sql`, `minio.tgz`, `parquet-manifest.json`, and `checksums.sha256`.
+- Each recoverable folder contains `manifest.json`, `data.json`, `objects-manifest.jsonl`, `checksums.json`, `restore-plan.json`, and optional Parquet snapshots.
 - Docker restore validates that folder before replacing live data.
 
 ## Public Languages

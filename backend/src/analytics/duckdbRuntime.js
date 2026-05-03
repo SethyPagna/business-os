@@ -60,8 +60,9 @@ function getDuckDbRuntimeStatus(options = {}) {
     ? { available: false, packageName: null, reason: 'probe skipped' }
     : probeDuckDbPackage()
   const enabled = configuredEngine === 'duckdb'
-  const parquetEnabled = configuredStore === 'minio' || configuredStore === 'local'
-  const productionStoreReady = configuredStore === 'minio' && OBJECT_STORAGE_DRIVER === 'minio' && !!S3_BUCKET
+  const objectStores = new Set(['r2', 'minio'])
+  const parquetEnabled = objectStores.has(configuredStore) || configuredStore === 'local'
+  const productionStoreReady = objectStores.has(configuredStore) && configuredStore === OBJECT_STORAGE_DRIVER && !!S3_BUCKET
 
   return {
     engine: configuredEngine,

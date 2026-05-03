@@ -428,7 +428,7 @@
   "export_all_report": "នាំចេញទាំងអស់ (របាយការណ៍ពេញ)",
   "export_backup": "នាំចេញការបម្រុង",
   "export_backup_btn": "📤 ទាញយកបម្រុង",
-  "export_backup_desc": "បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញដែលមាន Postgres, MinIO, ការកំណត់, អ្នកប្រើ, ស្តុក និង checksum។",
+  "export_backup_desc": "បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញដែលមាន Postgres, R2 ឬ object storage offline, ការកំណត់, អ្នកប្រើ, ស្តុក និង checksum។",
   "export_backup_title": "📤 នាំចេញបម្រុង",
   "export_branch_performance": "ការអនុវត្តសាខា",
   "export_contacts": "នាំចេញទំនាក់ទំនង",

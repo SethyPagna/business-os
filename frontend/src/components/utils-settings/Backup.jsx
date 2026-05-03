@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
-import { cacheClearAll } from '../../api/http'
-import { refreshAppData } from '../../utils/appRefresh'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -25,7 +23,7 @@ const QUICK_BACKUP_SECTIONS = [
 const BACKUP_LOCAL_COPY = {
   km: {
     backup: 'បម្រុងទុក',
-    export_backup_desc: 'នាំចេញបម្រុងទុក Docker ពេញលេញសម្រាប់ Postgres, MinIO និង Drive sync។',
+    export_backup_desc: 'នាំចេញបម្រុងទុក Docker ពេញលេញសម្រាប់ Postgres, R2 ឬ object storage offline និង Drive sync។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
     folder_backup_placeholder: 'ជ្រើសថតមេ សម្រាប់ចម្លង backup',
     browse_folder: 'ជ្រើសថត',
@@ -95,10 +93,12 @@ function JobProgressCard({ job, copy, onClear }) {
             {job.type || 'system job'} · {job.phase || job.status || 'queued'}
           </div>
           {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
-          {result.requiresHostAction ? (
+          {result.packageId || result.localPath || result.objectPrefix ? (
             <div className="mt-2 rounded-xl border border-current/20 bg-white/50 p-3 text-xs dark:bg-slate-950/30">
-              <div className="font-semibold">{result.message || copy('host_action_required', 'Run this on the Business OS computer to finish safely.')}</div>
-              {result.command ? <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 font-mono text-[11px] text-white">{result.command}</code> : null}
+              {result.packageId ? <div><span className="font-semibold">{copy('backup_version', 'Version')}:</span> {result.packageId}</div> : null}
+              {result.objectPrefix ? <div className="break-all"><span className="font-semibold">{copy('object_prefix', 'Object prefix')}:</span> {result.objectPrefix}</div> : null}
+              {result.localPath ? <div className="break-all"><span className="font-semibold">{copy('local_copy', 'Local copy')}:</span> {result.localPath}</div> : null}
+              {result.message ? <div className="mt-1">{result.message}</div> : null}
             </div>
           ) : null}
         </div>
@@ -1218,7 +1218,7 @@ function ScaleMigrationSection({ t, notify, active = true }) {
   const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
   const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'postgres').toLowerCase()
   const activeStorageLabel = activeDatabaseDriver === 'postgres'
-    ? copy('postgres_minio_storage', 'Postgres / MinIO')
+    ? copy('postgres_object_storage', 'Postgres / object storage')
     : copy('unsupported_storage_mode', 'Unsupported storage mode')
 
   return (
@@ -1354,25 +1354,14 @@ export default function Backup() {
               if (!aliveRef.current) return
               if (job) setActiveJob(job)
               const result = job?.result || {}
-              if (result.requiresHostAction) {
-                actionHistory.pushAction({
-                  scope: 'backup',
-                  entity: 'backup',
-                  label: copy('backup_host_command_ready', 'Docker backup command is ready'),
-                  redo_payload: { command: result.command, destinationDir: result.destinationDir },
-                })
-                notify(`${copy('backup_host_command_ready', 'Docker backup command is ready')}: ${result.command || 'run\\docker\\backup.bat'}`, 'info')
-                setLoading('')
-                return
-              }
               actionHistory.pushAction({
                 scope: 'backup',
                 entity: 'backup',
                 label: copy('export_backup_success', 'Backup exported successfully'),
-                redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
+                redo_payload: { packageId: result.packageId || '', objectPrefix: result.objectPrefix || '', destinationDir: exportDestination || 'default' },
               })
               notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-              if (job?.result?.backupRoot) setFolderImportPath(job.result.backupRoot)
+              if (job?.result?.localPath) setFolderImportPath(job.result.localPath)
               setLoading('')
             },
             onError: (error, job) => {
@@ -1396,7 +1385,7 @@ export default function Backup() {
     if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
-    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+    if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
 
     setLoading('folder-import')
     try {
@@ -1418,26 +1407,13 @@ export default function Backup() {
               if (!aliveRef.current) return
               if (job) setActiveJob(job)
               const result = job?.result || {}
-              if (result.requiresHostAction) {
-                actionHistory.pushAction({
-                  scope: 'backup',
-                  entity: 'backup',
-                  label: copy('restore_host_command_ready', 'Docker restore command is ready'),
-                  undo_payload: { command: result.command, sourceDir: result.sourceDir },
-                })
-                notify(`${copy('restore_host_command_ready', 'Docker restore command is ready')}: ${result.command || 'run\\docker\\restore.bat'}`, 'info')
-                setLoading('')
-                return
-              }
-              cacheClearAll()
               actionHistory.pushAction({
                 scope: 'backup',
                 entity: 'backup',
-                label: copy('import_backup_success', 'Backup imported successfully'),
-                undo_payload: { sourceDir: folderImportPath },
+                label: copy('backup_restore_validated', 'Backup restore validated'),
+                undo_payload: { sourceDir: folderImportPath, manifest: result.manifest || null },
               })
-              notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-              setTimeout(() => refreshAppData(), 200)
+              notify(copy('backup_restore_validated', 'Backup restore validated'), 'success')
               setLoading('')
             },
             onError: (error, job) => {
@@ -1464,7 +1440,7 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, MinIO assets, settings, users, portal files, and restore metadata.')}
+          subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
@@ -1474,7 +1450,7 @@ export default function Backup() {
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, MinIO assets, settings, users, portal files, and restore metadata.')}
+            {copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (

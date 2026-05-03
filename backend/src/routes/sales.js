@@ -9,14 +9,14 @@ const { normalizeClientRequestId } = require('../idempotency')
 const router = express.Router()
 
 function periodExpression(alias, granularity = 'day') {
-  const createdAt = `NULLIF(${alias}.created_at, '')::timestamptz`
+  const createdAt = `NULLIF(${alias}.created_at::text, '')::timestamptz`
   if (granularity === 'week') return `to_char(${createdAt}, 'IYYY-"W"IW')`
   if (granularity === 'month') return `to_char(${createdAt}, 'YYYY-MM')`
   return `to_char(${createdAt}, 'YYYY-MM-DD')`
 }
 
 function hourExpression(column = 'created_at') {
-  return `to_char(NULLIF(${column}, '')::timestamptz, 'HH24')`
+  return `to_char(NULLIF(${column}::text, '')::timestamptz, 'HH24')`
 }
 
 function normalizeImportedTimestamp(value) {

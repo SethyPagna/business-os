@@ -164,7 +164,7 @@ function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
     SET status = 'cancelled',
         phase = 'cancelled',
         cancel_requested = 1,
-        finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP::text),
+        finished_at = COALESCE(finished_at::text, CURRENT_TIMESTAMP::text),
         updated_at = CURRENT_TIMESTAMP::text
     WHERE id = ?
   `).run(row.id)
@@ -3122,7 +3122,7 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
         status = CASE WHEN lower(status) = 'running' THEN 'cancelling' ELSE 'cancelled' END,
         phase = CASE WHEN lower(status) = 'running' THEN 'cancel_requested' ELSE 'cancelled' END,
         last_error = ?,
-        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE CURRENT_TIMESTAMP::text END,
+        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at::text ELSE CURRENT_TIMESTAMP::text END,
         updated_at = CURRENT_TIMESTAMP::text
     WHERE id IN (${placeholders})
   `).run(reason, ...jobIds)

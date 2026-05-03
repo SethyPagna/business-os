@@ -403,7 +403,7 @@
   "export_all_report": "Export All (Full Report)",
   "export_backup": "Export Backup",
   "export_backup_btn": "Create full backup",
-  "export_backup_desc": "Creates a full Business OS Docker backup with Postgres data, MinIO assets, settings, users, stock, checksums, and restore metadata.",
+  "export_backup_desc": "Creates a full Business OS Docker backup with Postgres data, R2 or offline object assets, settings, users, stock, checksums, and restore metadata.",
   "export_backup_title": "Export backup",
   "export_branch_performance": "Branch Performance",
   "export_contacts": "Export Contacts",

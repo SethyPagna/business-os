@@ -21,7 +21,7 @@ if defined BUSINESS_OS_REPO_ROOT (
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 echo.
-echo [INFO] Business OS is Docker/Postgres/MinIO only now.
+echo [INFO] Business OS is Docker/Postgres/R2 object storage by default; MinIO is offline emergency mode.
 echo        This support launcher is forwarding to run\docker\start.bat.
 echo.
 if exist "%ROOT%\run\docker\start.bat" (
@@ -61,7 +61,7 @@ if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
 if not defined RUNTIME_CACHE_ENABLED set "RUNTIME_CACHE_ENABLED=1"
 if not defined CACHE_REDIS_URL set "CACHE_REDIS_URL=redis://127.0.0.1:6380"
 if not defined DATABASE_DRIVER set "DATABASE_DRIVER=postgres"
-if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=minio"
+if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=r2"
 if not defined IMPORT_QUEUE_CONCURRENCY set "IMPORT_QUEUE_CONCURRENCY=1"
 if not defined MEDIA_QUEUE_CONCURRENCY set "MEDIA_QUEUE_CONCURRENCY=4"
 if not defined IMPORT_ROW_BATCH_SIZE set "IMPORT_ROW_BATCH_SIZE=400"

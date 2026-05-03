@@ -139,16 +139,17 @@ ensureDirectory(UPLOADS_PATH)
 ensureDirectory(IMPORTS_PATH)
 
 const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'postgres').toLowerCase()
-const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'minio').toLowerCase()
+const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'r2').toLowerCase()
 const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'bullmq').toLowerCase()
 const ANALYTICS_ENGINE = trim(process.env.ANALYTICS_ENGINE || 'duckdb').toLowerCase()
-const PARQUET_STORE = trim(process.env.PARQUET_STORE || 'minio').toLowerCase()
+const PARQUET_STORE = trim(process.env.PARQUET_STORE || OBJECT_STORAGE_DRIVER).toLowerCase()
 
 if (DATABASE_DRIVER !== 'postgres') {
   throw new Error(`Unsupported database driver "${DATABASE_DRIVER}". Business OS final release requires Postgres.`)
 }
-if (OBJECT_STORAGE_DRIVER !== 'minio') {
-  throw new Error(`Unsupported object storage driver "${OBJECT_STORAGE_DRIVER}". Business OS final release requires MinIO.`)
+const SUPPORTED_OBJECT_STORAGE_DRIVERS = new Set(['r2', 'minio'])
+if (!SUPPORTED_OBJECT_STORAGE_DRIVERS.has(OBJECT_STORAGE_DRIVER)) {
+  throw new Error(`Unsupported object storage driver "${OBJECT_STORAGE_DRIVER}". Business OS final release requires R2 or emergency MinIO.`)
 }
 
 const DATABASE_URL = trim(process.env.DATABASE_URL)
@@ -164,6 +165,8 @@ const S3_ENDPOINT = trim(process.env.S3_ENDPOINT || 'http://127.0.0.1:9000')
 const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_ROOT_USER)
 const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
+const S3_REGION = trim(process.env.S3_REGION || (OBJECT_STORAGE_DRIVER === 'r2' ? 'auto' : 'us-east-1'))
+const R2_PUBLIC_BASE_URL = trim(process.env.R2_PUBLIC_BASE_URL || '')
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
 
 const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '400', 10) || 400))
@@ -240,9 +243,11 @@ module.exports = {
   DATABASE_URL,
   OBJECT_STORAGE_DRIVER,
   S3_ENDPOINT,
+  S3_REGION,
   S3_ACCESS_KEY_ID,
   S3_SECRET_ACCESS_KEY,
   S3_BUCKET,
+  R2_PUBLIC_BASE_URL,
   ANALYTICS_ENGINE,
   PARQUET_STORE,
   MINIO_LICENSE_FILE,

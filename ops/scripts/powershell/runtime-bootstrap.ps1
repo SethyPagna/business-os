@@ -160,7 +160,7 @@ function Write-DockerScaleProfile {
     BUSINESS_OS_DOCKER_PROFILE = $profile
     BUSINESS_OS_APP_RUNTIME = 'docker'
     DATABASE_DRIVER = 'postgres'
-    OBJECT_STORAGE_DRIVER = 'minio'
+  OBJECT_STORAGE_DRIVER = 'r2'
     REDIS_QUEUE_BIND_HOST = '127.0.0.1'
     REDIS_QUEUE_PORT = '6379'
     REDIS_QUEUE_MAX_MEMORY = '1536mb'

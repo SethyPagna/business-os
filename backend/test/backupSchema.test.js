@@ -65,12 +65,12 @@ runTest('buildBackupSummary returns row counts and totals', () => {
   assert.equal(summary.totals.uploadCount, 2)
 })
 
-runTest('Docker backup API completes with explicit host action handoff instead of failing silently', () => {
+runTest('Docker backup API queues real final-package jobs instead of host action handoff', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
-  assert.match(source, /requiresHostAction:\s*true/)
-  assert.match(source, /command:\s*'run\\\\docker\\\\backup\.bat'/)
-  assert.match(source, /command:\s*`run\\\\docker\\\\restore\.bat -BackupPath/)
-  assert.doesNotMatch(source, /Final backup must be created[\s\S]*throw new Error/)
+  assert.match(source, /createFinalBackupPackage/)
+  assert.match(source, /backup_export/)
+  assert.doesNotMatch(source, /requiresHostAction:\s*true/)
+  assert.doesNotMatch(source, /minio\.tgz/)
 })
 
 if (failed > 0) {

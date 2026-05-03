@@ -305,7 +305,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [cleanRows, setCleanRows] = useState([])
   const [importRows, setImportRows] = useState([])
   const [analysisSummary, setAnalysisSummary] = useState(null)
-  const [reviewGroups, setReviewGroups] = useState([])
   const [analysisProgress, setAnalysisProgress] = useState(null)
   const [decisions, setDecisions] = useState({})
   const [imageDecisions, setImageDecisions] = useState({})
@@ -329,7 +328,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setCleanRows([])
     setImportRows([])
     setAnalysisSummary(null)
-    setReviewGroups([])
     setAnalysisProgress(null)
     setDecisions({})
     setImageDecisions({})
@@ -542,7 +540,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setCleanRows(analysis.cleanRows || [])
       setImportRows(analysis.rows || [])
       setAnalysisSummary(analysis.summary || null)
-      setReviewGroups(analysis.groups || [])
       setDecisions(analysis.decisions || {})
       setImageDecisions(nextImageDecisions)
       setIdentifierDecisions(nextIdentifierDecisions)
@@ -653,7 +650,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         ...(entry.conflictFields || []),
       ].join(' ').toLowerCase()
       return hay.includes(query)
-    }).slice(0, 200)
+    }).slice(0, 75)
   }, [conflictFilter, conflictQuery, conflicts, decisions, rowOverrides])
 
   const toggleConflictSelection = (index) => {
@@ -678,18 +675,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const next = { ...current }
       conflicts.forEach((entry) => {
         if (selectedConflictIds.has(entry.index)) next[entry.index] = value
-      })
-      return next
-    })
-  }
-
-  const applyDecisionToGroup = (group, value) => {
-    const rowIndexes = Array.isArray(group?.rowIndexes) ? group.rowIndexes : []
-    if (!rowIndexes.length) return
-    setDecisions((current) => {
-      const next = { ...current }
-      rowIndexes.forEach((rowIndex) => {
-        next[Number(rowIndex)] = value
       })
       return next
     })
@@ -860,77 +845,6 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             </div>
           </div>
 
-          {reviewGroups.length ? (
-            <details className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm dark:border-indigo-900/40 dark:bg-indigo-950/20">
-              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-100">Same-name family review</p>
-                  <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                    Open to review grouped families. Matching detail groups merge stock; different details become variants.
-                  </p>
-                </div>
-                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-indigo-700 dark:bg-slate-900 dark:text-indigo-200">
-                  {reviewGroups.length} group{reviewGroups.length === 1 ? '' : 's'}
-                </span>
-              </summary>
-              <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
-                {reviewGroups.slice(0, 20).map((group) => (
-                  <div key={group.key || group.title} className="rounded-xl border border-indigo-100 bg-white p-3 dark:border-indigo-900/40 dark:bg-slate-900">
-                    <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-950 dark:text-white">{group.title}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          Rows {(group.rowNumbers || []).join(', ')} - {(group.subgroups || []).length} detail group{(group.subgroups || []).length === 1 ? '' : 's'}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 text-xs">
-                        <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => applyDecisionToGroup(group, 'merge_stock')}>Merge/add stock</button>
-                        <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => applyDecisionToGroup(group, 'create_variant')}>Create variants</button>
-                      </div>
-                    </div>
-                    <div className="grid gap-2 lg:grid-cols-2">
-                      {(group.subgroups || []).slice(0, 6).map((subgroup, subgroupIndex) => (
-                        <div key={`${group.key || group.title}-${subgroup.signature || subgroupIndex}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-800">
-                          <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
-                            <span className="font-semibold text-slate-700 dark:text-slate-100">
-                              {subgroup.suggestedAction === 'merge_stock' ? 'Merge stock' : `Variant #${subgroupIndex + 1}`}
-                            </span>
-                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-900 dark:text-slate-300">
-                              Rows {(subgroup.rowNumbers || []).join(', ')}
-                            </span>
-                          </div>
-                          <div className="space-y-1">
-                            {(subgroup.rows || []).slice(0, 3).map((item) => (
-                              <div key={`${item.rowIndex}-${item.rowNumber}`} className="rounded bg-white/80 p-1.5 dark:bg-slate-950/50">
-                                <div className="mb-1 font-semibold text-slate-700 dark:text-slate-200">Row {item.rowNumber}</div>
-                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                                  {IMPORT_REVIEW_DETAIL_FIELDS.map(([field, label]) => (
-                                    <div key={field} className="min-w-0">
-                                      <span className="text-slate-400">{label}: </span>
-                                      <span className="break-words text-slate-600 dark:text-slate-300">{compactImportValue(item?.[field])}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                            {(subgroup.rows || []).length > 3 ? (
-                              <div className="text-slate-400">+{subgroup.rows.length - 3} more matching row(s)</div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {reviewGroups.length > 20 ? (
-                  <p className="rounded-lg bg-white px-3 py-2 text-xs text-indigo-700 dark:bg-slate-900 dark:text-indigo-200">
-                    Showing first 20 same-name groups. The import still carries decisions for all groups.
-                  </p>
-                ) : null}
-              </div>
-            </details>
-          ) : null}
-
           {conflicts.length ? (
             <div className="space-y-3">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
@@ -941,7 +855,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     className="input text-xs"
                     value={conflictQuery}
                     onChange={(event) => setConflictQuery(event.target.value)}
-                    placeholder="Search name, barcode, SKU, brand, category..."
+                    placeholder="Search conflict rows by name, barcode, SKU, brand, category..."
                     autoComplete="off"
                   />
                   <div className="flex flex-wrap gap-1.5 text-xs">
@@ -1017,7 +931,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                 </div>
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {T('import_conflict_rows_label', 'Rows that need review')}
+                  </p>
                 {visibleConflicts.map((entry) => {
                   const { row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages } = entry
                   const editedRow = { ...(row || {}), ...(rowOverrides[index] || {}) }
@@ -1144,7 +1060,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                 })}
                 {conflicts.length > visibleConflicts.length ? (
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                    Showing first {visibleConflicts.length} of {conflicts.length} planned conflict/variant rows. All rows will still be imported with their selected action.
+                    Showing first {visibleConflicts.length} of {conflicts.length} review rows. Search or use filters to narrow the rows before applying bulk actions.
                   </p>
                 ) : null}
               </div>

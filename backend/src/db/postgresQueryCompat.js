@@ -121,6 +121,7 @@ function normalizePortableSqlFunctions(sql = '') {
   return String(sql || '')
     .replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, 'CURRENT_TIMESTAMP')
     .replace(/\bdatetime\s*\(\s*([^)]+?)\s*\)/gi, '$1')
+    .replace(/\bdate\s*\(\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\)/gi, "NULLIF($1::text, '')::timestamptz::date")
     .replace(/\bCOALESCE\s*\(\s*trim\s*\(([^)]+)\)\s*,\s*''\s*\)/gi, "COALESCE(trim($1), '')")
     .replace(/\s+COLLATE\s+NOCASE\b/gi, '')
     .replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,')

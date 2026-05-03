@@ -120,8 +120,8 @@ function analyzePostgresCutoverReadiness(options = {}) {
       file: 'runtime',
       line: 0,
       code: 'cutover_manifest_missing',
-      description: 'Compiled Docker runtime has no verified Postgres/MinIO cutover manifest',
-      snippet: 'Set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after all live routes use Postgres repositories and MinIO adapters.',
+      description: 'Compiled Docker runtime has no verified Postgres/object-storage cutover manifest',
+      snippet: 'Set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after all live routes use Postgres repositories and the shared object-storage adapter.',
     }, ...blockers]
   }
 

@@ -39,7 +39,7 @@ const { db, runDatabaseMaintenance } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
 const { getRuntimeVersion } = require('./src/runtimeVersion')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime')
-const { getObjectStream, isMinioEnabled } = require('./src/objectStore')
+const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
@@ -114,9 +114,9 @@ function applyCoreMiddleware(target) {
 }
 
 function mountStaticAssets(target) {
-  // Uploads live in MinIO for Docker releases. The compiled SPA is only mounted
+  // Uploads live in the configured S3-compatible object store for Docker releases.
   // when a frontend build exists.
-  if (isMinioEnabled()) {
+  if (isObjectStorageEnabled()) {
     target.get('/uploads/*', async (req, res) => {
       try {
         const key = `uploads/${String(req.params[0] || '').replace(/^\/+/, '')}`
@@ -166,6 +166,10 @@ function mountHealthRoute(target) {
         cache: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
         analytics: ANALYTICS_ENGINE,
         parquetStore: PARQUET_STORE,
+      },
+      objectStorage: {
+        driver: OBJECT_STORAGE_DRIVER,
+        bucket: S3_BUCKET || null,
       },
       analytics: getDuckDbRuntimeStatus(),
     })
@@ -263,7 +267,9 @@ function getStartupBanner() {
     ? FRONTEND_DIST
     : 'not built - run: cd frontend && npm run build'
   const databaseLine = DATABASE_DRIVER === 'postgres' ? 'Postgres service: business_os/postgres' : DB_PATH
-  const uploadsLine = OBJECT_STORAGE_DRIVER === 'minio' ? `MinIO bucket: ${S3_BUCKET}` : UPLOADS_PATH
+  const uploadsLine = ['r2', 'minio'].includes(OBJECT_STORAGE_DRIVER)
+    ? `${OBJECT_STORAGE_DRIVER.toUpperCase()} bucket: ${S3_BUCKET}`
+    : UPLOADS_PATH
 
   return `
 ==========================================

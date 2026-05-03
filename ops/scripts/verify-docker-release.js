@@ -54,9 +54,9 @@ function main() {
     'BUSINESS_OS_DOCKER_DATA_MODE',
     'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED',
     'DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"',
-    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"',
+    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-r2}"',
     'ANALYTICS_ENGINE: "${ANALYTICS_ENGINE:-duckdb}"',
-    'PARQUET_STORE: "${PARQUET_STORE:-minio}"',
+    'PARQUET_STORE: "${PARQUET_STORE:-r2}"',
     'JOB_QUEUE_DRIVER: bullmq',
     'cloudflared:',
     'postgres:',
@@ -80,9 +80,9 @@ function main() {
     'BUSINESS_OS_DOCKER_DATA_MODE=postgres',
     'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1',
     'DATABASE_DRIVER=postgres',
-    'OBJECT_STORAGE_DRIVER=minio',
+    'OBJECT_STORAGE_DRIVER=r2',
     'ANALYTICS_ENGINE=duckdb',
-    'PARQUET_STORE=minio',
+    'PARQUET_STORE=r2',
   ].forEach((token) => {
     if (!dockerfile.includes(token)) failures.push(`Production Dockerfile is missing ${token}`)
   })
@@ -90,10 +90,10 @@ function main() {
   const retiredObjectStoreDefault = `OBJECT_STORAGE_DRIVER=${'loc' + 'al'}`
   const retiredComposeObjectStoreDefault = `OBJECT_STORAGE_DRIVER: "\${OBJECT_STORAGE_DRIVER:-${'loc' + 'al'}}"`
   if (dockerfile.includes(retiredObjectStoreDefault)) {
-    failures.push('Production Dockerfile must ship MinIO storage defaults only.')
+    failures.push('Production Dockerfile must ship R2 storage defaults, with MinIO only as explicit offline mode.')
   }
   if (compose.includes(retiredComposeObjectStoreDefault)) {
-    failures.push('Production Compose must ship MinIO storage defaults only.')
+    failures.push('Production Compose must ship R2 storage defaults, with MinIO only as explicit offline mode.')
   }
   if (compose.includes('legacy-adopter:')) {
     failures.push('Production Compose must not auto-adopt loose legacy business-os-data folders.')

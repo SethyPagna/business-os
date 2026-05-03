@@ -111,7 +111,7 @@ assert(buildMetadata.includes('"hash"') || buildMetadata.includes('"buildHash"')
 const dockerReleaseScript = read(path.join(PROJECT_ROOT, 'ops', 'scripts', 'powershell', 'docker-release.ps1'))
 assert(dockerReleaseScript.includes('business-os-image.tar'), 'Docker release must publish a local portable image tar.')
 assert(dockerReleaseScript.includes('postgres.sql'), 'Docker backup must include a Postgres dump artifact.')
-assert(dockerReleaseScript.includes('minio.tgz'), 'Docker backup must include a MinIO object-store artifact.')
+assert(dockerReleaseScript.includes('objects-manifest.jsonl'), 'Docker backup must include an object-store manifest artifact.')
 
 const indexHtml = read(path.join(FRONTEND_ROOT, 'index.html'))
 const preconnectCount = (indexHtml.match(/rel=["']preconnect["']/g) || []).length

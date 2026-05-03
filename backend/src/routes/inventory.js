@@ -94,8 +94,8 @@ function appendInventoryProductFilters(query = {}) {
   if (initial && initial.toLowerCase() !== 'all') {
     const key = getInitialKey(initial)
     params.initial = key
-    if (getInitialType(key) === 'latin') where.push('upper(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
-    else where.push('substr(trim(COALESCE(p.name, "")), 1, 1) = @initial')
+    if (getInitialType(key) === 'latin') where.push("upper(substr(trim(COALESCE(p.name, '')), 1, 1)) = @initial")
+    else where.push("substr(trim(COALESCE(p.name, '')), 1, 1) = @initial")
   }
   return { where, joins, params, stockExpr }
 }

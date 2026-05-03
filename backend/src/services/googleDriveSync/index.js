@@ -21,6 +21,7 @@ const {
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
 } = require('./versioning')
+const { createFinalBackupPackage } = require('../backupPackages')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
@@ -656,6 +657,10 @@ async function runDriveSync(reason = 'manual') {
     [SETTINGS_KEYS.lastError]: '',
   })
 
+  const backupPackage = await createFinalBackupPackage({
+    destinationDir: path.join(DATA_ROOT, 'backups'),
+    actor: { userName: 'Google Drive sync' },
+  })
   const snapshot = createDataRootSnapshot()
   try {
     let mappings = getDriveSyncEntriesMap()
@@ -787,6 +792,13 @@ async function runDriveSync(reason = 'manual') {
         name: versionState.versionName,
         startedAt: versionState.startedAt,
         rotated: versionState.rotated,
+      },
+      backupPackage: {
+        packageId: backupPackage.packageId,
+        localPath: backupPackage.localPath,
+        objectPrefix: backupPackage.objectPrefix,
+        objectsCopied: backupPackage.objectsCopied,
+        objectsFailed: backupPackage.objectsFailed,
       },
       manifest,
     }

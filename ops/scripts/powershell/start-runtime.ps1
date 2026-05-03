@@ -238,7 +238,7 @@ $importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$docker
 $mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
 $databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'postgres' }
 if ($databaseDriver.Trim().ToLowerInvariant() -ne 'postgres') {
-  Fail 'Postgres/MinIO is the only supported runtime. Use Start Business OS.bat or run\docker\start.bat.'
+  Fail 'Postgres plus R2 or emergency MinIO object storage is the only supported runtime. Use Start Business OS.bat or run\docker\start.bat.'
 }
 $importWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $importWorkerReplicas))
 $mediaWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $mediaWorkerReplicas))
@@ -249,7 +249,7 @@ $env:DOCKER_CONFIG = $DockerConfig
 $env:MINIO_LICENSE_HOST_FILE = Join-Path $Root 'ops\runtime\secrets\minio.license'
 $env:CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $tokenFile
 $env:DATABASE_DRIVER = 'postgres'
-$env:OBJECT_STORAGE_DRIVER = 'minio'
+$env:OBJECT_STORAGE_DRIVER = if ($env:OBJECT_STORAGE_DRIVER) { $env:OBJECT_STORAGE_DRIVER } else { 'r2' }
 $env:BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
 $env:PUBLIC_BASE_URL = $publicUrl
 $env:CLOUDFLARE_PUBLIC_URL = $publicUrl
