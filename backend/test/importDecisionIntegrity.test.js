@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 
 const source = fs.readFileSync(path.join(__dirname, '../src/services/importJobs.js'), 'utf8')
+const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/importJobs.js'), 'utf8')
 
 assert.match(
   source,
@@ -45,6 +46,41 @@ assert.doesNotMatch(
   source,
   /finished_at\s*=\s*CASE[\s\S]*?ELSE\s+CURRENT_TIMESTAMP\s+END/,
   'bulk import cancellation must not mix text columns with raw Postgres timestamps',
+)
+assert.match(
+  source,
+  /BLOCKING_BARCODE_ISSUES[\s\S]*barcode_scientific_notation/,
+  'scientific-notation barcodes must be treated as blocking product import issues',
+)
+assert.match(
+  source,
+  /function resetImportJobForRetry/,
+  'cancelled import jobs must have an explicit retry reset path',
+)
+assert.match(
+  source,
+  /resetImportJobForRetry,/,
+  'retry reset helper must be exported for the import route',
+)
+assert.match(
+  routeSource,
+  /resetImportJobForRetry/,
+  'retry route must reset cancelled jobs before requeueing analysis',
+)
+assert.match(
+  routeSource,
+  /cancel_requested[\s\S]*409/,
+  'start route must reject cancel-requested jobs with a clear conflict response',
+)
+assert.match(
+  routeSource,
+  /cancelImportJob\(job\.id,\s*\{[\s\S]*source:\s*req\.body\?\.source/,
+  'cancel route must record the cancellation source for auditing',
+)
+assert.match(
+  routeSource,
+  /auditImportJobEvent\(.*import_job_start/s,
+  'import start must be audited with actor and job metadata',
 )
 
 console.log('PASS import decision integrity source checks')

@@ -5,7 +5,7 @@ const path = require('path')
 const express = require('express')
 const multer = require('multer')
 const { IMPORTS_PATH, IMPORT_MAX_CSV_MB, IMPORT_MAX_ZIP_MB } = require('../config')
-const { ok, err } = require('../helpers')
+const { ok, err, audit } = require('../helpers')
 const { authToken, hasPermission, routeRateLimit, getAuditActor } = require('../middleware')
 const { sanitizeOriginalFileName } = require('../fileAssets')
 const {
@@ -23,6 +23,7 @@ const {
   getQueueStatus,
   listImportJobs,
   preflightImportJob,
+  resetImportJobForRetry,
   updateImportJobDecisions,
 } = require('../services/importJobs')
 
@@ -149,6 +150,38 @@ function shouldForceDelete(req) {
   return raw === true || raw === 1 || String(raw || '').toLowerCase() === 'true' || String(raw || '') === '1'
 }
 
+function auditImportJobEvent(req, action, beforeJob, afterJob, extra = {}) {
+  const actor = getAuditActor(req, req.body || {})
+  const job = afterJob || beforeJob || {}
+  if (!job?.id) return
+  audit(
+    actor.userId,
+    actor.userName,
+    action,
+    'import_job',
+    job.id,
+    {
+      jobId: job.id,
+      jobType: job.type || beforeJob?.type || null,
+      oldStatus: beforeJob?.status || null,
+      newStatus: afterJob?.status || null,
+      oldPhase: beforeJob?.phase || null,
+      newPhase: afterJob?.phase || null,
+      cancelSource: extra.cancelSource || null,
+      source: extra.source || null,
+      fileKind: extra.fileKind || null,
+      fileName: extra.fileName || null,
+      mode: extra.mode || null,
+    },
+    {
+      tableName: 'import_jobs',
+      recordId: job.id,
+      oldValue: beforeJob ? { status: beforeJob.status, phase: beforeJob.phase, cancel_requested: beforeJob.cancel_requested } : null,
+      newValue: afterJob ? { status: afterJob.status, phase: afterJob.phase, cancel_requested: afterJob.cancel_requested } : null,
+    },
+  )
+}
+
 router.get('/queue/status', authToken, requireAnyImportPermission, (_req, res) => {
   ok(res, { queue: getQueueStatus() })
 })
@@ -169,6 +202,9 @@ router.post('/', authToken, requireImportPermission, routeRateLimit({ name: 'imp
       actor,
       policy: parsePolicy(req),
       queueDriver: getQueueStatus().driver || 'bullmq',
+    })
+    auditImportJobEvent(req, 'import_job_create', null, job, {
+      source: req.body?.source || req.body?.policy?.source || 'api',
     })
     ok(res, { job })
   } catch (error) {
@@ -239,7 +275,13 @@ router.post('/:id/csv', authToken, requireImportPermission, importUpload.single(
     const ext = path.extname(String(req.file.originalname || '')).toLowerCase()
     if (ext !== '.csv' && ext !== '.tsv') return err(res, 'Upload a CSV or TSV file')
     const file = addJobFile(job.id, req.file, 'csv', req.file.originalname)
-    ok(res, { file, job: getImportJob(job.id) })
+    const after = getImportJob(job.id)
+    auditImportJobEvent(req, 'import_job_upload', job, after, {
+      source: req.body?.source || 'api',
+      fileKind: 'csv',
+      fileName: req.file.originalname,
+    })
+    ok(res, { file, job: after })
   } catch (error) {
     err(res, error?.message || 'Failed to upload CSV')
   }
@@ -254,7 +296,13 @@ router.post('/:id/zip', authToken, requireImportPermission, importUpload.single(
     const ext = path.extname(String(req.file.originalname || '')).toLowerCase()
     if (ext !== '.zip') return err(res, 'Upload a ZIP file for images')
     const file = addJobFile(job.id, req.file, 'zip', req.file.originalname)
-    ok(res, { file, job: getImportJob(job.id) })
+    const after = getImportJob(job.id)
+    auditImportJobEvent(req, 'import_job_upload', job, after, {
+      source: req.body?.source || 'api',
+      fileKind: 'zip',
+      fileName: req.file.originalname,
+    })
+    ok(res, { file, job: after })
   } catch (error) {
     err(res, error?.message || 'Failed to upload ZIP')
   }
@@ -268,7 +316,15 @@ router.post('/:id/images', authToken, requireImportPermission, importUpload.arra
     const files = Array.isArray(req.files) ? req.files : []
     const relativePaths = parseRelativePaths(req)
     const saved = files.map((file, index) => addJobFile(job.id, file, 'image', relativePaths[index] || file.originalname))
-    ok(res, { files: saved, job: getImportJob(job.id) })
+    const after = getImportJob(job.id)
+    if (saved.length) {
+      auditImportJobEvent(req, 'import_job_upload', job, after, {
+        source: req.body?.source || 'api',
+        fileKind: 'image',
+        fileName: saved.length === 1 ? saved[0]?.original_name : `${saved.length} images`,
+      })
+    }
+    ok(res, { files: saved, job: after })
   } catch (error) {
     err(res, error?.message || 'Failed to upload images')
   }
@@ -278,11 +334,25 @@ router.post('/:id/start', authToken, requireImportPermission, routeRateLimit({ n
   try {
     const job = getJobOr404(req, res)
     if (!job) return
+    const status = String(job.status || '').toLowerCase()
+    if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
+      auditImportJobEvent(req, 'import_job_start_blocked', job, job, {
+        source: req.body?.source || 'api',
+        cancelSource: req.body?.source || 'api',
+        mode: 'analyze',
+      })
+      return err(res, 'Import was cancelled. Use Retry before starting it again.', 409)
+    }
     if (!getJobFiles(job.id, 'csv').length) return err(res, 'Upload a CSV before starting the import')
     const queued = await enqueueImportJob(job.id, { mode: 'analyze' })
+    auditImportJobEvent(req, 'import_job_start', job, queued, {
+      source: req.body?.source || 'api',
+      mode: 'analyze',
+    })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
-    err(res, error?.message || 'Failed to start import job')
+    const status = error?.code === 'import_cancelled' ? 409 : 400
+    err(res, error?.message || 'Failed to start import job', status)
   }
 })
 
@@ -291,6 +361,10 @@ router.post('/:id/approve', authToken, requireImportPermission, routeRateLimit({
     const job = getJobOr404(req, res)
     if (!job) return
     const queued = await approveImportJob(job.id)
+    auditImportJobEvent(req, 'import_job_approve', job, queued, {
+      source: req.body?.source || 'api',
+      mode: 'apply',
+    })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
     err(res, error?.message || 'Failed to approve import job')
@@ -301,7 +375,12 @@ router.post('/:id/cancel', authToken, requireImportPermission, async (req, res) 
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, { job: await cancelImportJob(job.id) })
+    const cancelled = await cancelImportJob(job.id, { source: req.body?.source || 'api' })
+    auditImportJobEvent(req, 'import_job_cancel', job, cancelled, {
+      source: req.body?.source || 'api',
+      cancelSource: req.body?.source || 'api',
+    })
+    ok(res, { job: cancelled })
   } catch (error) {
     err(res, error?.message || 'Failed to cancel import job')
   }
@@ -311,7 +390,11 @@ router.delete('/:id', authToken, requireImportPermission, async (req, res) => {
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, await deleteImportJob(job.id, { force: shouldForceDelete(req) }))
+    const result = await deleteImportJob(job.id, { force: shouldForceDelete(req), source: req.body?.source || req.query?.source || 'api' })
+    auditImportJobEvent(req, 'import_job_delete', job, null, {
+      source: req.body?.source || req.query?.source || 'api',
+    })
+    ok(res, result)
   } catch (error) {
     const status = error?.code === 'import_still_stopping' ? 409 : 400
     err(res, error?.message || 'Failed to remove import job', status)
@@ -322,7 +405,11 @@ router.post('/:id/delete', authToken, requireImportPermission, async (req, res) 
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    ok(res, await deleteImportJob(job.id, { force: shouldForceDelete(req) }))
+    const result = await deleteImportJob(job.id, { force: shouldForceDelete(req), source: req.body?.source || 'api' })
+    auditImportJobEvent(req, 'import_job_delete', job, null, {
+      source: req.body?.source || 'api',
+    })
+    ok(res, result)
   } catch (error) {
     const status = error?.code === 'import_still_stopping' ? 409 : 400
     err(res, error?.message || 'Failed to remove import job', status)
@@ -334,9 +421,17 @@ router.post('/:id/retry', authToken, requireImportPermission, async (req, res) =
     const job = getJobOr404(req, res)
     if (!job) return
     const mode = ['awaiting_review', 'approved'].includes(String(job.status || '').toLowerCase()) ? 'apply' : 'analyze'
+    const retryReady = mode === 'apply'
+      ? job
+      : resetImportJobForRetry(job.id, { mode: 'analyze' })
     const queued = mode === 'apply'
       ? await approveImportJob(job.id)
       : await enqueueImportJob(job.id, { mode: 'analyze' })
+    auditImportJobEvent(req, 'import_job_retry', job, queued, {
+      source: req.body?.source || 'api',
+      mode,
+      cancelSource: retryReady?.cancel_requested ? req.body?.source || 'api' : null,
+    })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
     err(res, error?.message || 'Failed to retry import job')

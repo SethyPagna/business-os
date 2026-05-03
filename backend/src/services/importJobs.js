@@ -307,8 +307,14 @@ function getBarcodeReviewIssue(value) {
   return ''
 }
 
+const BLOCKING_BARCODE_ISSUES = new Set([
+  'invalid_barcode',
+  'barcode_scientific_notation',
+  'barcode_too_long',
+])
+
 function isBlockingBarcodeIssue(issueType) {
-  return ['invalid_barcode', 'barcode_too_long'].includes(String(issueType || ''))
+  return BLOCKING_BARCODE_ISSUES.has(String(issueType || ''))
 }
 
 async function buildProductImportReviewState(csvFile) {
@@ -3009,6 +3015,13 @@ async function startImportWorkers({ concurrency = getImportQueueConcurrency() } 
 async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {}) {
   const normalizedMode = normalizeQueueMode(mode)
   const currentJob = getImportJob(jobId)
+  if (!currentJob) throw new Error('Import job not found')
+  const currentStatus = String(currentJob.status || '').toLowerCase()
+  if (!force && (currentJob.cancel_requested || currentStatus === 'cancelled' || currentStatus === 'cancelling')) {
+    const error = new Error('Import was cancelled. Retry the import before starting it again.')
+    error.code = 'import_cancelled'
+    throw error
+  }
   if (!force && ['running', 'queued', 'cancelling'].includes(String(currentJob?.status || '').toLowerCase())) {
     return currentJob
   }
@@ -3042,7 +3055,59 @@ async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {})
   throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
 }
 
-async function cancelImportJob(jobId) {
+function resetImportJobForRetry(jobId, { mode = 'analyze' } = {}) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const normalizedMode = normalizeQueueMode(mode)
+  const retrySummary = {
+    ...(job.summary || {}),
+    retry_count: Number(job.summary?.retry_count || 0) + 1,
+    retry_mode: normalizedMode,
+    retry_reset_at: nowIso(),
+  }
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM import_job_errors WHERE job_id = ?').run(jobId)
+    db.prepare(`
+      UPDATE import_job_files
+      SET status = 'stored',
+          error_message = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE job_id = ?
+        AND lower(status) IN ('cancelled', 'failed', 'queued_media', 'processing')
+    `).run(jobId)
+    db.prepare(`
+      UPDATE import_jobs
+      SET status = 'pending',
+          phase = ?,
+          cancel_requested = 0,
+          last_error = NULL,
+          started_at = NULL,
+          finished_at = NULL,
+          total_rows = CASE WHEN ? = 'analyze' THEN 0 ELSE total_rows END,
+          processed_rows = 0,
+          failed_rows = 0,
+          total_images = CASE WHEN ? = 'analyze' THEN 0 ELSE total_images END,
+          processed_images = 0,
+          failed_images = 0,
+          warning_count = 0,
+          summary_json = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      normalizedMode === 'apply' ? 'retry_apply_ready' : 'retry_analyze_ready',
+      normalizedMode,
+      normalizedMode,
+      stringify(retrySummary),
+      jobId,
+    )
+  })()
+
+  broadcast('runtime')
+  return getImportJob(jobId)
+}
+
+async function cancelImportJob(jobId, _options = {}) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
   const status = String(job.status || '').toLowerCase()
@@ -3281,6 +3346,7 @@ module.exports = {
   preflightImportJob,
   processImportJob,
   recoverImportJobs,
+  resetImportJobForRetry,
   startImportWorkers,
   updateImportJobDecisions,
   updateJob,

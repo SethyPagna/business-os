@@ -148,13 +148,18 @@ function DetailRow({ label, value, mono }) {
 }
 
 export default function AuditLog() {
-  const { t } = useApp()
+  const { t, user, hasPermission } = useApp()
   const isActive = useIsPageActive('audit_log')
   const [logs, setLogs] = useState([])
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
+  const [userFilter, setUserFilter] = useState('all')
+  const [auditUsers, setAuditUsers] = useState([])
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalLogs, setTotalLogs] = useState(0)
   const [groupMode, setGroupMode] = useState('time')
   const [sortDirection, setSortDirection] = useState('desc')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
@@ -168,6 +173,11 @@ export default function AuditLog() {
   const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
   const aliveRef = useRef(true)
+  const isAdmin = useMemo(() => {
+    const roleCode = String(user?.role_code || '').toLowerCase()
+    const username = String(user?.username || '').toLowerCase()
+    return username === 'admin' || roleCode === 'admin' || hasPermission?.('all')
+  }, [hasPermission, user])
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
   const actionLabels = useMemo(() => ({
@@ -226,6 +236,25 @@ export default function AuditLog() {
     return ACTION_COLOR_CLASS[String(action).toLowerCase()] || DEFAULT_ACTION_CLASS
   }, [])
 
+  const auditDateRange = useMemo(() => {
+    if (yearFilter === 'all') return {}
+    const year = Number(yearFilter)
+    if (!Number.isFinite(year)) return {}
+    const month = monthFilter !== 'all' ? Number(monthFilter) : null
+    if (month && Number.isFinite(month)) {
+      const start = new Date(Date.UTC(year, month - 1, 1))
+      const end = new Date(Date.UTC(year, month, 0))
+      return {
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+      }
+    }
+    return {
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`,
+    }
+  }, [monthFilter, yearFilter])
+
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent && aliveRef.current) {
@@ -239,9 +268,20 @@ export default function AuditLog() {
       }, 15000)
     }
     try {
-      const data = await withLoaderTimeout(() => window.api.getAuditLogs(), 'Audit log')
+      const params = {
+        page,
+        pageSize,
+        search: search.trim() || undefined,
+        action: actionFilter !== 'all' ? actionFilter : undefined,
+        userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
+        ...auditDateRange,
+      }
+      const data = await withLoaderTimeout(() => window.api.getAuditLogs(params), 'Audit log')
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setLogs(Array.isArray(data) ? data : [])
+      const rows = Array.isArray(data) ? data : (data?.items || [])
+      setLogs(rows)
+      setTotalLogs(Number(Array.isArray(data) ? rows.length : data?.total || rows.length))
+      setAuditUsers(Array.isArray(data?.filters?.users) ? data.filters.users : [])
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       console.error('Failed to load audit logs:', err)
@@ -258,7 +298,7 @@ export default function AuditLog() {
       loadedOnceRef.current = true
       if (!silent) setLoading(false)
     }
-  }, [])
+  }, [actionFilter, auditDateRange, isAdmin, page, pageSize, search, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -279,6 +319,10 @@ export default function AuditLog() {
     pageLoadRequestedRef.current = true
     load(false)
   }, [isActive, load])
+
+  useEffect(() => {
+    setPage(1)
+  }, [actionFilter, monthFilter, pageSize, search, userFilter, yearFilter])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -372,6 +416,7 @@ export default function AuditLog() {
     () => visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)),
     [visibleLogs],
   )
+  const totalPages = useMemo(() => Math.max(1, Math.ceil((Number(totalLogs) || 0) / pageSize)), [pageSize, totalLogs])
 
   const selectedLogs = useMemo(
     () => visibleLogs.filter((log) => selectedIds.has(Number(log.id))),
@@ -491,6 +536,22 @@ export default function AuditLog() {
         })),
       ],
     },
+    isAdmin ? {
+      id: 'user',
+      label: t('user') || 'User',
+      options: [
+        { id: 'all', label: t('all_users') || 'All users', active: userFilter === 'all', onClick: () => setUserFilter('all') },
+        ...auditUsers.map((auditUser) => {
+          const id = String(auditUser?.id || '')
+          return {
+            id: `user-${id}`,
+            label: auditUser?.name || `User ${id}`,
+            active: userFilter === id,
+            onClick: () => setUserFilter(userFilter === id ? 'all' : id),
+          }
+        }).filter((option) => option.id !== 'user-'),
+      ],
+    } : null,
     {
       id: 'sort',
       label: copy('sort', 'Sort'),
@@ -507,12 +568,26 @@ export default function AuditLog() {
         { id: 'group-time-action', label: copy('group_time_action', 'Time + action'), active: groupMode === 'time+action', onClick: () => setGroupMode('time+action') },
       ],
     },
-  ]), [actionFilter, actionOptions, availableYears, copy, groupMode, monthFilter, sortDirection, t, yearFilter])
+  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length,
-    [actionFilter, groupMode, monthFilter, sortDirection, yearFilter],
+    () => [yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length,
+    [actionFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
   )
+
+  const clearOldAuditLogs = useCallback(async () => {
+    if (!isAdmin) return
+    if (!window.confirm('Clear audit logs older than 30 days?')) return
+    try {
+      setLoading(true)
+      await window.api.deleteAuditLogsRetention(30)
+      await load(true)
+    } catch (err) {
+      setError(err?.message || 'Failed to clear old audit logs.')
+    } finally {
+      setLoading(false)
+    }
+  }, [isAdmin, load])
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
@@ -526,6 +601,12 @@ export default function AuditLog() {
             <RefreshCw className="h-4 w-4" />
             {copy('refresh', 'Refresh')}
           </button>
+          {isAdmin ? (
+            <button onClick={clearOldAuditLogs} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
+              <X className="h-4 w-4" />
+              {copy('clear_30_days', 'Clear 30d')}
+            </button>
+          ) : null}
           <ExportMenu label={copy('export', 'Export')} items={exportItems} compact />
         </div>
       </div>
@@ -551,11 +632,22 @@ export default function AuditLog() {
             setYearFilter('all')
             setMonthFilter('all')
             setActionFilter('all')
+            setUserFilter('all')
             setGroupMode('time')
             setSortDirection('desc')
           }}
           compact
         />
+        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <span>{t('rows') || 'Rows'}</span>
+          <select
+            className="input h-9 w-20 py-1 text-xs"
+            value={pageSize}
+            onChange={(event) => setPageSize(Number(event.target.value) || 50)}
+          >
+            {[50, 100, 200].map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+        </label>
       </div>
 
       {selectedLogs.length > 0 ? (
@@ -715,8 +807,16 @@ export default function AuditLog() {
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          <span>{visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
-          <span>{t('click_row_details') || 'Click a row for details'}</span>
+          <span>{visibleLogs.length} / {totalLogs || visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+              {t('previous') || 'Previous'}
+            </button>
+            <span>{page} / {totalPages}</span>
+            <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+              {t('next') || 'Next'}
+            </button>
+          </div>
         </div>
       </div>
 

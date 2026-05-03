@@ -107,10 +107,54 @@ await runTest('write dedupe clears after settle and keeps different writes separ
   }
 })
 
+await runTest('GET, HEAD, and OPTIONS requests never serialize a request body', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = (...args) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }
+
+  try {
+    await apiFetch('GET', '/api/system/integration-doctor', null, 1000)
+    await apiFetch('HEAD', '/api/health', { unsafe: true }, 1000)
+    await apiFetch('OPTIONS', '/api/products', { unsafe: true }, 1000)
+
+    for (const [, init] of calls) {
+      assert.ok(!Object.prototype.hasOwnProperty.call(init, 'body') || init.body === undefined)
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const block = source.match(/export async function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
+  assert.match(block, /apiFetch\('GET',\s*`\/api\/system\/integration-doctor\$\{suffix\}`,\s*undefined,/)
+  assert.doesNotMatch(block, /apiFetch\('GET'[\s\S]*,\s*null\s*,/)
+  assert.doesNotMatch(block, /\n\s*true,\s*\n\s*\)/)
+})
+
 await runTest('import job delete prefers canonical DELETE route with legacy fallback', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   assert.match(source, /deleteImportJob\s*=\s*\(id,[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{encodedId\}/)
   assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
+})
+
+await runTest('paged audit and user-attributed activity APIs expose user filters', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(source, /getAuditLogs\s*=\s*\(params\s*=\s*\{\}\)/)
+  assert.match(source, /\/api\/system\/audit-logs\$\{q \? `\?\$\{q\}` : ''\}/)
+  assert.match(source, /getActionHistory\s*=\s*\([^)]*params\s*=\s*\{\}/)
+  assert.match(source, /getInventoryMovements\s*=\s*\([^)]*userId/)
+  assert.match(source, /getSales\s*=\s*\(params\)/)
 })
 
 await runTest('empty local mirrors are not treated as usable server read fallback data', () => {

@@ -778,10 +778,14 @@ export const getImportJobReview = (id, params = {}) => {
 export const updateImportJobDecisions = (id, decisions = {}) =>
   route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, { decisions }), null, true)
 export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, {}), null, true)
-export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
-export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
-export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
-export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/retry`, {}), null, true)
+export const startImportJob = (id, options = {}) =>
+  route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/start`, { source: options.source || 'ui' }), null, true)
+export const approveImportJob = (id, options = {}) =>
+  route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/approve`, { source: options.source || 'ui' }), null, true)
+export const cancelImportJob = (id, options = {}) =>
+  route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/cancel`, { source: options.source || 'ui' }), null, true)
+export const retryImportJob = (id, options = {}) =>
+  route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/retry`, { source: options.source || 'ui' }), null, true)
 export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${id}`, async () => {
   const encodedId = encodeURIComponent(id)
   const force = options.force ? '?force=1' : ''
@@ -1028,8 +1032,10 @@ export { getSyncServerUrl, getAuthSessionToken }
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
-export const getActionHistory = (scope = 'global', limit = 3) =>
-  route(`actionHistory:get:${scope}:${limit}`, () => apiFetch('GET', `/api/action-history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit)}`), () => ({ items: [] }))
+export const getActionHistory = (scope = 'global', limit = 3, params = {}) => {
+  const query = new URLSearchParams(Object.entries({ scope, limit, ...(params || {}) }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`actionHistory:get:${query}`, () => apiFetch('GET', `/api/action-history?${query}`), () => ({ items: [] }))
+}
 export const createActionHistory = payload =>
   route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
 export const updateActionHistory = (id, payload) =>
@@ -1043,7 +1049,10 @@ export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
-export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
+export const getInventoryMovements = ({ branchId, userId } = {}, limit) => {
+  const q = new URLSearchParams(Object.entries({ limit: limit || 500, branchId, userId }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
+}
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
@@ -1159,7 +1168,24 @@ export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) =
 export const deleteCustomRow    = ({ tableName, id, payload })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`, payload),                  null, true)
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray(), mirrorTable('audit_logs'))
+export const getAuditLogs = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return routeMirrored(
+    `audit_log:get:${q}`,
+    () => apiFetch('GET', `/api/system/audit-logs${q ? `?${q}` : ''}`),
+    async () => {
+      const rows = await dexieDb.audit_logs.orderBy('created_at').reverse().limit(params?.pageSize || 50).toArray()
+      return { items: rows, total: rows.length, page: 1, pageSize: rows.length || Number(params?.pageSize || 50), totalPages: 1, filters: { users: [] } }
+    },
+    async (result) => {
+      const rows = Array.isArray(result) ? result : (result?.items || [])
+      return mirrorTable('audit_logs')(rows)
+    },
+  )
+}
+
+export const deleteAuditLogsRetention = (olderThanDays = 30) =>
+  route('audit_log:retention:delete', () => apiFetch('DELETE', `/api/system/audit-logs/retention?olderThanDays=${encodeURIComponent(olderThanDays)}&confirm=1`, undefined), null, true)
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 function wait(ms) {
@@ -1211,9 +1237,8 @@ export async function getIntegrationDoctor(options = {}) {
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return route(
     'system:integrationDoctor',
-    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, null, SYNC.REQUEST_TIMEOUT_MS),
-    null,
-    true,
+    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, undefined, SYNC.REQUEST_TIMEOUT_MS),
+    undefined,
   )
 }
 

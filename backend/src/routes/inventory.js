@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
@@ -691,18 +691,25 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
 // GET /api/inventory/movements
 router.get('/movements', authToken, requirePermission('inventory'), (req, res) => {
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
-  let rows
+  const userId = req.query.userId ? String(req.query.userId).trim() : ''
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '1000', 10) || 1000, 1), 1000)
+  const where = []
+  const params = []
   if (branchId) {
-    rows = db.prepare(`
-      SELECT * FROM inventory_movements WHERE branch_id = ?
-      ORDER BY created_at DESC LIMIT 1000
-    `).all(branchId)
-  } else {
-    rows = db.prepare(`
-      SELECT * FROM inventory_movements
-      ORDER BY created_at DESC LIMIT 1000
-    `).all()
+    where.push('branch_id = ?')
+    params.push(branchId)
   }
+  if (userId) {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for movement user filters.', 403)
+    where.push('user_id = ?')
+    params.push(parseInt(userId, 10) || userId)
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const rows = db.prepare(`
+    SELECT * FROM inventory_movements
+    ${whereSql}
+    ORDER BY created_at DESC LIMIT ?
+  `).all(...params, limit)
   res.json(rows)
 })
 

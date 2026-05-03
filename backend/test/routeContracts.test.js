@@ -72,6 +72,33 @@ runTest('system router registers non-blocking job and backup routes', () => {
   assert.ok(paths.includes('/backups/:id/restore'), 'missing /api/system/backups/:id/restore')
 })
 
+runTest('system router exposes paged audit logs and retention cleanup', () => {
+  const router = require('../src/routes/system')
+  const paths = getRoutePaths(router)
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  assert.ok(paths.includes('/audit-logs'), 'missing /api/system/audit-logs')
+  assert.ok(paths.includes('/audit-logs/retention'), 'missing /api/system/audit-logs/retention')
+  assert.match(source, /COUNT\(\*\)[\s\S]*FROM audit_logs/)
+  assert.match(source, /pageSize/)
+  assert.match(source, /userId/)
+  assert.match(source, /isAdminControlUser/)
+  assert.match(source, /olderThanDays/)
+})
+
+runTest('activity routes include admin-only user filters for attribution review', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  const inventorySource = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  const actionHistorySource = fs.readFileSync(path.join(__dirname, '../src/routes/actionHistory.js'), 'utf8')
+  assert.match(salesSource, /cashier_id\s*=\s*\?/)
+  assert.match(salesSource, /isAdminControlUser/)
+  assert.match(inventorySource, /user_id\s*=\s*\?/)
+  assert.match(inventorySource, /isAdminControlUser/)
+  assert.match(actionHistorySource, /created_by_id\s*=\s*\?/)
+  assert.match(actionHistorySource, /isAdminControlUser/)
+})
+
 runTest('server health route exposes runtime driver diagnostics', () => {
   const source = require('fs').readFileSync(require('path').join(__dirname, '../server.js'), 'utf8')
   assert.match(source, /drivers:\s*\{/)

@@ -25,6 +25,7 @@ The release folder is complete when it contains `images\business-os-image.tar`. 
 - `rotate-cloudflare.bat` rotates the Cloudflare Tunnel token after a secret leak.
 
 Every command keeps the window open and prints the next step.
+Before merging or shipping a release, run `doctor.bat` and confirm the Docker app container reports healthy.
 
 ## Data Mode
 
@@ -37,5 +38,6 @@ Live app data uses Postgres for business records and R2 for files/images/backups
 - Google Drive sync uses the OAuth client named `Business-os Drive` with callbacks under `/api/system/drive-sync/oauth/callback` for admin, public, and localhost URLs.
 - Supabase Google/Gmail login uses the separate OAuth client named `business-os` and the Supabase callback URL.
 - The Backup page Integration Doctor verifies Postgres, Redis jobs/cache, object storage, Drive sync, Supabase Auth, DuckDB/Parquet, and backup package format with all secret values redacted.
+- Integration Doctor is a read-only check. It should not send request bodies with GET/HEAD/OPTIONS calls and should not display write-failed banners for health checks.
 
 The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.

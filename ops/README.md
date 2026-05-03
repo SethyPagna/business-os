@@ -18,4 +18,5 @@
 - Keep secrets under `ops\runtime\secrets\`; never commit them.
 - Keep normal user instructions in the root `README.md`.
 - Keep manual Docker/Cloudflare commands out of beginner docs unless they are explicitly support-only.
+- Keep route/runtime docs current when import jobs, backup diagnostics, audit retention, permissions, Docker release checks, or receipt rendering behavior changes.
 - Archive questionable old files first, then delete only after `git grep` and verification prove they are unused.

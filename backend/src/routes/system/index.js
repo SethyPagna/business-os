@@ -55,7 +55,7 @@ const {
   buildBackupSummary,
 } = require('../../backupSchema')
 const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../../helpers')
-const { authToken, requirePermission, requireAnyPermission, getAuditActor } = require('../../middleware')
+const { authToken, requirePermission, requireAnyPermission, getAuditActor, isAdminControlUser } = require('../../middleware')
 const { checkRateLimit } = require('../../security')
 const { classifyRequestAccess } = require('../../accessControl')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../../organizationContext')
@@ -500,8 +500,89 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = 
 }
 
 // ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-router.get('/audit-logs', authToken, (req, res) => {
-  res.json(db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all())
+router.get('/audit-logs', authToken, requirePermission('audit_log'), (req, res) => {
+  try {
+    const adminUser = isAdminControlUser(req.user)
+    const page = Math.max(1, parseInt(req.query?.page || '1', 10) || 1)
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query?.pageSize || req.query?.limit || '50', 10) || 50))
+    const offset = (page - 1) * pageSize
+    const params = []
+    const where = []
+    const action = String(req.query?.action || '').trim()
+    const entity = String(req.query?.entity || '').trim()
+    const search = String(req.query?.search || req.query?.q || '').trim()
+    const startDate = String(req.query?.startDate || '').trim()
+    const endDate = String(req.query?.endDate || '').trim()
+    const userId = String(req.query?.userId || '').trim()
+
+    if (action) { where.push('action = ?'); params.push(action) }
+    if (entity) { where.push('entity = ?'); params.push(entity) }
+    if (startDate) { where.push('date(created_at) >= ?'); params.push(startDate) }
+    if (endDate) { where.push('date(created_at) <= ?'); params.push(endDate) }
+    if (userId) {
+      if (!adminUser) return err(res, 'Administrator access required for user audit filters.', 403)
+      where.push('user_id = ?')
+      params.push(parseInt(userId, 10) || userId)
+    }
+    if (search) {
+      where.push(`lower(coalesce(user_name, '') || ' ' || coalesce(action, '') || ' ' || coalesce(entity, '') || ' ' || coalesce(entity_id::text, '') || ' ' || coalesce(details, '')) LIKE ?`)
+      params.push(`%${search.toLowerCase()}%`)
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM audit_logs ${whereSql}`).get(...params)?.total || 0)
+    const items = db.prepare(`
+      SELECT *
+      FROM audit_logs
+      ${whereSql}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, pageSize, offset)
+    const users = adminUser
+      ? db.prepare(`
+          SELECT user_id AS id, COALESCE(NULLIF(user_name, ''), 'User ' || user_id) AS name
+          FROM audit_logs
+          WHERE user_id IS NOT NULL
+          GROUP BY user_id, user_name
+          ORDER BY name ASC
+          LIMIT 500
+        `).all()
+      : []
+
+    ok(res, {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      filters: { users },
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load audit logs')
+  }
+})
+
+router.delete('/audit-logs/retention', authToken, requirePermission('audit_log'), (req, res) => {
+  try {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required.', 403)
+    const olderThanDays = Math.max(1, parseInt(req.query?.olderThanDays || req.body?.olderThanDays || '30', 10) || 30)
+    const confirmed = req.body?.confirm === true
+      || String(req.query?.confirm || '').toLowerCase() === 'true'
+      || String(req.query?.confirm || '') === '1'
+    if (!confirmed) return err(res, 'Confirmation is required to clear old audit logs.', 400)
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000)
+    const cutoffDate = cutoff.toISOString().slice(0, 10)
+    const result = db.prepare('DELETE FROM audit_logs WHERE date(created_at) < ?').run(cutoffDate)
+    const actor = getAuditActor(req, req.body || {})
+    audit(actor.userId, actor.userName, 'audit_log_retention_delete', 'audit_log', null, {
+      olderThanDays,
+      cutoffDate,
+      deleted: result?.changes || 0,
+    })
+    ok(res, { olderThanDays, cutoffDate, deleted: result?.changes || 0 })
+  } catch (error) {
+    err(res, error?.message || 'Failed to clear old audit logs')
+  }
 })
 
 router.get('/debug/log', authToken, (req, res) => {

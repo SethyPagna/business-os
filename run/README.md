@@ -28,6 +28,10 @@ These are for the local Docker release or support:
 - `run\docker\doctor.bat` diagnoses Docker, ports, local image bundles, Cloudflare, database, workers, and storage.
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.
 
+## Release Verification
+
+Before merging a release branch, run the backend utility suite, frontend utility suite, production frontend build, frontend i18n/UI/performance verifiers, backend integrity verifier, Docker release doctor, and local/public health checks. The Docker release is ready only when the app container is healthy and Postgres, Redis queue/cache, R2 object storage, BullMQ, DuckDB/Parquet, and Cloudflare diagnostics report clean status.
+
 ## Support-Only / Legacy
 
 - `run\cloudflare-origin.bat` helps switch Cloudflare origin style.

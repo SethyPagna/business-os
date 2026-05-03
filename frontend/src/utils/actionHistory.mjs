@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useApp } from '../AppContext.jsx'
 
 function normalizeEntry(entry = {}, index = 0) {
   return {
@@ -14,23 +15,47 @@ function normalizeEntry(entry = {}, index = 0) {
 }
 
 export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
+  const { user } = useApp()
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])
   const [serverItems, setServerItems] = useState([])
   const [busy, setBusy] = useState('')
+  const [userFilter, setUserFilter] = useState('all')
+  const [userOptions, setUserOptions] = useState([])
+  const isAdmin = useMemo(() => {
+    const roleCode = String(user?.role_code || '').toLowerCase()
+    const username = String(user?.username || '').toLowerCase()
+    let permissions = user?.permissions || {}
+    try {
+      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
+    } catch {
+      permissions = {}
+    }
+    return username === 'admin' || roleCode === 'admin' || !!permissions.all
+  }, [user])
 
   const refreshServerItems = useCallback(() => {
     if (typeof window === 'undefined' || !window.api?.getActionHistory) return
-    window.api.getActionHistory(scope, Math.max(3, limit))
+    window.api.getActionHistory(scope, Math.max(3, limit), {
+      all: isAdmin ? 1 : undefined,
+      userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
+    })
       .then((result) => {
         setServerItems(Array.isArray(result?.items) ? result.items : [])
       })
       .catch(() => {})
-  }, [limit, scope])
+  }, [isAdmin, limit, scope, userFilter])
 
   useEffect(() => {
     refreshServerItems()
   }, [refreshServerItems])
+
+  useEffect(() => {
+    if (!isAdmin || typeof window === 'undefined' || !window.api?.getUsers) return
+    window.api.getUsers()
+      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => setUserOptions([]))
+  }, [isAdmin])
 
   const pushAction = useCallback((entry) => {
     const nextEntry = normalizeEntry(entry)
@@ -113,9 +138,13 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
     undoItems: undoStack,
     redoItems: redoStack,
     serverItems,
+    isAdmin,
+    userFilter,
+    setUserFilter,
+    userOptions,
     refreshServerItems,
     pushAction,
     undo,
     redo,
-  }), [busy, pushAction, redo, redoStack, refreshServerItems, serverItems, undo, undoStack])
+  }), [busy, isAdmin, pushAction, redo, redoStack, refreshServerItems, serverItems, undo, undoStack, userFilter, userOptions])
 }

@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
-import { analyzeProductImportText } from './productImportPlanner.mjs'
+import {
+  analyzeProductImportText,
+  getProductImportBarcodeIssue,
+  isBlockingProductImportIssue,
+} from './productImportPlanner.mjs'
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
@@ -194,6 +198,23 @@ function hasPriceReviewIssue(row = {}, existing = null, samePricing = true) {
   return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
 }
 
+function getProductImportIssueLabel(issueType) {
+  if (issueType === 'barcode_scientific_notation') return 'Barcode exported as scientific notation'
+  if (issueType === 'barcode_too_long') return 'Barcode too long'
+  if (issueType === 'invalid_barcode') return 'Invalid barcode'
+  if (issueType === 'barcode_text') return 'Barcode text'
+  if (issueType === 'missing_name') return 'Missing name'
+  return String(issueType || '').replaceAll('_', ' ')
+}
+
+function getProductImportIssueHint(issueType) {
+  if (issueType === 'barcode_scientific_notation') return 'Edit this barcode, clear it, or re-export the CSV with the barcode column formatted as text. Scientific notation cannot be applied safely.'
+  if (issueType === 'barcode_too_long') return 'Shorten this barcode or clear it before importing.'
+  if (issueType === 'invalid_barcode') return 'Remove invalid control characters or clear this barcode before importing.'
+  if (issueType === 'barcode_text') return 'This barcode contains text or symbols. It can be kept if that is intentional.'
+  return 'Review this row before importing.'
+}
+
 function valuesDiffer(left, right) {
   return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
 }
@@ -319,8 +340,29 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [currentJob, setCurrentJob] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
+  const cancelRequestedRef = useRef(false)
 
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+
+  const throwIfImportCancelled = () => {
+    if (!cancelRequestedRef.current) return
+    const error = new Error(T('import_cancelled', 'Import cancelled.'))
+    error.code = 'import_cancel_requested'
+    throw error
+  }
+
+  const setCancelledResult = (jobId = currentJob?.id) => {
+    setResult({
+      imported: 0,
+      updated: 0,
+      queued: 0,
+      jobId,
+      cancelled: true,
+      errors: [],
+      message: T('import_cancelled', 'Import cancelled.'),
+    })
+    setStep(3)
+  }
 
   const resetCsvState = () => {
     setCsvData(null)
@@ -340,6 +382,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setFieldRules({})
     setZipFile(null)
     setCurrentJob(null)
+    cancelRequestedRef.current = false
     setStep(1)
   }
 
@@ -431,8 +474,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleCancelCurrentJob = async () => {
     if (!currentJob?.id) return
+    if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
+      if (!confirmed) return
+    }
+    cancelRequestedRef.current = true
     try {
-      const payload = await window.api.cancelImportJob(currentJob.id)
+      const payload = await window.api.cancelImportJob(currentJob.id, { source: 'products_modal' })
       setCurrentJob(payload?.job || payload || currentJob)
       setAnalysisProgress((current) => ({
         progress: current?.progress || 0,
@@ -447,8 +495,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleImageOnlyImport = async () => {
     if (!Object.keys(imageFiles).length && !zipFile) return
+    cancelRequestedRef.current = false
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
+    let jobId = null
     try {
       const created = await window.api.createImportJob({
         type: 'products',
@@ -456,17 +506,20 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       })
       const job = created?.job || created
       setCurrentJob(job)
-      const jobId = job?.id
+      jobId = job?.id
       if (!jobId) throw new Error('Import job was not created')
+      throwIfImportCancelled()
 
       await window.api.uploadImportJobCsv({
         jobId,
         text: buildImageOnlyCsv(imageFiles),
         fileName: 'image-only-import.csv',
       })
+      throwIfImportCancelled()
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await window.api.uploadImportJobZip({ jobId, file: zipFile })
+        throwIfImportCancelled()
       }
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
@@ -475,8 +528,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           files: browserImages,
           onProgress: setAnalysisProgress,
         })
+        throwIfImportCancelled()
       }
-      await window.api.startImportJob(jobId)
+      throwIfImportCancelled()
+      await window.api.startImportJob(jobId, { source: 'products_modal' })
+      throwIfImportCancelled()
       setResult({
         imported: 0,
         updated: 0,
@@ -489,8 +545,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
-      setStep(3)
+      if (error?.code === 'import_cancel_requested') {
+        setCancelledResult(jobId)
+      } else {
+        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setStep(3)
+      }
     } finally {
       setLoading(false)
       setAnalysisProgress(null)
@@ -556,8 +616,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleImport = async () => {
     if (!csvData?.content) return
+    cancelRequestedRef.current = false
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
+    let jobId = null
     try {
       const created = await window.api.createImportJob({
         type: 'products',
@@ -568,17 +630,20 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       })
       const job = created?.job || created
       setCurrentJob(job)
-      const jobId = job?.id
+      jobId = job?.id
       if (!jobId) throw new Error('Import job was not created')
+      throwIfImportCancelled()
 
       await window.api.uploadImportJobCsv({
         jobId,
         text: buildCsvForImportJob(),
         fileName: csvData?.name || 'products-import.csv',
       })
+      throwIfImportCancelled()
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await window.api.uploadImportJobZip({ jobId, file: zipFile })
+        throwIfImportCancelled()
       }
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
@@ -587,8 +652,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           files: browserImages,
           onProgress: setAnalysisProgress,
         })
+        throwIfImportCancelled()
       }
-      await window.api.startImportJob(jobId)
+      throwIfImportCancelled()
+      await window.api.startImportJob(jobId, { source: 'products_modal' })
+      throwIfImportCancelled()
       setResult({
         imported: 0,
         updated: 0,
@@ -600,8 +668,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
-      setStep(3)
+      if (error?.code === 'import_cancel_requested') {
+        setCancelledResult(jobId)
+      } else {
+        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setStep(3)
+      }
     } finally {
       setLoading(false)
       setAnalysisProgress(null)
@@ -609,7 +681,24 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }
 
   const pendingAsk = useMemo(() => conflicts.filter((item) => decisions[item.index] === 'ask'), [conflicts, decisions])
-  const allDecided = pendingAsk.length === 0
+  const blockingIssueEntries = useMemo(() => conflicts.map((entry) => {
+    const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
+    const editedRow = {
+      ...(entry.row || {}),
+      ...(rowOverrides[index] || {}),
+      sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? entry.row?.sku ?? '',
+      barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? entry.row?.barcode ?? '',
+    }
+    const issue = getProductImportBarcodeIssue(editedRow.barcode)
+    return {
+      index,
+      rowNumber: editedRow._rowNumber || index + 2,
+      barcode: editedRow.barcode || '',
+      issue,
+    }
+  }).filter((entry) => isBlockingProductImportIssue(entry.issue)), [conflicts, identifierOverrides, rowOverrides])
+  const blockingIssueCount = blockingIssueEntries.length
+  const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
   const conflictGroups = useMemo(() => ({
@@ -936,7 +1025,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   </p>
                 {visibleConflicts.map((entry) => {
                   const { row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages } = entry
-                  const editedRow = { ...(row || {}), ...(rowOverrides[index] || {}) }
+                  const editedRow = {
+                    ...(row || {}),
+                    ...(rowOverrides[index] || {}),
+                    sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? row?.sku ?? '',
+                    barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? row?.barcode ?? '',
+                  }
                   const updateEditedRow = (field, value) => {
                     setRowOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
                     if (field === 'sku' || field === 'barcode') {
@@ -949,8 +1043,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   const imageDecision = imageDecisions[index] || row?.image_conflict_mode || 'keep_existing'
                   const matchedLibraryImage = incomingImages.length ? '' : findImageReferenceForRow(editedRow, imageFiles)
                   const rowIncomingImages = incomingImages.length ? incomingImages : (matchedLibraryImage ? [matchedLibraryImage] : [])
+                  const liveBarcodeIssue = getProductImportBarcodeIssue(editedRow.barcode)
+                  const liveBarcodeBlocking = isBlockingProductImportIssue(liveBarcodeIssue)
                   return (
-                    <div key={index} className={`rounded-xl border p-2 text-sm ${decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
+                    <div key={index} className={`rounded-xl border p-2 text-sm ${liveBarcodeBlocking ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
                         <div className="min-w-[12rem] flex-1">
@@ -962,6 +1058,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                             {existing ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Matched: {existing.name}</span> : null}
                             {rowIncomingImages.length ? <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Image ready</span> : null}
                             {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
+                            {liveBarcodeIssue ? (
+                              <span className={`rounded px-1.5 py-0.5 ${liveBarcodeBlocking ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
+                                {getProductImportIssueLabel(liveBarcodeIssue)}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                         <select
@@ -1048,6 +1149,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                           </div>
                         ) : null}
 
+                        {liveBarcodeIssue ? (
+                          <div className={`mt-2 rounded-lg border p-2 text-xs ${liveBarcodeBlocking ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'}`}>
+                            <div className="font-semibold">{getProductImportIssueLabel(liveBarcodeIssue)}</div>
+                            <div>{getProductImportIssueHint(liveBarcodeIssue)}</div>
+                          </div>
+                        ) : null}
+
                         {rowIncomingImages.length ? (
                           <div className="mt-2 rounded-lg bg-white p-2 text-xs text-gray-500 dark:bg-slate-950/50 dark:text-gray-400">
                             <div>Incoming images: {rowIncomingImages.join(', ')}</div>
@@ -1076,6 +1184,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
             </div>
           </div>
+
+          {blockingIssueCount ? (
+            <p className="rounded-lg bg-red-50 p-2 text-xs text-red-600 dark:bg-red-950/30 dark:text-red-300">
+              {T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}
+              {' '}
+              {blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${getProductImportIssueLabel(entry.issue)}`).join('; ')}
+            </p>
+          ) : null}
 
           {pendingAsk.length ? (
             <p className="rounded-lg bg-yellow-50 p-2 text-xs text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400">

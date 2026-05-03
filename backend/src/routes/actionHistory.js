@@ -105,21 +105,32 @@ router.get('/', authToken, (req, res) => {
     const scope = normalizeText(req.query.scope, 'global', 80) || 'global'
     const limit = normalizeLimit(req.query.limit)
     const includeAll = ['1', 'true', 'yes'].includes(String(req.query.all || '').trim().toLowerCase())
-    const rows = canReadAllHistory(req.user, includeAll)
-      ? db.prepare(`
+    const userId = String(req.query.userId || '').trim()
+    if (userId && !isAdminControlUser(req.user)) return err(res, 'Administrator access required for action user filters.', 403)
+    let rows
+    if (canReadAllHistory(req.user, includeAll)) {
+      const where = ['scope = ?']
+      const params = [scope]
+      if (userId) {
+        where.push('created_by_id = ?')
+        params.push(parseInt(userId, 10) || userId)
+      }
+      rows = db.prepare(`
         SELECT *
         FROM action_history
-        WHERE scope = ?
+        WHERE ${where.join(' AND ')}
         ORDER BY updated_at DESC, id DESC
         LIMIT ?
-      `).all(scope, limit)
-      : db.prepare(`
+      `).all(...params, limit)
+    } else {
+      rows = db.prepare(`
         SELECT *
         FROM action_history
         WHERE scope = ? AND created_by_id = ?
         ORDER BY updated_at DESC, id DESC
         LIMIT ?
       `).all(scope, req.user?.id || 0, limit)
+    }
     ok(res, { items: rows.map(mapRow) })
   } catch (error) {
     err(res, error.message || 'Failed to load action history')

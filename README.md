@@ -93,8 +93,17 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 - Workers stay idle when no large action exists and wake automatically when jobs are queued.
 - CSV/TSV parsing preserves Khmer text and rounds money/percent values upward to two decimals.
 - Product conflicts are grouped by same name, same SKU/barcode, and errors/issues.
+- Product barcodes exported as spreadsheet scientific notation, such as `8.19265E+11`, are blocked during review until the barcode is edited, cleared, or the CSV is re-exported with barcode cells stored as text.
 - Imports wait for review before applying large changes.
-- Cancel, retry, failed-row download, remove, undo, and redo are available where supported.
+- Cancel, retry, failed-row download, remove, undo, and redo are available where supported. Cancelling during upload/start stops the start sequence, and retry resets cancelled jobs before queueing analysis again.
+- Import create, upload, start, cancel, retry, approve, and delete actions are recorded in the audit log with actor, job type, status changes, and cancellation source.
+
+## Audit, Activity, And Receipts
+
+- Audit Log is server-paginated with default 50 rows per page and a 200-row maximum.
+- Admin users can filter Audit Log, Sales, Inventory Movements, and product action history by user. Non-admin users keep their normal permission and ownership limits.
+- Admin users can clear audit entries older than 30 days from the Audit Log retention action after confirmation.
+- Receipt preview keeps the strict Content Security Policy: print, save-as-PDF, and close actions are bound by application code instead of inline scripts, and bilingual 58/80mm receipts are clamped to the preview viewport.
 
 ## Update, Backup, Restore
 
@@ -106,6 +115,7 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 - Update Docker release: `run\docker\update.bat`
 
 Every user-facing command window stays open and prints what to do next.
+The Backup page Integration Doctor is read-only and must not show a write-failed banner for GET/health checks.
 
 ## Cloudflare Safety
 

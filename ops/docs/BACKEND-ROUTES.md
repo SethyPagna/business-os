@@ -72,6 +72,27 @@ File: `backend/src/routes/products.js`
 - `POST /upload-image`
 - `POST /bulk-import`
 
+## Import Jobs
+
+Base: `/api/import-jobs`
+File: `backend/src/routes/importJobs.js`
+
+- `GET /`
+- `POST /`
+- `GET /:id`
+- `POST /:id/csv`
+- `POST /:id/zip`
+- `POST /:id/images`
+- `POST /:id/start`
+- `POST /:id/approve`
+- `POST /:id/cancel`
+- `POST /:id/retry`
+- `GET /:id/errors.csv`
+- `GET /:id/failed-rows.csv`
+- `DELETE /:id`
+
+Cancelled or cancelling jobs cannot be started. Retry clears stale cancellation state and re-queues analysis. Product import preflight treats spreadsheet scientific-notation barcodes as blocking review issues.
+
 ## Catalog (internal lightweight read API)
 
 Base: `/api/catalog`  
@@ -100,7 +121,7 @@ File: `backend/src/routes/inventory.js`
 
 - `POST /adjust`
 - `GET /summary`
-- `GET /movements`
+- `GET /movements` (`userId` filter is admin-only)
 
 ## Sales + Dashboard + Analytics
 
@@ -110,7 +131,7 @@ File: `backend/src/routes/sales.js`
 - `POST /sales`
 - `PATCH /sales/:id/status`
 - `PATCH /sales/:id/customer`
-- `GET /sales`
+- `GET /sales` (`userId` filter is admin-only)
 - `GET /sales/export`
 - `GET /dashboard`
 - `GET /analytics`
@@ -156,9 +177,19 @@ File: `backend/src/routes/customTables.js`
 Base: `/api/system`  
 File: `backend/src/routes/system/index.js`
 
+- `GET /audit-logs` supports server pagination, search, action/entity/date filters, and admin-only `userId`
+- `DELETE /audit-logs/retention?olderThanDays=30&confirm=1` is admin-only
 - audit/debug
 - backup export/import
 - sales/full reset and factory reset
 - integrity verify/repair
 - data path read/update/delete
 - folder browsing/open/picker endpoints
+- integration doctor and health diagnostics are read-only
+
+## Action History
+
+Base: `/api/action-history`
+File: `backend/src/routes/actionHistory.js`
+
+- `GET /` supports scoped history and admin-only `userId` filtering for all-history views.

@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
 
@@ -656,7 +656,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
 // GET /api/sales
 router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
-  const { startDate, endDate, cashier, branchId, status, limit = 100 } = req.query
+  const { startDate, endDate, cashier, branchId, status, userId, limit = 100 } = req.query
   // Fetch sales with all items in a single query (avoids N+1 problem)
   let q = `SELECT s.*,
              MAX(c.membership_number) AS customer_membership_number,
@@ -699,6 +699,11 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   if (startDate) { q += ' AND date(s.created_at) >= ?'; params.push(startDate) }
   if (endDate)   { q += ' AND date(s.created_at) <= ?'; params.push(endDate) }
   if (cashier)   { q += ' AND s.cashier_name LIKE ?';   params.push(`%${cashier}%`) }
+  if (userId) {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for cashier user filters.', 403)
+    q += ' AND s.cashier_id = ?'
+    params.push(parseInt(userId, 10) || userId)
+  }
   if (branchId)  {
     q += ' AND (s.branch_id = ? OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = ?))'
     params.push(branchId, branchId)

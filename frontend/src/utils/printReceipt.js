@@ -516,9 +516,6 @@ function buildPrintablePreviewDocument(markup, options = {}) {
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const title = options.title || 'Receipt'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
-  const autoPrintScript = options.autoPrint
-    ? `<script>window.addEventListener('load',()=>{window.setTimeout(()=>window.print(),240)})</script>`
-    : ''
 
   return `<!doctype html>
 <html lang="en">
@@ -538,6 +535,7 @@ function buildPrintablePreviewDocument(markup, options = {}) {
       .receipt-shell {
         min-height: 100vh;
         padding: 24px 12px 40px;
+        overflow-x: hidden;
       }
       .receipt-toolbar {
         position: sticky;
@@ -607,16 +605,22 @@ function buildPrintablePreviewDocument(markup, options = {}) {
       .receipt-stage {
         display: flex;
         justify-content: center;
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 8px;
       }
       .receipt-frame {
-        width: min(calc(${widthMm}mm + 44px), 100%);
-        padding: 22px;
-        border-radius: 22px;
+        width: min(calc(${widthMm}mm + 32px), calc(100vw - 24px));
+        padding: 16px;
+        border-radius: 14px;
         background: #ffffff;
         box-shadow: 0 22px 58px rgba(15, 23, 42, 0.16);
       }
       .receipt-frame > * {
         margin: 0 auto;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       @media print {
         body { background: #ffffff; }
@@ -630,7 +634,6 @@ function buildPrintablePreviewDocument(markup, options = {}) {
         }
       }
     </style>
-    ${autoPrintScript}
   </head>
   <body>
     <div class="receipt-shell">
@@ -640,8 +643,8 @@ function buildPrintablePreviewDocument(markup, options = {}) {
           <p class="receipt-toolbar-subtitle">Printable receipt preview. Use Print to print now or Save as PDF from your browser.</p>
         </div>
         <div class="receipt-toolbar-actions">
-          <button type="button" onclick="window.print()">Print / Save PDF</button>
-          <button type="button" onclick="window.close()">Close</button>
+          <button type="button" data-receipt-action="print">Print / Save PDF</button>
+          <button type="button" data-receipt-action="close">Close</button>
         </div>
       </div>
       ${note}
@@ -655,6 +658,20 @@ function buildPrintablePreviewDocument(markup, options = {}) {
 </html>`
 }
 
+function attachPrintablePreviewActions(previewWindow, { autoPrint = false } = {}) {
+  if (!previewWindow?.document) return
+  const doc = previewWindow.document
+  const printButton = doc.querySelector('[data-receipt-action="print"]')
+  const closeButton = doc.querySelector('[data-receipt-action="close"]')
+  printButton?.addEventListener('click', () => previewWindow.print?.())
+  closeButton?.addEventListener('click', () => previewWindow.close?.())
+
+  if (!autoPrint) return
+  const schedulePrint = () => previewWindow.setTimeout?.(() => previewWindow.print?.(), 240)
+  if (doc.readyState === 'complete') schedulePrint()
+  else previewWindow.addEventListener?.('load', schedulePrint, { once: true })
+}
+
 export async function openPrintableReceiptPreview(content, options = {}) {
   const markup = await createPrintableReceiptMarkup(content, options)
   const html = buildPrintablePreviewDocument(markup, options)
@@ -663,6 +680,7 @@ export async function openPrintableReceiptPreview(content, options = {}) {
   previewWindow.document.open()
   previewWindow.document.write(html)
   previewWindow.document.close()
+  attachPrintablePreviewActions(previewWindow, { autoPrint: !!options.autoPrint })
   previewWindow.focus?.()
   return { opened: true, mode: 'preview' }
 }

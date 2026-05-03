@@ -70,6 +70,35 @@ function normalizeComparableText(value) {
   return normalizeText(value).toLocaleLowerCase()
 }
 
+export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
+  'invalid_barcode',
+  'barcode_scientific_notation',
+  'barcode_too_long',
+])
+
+export function isBlockingProductImportIssue(issueType) {
+  return BLOCKING_PRODUCT_IMPORT_ISSUES.has(String(issueType || ''))
+}
+
+export function getProductImportBarcodeIssue(value) {
+  const barcode = normalizeText(value)
+  if (!barcode) return ''
+  if (/[\u0000-\u001F\u007F]/.test(barcode)) return 'invalid_barcode'
+  if (barcode.length > 128) return 'barcode_too_long'
+  if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(barcode)) return 'barcode_scientific_notation'
+  if (/[^\x20-\x7E]/.test(barcode)) return 'barcode_text'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+() -]*$/.test(barcode)) return 'barcode_text'
+  return ''
+}
+
+function getBlockingIssueMessage(issueType, rowNumber, barcode) {
+  const prefix = `Row ${rowNumber}:`
+  if (issueType === 'barcode_scientific_notation') return `${prefix} barcode "${barcode}" looks like scientific notation. Re-export it as text, edit it, or clear it before importing.`
+  if (issueType === 'barcode_too_long') return `${prefix} barcode is too long. Shorten or clear it before importing.`
+  if (issueType === 'invalid_barcode') return `${prefix} barcode contains invalid control characters. Edit or clear it before importing.`
+  return `${prefix} barcode needs review.`
+}
+
 function normalizeFlag(value, fallback = 0) {
   const text = normalizeComparableText(value)
   if (!text) return Number(fallback || 0) ? 1 : 0
@@ -339,7 +368,12 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
 
   normalizedRows.forEach((row, index) => {
     const rowIndex = Number(row._import_row_index ?? index)
+    const barcodeIssue = getProductImportBarcodeIssue(row.barcode)
+    const issueTypes = barcodeIssue ? [barcodeIssue] : []
+    const blockingIssue = issueTypes.find(isBlockingProductImportIssue) || ''
+    if (blockingIssue) errors.push(getBlockingIssueMessage(blockingIssue, row._rowNumber || rowIndex + 2, row.barcode))
     if (!normalizeText(row.name)) {
+      const missingIssueTypes = ['missing_name', ...issueTypes]
       const plannedRow = {
         ...row,
         _planned_action: 'skip_row',
@@ -356,9 +390,9 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         index: rowIndex,
         existing: null,
         plannedAction: 'skip_row',
-        conflictType: 'missing_name',
-        conflictFields: ['errors'],
-        issueTypes: ['missing_name'],
+        conflictType: blockingIssue || 'missing_name',
+        conflictFields: barcodeIssue ? ['errors', 'barcode'] : ['errors'],
+        issueTypes: missingIssueTypes,
         sameBasic: false,
         samePricing: false,
         sameImages: true,
@@ -391,6 +425,14 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       barcodeMatch && !identifierMatchSameName ? 'barcode' : '',
       ...sameFileIdentifierFields,
     ].filter(Boolean)))
+    const reviewConflictFields = Array.from(new Set([
+      ...identifierMatchFields,
+      ...(barcodeIssue ? ['barcode'] : []),
+    ]))
+    const issueConflictFields = Array.from(new Set([
+      ...identifierConflictFields,
+      ...reviewConflictFields,
+    ]))
     const existingCandidates = skuMatch && normalizeImportProductName(skuMatch.name) === nameKey
       ? [skuMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(skuMatch.id))]
       : barcodeMatch && normalizeImportProductName(barcodeMatch.name) === nameKey
@@ -433,12 +475,12 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       _target_product_id: targetProductId,
       _parent_id: parentId,
       _detail_signature: signature,
-      _identifier_conflict_mode: identifierMatchFields.length && ['new', 'create_variant'].includes(plannedAction) ? 'clear_imported' : '',
+      _identifier_conflict_mode: issueConflictFields.length && ['new', 'create_variant'].includes(plannedAction) ? 'clear_imported' : '',
     }
     normalizedRows[index] = plannedRow
     decisions[rowIndex] = plannedAction
 
-    if (plannedAction === 'new' && !identifierConflictFields.length) {
+    if (plannedAction === 'new' && !issueConflictFields.length && !issueTypes.length) {
       cleanRows.push({ row: plannedRow, index: rowIndex, incomingImages: [] })
     } else {
       conflicts.push({
@@ -447,8 +489,9 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         index: rowIndex,
         existing: matchingExisting || parent || identifierMatch || null,
         plannedAction,
-        conflictType: identifierConflictFields.length ? 'identifier' : (identifierMatchFields.length ? 'same_name_identifier' : 'same_name'),
-        conflictFields: identifierMatchFields,
+        conflictType: blockingIssue || (identifierConflictFields.length ? 'identifier' : (reviewConflictFields.length ? 'same_name_identifier' : 'same_name')),
+        conflictFields: issueConflictFields,
+        issueTypes,
         importDuplicateRows: {
           sku: sameFileSkuRows,
           barcode: sameFileBarcodeRows,

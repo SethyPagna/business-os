@@ -103,6 +103,19 @@ await runTest('same-file duplicate barcode rows become review conflicts', () => 
   assert.equal(analysis.rows[1]._identifier_conflict_mode, 'clear_imported')
 })
 
+await runTest('scientific notation barcodes are blocking review conflicts', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum A', barcode: '8.19265E+11', selling_price_usd: '12', stock_quantity: '1' },
+  ], [])
+
+  assert.equal(analysis.cleanRows.length, 0)
+  assert.equal(analysis.conflicts.length, 1)
+  assert.equal(analysis.conflicts[0].conflictType, 'barcode_scientific_notation')
+  assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
+  assert.deepEqual(analysis.conflicts[0].issueTypes, ['barcode_scientific_notation'])
+  assert.equal(analysis.summary.errorCount, 1)
+})
+
 await runTest('missing product name rows stay visible as review issues', () => {
   const analysis = analyzeProductImportRows([
     { name: '', barcode: 'HAS-BARCODE', selling_price_usd: '12', stock_quantity: '1' },
@@ -160,6 +173,25 @@ await runTest('bulk import modal does not fetch the full product catalog before 
   const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /await\s+window\.api\.getProducts\(/)
   assert.match(source, /Existing-product conflicts\s+[\s\S]*server import job/)
+})
+
+await runTest('bulk import modal stops the async start sequence after cancel is requested', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  assert.match(source, /useRef/)
+  assert.match(source, /cancelRequestedRef/)
+  assert.match(source, /throwIfImportCancelled/)
+  assert.match(source, /cancelImportJob\(currentJob\.id,\s*\{\s*source:/)
+  assert.match(source, /getProductImportBarcodeIssue/)
+  assert.match(source, /isBlockingProductImportIssue/)
+  assert.match(source, /blockingIssueCount/)
+
+  const startMatches = [...source.matchAll(/await\s+window\.api\.startImportJob\(jobId,\s*\{\s*source:/g)]
+  assert.ok(startMatches.length >= 2, 'expected image-only and CSV import start calls')
+  for (const match of startMatches) {
+    const previousGuard = source.lastIndexOf('throwIfImportCancelled()', match.index)
+    assert.ok(previousGuard >= 0, 'startImportJob must be guarded by throwIfImportCancelled')
+    assert.ok(match.index - previousGuard < 900, 'start guard should be close to the start call')
+  }
 })
 
 if (failed > 0) {
