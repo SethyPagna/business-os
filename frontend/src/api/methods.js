@@ -1205,6 +1205,18 @@ async function waitForSystemJob(jobId, {
   return pollSystemJob(jobId, { timeoutMs, pollMs, reason })
 }
 
+export async function getIntegrationDoctor(options = {}) {
+  const params = new URLSearchParams()
+  if (options.deep || options.write) params.set('deep', '1')
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return route(
+    'system:integrationDoctor',
+    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, null, SYNC.REQUEST_TIMEOUT_MS),
+    null,
+    true,
+  )
+}
+
 export async function queueBackupFolderExport(destinationDir = '') {
   const payload = {
     type: 'export-folder',

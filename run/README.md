@@ -23,7 +23,7 @@ These are for the local Docker release or support:
 - `run\docker\install.bat` installs the local Docker image bundle.
 - `run\docker\start.bat` starts Docker release services.
 - `run\docker\update.bat` backs up, reloads the local image bundle, checks health, and rolls back when possible.
-- `run\docker\backup.bat` backs up Docker release data from Postgres, MinIO, settings, users/roles, and runtime metadata.
+- `run\docker\backup.bat` backs up Docker release data from Postgres, R2 or emergency/offline MinIO, settings, users/roles, and runtime metadata.
 - `run\docker\restore.bat` restores a selected verified backup.
 - `run\docker\doctor.bat` diagnoses Docker, ports, local image bundles, Cloudflare, database, workers, and storage.
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.
@@ -36,3 +36,7 @@ These are for the local Docker release or support:
 - `run\sh\` contains shell equivalents for non-Windows support.
 
 Do not add new normal-user commands unless the root launcher cannot own the workflow.
+
+## Runtime Secrets
+
+Put real service credentials only in ignored runtime env files such as `ops\runtime\docker-release\docker-release.env`. The verification flow includes a tracked-secret hygiene check, and the Backup page Integration Doctor reports only redacted presence/status for R2, Google Drive OAuth, Supabase Auth, Cloudflare, and app secrets.

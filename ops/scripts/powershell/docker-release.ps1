@@ -146,6 +146,12 @@ function Read-EnvFile {
   return $map
 }
 
+function Get-EnvValue($primary, $secondary, [string]$key, [string]$fallback = '') {
+  if ($primary -and $primary.ContainsKey($key) -and [string]$primary[$key]) { return $primary[$key] }
+  if ($secondary -and $secondary.ContainsKey($key) -and [string]$secondary[$key]) { return $secondary[$key] }
+  return $fallback
+}
+
 function Get-MinIntSetting($value, [int]$minimum) {
   $parsed = 0
   if ([int]::TryParse([string]$value, [ref]$parsed) -and $parsed -ge $minimum) {
@@ -188,6 +194,18 @@ function Write-EnvFile($values) {
     "IMPORT_BATCH_PAUSE_MS=$($values.IMPORT_BATCH_PAUSE_MS)",
     "IMPORT_WORKER_REPLICAS=$($values.IMPORT_WORKER_REPLICAS)",
     "MEDIA_WORKER_REPLICAS=$($values.MEDIA_WORKER_REPLICAS)",
+    "SUPABASE_AUTH_ENABLED=$($values.SUPABASE_AUTH_ENABLED)",
+    "SUPABASE_URL=$($values.SUPABASE_URL)",
+    "SUPABASE_ANON_KEY=$($values.SUPABASE_ANON_KEY)",
+    "SUPABASE_SERVICE_ROLE_KEY=$($values.SUPABASE_SERVICE_ROLE_KEY)",
+    "SUPABASE_EMAIL_AUTH_ENABLED=$($values.SUPABASE_EMAIL_AUTH_ENABLED)",
+    "SUPABASE_MAGIC_LINK_ENABLED=$($values.SUPABASE_MAGIC_LINK_ENABLED)",
+    "SUPABASE_INVITE_ENABLED=$($values.SUPABASE_INVITE_ENABLED)",
+    "SUPABASE_GOOGLE_OAUTH_ENABLED=$($values.SUPABASE_GOOGLE_OAUTH_ENABLED)",
+    "SUPABASE_MFA_TOTP_ENABLED=$($values.SUPABASE_MFA_TOTP_ENABLED)",
+    "GOOGLE_DRIVE_CLIENT_ID=$($values.GOOGLE_DRIVE_CLIENT_ID)",
+    "GOOGLE_DRIVE_CLIENT_SECRET=$($values.GOOGLE_DRIVE_CLIENT_SECRET)",
+    "GOOGLE_DRIVE_OAUTH_REDIRECT_URI=$($values.GOOGLE_DRIVE_OAUTH_REDIRECT_URI)",
     'JOB_QUEUE_DRIVER=bullmq',
     'BUSINESS_OS_RUNTIME=docker'
   )
@@ -248,6 +266,18 @@ function Ensure-Env {
     IMPORT_BATCH_PAUSE_MS = '0'
     IMPORT_WORKER_REPLICAS = Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 2
     MEDIA_WORKER_REPLICAS = Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 2
+    SUPABASE_AUTH_ENABLED = if ($existing.SUPABASE_AUTH_ENABLED) { $existing.SUPABASE_AUTH_ENABLED } else { 'false' }
+    SUPABASE_URL = if ($existing.SUPABASE_URL) { $existing.SUPABASE_URL } else { '' }
+    SUPABASE_ANON_KEY = if ($existing.SUPABASE_ANON_KEY) { $existing.SUPABASE_ANON_KEY } else { '' }
+    SUPABASE_SERVICE_ROLE_KEY = if ($existing.SUPABASE_SERVICE_ROLE_KEY) { $existing.SUPABASE_SERVICE_ROLE_KEY } else { '' }
+    SUPABASE_EMAIL_AUTH_ENABLED = if ($existing.SUPABASE_EMAIL_AUTH_ENABLED) { $existing.SUPABASE_EMAIL_AUTH_ENABLED } else { 'true' }
+    SUPABASE_MAGIC_LINK_ENABLED = if ($existing.SUPABASE_MAGIC_LINK_ENABLED) { $existing.SUPABASE_MAGIC_LINK_ENABLED } else { 'true' }
+    SUPABASE_INVITE_ENABLED = if ($existing.SUPABASE_INVITE_ENABLED) { $existing.SUPABASE_INVITE_ENABLED } else { 'true' }
+    SUPABASE_GOOGLE_OAUTH_ENABLED = if ($existing.SUPABASE_GOOGLE_OAUTH_ENABLED) { $existing.SUPABASE_GOOGLE_OAUTH_ENABLED } else { if ($existing.SUPABASE_GOOGLE_ENABLED) { $existing.SUPABASE_GOOGLE_ENABLED } else { 'false' } }
+    SUPABASE_MFA_TOTP_ENABLED = if ($existing.SUPABASE_MFA_TOTP_ENABLED) { $existing.SUPABASE_MFA_TOTP_ENABLED } else { 'false' }
+    GOOGLE_DRIVE_CLIENT_ID = if ($existing.GOOGLE_DRIVE_CLIENT_ID) { $existing.GOOGLE_DRIVE_CLIENT_ID } else { '' }
+    GOOGLE_DRIVE_CLIENT_SECRET = if ($existing.GOOGLE_DRIVE_CLIENT_SECRET) { $existing.GOOGLE_DRIVE_CLIENT_SECRET } else { '' }
+    GOOGLE_DRIVE_OAUTH_REDIRECT_URI = if ($existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI) { $existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI } else { '' }
   }
   Write-EnvFile $values
   return $values
@@ -479,6 +509,8 @@ function Write-DockerReleaseKit($imageName) {
       $kitExisting[$parts[0]] = $parts[1]
     }
   }
+  $sourceExisting = Read-EnvFile
+  $supabaseGoogleFallback = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_ENABLED' 'false'
   $postgresPassword = if ($kitExisting.POSTGRES_PASSWORD) { $kitExisting.POSTGRES_PASSWORD } else { New-Secret 36 }
   $databaseUrl = "postgres://business_os:$postgresPassword@postgres:5432/business_os"
   $values = [ordered]@{
@@ -491,24 +523,36 @@ function Write-DockerReleaseKit($imageName) {
     POSTGRES_PASSWORD = $postgresPassword
     MINIO_ROOT_USER = if ($kitExisting.MINIO_ROOT_USER) { $kitExisting.MINIO_ROOT_USER } else { 'businessos' }
     MINIO_ROOT_PASSWORD = if ($kitExisting.MINIO_ROOT_PASSWORD) { $kitExisting.MINIO_ROOT_PASSWORD } else { New-Secret 36 }
-    S3_ENDPOINT = if ($kitExisting.S3_ENDPOINT) { $kitExisting.S3_ENDPOINT } else { 'https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com' }
-    S3_REGION = if ($kitExisting.S3_REGION) { $kitExisting.S3_REGION } else { 'auto' }
-    S3_ACCESS_KEY_ID = if ($kitExisting.S3_ACCESS_KEY_ID) { $kitExisting.S3_ACCESS_KEY_ID } else { '' }
-    S3_SECRET_ACCESS_KEY = if ($kitExisting.S3_SECRET_ACCESS_KEY) { $kitExisting.S3_SECRET_ACCESS_KEY } else { '' }
-    S3_BUCKET = if ($kitExisting.S3_BUCKET) { $kitExisting.S3_BUCKET } else { 'business-os-assets' }
-    R2_PUBLIC_BASE_URL = if ($kitExisting.R2_PUBLIC_BASE_URL) { $kitExisting.R2_PUBLIC_BASE_URL } else { '' }
+    S3_ENDPOINT = Get-EnvValue $kitExisting $sourceExisting 'S3_ENDPOINT' 'https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com'
+    S3_REGION = Get-EnvValue $kitExisting $sourceExisting 'S3_REGION' 'auto'
+    S3_ACCESS_KEY_ID = Get-EnvValue $kitExisting $sourceExisting 'S3_ACCESS_KEY_ID'
+    S3_SECRET_ACCESS_KEY = Get-EnvValue $kitExisting $sourceExisting 'S3_SECRET_ACCESS_KEY'
+    S3_BUCKET = Get-EnvValue $kitExisting $sourceExisting 'S3_BUCKET' 'business-os-assets'
+    R2_PUBLIC_BASE_URL = Get-EnvValue $kitExisting $sourceExisting 'R2_PUBLIC_BASE_URL'
     CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
     DATABASE_DRIVER = 'postgres'
-    OBJECT_STORAGE_DRIVER = if ($kitExisting.OBJECT_STORAGE_DRIVER) { $kitExisting.OBJECT_STORAGE_DRIVER } else { 'r2' }
+    OBJECT_STORAGE_DRIVER = Get-EnvValue $kitExisting $sourceExisting 'OBJECT_STORAGE_DRIVER' 'r2'
     DATABASE_URL = $databaseUrl
     BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = '1'
     ANALYTICS_ENGINE = 'duckdb'
-    PARQUET_STORE = if ($kitExisting.PARQUET_STORE) { $kitExisting.PARQUET_STORE } else { 'r2' }
+    PARQUET_STORE = Get-EnvValue $kitExisting $sourceExisting 'PARQUET_STORE' 'r2'
     IMPORT_QUEUE_CONCURRENCY = '2'
     MEDIA_QUEUE_CONCURRENCY = '3'
     IMPORT_BATCH_PAUSE_MS = '0'
     IMPORT_WORKER_REPLICAS = '2'
     MEDIA_WORKER_REPLICAS = '2'
+    SUPABASE_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_AUTH_ENABLED' 'false'
+    SUPABASE_URL = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_URL'
+    SUPABASE_ANON_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_ANON_KEY'
+    SUPABASE_SERVICE_ROLE_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_SERVICE_ROLE_KEY'
+    SUPABASE_EMAIL_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_EMAIL_AUTH_ENABLED' 'true'
+    SUPABASE_MAGIC_LINK_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MAGIC_LINK_ENABLED' 'true'
+    SUPABASE_INVITE_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_INVITE_ENABLED' 'true'
+    SUPABASE_GOOGLE_OAUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_OAUTH_ENABLED' $supabaseGoogleFallback
+    SUPABASE_MFA_TOTP_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MFA_TOTP_ENABLED' 'false'
+    GOOGLE_DRIVE_CLIENT_ID = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_ID'
+    GOOGLE_DRIVE_CLIENT_SECRET = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_SECRET'
+    GOOGLE_DRIVE_OAUTH_REDIRECT_URI = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_OAUTH_REDIRECT_URI'
   }
   $oldRuntimeDir = $RuntimeDir
   $oldEnvFile = $EnvFile

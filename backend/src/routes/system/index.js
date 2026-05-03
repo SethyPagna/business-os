@@ -77,6 +77,7 @@ const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJo
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime')
 const { testObjectStore } = require('../../objectStore')
+const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -761,6 +762,19 @@ router.post('/object-storage/test-write', authToken, requireAnyPermission(['back
     ok(res, { item: await testObjectStore() })
   } catch (error) {
     err(res, error?.message || 'Object storage test failed', 503)
+  }
+})
+
+router.get('/integration-doctor', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  try {
+    ok(res, {
+      item: await buildIntegrationDoctor({
+        driveRedirectUri: resolveDriveRedirectUri(req),
+        runObjectStoreTest: req.query?.write === '1' || req.query?.deep === '1',
+      }),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Integration doctor failed', 503)
   }
 })
 

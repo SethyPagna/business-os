@@ -41,13 +41,19 @@ if errorlevel 1 exit /b 1
 echo [OK] Docker-only release automation check passed
 echo.
 
-echo [1b/6] Verifying Business OS Docker release runtime...
+echo [1b/6] Verifying tracked secret hygiene...
+node ops\scripts\verify-secret-hygiene.js
+if errorlevel 1 exit /b 1
+echo [OK] Tracked secret hygiene check passed
+echo.
+
+echo [1c/6] Verifying Business OS Docker release runtime...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\docker-release.ps1" -Action Doctor
 if errorlevel 1 exit /b 1
 echo [OK] Business OS Docker release diagnostics passed
 echo.
 
-echo [1c/6] Checking running app API route contract when available...
+echo [1d/6] Checking running app API route contract when available...
 node ops\scripts\runtime\check-route-contract.mjs http://127.0.0.1:4000 --skip-if-unavailable
 if errorlevel 1 exit /b 1
 echo [OK] Running app API route contract check passed or was skipped

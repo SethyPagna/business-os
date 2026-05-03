@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
@@ -23,36 +23,48 @@ const QUICK_BACKUP_SECTIONS = [
 const BACKUP_LOCAL_COPY = {
   km: {
     backup: 'បម្រុងទុក',
-    export_backup_desc: 'នាំចេញបម្រុងទុក Docker ពេញលេញសម្រាប់ Postgres, R2 ឬ object storage offline និង Drive sync។',
+    export_backup_desc: 'បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញ ដែលមានទិន្នន័យ Postgres, R2 ឬ object storage offline, ការកំណត់, អ្នកប្រើ, ឯកសារ portal និង metadata សម្រាប់ស្ដារ។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
-    folder_backup_placeholder: 'ជ្រើសថតមេ សម្រាប់ចម្លង backup',
+    folder_backup_placeholder: 'ថតម៉ាស៊ីនមេជាជម្រើសសម្រាប់ backup ពេញលេញ',
     browse_folder: 'ជ្រើសថត',
-    browse: 'ថតនៅម៉ាស៊ីនមេ',
+    browse: 'រុករក',
     hide_advanced_browser: 'លាក់',
     export_backup_btn: 'នាំចេញ',
     exporting: 'កំពុងនាំចេញ...',
-    import_backup_title: 'ស្តារបម្រុងទុក',
-    import_backup_desc: 'ស្តារបម្រុងទុក Docker ពេញលេញតែប៉ុណ្ណោះ។',
-    folder_restore_placeholder: 'ជ្រើសថត backup ឬថត business-os-data',
-    restore_backup_btn: 'ស្តារ',
-    importing_backup: 'កំពុងនាំចូល...',
-    folder_restore_note: 'ការស្តារជាថតនឹងជំនួសទិន្នន័យបច្ចុប្បន្នដោយមាតិកា backup ដែលបានជ្រើស។',
+    import_backup_title: 'ស្ដារបម្រុងទុក',
+    import_backup_desc: 'ស្ដារថតបម្រុងទុក Business OS ពេញលេញពីម៉ាស៊ីនមេ។',
+    folder_restore_placeholder: 'ជ្រើសផ្លូវថត backup ពេញលេញ',
+    restore_backup_btn: 'ស្ដារ',
+    importing_backup: 'កំពុងស្ដារ...',
+    folder_restore_note: 'ការស្ដារទទួលយកតែកញ្ចប់ backup Business OS ចុងក្រោយ ឬ Google Drive datasync version។',
     rows: 'ជួរ',
     uploads: 'ឯកសារផ្ទុកឡើង',
     custom_tables: 'តារាងផ្ទាល់ខ្លួន',
     exported: 'បាននាំចេញ',
     clear: 'សម្អាត',
     choose_folder_first: 'សូមជ្រើសថតជាមុន',
-    server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ បើអ្នកភ្ជាប់ពីចម្ងាយ សូមជ្រើស ឬបិទភ្ជាប់ path ដែលមាននៅលើម៉ាស៊ីនមេនោះ។',
-    server_restore_note: 'ការស្តារប្រើថតពីម៉ាស៊ីនមេ Business OS។ Browser ពីចម្ងាយមិនអាចរុករកថាសក្នុងម៉ាស៊ីនរបស់ខ្លួនចូល runtime ម៉ាស៊ីនមេបានទេ។',
-    host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ប្រើ Browse folders ឬវាយ path របស់ម៉ាស៊ីនមេដោយដៃ នៅពេលភ្ជាប់ពីចម្ងាយ។',
-    restore: 'ស្តារ',
+    server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ សូមវាយ path ដែលមាននៅលើម៉ាស៊ីនមេ មិនមែនឧបករណ៍ browser ពីចម្ងាយទេ។',
+    server_restore_note: 'Restore ប្រើថត backup ចុងក្រោយពីម៉ាស៊ីនមេ Business OS។ សូមវាយ path ម៉ាស៊ីនមេ ឬស្ដារពី Google Drive datasync version។',
+    host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ពេលភ្ជាប់ពីចម្ងាយ សូមវាយ ឬបិទភ្ជាប់ path ម៉ាស៊ីនមេដោយដៃ។',
+    restore: 'ស្ដារ',
     export: 'នាំចេញ',
-    refresh: 'ស្រស់ថ្មី',
+    refresh: 'ផ្ទុកឡើងវិញ',
     save: 'រក្សាទុក',
+    integration_doctor_title: 'ពិនិត្យការភ្ជាប់ប្រព័ន្ធ',
+    integration_doctor_desc: 'ពិនិត្យ Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs និង DuckDB/Parquet ដោយមិនបង្ហាញ secret។',
+    integration_doctor_complete: 'ពិនិត្យប្រព័ន្ធរួចរាល់',
+    integration_doctor_failed: 'ពិនិត្យប្រព័ន្ធបរាជ័យ',
+    run_deep_doctor: 'ពិនិត្យ storage',
+    secrets_redacted: 'បង្ហាញតែមាន/ខ្វះប៉ុណ្ណោះ; តម្លៃត្រូវបានលាក់។',
+    oauth_setup_checklist: 'បញ្ជីពិនិត្យ OAuth',
+    authorized_redirect_uris: 'Authorized redirect URIs',
+    authorized_js_origins: 'Authorized JavaScript origins',
+    object_storage_write_test: 'តេស្តសរសេរ/អាន/លុប object storage',
+    passed: 'បានជោគជ័យ',
+    failed: 'បរាជ័យ',
+    checking: 'កំពុងពិនិត្យ...',
   },
 }
-
 function PathActionButton({ children, ...props }) {
   return (
     <button
@@ -90,7 +102,7 @@ function JobProgressCard({ job, copy, onClear }) {
         <div className="min-w-0">
           <div className="font-semibold">{job.message || copy('job_running', 'Working...')}</div>
           <div className="mt-1 text-xs opacity-80">
-            {job.type || 'system job'} · {job.phase || job.status || 'queued'}
+            {job.type || 'system job'} Â· {job.phase || job.status || 'queued'}
           </div>
           {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
           {result.packageId || result.localPath || result.objectPrefix ? (
@@ -111,6 +123,122 @@ function JobProgressCard({ job, copy, onClear }) {
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-slate-950/50">
         <div className={`h-full rounded-full ${failed ? 'bg-red-500' : completed ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
       </div>
+    </div>
+  )
+}
+
+function DoctorStatusPill({ label, check }) {
+  const ok = check?.ok === true
+  const attention = check?.status === 'needs_attention' || check?.ok === false
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-xs ${ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200' : attention ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300'}`}>
+      <div className="flex items-center gap-2 font-semibold">
+        <CheckCircle2 className={`h-3.5 w-3.5 ${ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`} />
+        <span>{label}</span>
+      </div>
+      {check?.message ? <div className="mt-1 break-words opacity-80">{check.message}</div> : null}
+    </div>
+  )
+}
+
+function IntegrationDoctorCard({ copy, notify, active }) {
+  const [doctor, setDoctor] = useState(null)
+  const [busy, setBusy] = useState('')
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const runDoctor = useCallback(async (deep = false) => {
+    if (busy) return
+    setBusy(deep ? 'deep' : 'quick')
+    try {
+      await yieldToBrowser()
+      const result = await window.api.getIntegrationDoctor?.({ deep })
+      if (!mountedRef.current) return
+      setDoctor(result?.item || null)
+      if (deep) notify(copy('integration_doctor_complete', 'Integration doctor complete'), 'success')
+    } catch (error) {
+      if (mountedRef.current) notify(`${copy('integration_doctor_failed', 'Integration doctor failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      if (mountedRef.current) setBusy('')
+    }
+  }, [busy, copy, notify])
+
+  useEffect(() => {
+    if (!active || doctor) return
+    const timer = window.setTimeout(() => runDoctor(false), 250)
+    return () => window.clearTimeout(timer)
+  }, [active, doctor, runDoctor])
+
+  const checks = doctor?.checks || {}
+  const runtime = doctor?.runtime || {}
+  const drive = checks.googleDrive || {}
+  const supabase = checks.supabaseAuth || {}
+  const storage = checks.objectStorage || {}
+  const oauth = doctor?.expectedOauth || {}
+
+  return (
+    <div className="card p-5 sm:p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            {copy('integration_doctor_title', 'Integration doctor')}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {copy('integration_doctor_desc', 'Checks Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs, and DuckDB/Parquet without showing secrets.')}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <PathActionButton onClick={() => runDoctor(false)} disabled={!!busy}>
+            <RefreshCw className={`h-4 w-4 ${busy === 'quick' ? 'animate-spin' : ''}`} />
+            {busy === 'quick' ? copy('checking', 'Checking...') : copy('refresh', 'Refresh')}
+          </PathActionButton>
+          <PrimaryActionButton onClick={() => runDoctor(true)} disabled={!!busy}>
+            <RefreshCw className={`h-4 w-4 ${busy === 'deep' ? 'animate-spin' : ''}`} />
+            {busy === 'deep' ? copy('checking', 'Checking...') : copy('run_deep_doctor', 'Run storage test')}
+          </PrimaryActionButton>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <DoctorStatusPill label="Postgres" check={checks.database} />
+        <DoctorStatusPill label={`${String(runtime.objectStorageDriver || 'R2').toUpperCase()} storage`} check={storage} />
+        <DoctorStatusPill label="Redis jobs" check={checks.queue} />
+        <DoctorStatusPill label="DuckDB / Parquet" check={checks.analytics} />
+        <DoctorStatusPill label="Google Drive" check={drive} />
+        <DoctorStatusPill label="Supabase Auth" check={supabase} />
+        <DoctorStatusPill label="Backup packages" check={checks.backup} />
+        <DoctorStatusPill label="Secrets" check={{ ok: true, message: copy('secrets_redacted', 'Present/missing only; values are redacted.') }} />
+      </div>
+
+      {doctor ? (
+        <details className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300">
+          <summary className="cursor-pointer font-semibold text-gray-800 dark:text-gray-100">
+            {copy('oauth_setup_checklist', 'OAuth setup checklist')}
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div>
+              <div className="font-semibold text-gray-900 dark:text-white">{oauth.googleLoginClient?.name || 'business-os'}</div>
+              <div className="mt-1">{copy('authorized_redirect_uris', 'Authorized redirect URIs')}: {(oauth.googleLoginClient?.authorizedRedirectUris || []).join(', ') || '--'}</div>
+              <div className="mt-1">{copy('authorized_js_origins', 'Authorized JavaScript origins')}: {(oauth.googleLoginClient?.authorizedJavaScriptOrigins || []).join(', ') || '--'}</div>
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900 dark:text-white">{oauth.googleDriveClient?.name || 'Business-os Drive'}</div>
+              <div className="mt-1">{copy('authorized_redirect_uris', 'Authorized redirect URIs')}: {(oauth.googleDriveClient?.authorizedRedirectUris || []).join(', ') || '--'}</div>
+              <div className="mt-1">{copy('authorized_js_origins', 'Authorized JavaScript origins')}: {(oauth.googleDriveClient?.authorizedJavaScriptOrigins || []).join(', ') || '--'}</div>
+            </div>
+          </div>
+          {storage.writeReadDelete ? (
+            <div className="mt-3 rounded-lg border border-current/10 bg-white/60 p-2 dark:bg-zinc-900/50">
+              {copy('object_storage_write_test', 'Object storage write/read/delete test')}: {storage.writeReadDelete.ok ? copy('passed', 'Passed') : storage.writeReadDelete.error || copy('failed', 'Failed')}
+            </div>
+          ) : null}
+        </details>
+      ) : null}
     </div>
   )
 }
@@ -1444,6 +1572,7 @@ export default function Backup() {
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+        <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -1563,3 +1692,4 @@ export default function Backup() {
     </div>
   )
 }
+

@@ -30,4 +30,12 @@ Every command keeps the window open and prints the next step.
 
 Live app data uses Postgres for business records and R2 for files/images/backups. Emergency/offline MinIO uses the same storage adapter and object keys. Local backups and Google Drive `datasync-N` versions use the same restore format, so Docker can recover either one through `restore.bat`.
 
+## Auth And Storage Checklist
+
+- Keep real credentials in `ops\runtime\docker-release\docker-release.env`; never in tracked docs or code.
+- R2 is the normal object store. MinIO is only for explicit emergency/offline mode.
+- Google Drive sync uses the OAuth client named `Business-os Drive` with callbacks under `/api/system/drive-sync/oauth/callback` for admin, public, and localhost URLs.
+- Supabase Google/Gmail login uses the separate OAuth client named `business-os` and the Supabase callback URL.
+- The Backup page Integration Doctor verifies Postgres, Redis jobs/cache, object storage, Drive sync, Supabase Auth, DuckDB/Parquet, and backup package format with all secret values redacted.
+
 The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.
