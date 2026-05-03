@@ -164,8 +164,8 @@ function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
     SET status = 'cancelled',
         phase = 'cancelled',
         cancel_requested = 1,
-        finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP),
-        updated_at = CURRENT_TIMESTAMP
+        finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP::text),
+        updated_at = CURRENT_TIMESTAMP::text
     WHERE id = ?
   `).run(row.id)
   return db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(row.id)
@@ -267,7 +267,7 @@ function updateJob(id, patch = {}) {
   const entries = Object.entries(patch).filter(([key]) => allowed.includes(key))
   if (!entries.length) return getImportJob(id)
   const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ')
-  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
+  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP::text WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
   return getImportJob(id)
 }
 
@@ -2562,7 +2562,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
             branch_id, branch_name, subtotal_usd, subtotal_khr, total_usd, total_khr,
             payment_method, payment_currency, amount_paid_usd, amount_paid_khr,
             sale_status, notes, created_at, updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP::text), CURRENT_TIMESTAMP::text)
         `).run(
           sale.receiptNumber,
           actor.userId || null,
@@ -3122,8 +3122,8 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
         status = CASE WHEN lower(status) = 'running' THEN 'cancelling' ELSE 'cancelled' END,
         phase = CASE WHEN lower(status) = 'running' THEN 'cancel_requested' ELSE 'cancelled' END,
         last_error = ?,
-        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE CURRENT_TIMESTAMP END,
-        updated_at = CURRENT_TIMESTAMP
+        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE CURRENT_TIMESTAMP::text END,
+        updated_at = CURRENT_TIMESTAMP::text
     WHERE id IN (${placeholders})
   `).run(reason, ...jobIds)
   db.prepare(`

@@ -1802,7 +1802,7 @@
     "drive_sync_connect_failed": "Failed to connect Google Drive.",
     "drive_sync_connect_started": "Google Drive connection started.",
     "drive_sync_connected": "Google Drive connected",
-    "drive_sync_connected_as": "Connected as {name}",
+    "drive_sync_connected_as": "Connected as",
     "drive_sync_delete_missing": "Delete missing cloud files locally",
     "drive_sync_desc": "Mirror Business OS backup data to Google Drive on a schedule from the server container/device.",
     "drive_sync_disconnect_confirm": "Disconnect Google Drive sync?",

@@ -117,20 +117,114 @@ function csvEscape(value) {
 }
 
 const IMPORT_REVIEW_DETAIL_FIELDS = [
+  ['name', 'Name'],
   ['sku', 'SKU'],
   ['barcode', 'Barcode'],
   ['brand', 'Brand'],
   ['category', 'Category'],
   ['unit', 'Unit'],
   ['supplier', 'Supplier'],
+  ['branch', 'Branch'],
   ['stock_quantity', 'Stock'],
+  ['low_stock_threshold', 'Low stock'],
   ['selling_price_usd', 'Sell USD'],
+  ['selling_price_khr', 'Sell KHR'],
+  ['special_price_usd', 'Special USD'],
+  ['special_price_khr', 'Special KHR'],
   ['purchase_price_usd', 'Cost USD'],
+  ['purchase_price_khr', 'Cost KHR'],
+  ['discount_enabled', 'Discount on'],
+  ['discount_type', 'Discount type'],
+  ['discount_percent', 'Discount %'],
+  ['discount_amount_usd', 'Discount USD'],
+  ['discount_amount_khr', 'Discount KHR'],
+  ['description', 'Description'],
 ]
+
+const IMPORT_REVIEW_EDIT_FIELDS = [
+  ['name', 'Name'],
+  ['sku', 'SKU'],
+  ['barcode', 'Barcode'],
+  ['brand', 'Brand'],
+  ['category', 'Category'],
+  ['unit', 'Unit'],
+  ['supplier', 'Supplier'],
+  ['branch', 'Branch'],
+  ['stock_quantity', 'Stock'],
+  ['low_stock_threshold', 'Low stock'],
+  ['purchase_price_usd', 'Cost USD'],
+  ['purchase_price_khr', 'Cost KHR'],
+  ['selling_price_usd', 'Sell USD'],
+  ['selling_price_khr', 'Sell KHR'],
+  ['special_price_usd', 'Special USD'],
+  ['special_price_khr', 'Special KHR'],
+  ['discount_percent', 'Discount %'],
+  ['discount_amount_usd', 'Discount USD'],
+  ['discount_amount_khr', 'Discount KHR'],
+  ['description', 'Description'],
+]
+
+const IMPORTANT_IMPORT_DETAILS = ['name', 'brand', 'category', 'unit', 'supplier', 'stock_quantity']
+const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
 
 function compactImportValue(value) {
   const text = String(value ?? '').trim()
   return text || '-'
+}
+
+function isBlankImportValue(value) {
+  return String(value ?? '').trim() === ''
+}
+
+function hasMissingImportDetails(row = {}) {
+  return IMPORTANT_IMPORT_DETAILS.some((field) => isBlankImportValue(row?.[field]))
+}
+
+function hasPriceReviewIssue(row = {}) {
+  return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
+}
+
+function valuesDiffer(left, right) {
+  return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
+}
+
+function ImportDetailGrid({ title, row = {}, compareTo = null }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+      <div className="mb-2 font-semibold text-slate-700 dark:text-slate-100">{title}</div>
+      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+        {IMPORT_REVIEW_DETAIL_FIELDS.map(([field, label]) => {
+          const differs = compareTo && valuesDiffer(row?.[field], compareTo?.[field])
+          return (
+            <div key={field} className={`min-w-0 rounded px-2 py-1 ${differs ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100' : 'bg-white/70 text-slate-600 dark:bg-slate-950/50 dark:text-slate-300'}`}>
+              <span className="text-slate-400 dark:text-slate-500">{label}: </span>
+              <span className="break-words">{compactImportValue(row?.[field])}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ImportDetailEditor({ row = {}, onChange, title = 'Edit imported row details before apply' }) {
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+      <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-100">{title}</summary>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {IMPORT_REVIEW_EDIT_FIELDS.map(([field, label]) => (
+          <label key={field} className="grid gap-1">
+            <span className="text-slate-500 dark:text-slate-400">{label}</span>
+            <input
+              className="input h-8 min-w-0 py-1 text-xs"
+              value={row?.[field] ?? ''}
+              onChange={(event) => onChange?.(field, event.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+    </details>
+  )
 }
 
 function buildImageOnlyCsv(imageFiles = {}) {
@@ -174,6 +268,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [imageDecisions, setImageDecisions] = useState({})
   const [identifierDecisions, setIdentifierDecisions] = useState({})
   const [identifierOverrides, setIdentifierOverrides] = useState({})
+  const [rowOverrides, setRowOverrides] = useState({})
   const [conflictFilter, setConflictFilter] = useState('all')
   const [conflictQuery, setConflictQuery] = useState('')
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
@@ -197,6 +292,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setImageDecisions({})
     setIdentifierDecisions({})
     setIdentifierOverrides({})
+    setRowOverrides({})
     setConflictFilter('all')
     setConflictQuery('')
     setSelectedConflictIds(new Set())
@@ -266,6 +362,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const action = decisions[rowIndex] || row?._planned_action || 'new'
       return {
         ...row,
+        ...(rowOverrides[rowIndex] || {}),
         sku: identifierOverrides[rowIndex]?.sku ?? row.sku,
         barcode: identifierOverrides[rowIndex]?.barcode ?? row.barcode,
         _action: action,
@@ -475,35 +572,41 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     identifier: conflicts.filter((entry) => (entry.conflictFields || []).length).length,
     barcode: conflicts.filter((entry) => (entry.conflictFields || []).includes('barcode')).length,
     sku: conflicts.filter((entry) => (entry.conflictFields || []).includes('sku')).length,
+    missingDetails: conflicts.filter((entry) => hasMissingImportDetails({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) })).length,
+    pricing: conflicts.filter((entry) => hasPriceReviewIssue({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) })).length,
+    existing: conflicts.filter((entry) => !!entry.existing).length,
     variant: conflicts.filter((entry) => ['create_variant', 'link_variant'].includes(String(decisions[entry.index] || entry.plannedAction || ''))).length,
     merge: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '') === 'merge_stock').length,
     errors: conflicts.filter((entry) => String(entry.conflictType || '').includes('missing_name') || (entry.issueTypes || []).length || (entry.conflictFields || []).includes('errors')).length,
-  }), [conflicts, decisions])
+  }), [conflicts, decisions, rowOverrides])
   const visibleConflicts = useMemo(() => {
     const query = conflictQuery.trim().toLowerCase()
     return conflicts.filter((entry) => {
       const type = String(entry.conflictType || '')
       const fields = entry.conflictFields || []
       const planned = String(decisions[entry.index] || entry.plannedAction || '')
+      const editedRow = { ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }
       if (conflictFilter === 'same_name' && !type.includes('same_name')) return false
       if (conflictFilter === 'identifier' && !fields.length) return false
       if (conflictFilter === 'barcode' && !fields.includes('barcode')) return false
       if (conflictFilter === 'sku' && !fields.includes('sku')) return false
+      if (conflictFilter === 'missing_details' && !hasMissingImportDetails(editedRow)) return false
+      if (conflictFilter === 'pricing' && !hasPriceReviewIssue(editedRow)) return false
+      if (conflictFilter === 'existing' && !entry.existing) return false
       if (conflictFilter === 'variant' && !['create_variant', 'link_variant'].includes(planned)) return false
       if (conflictFilter === 'merge' && planned !== 'merge_stock') return false
       if (conflictFilter === 'errors' && !type.includes('missing_name') && !(entry.issueTypes || []).length && !fields.includes('errors')) return false
-      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'variant', 'merge', 'errors'].includes(conflictFilter)) return false
+      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'missing_details', 'pricing', 'existing', 'variant', 'merge', 'errors'].includes(conflictFilter)) return false
       if (!query) return true
-      const row = entry.row || {}
       const existing = entry.existing || {}
       const hay = [
-        row.name, row.sku, row.barcode, row.category, row.brand, row.description,
-        existing.name, existing.sku, existing.barcode,
+        editedRow.name, editedRow.sku, editedRow.barcode, editedRow.category, editedRow.brand, editedRow.unit, editedRow.supplier, editedRow.branch, editedRow.description,
+        existing.name, existing.sku, existing.barcode, existing.category, existing.brand, existing.unit, existing.supplier,
         ...(entry.conflictFields || []),
       ].join(' ').toLowerCase()
       return hay.includes(query)
     }).slice(0, 200)
-  }, [conflictFilter, conflictQuery, conflicts, decisions])
+  }, [conflictFilter, conflictQuery, conflicts, decisions, rowOverrides])
 
   const toggleConflictSelection = (index) => {
     setSelectedConflictIds((current) => {
@@ -798,6 +901,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       ['identifier', `SKU/barcode (${conflictGroups.identifier})`],
                       ['barcode', `Barcode (${conflictGroups.barcode})`],
                       ['sku', `SKU (${conflictGroups.sku})`],
+                      ['missing_details', `Missing details (${conflictGroups.missingDetails})`],
+                      ['pricing', `Pricing (${conflictGroups.pricing})`],
+                      ['existing', `Existing match (${conflictGroups.existing})`],
                       ['variant', `Variants (${conflictGroups.variant})`],
                       ['merge', `Add stock (${conflictGroups.merge})`],
                       ['errors', `Errors (${conflictGroups.errors})`],
@@ -855,12 +961,22 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
-                {visibleConflicts.map(({ row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
+                {visibleConflicts.map((entry) => {
+                  const { row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages } = entry
+                  const editedRow = { ...(row || {}), ...(rowOverrides[index] || {}) }
+                  const updateEditedRow = (field, value) => {
+                    setRowOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
+                    if (field === 'sku' || field === 'barcode') {
+                      setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
+                      setIdentifierDecisions((state) => ({ ...state, [index]: value === (row?.[field] || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
+                    }
+                  }
+                  return (
                 <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
-                      <span className="font-medium text-gray-900 dark:text-white">{row.name || `Row ${row._rowNumber || index + 2} needs a product name`}</span>
+                      <span className="font-medium text-gray-900 dark:text-white">Row {editedRow._rowNumber || index + 2}: {editedRow.name || 'Needs a product name'}</span>
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
@@ -870,6 +986,19 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                       {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
                     </div>
                   </div>
+
+                  <div className="grid gap-2 xl:grid-cols-2">
+                    <ImportDetailGrid title={T('csv_row_details', 'CSV row details')} row={editedRow} compareTo={existing} />
+                    {existing ? (
+                      <ImportDetailGrid title={T('existing_product_match', 'Existing product match')} row={existing} compareTo={editedRow} />
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                        {T('no_existing_product_match_hint', 'No existing product match. This row can be created as new, merged with a selected family action, or skipped.')}
+                      </div>
+                    )}
+                  </div>
+
+                  <ImportDetailEditor row={editedRow} onChange={updateEditedRow} title={T('edit_imported_row_details', 'Edit imported row details before apply')} />
 
                   {incomingImages.length ? (
                     <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
@@ -963,7 +1092,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     <p className="text-xs text-gray-400">No incoming image columns for this row.</p>
                   )}
                 </div>
-                ))}
+                  )
+                })}
                 {conflicts.length > visibleConflicts.length ? (
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                     Showing first {visibleConflicts.length} of {conflicts.length} planned conflict/variant rows. All rows will still be imported with their selected action.

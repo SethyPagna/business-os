@@ -82,8 +82,12 @@ function ensureCustomTableRowVersioning(tableName) {
     db.exec(`ALTER TABLE "${safeTableName}" ADD COLUMN "updated_at" TIMESTAMPTZ`)
     db.exec(`
       UPDATE "${safeTableName}"
-      SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
-      WHERE updated_at IS NULL OR trim(updated_at) = ''
+      SET updated_at = COALESCE(
+        NULLIF(updated_at::text, '')::timestamptz,
+        NULLIF(created_at::text, '')::timestamptz,
+        CURRENT_TIMESTAMP
+      )
+      WHERE updated_at IS NULL
     `)
   }
 }

@@ -835,6 +835,11 @@ function scheduleDriveSync(reason = 'change', delayMs = 5000) {
 
 function getDriveSyncStatus(redirectUri = '') {
   const config = getDriveSyncConfig()
+  const hasPreviousAccount = !!(config.connectedEmail || config.connectedName || config.rootFolderId)
+  const needsReconnect = !config.ready && hasPreviousAccount
+  const reconnectMessage = needsReconnect
+    ? 'Google Drive was connected before, but the saved OAuth secret or token is missing. Reconnect Google Drive to resume sync.'
+    : ''
   return {
     enabled: config.enabled,
     connected: !!config.ready,
@@ -863,12 +868,12 @@ function getDriveSyncStatus(redirectUri = '') {
       queued: !!runtimeState.timer || !!trim(runtimeState.queuedReason),
       lastRunAt: runtimeState.lastRunAt,
       lastReason: runtimeState.lastReason,
-      lastError: runtimeState.lastError || config.lastError,
+      lastError: runtimeState.lastError || config.lastError || reconnectMessage,
       lastSummary: runtimeState.lastSummary,
     },
     lastSyncedAt: config.lastSyncedAt,
-    lastError: runtimeState.lastError || config.lastError,
-    lastStatus: config.lastStatus,
+    lastError: runtimeState.lastError || config.lastError || reconnectMessage,
+    lastStatus: needsReconnect ? 'needs_reconnect' : config.lastStatus,
   }
 }
 

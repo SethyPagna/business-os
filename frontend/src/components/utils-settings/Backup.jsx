@@ -694,6 +694,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     syncIntervalSeconds: 120,
   })
   const [activeJob, setActiveJob] = useState(null)
+  const [pendingAuthUrl, setPendingAuthUrl] = useState('')
   const loadRequestRef = useRef(0)
   const retryTimerRef = useRef(null)
   const failureCountRef = useRef(0)
@@ -865,6 +866,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       return
     }
 
+    setPendingAuthUrl('')
+    const popup = window.open('', 'business-os-drive-sync', 'width=640,height=760')
+    if (popup) {
+      try {
+        popup.document.title = 'Business OS Google Drive'
+        popup.document.body.innerHTML = '<div style="font-family:system-ui;padding:24px"><h2>Business OS</h2><p>Preparing Google Drive connection...</p></div>'
+      } catch (_) {}
+    }
     setBusy('connect')
     try {
       await yieldToBrowser()
@@ -885,10 +894,15 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         entity: 'google_drive_sync',
         label: copy('drive_sync_connect_started', 'Google Drive connection started'),
       })
-      const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
-      if (!popup) window.location.assign(authUrl)
+      if (popup && !popup.closed) {
+        popup.location.href = authUrl
+      } else {
+        setPendingAuthUrl(authUrl)
+        notify(copy('drive_sync_popup_blocked', 'Google Drive setup is ready. Use the open setup button to continue.'), 'info')
+      }
       notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
     } catch (error) {
+      if (popup && !popup.closed) popup.close()
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
       setBusy('')
@@ -1080,10 +1094,38 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         </div>
       </div>
 
-      {status?.connectedEmail || status?.connectedName ? (
+      {status?.connected && (status?.connectedEmail || status?.connectedName) ? (
         <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
           {copy('drive_sync_connected_as', 'Connected as')} {status.connectedName || status.connectedEmail}
           {status.connectedName && status.connectedEmail ? ` (${status.connectedEmail})` : ''}
+        </div>
+      ) : null}
+
+      {!status?.connected && (status?.connectedEmail || status?.connectedName) ? (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100">
+          {copy('drive_sync_previous_account', 'Previous Google account')}: {status.connectedName || status.connectedEmail}
+          {status.connectedName && status.connectedEmail ? ` (${status.connectedEmail})` : ''}. {copy('drive_sync_reconnect_required', 'Reconnect to resume Drive sync.')}
+        </div>
+      ) : null}
+
+      {pendingAuthUrl ? (
+        <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100">
+          <div className="font-medium">{copy('drive_sync_setup_ready', 'Google Drive setup is ready.')}</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a
+              href={pendingAuthUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs"
+              onClick={() => setPendingAuthUrl('')}
+            >
+              <Link2 className="h-4 w-4" />
+              {copy('drive_sync_open_setup', 'Open Google Drive setup')}
+            </a>
+            <button type="button" className="btn-secondary px-3 py-2 text-xs" onClick={() => setPendingAuthUrl('')}>
+              {copy('dismiss', 'Dismiss')}
+            </button>
+          </div>
         </div>
       ) : null}
 

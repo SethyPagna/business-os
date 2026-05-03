@@ -1810,7 +1810,7 @@
     "drive_sync_connect_failed": "មិនអាចភ្ជាប់ Google Drive បានទេ។",
     "drive_sync_connect_started": "បានចាប់ផ្តើមភ្ជាប់ Google Drive។",
     "drive_sync_connected": "បានភ្ជាប់ Google Drive",
-    "drive_sync_connected_as": "បានភ្ជាប់ជា {name}",
+    "drive_sync_connected_as": "បានភ្ជាប់ជា",
     "drive_sync_delete_missing": "លុបឯកសារលើម៉ាស៊ីនដែលបាត់ពី cloud",
     "drive_sync_desc": "ចម្លង backup ទៅ Google Drive តាមកាលវិភាគពីឧបករណ៍ម៉ាស៊ីនមេនេះ។",
     "drive_sync_disconnect_confirm": "ផ្តាច់ការសមកាលកម្ម Google Drive មែនទេ?",

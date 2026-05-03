@@ -36,5 +36,15 @@ assert.match(
   /referenceId:\s*jobId/,
   'product import stock movements should reference the import job',
 )
+assert.doesNotMatch(
+  source,
+  /finished_at\s*=\s*COALESCE\(finished_at,\s*CURRENT_TIMESTAMP\)(?!::text)/,
+  'import job timestamp reconciliation must not mix text columns with raw Postgres timestamps',
+)
+assert.doesNotMatch(
+  source,
+  /finished_at\s*=\s*CASE[\s\S]*?ELSE\s+CURRENT_TIMESTAMP\s+END/,
+  'bulk import cancellation must not mix text columns with raw Postgres timestamps',
+)
 
 console.log('PASS import decision integrity source checks')
