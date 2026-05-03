@@ -12,9 +12,8 @@ x-app-env: &app-env
   BUSINESS_OS_RUNTIME: docker
   BUSINESS_OS_DOCKER_RELEASE: "1"
   BUSINESS_OS_DOCKER_DATA_MODE: "${BUSINESS_OS_DOCKER_DATA_MODE:-postgres}"
-  BUSINESS_OS_DISABLE_SQLITE: "${BUSINESS_OS_DISABLE_SQLITE:-1}"
-  BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED: "${BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED:-0}"
-  BUSINESS_OS_BACKUP_DIR: "${BUSINESS_OS_BACKUP_DIR:-/runtime/backups}"
+  BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED: "${BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED:-1}"
+  BUSINESS_OS_BACKUP_DIR: "${BUSINESS_OS_BACKUP_DIR:-/runtime/business-os-data/backups}"
   BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
   BUSINESS_OS_REMOTE_PROVIDER: cloudflare
   PUBLIC_BASE_URL: "${BUSINESS_OS_PUBLIC_URL:-https://leangcosmetics.dpdns.org}"
@@ -22,13 +21,15 @@ x-app-env: &app-env
   CLOUDFLARE_ADMIN_URL: "${BUSINESS_OS_ADMIN_URL:-https://admin.leangcosmetics.dpdns.org}"
   DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"
   DATABASE_URL: "${DATABASE_URL:-}"
-  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"
-  S3_ENDPOINT: http://minio:9000
-  S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
-  S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-}"
+  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-r2}"
+  S3_ENDPOINT: "${S3_ENDPOINT:-https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com}"
+  S3_REGION: "${S3_REGION:-auto}"
+  S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:-businessos}"
+  S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:-}"
   S3_BUCKET: "${S3_BUCKET:-business-os-assets}"
+  R2_PUBLIC_BASE_URL: "${R2_PUBLIC_BASE_URL:-}"
   ANALYTICS_ENGINE: "${ANALYTICS_ENGINE:-duckdb}"
-  PARQUET_STORE: "${PARQUET_STORE:-minio}"
+  PARQUET_STORE: "${PARQUET_STORE:-r2}"
   JOB_QUEUE_DRIVER: bullmq
   REDIS_URL: redis://redis-queue:6379
   RUNTIME_CACHE_ENABLED: "1"
@@ -39,6 +40,18 @@ x-app-env: &app-env
   IMPORT_BATCH_PAUSE_MS: "${IMPORT_BATCH_PAUSE_MS:-50}"
   MEDIA_IMAGE_MAX_WIDTH: "${MEDIA_IMAGE_MAX_WIDTH:-1600}"
   MEDIA_IMAGE_QUALITY: "${MEDIA_IMAGE_QUALITY:-72}"
+  SUPABASE_AUTH_ENABLED: "${SUPABASE_AUTH_ENABLED:-false}"
+  SUPABASE_URL: "${SUPABASE_URL:-}"
+  SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY:-}"
+  SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:-}"
+  SUPABASE_EMAIL_AUTH_ENABLED: "${SUPABASE_EMAIL_AUTH_ENABLED:-true}"
+  SUPABASE_MAGIC_LINK_ENABLED: "${SUPABASE_MAGIC_LINK_ENABLED:-true}"
+  SUPABASE_INVITE_ENABLED: "${SUPABASE_INVITE_ENABLED:-true}"
+  SUPABASE_GOOGLE_OAUTH_ENABLED: "${SUPABASE_GOOGLE_OAUTH_ENABLED:-false}"
+  SUPABASE_MFA_TOTP_ENABLED: "${SUPABASE_MFA_TOTP_ENABLED:-false}"
+  GOOGLE_DRIVE_CLIENT_ID: "${GOOGLE_DRIVE_CLIENT_ID:-}"
+  GOOGLE_DRIVE_CLIENT_SECRET: "${GOOGLE_DRIVE_CLIENT_SECRET:-}"
+  GOOGLE_DRIVE_OAUTH_REDIRECT_URI: "${GOOGLE_DRIVE_OAUTH_REDIRECT_URI:-}"
 
 services:
   postgres:
@@ -113,6 +126,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    profiles: ["offline"]
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -131,29 +145,8 @@ services:
     cpus: "${MINIO_CPUS:-1.5}"
     logging: *log-policy
 
-  migrator:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
-    restart: "no"
-    environment:
-      <<: *app-env
-      BUSINESS_OS_WORKER_ROLE: migrator
-      BUSINESS_OS_LEGACY_ROOT_IN_CONTAINER: /legacy
-    volumes:
-      - type: bind
-        source: ${BUSINESS_OS_LEGACY_ROOT:-../..}
-        target: /legacy
-        read_only: true
-    networks: [business_os_internal]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    profiles: ["postgres-migrate"]
-    logging: *log-policy
-
   app:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -178,7 +171,7 @@ services:
     logging: *log-policy
 
   import-worker:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -194,7 +187,7 @@ services:
     logging: *log-policy
 
   media-worker:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env

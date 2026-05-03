@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor', 'Publish')]
+  [ValidateSet('Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor')]
   [string]$Action = 'Doctor',
   [string]$Version = '',
   [string]$Image = '',
@@ -26,7 +26,7 @@ $SecretDir = Join-Path $RuntimeDir 'secrets'
 $BackupDir = Join-Path $RuntimeDir 'backups'
 $EnvFile = Join-Path $RuntimeDir 'docker-release.env'
 $DockerConfig = Join-Path $RuntimeDir 'docker-config'
-$DefaultImage = 'ghcr.io/leangcosmetics/business-os'
+$DefaultImage = 'business-os'
 $DockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os'
 $OldDockerKitDir = Join-Path (Join-Path $Root 'release') 'business-os-docker'
 $ReleaseProjectName = 'business-os'
@@ -113,6 +113,17 @@ function Invoke-Compose {
   return Invoke-Docker -DockerArgs $dockerArgs -AllowFailure:$AllowFailure
 }
 
+function Test-PostgresAppSchemaReady($envMap) {
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  $dbName = if ($envMap.POSTGRES_DB) { [string]$envMap.POSTGRES_DB } else { 'business_os' }
+  $dbUser = if ($envMap.POSTGRES_USER) { [string]$envMap.POSTGRES_USER } else { 'business_os' }
+  $sql = "SELECT (to_regclass('public.products') IS NOT NULL AND to_regclass('public.settings') IS NOT NULL AND to_regclass('public.users') IS NOT NULL)::int;"
+  $output = & $docker compose --env-file $EnvFile -f $ComposeFile exec -T postgres psql -U $dbUser -d $dbName -Atc $sql 2>$null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  return (($output | Select-Object -First 1) -as [string]).Trim() -eq '1'
+}
+
 function New-Secret([int]$bytes = 32) {
   $buffer = New-Object byte[] $bytes
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -133,6 +144,12 @@ function Read-EnvFile {
     $map[$parts[0]] = $parts[1]
   }
   return $map
+}
+
+function Get-EnvValue($primary, $secondary, [string]$key, [string]$fallback = '') {
+  if ($primary -and $primary.ContainsKey($key) -and [string]$primary[$key]) { return $primary[$key] }
+  if ($secondary -and $secondary.ContainsKey($key) -and [string]$secondary[$key]) { return $secondary[$key] }
+  return $fallback
 }
 
 function Get-MinIntSetting($value, [int]$minimum) {
@@ -157,24 +174,38 @@ function Write-EnvFile($values) {
     "POSTGRES_PASSWORD=$($values.POSTGRES_PASSWORD)",
     "MINIO_ROOT_USER=$($values.MINIO_ROOT_USER)",
     "MINIO_ROOT_PASSWORD=$($values.MINIO_ROOT_PASSWORD)",
+    "S3_ENDPOINT=$($values.S3_ENDPOINT)",
+    "S3_REGION=$($values.S3_REGION)",
+    "S3_ACCESS_KEY_ID=$($values.S3_ACCESS_KEY_ID)",
+    "S3_SECRET_ACCESS_KEY=$($values.S3_SECRET_ACCESS_KEY)",
     "S3_BUCKET=$($values.S3_BUCKET)",
+    "R2_PUBLIC_BASE_URL=$($values.R2_PUBLIC_BASE_URL)",
     "CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE=$($values.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE)",
-    "BUSINESS_OS_LEGACY_ROOT=$($values.BUSINESS_OS_LEGACY_ROOT)",
     'APP_BIND_HOST=127.0.0.1',
     'APP_PORT=4000',
     "DATABASE_DRIVER=$($values.DATABASE_DRIVER)",
     "OBJECT_STORAGE_DRIVER=$($values.OBJECT_STORAGE_DRIVER)",
     "DATABASE_URL=$($values.DATABASE_URL)",
-    "BUSINESS_OS_DISABLE_SQLITE=$($values.BUSINESS_OS_DISABLE_SQLITE)",
     "BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=$($values.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED)",
     "ANALYTICS_ENGINE=$($values.ANALYTICS_ENGINE)",
     "PARQUET_STORE=$($values.PARQUET_STORE)",
-    "SQLITE_SAFE_WRITER_MODE=$($values.SQLITE_SAFE_WRITER_MODE)",
     "IMPORT_QUEUE_CONCURRENCY=$($values.IMPORT_QUEUE_CONCURRENCY)",
     "MEDIA_QUEUE_CONCURRENCY=$($values.MEDIA_QUEUE_CONCURRENCY)",
     "IMPORT_BATCH_PAUSE_MS=$($values.IMPORT_BATCH_PAUSE_MS)",
     "IMPORT_WORKER_REPLICAS=$($values.IMPORT_WORKER_REPLICAS)",
     "MEDIA_WORKER_REPLICAS=$($values.MEDIA_WORKER_REPLICAS)",
+    "SUPABASE_AUTH_ENABLED=$($values.SUPABASE_AUTH_ENABLED)",
+    "SUPABASE_URL=$($values.SUPABASE_URL)",
+    "SUPABASE_ANON_KEY=$($values.SUPABASE_ANON_KEY)",
+    "SUPABASE_SERVICE_ROLE_KEY=$($values.SUPABASE_SERVICE_ROLE_KEY)",
+    "SUPABASE_EMAIL_AUTH_ENABLED=$($values.SUPABASE_EMAIL_AUTH_ENABLED)",
+    "SUPABASE_MAGIC_LINK_ENABLED=$($values.SUPABASE_MAGIC_LINK_ENABLED)",
+    "SUPABASE_INVITE_ENABLED=$($values.SUPABASE_INVITE_ENABLED)",
+    "SUPABASE_GOOGLE_OAUTH_ENABLED=$($values.SUPABASE_GOOGLE_OAUTH_ENABLED)",
+    "SUPABASE_MFA_TOTP_ENABLED=$($values.SUPABASE_MFA_TOTP_ENABLED)",
+    "GOOGLE_DRIVE_CLIENT_ID=$($values.GOOGLE_DRIVE_CLIENT_ID)",
+    "GOOGLE_DRIVE_CLIENT_SECRET=$($values.GOOGLE_DRIVE_CLIENT_SECRET)",
+    "GOOGLE_DRIVE_OAUTH_REDIRECT_URI=$($values.GOOGLE_DRIVE_OAUTH_REDIRECT_URI)",
     'JOB_QUEUE_DRIVER=bullmq',
     'BUSINESS_OS_RUNTIME=docker'
   )
@@ -207,11 +238,6 @@ function Ensure-Env {
 
   $postgresPassword = if ($existing.POSTGRES_PASSWORD) { $existing.POSTGRES_PASSWORD } else { New-Secret 36 }
   $databaseUrl = "postgres://business_os:$postgresPassword@postgres:5432/business_os"
-  $wasLegacyMode = (($existing.BUSINESS_OS_DOCKER_DATA_MODE -eq 'sqlite') -or ($existing.DATABASE_DRIVER -eq 'sqlite') -or ($existing.OBJECT_STORAGE_DRIVER -eq 'local'))
-  if ($wasLegacyMode) {
-    Write-Warn 'Existing Docker release env used SQLite/local compatibility. Rewriting it to Postgres/MinIO with SQLite disabled.'
-  }
-
   $values = [ordered]@{
     BUSINESS_OS_IMAGE = "$imageBase`:$tag"
     BUSINESS_OS_DOCKER_DATA_MODE = 'postgres'
@@ -224,23 +250,96 @@ function Ensure-Env {
     MINIO_ROOT_PASSWORD = if ($existing.MINIO_ROOT_PASSWORD) { $existing.MINIO_ROOT_PASSWORD } else { New-Secret 36 }
     S3_BUCKET = if ($existing.S3_BUCKET) { $existing.S3_BUCKET } else { 'business-os-assets' }
     CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $tokenFile
-    BUSINESS_OS_LEGACY_ROOT = if ($existing.BUSINESS_OS_LEGACY_ROOT) { $existing.BUSINESS_OS_LEGACY_ROOT } else { $Root }
     DATABASE_DRIVER = 'postgres'
-    OBJECT_STORAGE_DRIVER = 'minio'
+    OBJECT_STORAGE_DRIVER = if ($existing.OBJECT_STORAGE_DRIVER) { $existing.OBJECT_STORAGE_DRIVER } else { 'r2' }
+    S3_ENDPOINT = if ($existing.S3_ENDPOINT) { $existing.S3_ENDPOINT } else { 'https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com' }
+    S3_REGION = if ($existing.S3_REGION) { $existing.S3_REGION } else { 'auto' }
+    S3_ACCESS_KEY_ID = if ($existing.S3_ACCESS_KEY_ID) { $existing.S3_ACCESS_KEY_ID } else { '' }
+    S3_SECRET_ACCESS_KEY = if ($existing.S3_SECRET_ACCESS_KEY) { $existing.S3_SECRET_ACCESS_KEY } else { '' }
+    R2_PUBLIC_BASE_URL = if ($existing.R2_PUBLIC_BASE_URL) { $existing.R2_PUBLIC_BASE_URL } else { '' }
     DATABASE_URL = $databaseUrl
-    BUSINESS_OS_DISABLE_SQLITE = '1'
-    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' }
+    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ((Get-PostgresCutoverBlockerSummary) -match '"blockerCount"\s*:\s*0') { '1' } else { if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' } }
     ANALYTICS_ENGINE = if ($existing.ANALYTICS_ENGINE) { $existing.ANALYTICS_ENGINE } else { 'duckdb' }
-    PARQUET_STORE = if ($existing.PARQUET_STORE) { $existing.PARQUET_STORE } else { 'minio' }
-    SQLITE_SAFE_WRITER_MODE = '0'
-    IMPORT_QUEUE_CONCURRENCY = if ($wasLegacyMode) { '2' } else { Get-MinIntSetting $existing.IMPORT_QUEUE_CONCURRENCY 2 }
-    MEDIA_QUEUE_CONCURRENCY = if ($wasLegacyMode) { '3' } else { Get-MinIntSetting $existing.MEDIA_QUEUE_CONCURRENCY 3 }
+    PARQUET_STORE = if ($existing.PARQUET_STORE) { $existing.PARQUET_STORE } else { 'r2' }
+    IMPORT_QUEUE_CONCURRENCY = Get-MinIntSetting $existing.IMPORT_QUEUE_CONCURRENCY 2
+    MEDIA_QUEUE_CONCURRENCY = Get-MinIntSetting $existing.MEDIA_QUEUE_CONCURRENCY 3
     IMPORT_BATCH_PAUSE_MS = '0'
-    IMPORT_WORKER_REPLICAS = if ($wasLegacyMode) { '2' } else { Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 2 }
-    MEDIA_WORKER_REPLICAS = if ($wasLegacyMode) { '2' } else { Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 2 }
+    IMPORT_WORKER_REPLICAS = Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 2
+    MEDIA_WORKER_REPLICAS = Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 2
+    SUPABASE_AUTH_ENABLED = if ($existing.SUPABASE_AUTH_ENABLED) { $existing.SUPABASE_AUTH_ENABLED } else { 'false' }
+    SUPABASE_URL = if ($existing.SUPABASE_URL) { $existing.SUPABASE_URL } else { '' }
+    SUPABASE_ANON_KEY = if ($existing.SUPABASE_ANON_KEY) { $existing.SUPABASE_ANON_KEY } else { '' }
+    SUPABASE_SERVICE_ROLE_KEY = if ($existing.SUPABASE_SERVICE_ROLE_KEY) { $existing.SUPABASE_SERVICE_ROLE_KEY } else { '' }
+    SUPABASE_EMAIL_AUTH_ENABLED = if ($existing.SUPABASE_EMAIL_AUTH_ENABLED) { $existing.SUPABASE_EMAIL_AUTH_ENABLED } else { 'true' }
+    SUPABASE_MAGIC_LINK_ENABLED = if ($existing.SUPABASE_MAGIC_LINK_ENABLED) { $existing.SUPABASE_MAGIC_LINK_ENABLED } else { 'true' }
+    SUPABASE_INVITE_ENABLED = if ($existing.SUPABASE_INVITE_ENABLED) { $existing.SUPABASE_INVITE_ENABLED } else { 'true' }
+    SUPABASE_GOOGLE_OAUTH_ENABLED = if ($existing.SUPABASE_GOOGLE_OAUTH_ENABLED) { $existing.SUPABASE_GOOGLE_OAUTH_ENABLED } else { if ($existing.SUPABASE_GOOGLE_ENABLED) { $existing.SUPABASE_GOOGLE_ENABLED } else { 'false' } }
+    SUPABASE_MFA_TOTP_ENABLED = if ($existing.SUPABASE_MFA_TOTP_ENABLED) { $existing.SUPABASE_MFA_TOTP_ENABLED } else { 'false' }
+    GOOGLE_DRIVE_CLIENT_ID = if ($existing.GOOGLE_DRIVE_CLIENT_ID) { $existing.GOOGLE_DRIVE_CLIENT_ID } else { '' }
+    GOOGLE_DRIVE_CLIENT_SECRET = if ($existing.GOOGLE_DRIVE_CLIENT_SECRET) { $existing.GOOGLE_DRIVE_CLIENT_SECRET } else { '' }
+    GOOGLE_DRIVE_OAUTH_REDIRECT_URI = if ($existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI) { $existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI } else { '' }
   }
   Write-EnvFile $values
   return $values
+}
+
+function Get-BaseDataServices($envMap) {
+  $services = @('postgres', 'redis-queue', 'redis-cache')
+  if ($envMap.OBJECT_STORAGE_DRIVER -eq 'minio') {
+    $services += 'minio'
+  }
+  return $services
+}
+
+function Stop-OfflineStorageWhenR2($envMap) {
+  if ($envMap.OBJECT_STORAGE_DRIVER -eq 'minio') { return }
+  Invoke-Compose -ComposeArgs @('stop', 'minio') -AllowFailure | Out-Null
+}
+
+function Get-PostgresCutoverBlockerSummary {
+  $node = Find-Executable @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe')
+  $analyzer = Join-Path $Root 'backend\src\db\cutoverReadiness.js'
+  if (-not $node -or -not (Test-Path -LiteralPath $analyzer)) {
+    return ''
+  }
+  $rootJson = $Root | ConvertTo-Json -Compress
+  $script = @"
+const root = $rootJson;
+const { analyzePostgresCutoverReadiness } = require(root + '/backend/src/db/cutoverReadiness');
+const report = analyzePostgresCutoverReadiness({ repoRoot: root, packagedRuntime: false });
+console.log(JSON.stringify({
+  blockerCount: report.blockerCount,
+  byCode: report.summary.byCode,
+  byFile: report.summary.byFile.slice(0, 12)
+}, null, 2));
+process.exit(report.ready ? 0 : 2);
+"@
+  $result = Invoke-ProcessWithTimeout $node @('-e', $script) 20
+  $text = (($result.Stdout, $result.Stderr) -join [Environment]::NewLine).Trim()
+  return $text
+}
+
+function Assert-PostgresCutoverReadyForApp($envMap) {
+  if (($envMap.DATABASE_DRIVER -ne 'postgres') -or (@('r2', 'minio') -notcontains $envMap.OBJECT_STORAGE_DRIVER)) {
+    Fail 'Docker release app startup requires DATABASE_DRIVER=postgres and OBJECT_STORAGE_DRIVER=r2 or minio.'
+  }
+
+  $verified = [string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED
+  $summary = Get-PostgresCutoverBlockerSummary
+  if ($verified -ne '1') {
+    Invoke-Compose -ComposeArgs @('stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
+    $details = if ($summary) { "`nCurrent cutover blockers:`n$summary" } else { '' }
+    Fail ("Postgres migration finished, but the app data layer is not cut over yet. " +
+      "Business OS will not start the app/workers/Cloudflare because that would crash or tempt a hidden retired-data fallback. " +
+      "Complete the Postgres repository and shared object-storage adapter cutover, then set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after route-contract verification passes." +
+      $details)
+  }
+
+  if ($summary -and $summary -match '"blockerCount"\s*:\s*([1-9][0-9]*)') {
+    Invoke-Compose -ComposeArgs @('stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
+    Fail ("BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 is set, but retired live data-layer references are still present. " +
+      "Refusing to start production Docker until the source scan is clean.`nCurrent cutover blockers:`n$summary")
+  }
 }
 
 function Ensure-DockerReady {
@@ -283,7 +382,7 @@ function Save-ReleaseImageBundle($imageName) {
   Set-Content -LiteralPath (Join-Path ([System.IO.Path]::GetDirectoryName($bundlePath)) 'business-os-image.txt') -Encoding UTF8 -Value (@(
     "image=$imageName",
     "createdAt=$((Get-Date).ToString('o'))",
-    'purpose=Copy this release folder locally or through Google Drive, then Start Business OS.bat loads this image without GHCR.'
+    'purpose=Copy this release folder locally or through Google Drive, then Start Business OS.bat loads this local image bundle.'
   ))
   Write-Ok 'Local Docker image bundle saved for offline/local/Google Drive installs.'
 }
@@ -309,13 +408,7 @@ function Ensure-ReleaseImageAvailable($imageName) {
     }
   }
 
-  Write-Warn 'No local image bundle matched this release. Trying the registry as an optional fallback.'
-  Invoke-Docker -DockerArgs @('pull', $imageName) -AllowFailure | Out-Null
-  if (Test-DockerImageExists $imageName) {
-    Write-Ok "Release image pulled from registry: $imageName"
-    return
-  }
-  Fail "Release image is not available. Copy the full release\\business-os folder, including images\\business-os-image.tar, or log in to GHCR and rerun publish/install."
+  Fail "Release image is not available. Copy the full release\\business-os folder, including images\\business-os-image.tar, then run Start Business OS.bat again."
 }
 
 function Test-ReleaseContents {
@@ -323,8 +416,8 @@ function Test-ReleaseContents {
   if ($compose -match '\.\./\.\.:/app' -or $compose -match 'node_modules') {
     Fail 'Release Compose must not bind-mount source folders or node_modules.'
   }
-  if ($compose -match 'DATABASE_DRIVER:\s*"\$\{DATABASE_DRIVER:-sqlite\}"' -or $compose -match 'OBJECT_STORAGE_DRIVER:\s*"\$\{OBJECT_STORAGE_DRIVER:-local\}"') {
-    Fail 'Release Compose must not ship SQLite/local storage defaults.'
+  if ($compose -match 'OBJECT_STORAGE_DRIVER:\s*"\$\{OBJECT_STORAGE_DRIVER:-local\}"') {
+    Fail 'Release Compose must not ship local storage defaults.'
   }
   if ($compose -notmatch 'business_os_runtime:/runtime') {
     Fail 'Release Compose must keep runtime scratch state inside a Docker volume.'
@@ -416,6 +509,8 @@ function Write-DockerReleaseKit($imageName) {
       $kitExisting[$parts[0]] = $parts[1]
     }
   }
+  $sourceExisting = Read-EnvFile
+  $supabaseGoogleFallback = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_ENABLED' 'false'
   $postgresPassword = if ($kitExisting.POSTGRES_PASSWORD) { $kitExisting.POSTGRES_PASSWORD } else { New-Secret 36 }
   $databaseUrl = "postgres://business_os:$postgresPassword@postgres:5432/business_os"
   $values = [ordered]@{
@@ -428,22 +523,36 @@ function Write-DockerReleaseKit($imageName) {
     POSTGRES_PASSWORD = $postgresPassword
     MINIO_ROOT_USER = if ($kitExisting.MINIO_ROOT_USER) { $kitExisting.MINIO_ROOT_USER } else { 'businessos' }
     MINIO_ROOT_PASSWORD = if ($kitExisting.MINIO_ROOT_PASSWORD) { $kitExisting.MINIO_ROOT_PASSWORD } else { New-Secret 36 }
-    S3_BUCKET = if ($kitExisting.S3_BUCKET) { $kitExisting.S3_BUCKET } else { 'business-os-assets' }
+    S3_ENDPOINT = Get-EnvValue $kitExisting $sourceExisting 'S3_ENDPOINT' 'https://743e5b727d139e85ed11679097f6f99e.r2.cloudflarestorage.com'
+    S3_REGION = Get-EnvValue $kitExisting $sourceExisting 'S3_REGION' 'auto'
+    S3_ACCESS_KEY_ID = Get-EnvValue $kitExisting $sourceExisting 'S3_ACCESS_KEY_ID'
+    S3_SECRET_ACCESS_KEY = Get-EnvValue $kitExisting $sourceExisting 'S3_SECRET_ACCESS_KEY'
+    S3_BUCKET = Get-EnvValue $kitExisting $sourceExisting 'S3_BUCKET' 'business-os-assets'
+    R2_PUBLIC_BASE_URL = Get-EnvValue $kitExisting $sourceExisting 'R2_PUBLIC_BASE_URL'
     CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
-    BUSINESS_OS_LEGACY_ROOT = $DockerKitDir
     DATABASE_DRIVER = 'postgres'
-    OBJECT_STORAGE_DRIVER = 'minio'
+    OBJECT_STORAGE_DRIVER = Get-EnvValue $kitExisting $sourceExisting 'OBJECT_STORAGE_DRIVER' 'r2'
     DATABASE_URL = $databaseUrl
-    BUSINESS_OS_DISABLE_SQLITE = '1'
-    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = '0'
+    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = '1'
     ANALYTICS_ENGINE = 'duckdb'
-    PARQUET_STORE = 'minio'
-    SQLITE_SAFE_WRITER_MODE = '0'
+    PARQUET_STORE = Get-EnvValue $kitExisting $sourceExisting 'PARQUET_STORE' 'r2'
     IMPORT_QUEUE_CONCURRENCY = '2'
     MEDIA_QUEUE_CONCURRENCY = '3'
     IMPORT_BATCH_PAUSE_MS = '0'
     IMPORT_WORKER_REPLICAS = '2'
     MEDIA_WORKER_REPLICAS = '2'
+    SUPABASE_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_AUTH_ENABLED' 'false'
+    SUPABASE_URL = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_URL'
+    SUPABASE_ANON_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_ANON_KEY'
+    SUPABASE_SERVICE_ROLE_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_SERVICE_ROLE_KEY'
+    SUPABASE_EMAIL_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_EMAIL_AUTH_ENABLED' 'true'
+    SUPABASE_MAGIC_LINK_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MAGIC_LINK_ENABLED' 'true'
+    SUPABASE_INVITE_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_INVITE_ENABLED' 'true'
+    SUPABASE_GOOGLE_OAUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_OAUTH_ENABLED' $supabaseGoogleFallback
+    SUPABASE_MFA_TOTP_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MFA_TOTP_ENABLED' 'false'
+    GOOGLE_DRIVE_CLIENT_ID = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_ID'
+    GOOGLE_DRIVE_CLIENT_SECRET = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_SECRET'
+    GOOGLE_DRIVE_OAUTH_REDIRECT_URI = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_OAUTH_REDIRECT_URI'
   }
   $oldRuntimeDir = $RuntimeDir
   $oldEnvFile = $EnvFile
@@ -479,10 +588,11 @@ local Docker image bundle at:
 The app itself runs from this Docker image:
   $imageName
 
-No GHCR registry push is required for local/Google Drive installs. If the image
-is missing on a laptop, install/start loads images\business-os-image.tar.
+No remote image service is required for local/Google Drive installs. If the
+image is missing on a laptop, install/start loads images\business-os-image.tar.
 
-Live app data is stored in Docker-managed Postgres and MinIO volumes.
+Live app data is stored in Docker-managed Postgres plus R2 object storage.
+Emergency/offline mode uses the same object layout with local MinIO.
 
 Moving data safely:
 1. Preferred: run run\docker\backup.bat on the old laptop.
@@ -493,9 +603,9 @@ Moving data safely:
 
 Google Drive and local backups use the same folder format, so a selected
 datasync-N folder can be restored after Business OS validates its manifest,
-checksums, Postgres dump, MinIO assets, and app version metadata.
+checksums, Postgres data, object assets, and app version metadata.
 
-Loose business-os-data folders are not imported automatically by this release.
+Loose old data folders are not imported automatically by this release.
 Use a verified backup folder instead so old local data cannot overwrite newer
 Docker data by accident.
 "@ | Set-Content -LiteralPath (Join-Path $DockerKitDir 'README.txt') -Encoding UTF8
@@ -520,16 +630,7 @@ function Invoke-Release {
   Write-EnvFile $envMap
   Write-DockerReleaseKit $fullImage
   Write-Ok "Release image built: $fullImage"
-  Write-Ok 'Docker release is source-free and configured for Postgres/MinIO data with Redis jobs/cache.'
-}
-
-function Invoke-Publish {
-  Ensure-DockerReady
-  $envMap = Ensure-Env
-  Write-Step "Pushing $($envMap.BUSINESS_OS_IMAGE)"
-  Invoke-Docker -DockerArgs @('push', $envMap.BUSINESS_OS_IMAGE)
-  $latest = ($envMap.BUSINESS_OS_IMAGE -replace ':[^/:]+$', ':latest')
-  Invoke-Docker -DockerArgs @('push', $latest) -AllowFailure
+  Write-Ok 'Docker release is source-free and configured for Postgres, R2/offline object storage, Redis jobs/cache.'
 }
 
 function Invoke-Install {
@@ -537,9 +638,10 @@ function Invoke-Install {
   $envMap = Ensure-Env
   Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
   Write-Step 'Pulling base service images when available...'
-  Invoke-Compose -ComposeArgs @('pull', 'postgres', 'redis-queue', 'redis-cache', 'minio', 'cloudflared') -AllowFailure | Out-Null
-  Write-Step 'Starting database, queues, and storage...'
-  Invoke-Compose -ComposeArgs @('up', '-d', 'postgres', 'redis-queue', 'redis-cache', 'minio')
+  Invoke-Compose -ComposeArgs (@('pull') + (Get-BaseDataServices $envMap) + @('cloudflared')) -AllowFailure | Out-Null
+  Stop-OfflineStorageWhenR2 $envMap
+  Write-Step 'Starting database, queues, and object storage checks when configured...'
+  Invoke-Compose -ComposeArgs (@('up', '-d') + (Get-BaseDataServices $envMap))
   Write-Ok 'Base Docker services are installed.'
 }
 
@@ -554,12 +656,19 @@ function Invoke-Start {
   }
   Write-Step 'Stopping retired Docker release containers if they exist...'
   Invoke-Docker -DockerArgs @('compose', '-p', $OldReleaseProjectName, '--env-file', $EnvFile, '-f', $ComposeFile, 'down', '--remove-orphans') -AllowFailure | Out-Null
-  if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -eq 'postgres') -or ($envMap.DATABASE_DRIVER -eq 'postgres')) {
-    Write-Step 'Running Postgres migration profile...'
-    Invoke-Compose -ComposeArgs @('--profile', 'postgres-migrate', 'run', '--rm', 'migrator')
-  } else {
-    Fail 'Docker release no longer supports SQLite/local runtime mode. Restore a verified Postgres/MinIO backup or run the explicit legacy migration before starting.'
+  if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -ne 'postgres') -and ($envMap.DATABASE_DRIVER -ne 'postgres')) {
+    Fail 'Docker release requires Postgres plus R2 or offline MinIO runtime mode. Restore a verified backup package before starting.'
   }
+  Stop-OfflineStorageWhenR2 $envMap
+  Write-Step 'Starting Postgres, Redis, and object storage checks when configured...'
+  Invoke-Compose -ComposeArgs (@('up', '-d') + (Get-BaseDataServices $envMap))
+  Start-Sleep -Seconds 2
+  if (Test-PostgresAppSchemaReady $envMap) {
+    Write-Ok 'Postgres live schema is ready.'
+  } else {
+    Write-Warn 'Postgres live schema is missing. The app will create the final schema during startup; restore a verified backup if this volume should already contain data.'
+  }
+  Assert-PostgresCutoverReadyForApp $envMap
   Write-Step 'Starting Business OS Docker release runtime...'
   $importReplicas = if ($envMap.IMPORT_WORKER_REPLICAS) { [int]$envMap.IMPORT_WORKER_REPLICAS } else { 1 }
   $mediaReplicas = if ($envMap.MEDIA_WORKER_REPLICAS) { [int]$envMap.MEDIA_WORKER_REPLICAS } else { 1 }
@@ -633,12 +742,11 @@ function Write-BackupManifest($target, $envMap, $files) {
     }
     drivers = @{
       database = 'postgres'
-      objectStorage = 'minio'
+      objectStorage = $envMap.OBJECT_STORAGE_DRIVER
       queue = 'bullmq'
       cache = 'redis'
       analytics = if ($envMap.ANALYTICS_ENGINE) { $envMap.ANALYTICS_ENGINE } else { 'duckdb' }
-      parquetStore = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { 'minio' }
-      sqliteDisabled = $true
+      parquetStore = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { $envMap.OBJECT_STORAGE_DRIVER }
     }
     database = @{
       file = 'postgres.sql'
@@ -647,13 +755,14 @@ function Write-BackupManifest($target, $envMap, $files) {
       user = $envMap.POSTGRES_USER
     }
     objectStorage = @{
-      file = 'minio.tgz'
-      kind = 'docker-volume-tar'
+      file = 'objects-manifest.jsonl'
+      kind = 'object-manifest'
       bucket = $envMap.S3_BUCKET
+      driver = $envMap.OBJECT_STORAGE_DRIVER
     }
     parquet = @{
       manifest = 'parquet-manifest.json'
-      store = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { 'minio' }
+      store = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { $envMap.OBJECT_STORAGE_DRIVER }
     }
     files = $files
   }
@@ -670,9 +779,9 @@ function Write-BackupManifest($target, $envMap, $files) {
   Set-Content -LiteralPath (Join-Path $target 'checksums.sha256') -Encoding ASCII -Value $checksumLines
 }
 
-function Assert-PostgresMinioMode($envMap) {
-  if (($envMap.DATABASE_DRIVER -ne 'postgres') -or ($envMap.OBJECT_STORAGE_DRIVER -ne 'minio') -or ($envMap.BUSINESS_OS_DISABLE_SQLITE -ne '1')) {
-    Fail 'Docker release backup/restore requires DATABASE_DRIVER=postgres, OBJECT_STORAGE_DRIVER=minio, and BUSINESS_OS_DISABLE_SQLITE=1. Run run\docker\install.bat or run\docker\start.bat to rewrite the release env.'
+function Assert-PostgresObjectStorageMode($envMap) {
+  if (($envMap.DATABASE_DRIVER -ne 'postgres') -or (@('r2', 'minio') -notcontains $envMap.OBJECT_STORAGE_DRIVER)) {
+    Fail 'Docker release backup/restore requires DATABASE_DRIVER=postgres and OBJECT_STORAGE_DRIVER=r2 or minio. Run run\docker\install.bat or run\docker\start.bat to rewrite the release env.'
   }
 }
 
@@ -719,30 +828,44 @@ function Test-ReleaseHealth {
 function Invoke-Backup {
   Ensure-DockerReady
   $envMap = Ensure-Env
-  Assert-PostgresMinioMode $envMap
+  Assert-PostgresObjectStorageMode $envMap
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $target = Join-Path $BackupDir $stamp
   Ensure-Dir $target
-  Invoke-Compose -ComposeArgs @('up', '-d', 'postgres', 'minio')
+  Invoke-Compose -ComposeArgs (@('up', '-d') + (Get-BaseDataServices $envMap))
   Write-Step "Backing up Postgres to $target"
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
   & $docker compose --env-file $EnvFile -f $ComposeFile exec -T postgres pg_dump --clean --if-exists --no-owner --no-privileges -U $envMap.POSTGRES_USER $envMap.POSTGRES_DB | Set-Content -LiteralPath (Join-Path $target 'postgres.sql') -Encoding UTF8
   if ($LASTEXITCODE -ne 0) { Fail 'Postgres backup failed.' }
-  Write-Step 'Backing up MinIO objects to the same backup folder format...'
-  $minioVolume = Get-ComposeVolumeName 'business_os_minio'
-  Invoke-VolumeTar $minioVolume $target 'minio.tgz'
+  Write-Step 'Writing object storage manifest...'
+  $objectManifest = @{
+    generatedAt = (Get-Date).ToString('o')
+    driver = $envMap.OBJECT_STORAGE_DRIVER
+    endpoint = $envMap.S3_ENDPOINT
+    bucket = $envMap.S3_BUCKET
+    note = if ($envMap.OBJECT_STORAGE_DRIVER -eq 'r2') { 'R2 object payloads stay in R2; this host backup records the object-store source for validation.' } else { 'Offline MinIO payloads are captured in minio.tgz.' }
+  }
+  Set-Content -LiteralPath (Join-Path $target 'objects-manifest.jsonl') -Encoding UTF8 -Value (($objectManifest | ConvertTo-Json -Compress))
+  if ($envMap.OBJECT_STORAGE_DRIVER -eq 'minio') {
+    Write-Step 'Backing up offline MinIO objects...'
+    $minioVolume = Get-ComposeVolumeName 'business_os_minio'
+    Invoke-VolumeTar $minioVolume $target 'minio.tgz'
+  }
   Set-Content -LiteralPath (Join-Path $target 'parquet-manifest.json') -Encoding UTF8 -Value (@{
     generatedAt = (Get-Date).ToString('o')
     engine = if ($envMap.ANALYTICS_ENGINE) { $envMap.ANALYTICS_ENGINE } else { 'duckdb' }
-    store = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { 'minio' }
-    note = 'Parquet snapshots are stored inside the MinIO archive when present.'
+    store = if ($envMap.PARQUET_STORE) { $envMap.PARQUET_STORE } else { $envMap.OBJECT_STORAGE_DRIVER }
+    note = 'Parquet snapshots use the configured object store.'
   } | ConvertTo-Json -Depth 4)
   $files = @(
     @{ path = 'postgres.sql'; sha256 = Get-FileSha256 (Join-Path $target 'postgres.sql') },
-    @{ path = 'minio.tgz'; sha256 = Get-FileSha256 (Join-Path $target 'minio.tgz') },
+    @{ path = 'objects-manifest.jsonl'; sha256 = Get-FileSha256 (Join-Path $target 'objects-manifest.jsonl') },
     @{ path = 'parquet-manifest.json'; sha256 = Get-FileSha256 (Join-Path $target 'parquet-manifest.json') }
   )
+  if (Test-Path -LiteralPath (Join-Path $target 'minio.tgz')) {
+    $files += @{ path = 'minio.tgz'; sha256 = Get-FileSha256 (Join-Path $target 'minio.tgz') }
+  }
   Write-BackupManifest $target $envMap $files
   Write-Ok "Backup created in Docker/Drive-compatible format: $target"
 }
@@ -755,8 +878,8 @@ function Invoke-Update {
   Invoke-Backup
   Write-Step 'Ensuring release image is available locally...'
   Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
-  Invoke-Compose -ComposeArgs @('pull', 'postgres', 'redis-queue', 'redis-cache', 'minio', 'cloudflared') -AllowFailure | Out-Null
-  Write-Step 'Applying migration and restarting...'
+  Invoke-Compose -ComposeArgs (@('pull') + (Get-BaseDataServices $envMap) + @('cloudflared')) -AllowFailure | Out-Null
+  Write-Step 'Restarting release runtime...'
   Invoke-Start
   $code = Invoke-Compose -ComposeArgs @('ps') -AllowFailure
   if ($code -ne 0) {
@@ -771,23 +894,26 @@ function Invoke-Update {
 }
 
 function Invoke-Restore {
-  if (-not $BackupPath) { Fail 'Set -BackupPath to a backup folder containing manifest.json, postgres.sql, and minio.tgz.' }
+  if (-not $BackupPath) { Fail 'Set -BackupPath to a backup folder containing manifest.json, postgres.sql, and objects-manifest.jsonl.' }
   $BackupPath = [System.IO.Path]::GetFullPath($BackupPath)
   $manifest = Join-Path $BackupPath 'manifest.json'
   $sql = Join-Path $BackupPath 'postgres.sql'
+  $objectsManifest = Join-Path $BackupPath 'objects-manifest.jsonl'
   $minioArchive = Join-Path $BackupPath 'minio.tgz'
-  if (-not (Test-Path -LiteralPath $manifest)) { Write-Warn 'Backup manifest.json not found; continuing only if postgres.sql and minio.tgz are present.' }
+  if (-not (Test-Path -LiteralPath $manifest)) { Write-Warn 'Backup manifest.json not found; continuing only if required final backup files are present.' }
   if (-not (Test-Path -LiteralPath $sql)) { Fail "Backup does not contain postgres.sql: $BackupPath" }
-  if (-not (Test-Path -LiteralPath $minioArchive)) { Fail "Backup does not contain minio.tgz: $BackupPath" }
+  if (-not (Test-Path -LiteralPath $objectsManifest)) { Fail "Backup does not contain objects-manifest.jsonl: $BackupPath" }
   Ensure-DockerReady
   $envMap = Ensure-Env
-  Assert-PostgresMinioMode $envMap
-  Write-Warn 'Restore will replace Docker Postgres data and MinIO objects after validation.'
+  Assert-PostgresObjectStorageMode $envMap
+  Write-Warn 'Restore will replace Docker Postgres data after validation. Object assets are validated from the configured object store.'
   Invoke-Compose -ComposeArgs @('stop', 'app', 'import-worker', 'media-worker', 'cloudflared') -AllowFailure | Out-Null
-  Invoke-Compose -ComposeArgs @('up', '-d', 'postgres', 'minio')
-  Write-Step 'Restoring MinIO objects...'
-  $minioVolume = Get-ComposeVolumeName 'business_os_minio'
-  Invoke-VolumeTar $minioVolume $BackupPath 'minio.tgz' -Restore
+  Invoke-Compose -ComposeArgs (@('up', '-d') + (Get-BaseDataServices $envMap))
+  if ($envMap.OBJECT_STORAGE_DRIVER -eq 'minio' -and (Test-Path -LiteralPath $minioArchive)) {
+    Write-Step 'Restoring offline MinIO objects...'
+    $minioVolume = Get-ComposeVolumeName 'business_os_minio'
+    Invoke-VolumeTar $minioVolume $BackupPath 'minio.tgz' -Restore
+  }
   Write-Step 'Restoring Postgres dump...'
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
@@ -799,19 +925,24 @@ function Invoke-Restore {
 }
 
 function Invoke-Doctor {
-  Ensure-Env | Out-Null
+  $envMap = Ensure-Env
   Test-ReleaseContents
   Ensure-DockerReady
   Invoke-Docker -DockerArgs @('compose', '--env-file', $EnvFile, '-f', $ComposeFile, 'config', '--quiet') | Out-Null
   Invoke-Compose -ComposeArgs @('ps') -AllowFailure | Out-Null
+  if ([string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED -ne '1') {
+    $summary = Get-PostgresCutoverBlockerSummary
+    Write-Warn 'Docker infrastructure is ready, but the Business OS app is not startable in Postgres-only mode yet.'
+    Write-Warn 'Postgres migration can run, but live app routes still need the Postgres repository/object-storage adapter cutover.'
+    if ($summary) { Write-Host $summary }
+  }
   Write-Ok 'Docker release diagnostics completed.'
-  Write-Ok 'Docker release uses private images, Postgres/MinIO data volumes, Redis services, and no source bind mount.'
+  Write-Ok 'Docker release uses local image bundles, Postgres data volumes, R2/offline object storage, Redis services, and no source bind mount.'
 }
 
 Set-Location $Root
 switch ($Action) {
   'Release' { Invoke-Release }
-  'Publish' { Invoke-Publish }
   'Install' { Invoke-Install }
   'Start' { Invoke-Start }
   'Update' { Invoke-Update }

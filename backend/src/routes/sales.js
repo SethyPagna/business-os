@@ -2,11 +2,22 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
+
+function periodExpression(alias, granularity = 'day') {
+  const createdAt = `NULLIF(${alias}.created_at::text, '')::timestamptz`
+  if (granularity === 'week') return `to_char(${createdAt}, 'IYYY-"W"IW')`
+  if (granularity === 'month') return `to_char(${createdAt}, 'YYYY-MM')`
+  return `to_char(${createdAt}, 'YYYY-MM-DD')`
+}
+
+function hourExpression(column = 'created_at') {
+  return `to_char(NULLIF(${column}::text, '')::timestamptz, 'HH24')`
+}
 
 function normalizeImportedTimestamp(value) {
   const raw = String(value || '').trim()
@@ -192,7 +203,7 @@ function refreshProductStockQuantity(productId) {
       FROM branch_stock
       WHERE product_id = ?
     ),
-    updated_at = datetime('now')
+    updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -294,7 +305,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
       ).lastInsertRowid
 
       if (saleCreatedAt) {
-        db.prepare('UPDATE sales SET created_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        db.prepare('UPDATE sales SET created_at = ?, updated_at = \'now\' WHERE id = ?')
           .run(saleCreatedAt, sid)
       }
 
@@ -409,7 +420,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   ok(res, { id: saleId, receiptNumber })
 })
 
-// PATCH /api/sales/:id/status  — update sale status
+// PATCH /api/sales/:id/status  â€” update sale status
 router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const payload = req.body || {}
@@ -436,7 +447,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
   try {
     db.transaction(() => {
       // Build update query
-      const updates = ['sale_status = ?', "updated_at = datetime('now')"]
+      const updates = ['sale_status = ?', "updated_at = CURRENT_TIMESTAMP"]
       const params = [sale_status]
       if (notes !== undefined) { updates.push('notes = ?'); params.push(notes) }
       params.push(id)
@@ -451,7 +462,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
 
       // Handle stock adjustments based on transition
       if (oldStatus === 'awaiting_payment' && willStockBeDeducted) {
-        // Transition: awaiting_payment → {completed, awaiting_delivery}
+        // Transition: awaiting_payment â†’ {completed, awaiting_delivery}
         // Stock needs to be deducted now (it was held, not deducted)
         assertSaleStockAvailable(items, sale.branch_id || null)
 
@@ -489,7 +500,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
         }
         refreshProductStockQuantities(touchedProductIds)
       } else if (wasStockDeducted && !willStockBeDeducted && sale_status !== 'partial_return' && sale_status !== 'returned') {
-        // Transition: {completed, awaiting_delivery} → awaiting_payment / cancelled / other
+        // Transition: {completed, awaiting_delivery} â†’ awaiting_payment / cancelled / other
         // Stock was deducted, now needs to be restored
         const touchedProductIds = new Set()
         for (const item of items) {
@@ -578,7 +589,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
       db.prepare(`
       UPDATE sales
-      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = datetime('now')
+      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
       `).run(
       customer?.id || null,
@@ -590,7 +601,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
       db.prepare(`
       UPDATE returns
-      SET customer_id = ?, customer_name = ?, updated_at = datetime('now')
+      SET customer_id = ?, customer_name = ?, updated_at = CURRENT_TIMESTAMP
       WHERE sale_id = ?
       `).run(
       customer?.id || null,
@@ -645,16 +656,15 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
 // GET /api/sales
 router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
-  const { startDate, endDate, cashier, branchId, status, limit = 100 } = req.query
+  const { startDate, endDate, cashier, branchId, status, userId, limit = 100 } = req.query
   // Fetch sales with all items in a single query (avoids N+1 problem)
   let q = `SELECT s.*,
-             c.membership_number AS customer_membership_number,
-             COALESCE(r.refund_usd, 0) AS refund_usd,
-             COALESCE(r.refund_khr, 0) AS refund_khr,
-             COALESCE(r.return_count, 0) AS return_count,
-             GROUP_CONCAT(si.product_name || ' x' || si.quantity, ', ') AS items_summary,
-             COALESCE(json_group_array(CASE 
-               WHEN si.id IS NOT NULL THEN json_object(
+             MAX(c.membership_number) AS customer_membership_number,
+             COALESCE(MAX(r.refund_usd), 0) AS refund_usd,
+             COALESCE(MAX(r.refund_khr), 0) AS refund_khr,
+             COALESCE(MAX(r.return_count), 0) AS return_count,
+             STRING_AGG(si.product_name || ' x' || si.quantity, ', ' ORDER BY si.id) FILTER (WHERE si.id IS NOT NULL) AS items_summary,
+             COALESCE(json_agg(json_build_object(
                  'id', si.id,
                  'sale_id', si.sale_id,
                  'product_id', si.product_id,
@@ -668,8 +678,8 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
                  'total_khr', si.total_khr,
                  'branch_id', si.branch_id,
                  'branch_name', bsi.name
-               ) ELSE NULL END
-             ) FILTER (WHERE si.id IS NOT NULL), '[]') AS items_json
+               )
+             ) FILTER (WHERE si.id IS NOT NULL), '[]'::json)::text AS items_json
            FROM sales s
            LEFT JOIN customers c ON c.id = s.customer_id
            LEFT JOIN (
@@ -689,6 +699,11 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   if (startDate) { q += ' AND date(s.created_at) >= ?'; params.push(startDate) }
   if (endDate)   { q += ' AND date(s.created_at) <= ?'; params.push(endDate) }
   if (cashier)   { q += ' AND s.cashier_name LIKE ?';   params.push(`%${cashier}%`) }
+  if (userId) {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for cashier user filters.', 403)
+    q += ' AND s.cashier_id = ?'
+    params.push(parseInt(userId, 10) || userId)
+  }
   if (branchId)  {
     q += ' AND (s.branch_id = ? OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = ?))'
     params.push(branchId, branchId)
@@ -709,7 +724,7 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   })))
 })
 
-// GET /api/sales/export  — enriched export with accounting summary
+// GET /api/sales/export  â€” enriched export with accounting summary
 router.get('/sales/export', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, period, format = 'json' } = req.query
 
@@ -906,7 +921,7 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
       AND COALESCE(r.return_scope,'customer') = 'customer'
   `).get()
 
-  // Returns stats — all-time and today
+  // Returns stats â€” all-time and today
   const allReturns = db.prepare(`
     SELECT COUNT(*) AS return_count,
       COALESCE(SUM(total_refund_usd), 0) AS total_refund_usd,
@@ -981,16 +996,8 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, granularity = 'day' } = req.query
   if (!startDate || !endDate) return err(res, 'startDate and endDate required')
 
-  const saleGroupExpr = {
-    day:   "strftime('%Y-%m-%d', s.created_at)",
-    week:  "strftime('%Y-W%W', s.created_at)",
-    month: "strftime('%Y-%m', s.created_at)",
-  }[granularity] || "strftime('%Y-%m-%d', s.created_at)"
-  const returnGroupExpr = {
-    day:   "strftime('%Y-%m-%d', r.created_at)",
-    week:  "strftime('%Y-W%W', r.created_at)",
-    month: "strftime('%Y-%m', r.created_at)",
-  }[granularity] || "strftime('%Y-%m-%d', r.created_at)"
+  const saleGroupExpr = periodExpression('s', granularity)
+  const returnGroupExpr = periodExpression('r', granularity)
 
   const periodData = db.prepare(`
     WITH sale_costs AS (
@@ -1313,7 +1320,7 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
     `).all(startDate, endDate, startDate, endDate),
     hourlyDist:     db.prepare(`
       SELECT
-        strftime('%H', created_at) AS hour,
+        ${hourExpression('created_at')} AS hour,
         COUNT(*) AS count,
         COALESCE(SUM(subtotal_usd - discount_usd - COALESCE(membership_discount_usd,0)),0) AS revenue_usd
       FROM sales

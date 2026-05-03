@@ -21,6 +21,7 @@ const routes = [
   { name: 'backup job restore', method: 'POST', path: '/api/backups/contract-smoke/restore', allowed: new Set([200, 401, 403]) },
   { name: 'drive sync job create', method: 'POST', path: '/api/system/drive-sync/jobs', allowed: new Set([200, 401, 403]) },
   { name: 'storage mode diagnostics', path: '/api/system/storage-mode', allowed: new Set([200, 401, 403]) },
+  { name: 'integration doctor diagnostics', path: '/api/system/integration-doctor', allowed: new Set([200, 401, 403]) },
 ]
 
 function fail(message) {

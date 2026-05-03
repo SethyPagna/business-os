@@ -20,7 +20,7 @@ function enabled() {
 
 function namespacedKey(key) {
   const safeKey = String(key || '').trim().replace(/\s+/g, ':')
-  return `${CACHE_PREFIX}:${DATABASE_DRIVER || 'sqlite'}:${safeKey}`
+  return `${CACHE_PREFIX}:${DATABASE_DRIVER || 'postgres'}:${safeKey}`
 }
 
 async function getClient() {

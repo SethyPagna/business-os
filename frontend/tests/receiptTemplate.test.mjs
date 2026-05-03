@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.js'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.js'
 
@@ -33,6 +34,15 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
   assert.equal(reparsed.show_discount, false)
   assert.equal(reparsed.footer_separator, DEFAULT_TEMPLATE.footer_separator)
   assert.equal(Array.isArray(reparsed.field_order), true)
+})
+
+await runTest('receipt preview remains strict-CSP compatible and binds buttons outside markup', () => {
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /onclick\s*=/i)
+  assert.doesNotMatch(source, /<script[\s>]/i)
+  assert.match(source, /data-receipt-action="print"/)
+  assert.match(source, /data-receipt-action="close"/)
+  assert.match(source, /function attachPrintablePreviewActions/)
 })
 
 if (failed > 0) {

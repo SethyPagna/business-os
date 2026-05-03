@@ -13,7 +13,7 @@ const MEDIA_OPTIMIZE_QUEUE_NAME = process.env.MEDIA_OPTIMIZE_QUEUE_NAME || 'busi
 let mediaConnection = null
 let mediaQueue = null
 let mediaWorker = null
-let mediaStatus = { driver: 'sqlite', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
+let mediaStatus = { driver: 'bullmq', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
 const localMediaJobs = new Set()
 
 function wait(ms = 0) {
@@ -46,10 +46,6 @@ async function getMediaConnection() {
 
 async function initializeMediaQueue() {
   if (mediaQueue) return mediaStatus
-  if (JOB_QUEUE_DRIVER === 'sqlite') {
-    mediaStatus = { driver: 'sqlite', available: false, reason: 'sqlite_configured', producerReady: false, workerActive: !!mediaWorker }
-    return mediaStatus
-  }
   try {
     const { Queue } = require('bullmq')
     const connection = await getMediaConnection()
@@ -58,7 +54,7 @@ async function initializeMediaQueue() {
   } catch (error) {
     mediaConnection = null
     mediaQueue = null
-    mediaStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: !!mediaWorker }
+    mediaStatus = { driver: 'bullmq', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: !!mediaWorker }
     if (JOB_QUEUE_DRIVER === 'bullmq') {
       console.warn(`[media-queue] BullMQ unavailable: ${mediaStatus.reason}`)
     }
@@ -71,7 +67,7 @@ async function processMediaOptimizationJob({ storedName, source = 'media_queue',
   if (!safeStoredName) throw new Error('Media optimization job missing storedName')
   if (isImportJobCancelled(importJobId)) {
     if (importFileId) {
-      db.prepare("UPDATE import_job_files SET status = 'cancelled', updated_at = datetime('now') WHERE id = ? AND status != 'processed'").run(importFileId)
+      db.prepare("UPDATE import_job_files SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'processed'").run(importFileId)
     }
     return
   }
@@ -91,24 +87,24 @@ async function processMediaOptimizationJob({ storedName, source = 'media_queue',
       source: current?.source || source,
     })
     if (importFileId) {
-      db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(importFileId)
+      db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(importFileId)
     }
     if (importJobId) {
       db.prepare(`
         UPDATE import_jobs
-        SET processed_images = processed_images + 1, updated_at = datetime('now')
+        SET processed_images = processed_images + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(importJobId)
     }
   } catch (error) {
     if (importFileId) {
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?")
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(error?.message || 'Media optimization failed', importFileId)
     }
     if (importJobId) {
       db.prepare(`
         UPDATE import_jobs
-        SET failed_images = failed_images + 1, updated_at = datetime('now')
+        SET failed_images = failed_images + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(importJobId)
       db.prepare(`

@@ -3,7 +3,11 @@
 const express = require('express')
 const { db } = require('../database')
 const { ok, err, audit } = require('../helpers')
-const { authToken, getAuditActor, hasPermission } = require('../middleware')
+const { authToken, getAuditActor, hasPermission, isAdminControlUser } = require('../middleware')
+const {
+  isSensitiveActionHistory,
+  permissionForActionHistory,
+} = require('../permissions')
 
 const router = express.Router()
 
@@ -37,7 +41,7 @@ function serializePayload(value) {
 }
 
 function canReadAllHistory(user, requestedAll = false) {
-  return !!requestedAll && (hasPermission(user, 'settings') || hasPermission(user, 'backup'))
+  return !!requestedAll && (isAdminControlUser(user) || hasPermission(user, 'audit_log'))
 }
 
 function getOwnedHistoryRow(req, id) {
@@ -48,8 +52,36 @@ function getOwnedHistoryRow(req, id) {
 
 function canOperateHistoryRow(req, row) {
   if (!row) return false
+  if (isAdminControlUser(req.user)) return true
+  const permission = permissionForActionHistory(row)
+  if (permission && !hasPermission(req.user, permission)) return false
+  const payload = {
+    ...parseJson(row.undo_payload),
+    ...parseJson(row.redo_payload),
+  }
+  if (isSensitiveActionHistory({ ...row, payload })) return false
   if (Number(row.created_by_id || 0) === Number(req.user?.id || 0)) return true
-  return hasPermission(req.user, 'settings') || hasPermission(req.user, 'backup')
+  return hasPermission(req.user, 'audit_log')
+}
+
+function canRecordHistory(req, body = {}) {
+  if (isAdminControlUser(req.user)) return true
+  const permission = permissionForActionHistory({
+    entity: body.entity,
+    scope: body.scope,
+  })
+  if (permission && !hasPermission(req.user, permission)) return false
+  const payload = {
+    ...(body.undo_payload && typeof body.undo_payload === 'object' ? body.undo_payload : {}),
+    ...(body.redo_payload && typeof body.redo_payload === 'object' ? body.redo_payload : {}),
+    permission: body.permission || body.permissionKey || null,
+    sensitivity: body.sensitivity || null,
+  }
+  return !isSensitiveActionHistory({
+    entity: body.entity,
+    scope: body.scope,
+    payload,
+  })
 }
 
 function getHistoryRow(req, id) {
@@ -73,21 +105,32 @@ router.get('/', authToken, (req, res) => {
     const scope = normalizeText(req.query.scope, 'global', 80) || 'global'
     const limit = normalizeLimit(req.query.limit)
     const includeAll = ['1', 'true', 'yes'].includes(String(req.query.all || '').trim().toLowerCase())
-    const rows = canReadAllHistory(req.user, includeAll)
-      ? db.prepare(`
+    const userId = String(req.query.userId || '').trim()
+    if (userId && !isAdminControlUser(req.user)) return err(res, 'Administrator access required for action user filters.', 403)
+    let rows
+    if (canReadAllHistory(req.user, includeAll)) {
+      const where = ['scope = ?']
+      const params = [scope]
+      if (userId) {
+        where.push('created_by_id = ?')
+        params.push(parseInt(userId, 10) || userId)
+      }
+      rows = db.prepare(`
         SELECT *
         FROM action_history
-        WHERE scope = ?
-        ORDER BY datetime(updated_at) DESC, id DESC
+        WHERE ${where.join(' AND ')}
+        ORDER BY updated_at DESC, id DESC
         LIMIT ?
-      `).all(scope, limit)
-      : db.prepare(`
+      `).all(...params, limit)
+    } else {
+      rows = db.prepare(`
         SELECT *
         FROM action_history
         WHERE scope = ? AND created_by_id = ?
-        ORDER BY datetime(updated_at) DESC, id DESC
+        ORDER BY updated_at DESC, id DESC
         LIMIT ?
       `).all(scope, req.user?.id || 0, limit)
+    }
     ok(res, { items: rows.map(mapRow) })
   } catch (error) {
     err(res, error.message || 'Failed to load action history')
@@ -98,6 +141,7 @@ router.post('/', authToken, (req, res) => {
   const body = req.body || {}
   const actor = getAuditActor(req, body)
   try {
+    if (!canRecordHistory(req, body)) return err(res, 'No permission', 403)
     const label = normalizeText(body.label, '', 200)
     if (!label) return err(res, 'Action label required')
     const result = db.prepare(`
@@ -135,7 +179,7 @@ router.patch('/:id', authToken, (req, res) => {
     if (!existing) return err(res, 'Action history item not found', 404)
     db.prepare(`
       UPDATE action_history
-      SET status = ?, last_error = ?, updated_at = datetime('now')
+      SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, body.last_error ? String(body.last_error) : null, req.params.id)
     if (existing && (status === 'redoable' || status === 'undoable')) {
@@ -173,7 +217,7 @@ function completeServerHistoryTransition(req, res, direction) {
     }
     db.prepare(`
       UPDATE action_history
-      SET status = ?, last_error = NULL, updated_at = datetime('now')
+      SET status = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(nextStatus, existing.id)
     audit(

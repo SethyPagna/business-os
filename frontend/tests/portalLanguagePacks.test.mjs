@@ -19,9 +19,27 @@ assert.equal(isFirstPartyPortalLanguage('ru'), true)
 assert.equal(isFirstPartyPortalLanguage('fa'), false)
 
 assert.notEqual(getPortalLanguageText('zh-CN', 'products'), 'Products')
+assert.notEqual(getPortalLanguageText('zh-CN', 'liveCatalog'), 'Live inventory, customer-safe details only.')
+assert.notEqual(getPortalLanguageText('zh-CN', 'filterCompactHint'), 'Use quick filters to narrow products faster.')
+assert.notEqual(getPortalLanguageText('zh-CN', 'aiTitle'), 'Beauty Assistant')
+assert.notEqual(getPortalLanguageText('zh-CN', 'faqHint'), 'Add your most common customer questions here. Customers can open each answer one by one.')
 assert.notEqual(getPortalLanguageText('vi', 'membership'), 'Membership')
 assert.notEqual(getPortalLanguageText('th', 'search'), 'Search products')
 assert.notEqual(getPortalLanguageText('ru', 'noProducts'), 'No products matched the current filters.')
+assert.equal(getPortalLanguageText('zh-CN', 'products'), '产品')
+assert.equal(getPortalLanguageText('zh-TW', 'products'), '產品')
+assert.equal(getPortalLanguageText('vi', 'membership'), 'Thành viên')
+assert.equal(getPortalLanguageText('th', 'search'), 'ค้นหาสินค้า')
+assert.equal(getPortalLanguageText('ru', 'noProducts'), 'Товары по текущим фильтрам не найдены.')
+
+for (const option of FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS) {
+  assert.doesNotMatch(option.nativeLabel || '', /Ã|Â|Ð|Ñ|à¸|áº|Ø|Ù|�/, `${option.value} native label is mojibake`)
+  for (const key of ['products', 'membership', 'search', 'noProducts', 'filters', 'loadingProducts']) {
+    const text = getPortalLanguageText(option.value, key)
+    if (!text) continue
+    assert.doesNotMatch(text, /Ã|Â|Ð|Ñ|à¸|áº|Ø|Ù|�/, `${option.value}.${key} is mojibake`)
+  }
+}
 
 assert.equal(getPortalLanguageText('zh-CN', 'businessName'), '')
 assert.equal(getPortalLanguageText('fr', 'portalIntro'), '')

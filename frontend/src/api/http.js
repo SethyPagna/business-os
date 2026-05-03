@@ -390,6 +390,11 @@ export function buildApiRequestDedupeKey(method, path, body) {
   return `${verb} ${String(path || '')} ${clampDedupeBody(body)}`
 }
 
+function methodAllowsRequestBody(method) {
+  const verb = String(method || 'GET').toUpperCase()
+  return verb !== 'GET' && verb !== 'HEAD' && verb !== 'OPTIONS'
+}
+
 export function __resetApiWriteDedupeForTests() {
   _writeInflight.clear()
 }
@@ -431,12 +436,15 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   }, timeoutMs)
 
   try {
-    const res = await fetch(`${base}${path}`, {
+    const requestInit = {
       method: normalizedMethod,
       headers,
-      body:   body !== undefined ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
-    })
+    }
+    if (methodAllowsRequestBody(normalizedMethod) && body !== undefined) {
+      requestInit.body = JSON.stringify(body)
+    }
+    const res = await fetch(`${base}${path}`, requestInit)
     clearTimeout(timer)
     if (!res.ok) {
       const text = await res.text().catch(() => '')

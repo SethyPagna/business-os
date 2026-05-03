@@ -1,4 +1,4 @@
-﻿'use strict'
+'use strict'
 /**
  * system.js
  * Operational/system endpoints:
@@ -13,7 +13,6 @@
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
-const Database = require('better-sqlite3')
 const express = require('express')
 const { db, ensureCoreDataInvariants } = require('../../database')
 const {
@@ -44,7 +43,6 @@ const {
   S3_BUCKET,
   ANALYTICS_ENGINE,
   PARQUET_STORE,
-  BUSINESS_OS_DISABLE_SQLITE,
 } = require('../../config')
 const {
   summarizeDataRoot,
@@ -54,11 +52,10 @@ const {
 const {
   BACKUP_VERSION,
   BACKUP_TABLES,
-  BACKUP_CLEAR_ORDER,
   buildBackupSummary,
 } = require('../../backupSchema')
 const { ok, err, audit, broadcast, today, getServerLog, wss_clients, runDataIntegrityCheck } = require('../../helpers')
-const { authToken, requirePermission, requireAnyPermission, getAuditActor } = require('../../middleware')
+const { authToken, requirePermission, requireAnyPermission, getAuditActor, isAdminControlUser } = require('../../middleware')
 const { checkRateLimit } = require('../../security')
 const { classifyRequestAccess } = require('../../accessControl')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout, getOrganizationStorageStatus } = require('../../organizationContext')
@@ -74,10 +71,13 @@ const {
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
+const { createFinalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 const { startSystemJob, getSystemJob, listSystemJobs } = require('../../systemJobs')
 const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime')
+const { testObjectStore } = require('../../objectStore')
+const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -198,10 +198,6 @@ function resolveDriveRedirectUri(req) {
   return baseUrl ? `${baseUrl}/api/system/drive-sync/oauth/callback` : ''
 }
 
-function getTableColumns(table) {
-  return db.prepare(`PRAGMA table_info(${q(table)})`).all().map(col => col.name)
-}
-
 function getSafeTableCount(table) {
   try {
     return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${q(table)}`).get()?.count || 0)
@@ -293,7 +289,6 @@ function getMigrationSafetyState() {
 
 async function createMigrationSafetyBackup() {
   const destinationDir = getMigrationSafetyBackupDestination()
-  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
   const result = await runFsWorker('export-folder', {
     sourceRoot: STORAGE_ROOT,
     destinationDir,
@@ -371,12 +366,14 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
   const cutoverReadiness = analyzePostgresCutoverReadiness()
   const migrationEngineReady = cutoverReadiness.ready
+  const objectStorageLive = ['r2', 'minio'].includes(OBJECT_STORAGE_DRIVER)
+  const postgresLive = DATABASE_DRIVER === 'postgres' && objectStorageLive
   return {
-    mode: migrationEngineReady ? 'postgres_cutover_ready' : 'sqlite_authoritative',
+    mode: postgresLive && migrationEngineReady ? `postgres_${OBJECT_STORAGE_DRIVER}_live` : 'migration_required',
     authoritativeData: {
-      databaseDriver: 'sqlite',
-      databasePath: DB_PATH,
-      uploadsPath: UPLOADS_PATH,
+      databaseDriver: DATABASE_DRIVER || 'postgres',
+      databasePath: DATABASE_DRIVER === 'postgres' ? 'Postgres service: business_os/postgres' : DB_PATH,
+      uploadsPath: objectStorageLive ? `${OBJECT_STORAGE_DRIVER.toUpperCase()} bucket: ${S3_BUCKET}` : UPLOADS_PATH,
       importsPath: IMPORTS_PATH,
       storageRoot: STORAGE_ROOT,
       dataRoot: DATA_ROOT,
@@ -389,6 +386,8 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       redisConfigured: !!REDIS_URL,
       cacheRedisConfigured: RUNTIME_CACHE_ENABLED && !!CACHE_REDIS_URL,
       postgresConfigured: !!DATABASE_URL || DATABASE_DRIVER === 'postgres',
+      objectStorageConfigured: objectStorageLive,
+      r2Configured: OBJECT_STORAGE_DRIVER === 'r2',
       minioConfigured: OBJECT_STORAGE_DRIVER === 'minio',
       s3EndpointConfigured: !!S3_ENDPOINT,
       s3Bucket: S3_BUCKET || null,
@@ -397,21 +396,20 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       duckdb: getDuckDbRuntimeStatus({ probe: false }),
     },
     target: {
-      databaseDriver: DATABASE_DRIVER || 'sqlite',
+      databaseDriver: DATABASE_DRIVER || 'postgres',
       objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
       analyticsEngine: ANALYTICS_ENGINE || 'none',
       parquetStore: PARQUET_STORE || 'none',
-      sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
       postgresAvailableForMigration: !!DATABASE_URL && DATABASE_DRIVER === 'postgres',
-      minioAvailableForMigration: OBJECT_STORAGE_DRIVER === 'minio',
+      objectStorageAvailableForMigration: objectStorageLive,
     },
     backupRequired: true,
     automation: getMigrationSafetyState(),
     canPrepareMigration: true,
     canRunMigration: migrationEngineReady,
-    blockedReason: migrationEngineReady
+    blockedReason: postgresLive && migrationEngineReady
       ? ''
-      : `SQLite/local files remain authoritative. ${cutoverReadiness.blockerCount} live SQLite data-layer references remain. Docker production must stay locked until these routes/services move behind Postgres repositories and MinIO storage adapters.`,
+      : `Postgres/${String(OBJECT_STORAGE_DRIVER || 'object storage').toUpperCase()} live mode is not fully verified. ${cutoverReadiness.blockerCount} final-runtime blockers remain or runtime drivers are not set correctly.`,
     cutoverReadiness: {
       ready: cutoverReadiness.ready,
       blockerCount: cutoverReadiness.blockerCount,
@@ -428,59 +426,6 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   }
 }
 
-function extractUploadPathsFromText(value) {
-  const raw = String(value || '')
-  if (!raw.includes('/uploads/')) return []
-  const matches = raw.match(/\/uploads\/[^"'`\r\n]+/g) || []
-  return matches
-    .map((match) => match.replace(/[,\]}]+$/, '').trim())
-    .filter(Boolean)
-}
-
-function collectBackupUploads() {
-  const uploads = []
-  const seen = new Set()
-
-  const addUpload = (relPath) => {
-    if (!relPath || typeof relPath !== 'string') return
-    const normalized = relPath.trim()
-    if (!normalized.startsWith('/uploads/') || seen.has(normalized)) return
-    const fileName = path.basename(normalized)
-    if (!fileName) return
-    const filePath = path.join(UPLOADS_PATH, fileName)
-    if (!fs.existsSync(filePath)) return
-    uploads.push({ path: normalized, data: fs.readFileSync(filePath).toString('base64') })
-    seen.add(normalized)
-  }
-
-  const uploadScans = [
-    "SELECT DISTINCT image_path AS value FROM products WHERE image_path IS NOT NULL AND trim(image_path) != ''",
-    "SELECT DISTINCT image_path AS value FROM product_images WHERE image_path IS NOT NULL AND trim(image_path) != ''",
-    "SELECT DISTINCT avatar_path AS value FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != ''",
-    "SELECT DISTINCT public_path AS value FROM file_assets WHERE public_path IS NOT NULL AND trim(public_path) != ''",
-    "SELECT DISTINCT screenshots_json AS value FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != ''",
-    "SELECT DISTINCT value FROM settings WHERE value IS NOT NULL AND trim(value) != ''",
-  ]
-
-  uploadScans.forEach((sql) => {
-    db.prepare(sql).all().forEach((row) => {
-      extractUploadPathsFromText(row.value).forEach(addUpload)
-    })
-  })
-
-  return uploads
-}
-
-function restoreBackupUploads(uploads = []) {
-  if (!Array.isArray(uploads) || uploads.length === 0) return
-  fs.mkdirSync(UPLOADS_PATH, { recursive: true })
-  for (const file of uploads) {
-    const fileName = path.basename(file.path || '')
-    if (!fileName || !file.data) continue
-    try { fs.writeFileSync(path.join(UPLOADS_PATH, fileName), Buffer.from(file.data, 'base64')) } catch (_) {}
-  }
-}
-
 function deleteAllUploads() {
   try {
     if (!fs.existsSync(UPLOADS_PATH)) return
@@ -490,260 +435,14 @@ function deleteAllUploads() {
   } catch (_) {}
 }
 
-function getBackupDataRootCandidate(root) {
-  const resolved = path.resolve(String(root || ''))
-  const directDbPath = path.join(resolved, 'db', 'business.db')
-  if (fs.existsSync(directDbPath)) return resolved
-
-  const nestedDefault = path.join(resolved, DATA_FOLDER_NAME)
-  const nestedDbPath = path.join(nestedDefault, 'db', 'business.db')
-  if (fs.existsSync(nestedDbPath)) return nestedDefault
-
-  return null
-}
-
-function readBackupTablesFromDataRoot(sourceRoot) {
-  const root = getBackupDataRootCandidate(sourceRoot)
-  if (!root) throw new Error(`No Business OS data folder was found in "${sourceRoot}"`)
-
-  const dbPath = path.join(root, 'db', 'business.db')
-  const sourceDb = new Database(dbPath, { readonly: true, fileMustExist: true })
-
-  try {
-    const customTables = sourceDb.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
-    const tables = Object.fromEntries(
-      BACKUP_TABLES.map((table) => [table, sourceDb.prepare(`SELECT * FROM ${q(table)}`).all()]),
-    )
-    const customTableRows = Object.fromEntries(
-      getCustomTableNames(customTables).map((tableName) => {
-        try {
-          return [tableName, sourceDb.prepare(`SELECT * FROM "${tableName}"`).all()]
-        } catch (_) {
-          return [tableName, []]
-        }
-      }),
-    )
-
-    return {
-      root,
-      tables,
-      customTableRows,
-      summary: buildBackupSummary({ tables, customTableRows, uploads: fs.existsSync(path.join(root, 'uploads')) ? fs.readdirSync(path.join(root, 'uploads')) : [] }),
-    }
-  } finally {
-    try { sourceDb.close() } catch (_) {}
-  }
-}
-
-function restoreUploadsFromDataRoot(sourceRoot) {
-  const uploadSource = path.join(path.resolve(sourceRoot), 'uploads')
-  deleteAllUploads()
-  if (!fs.existsSync(uploadSource)) return
-  fs.mkdirSync(UPLOADS_PATH, { recursive: true })
-  const entries = fs.readdirSync(uploadSource, { withFileTypes: true })
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    const sourcePath = path.join(uploadSource, entry.name)
-    const targetPath = path.join(UPLOADS_PATH, entry.name)
-    try { fs.copyFileSync(sourcePath, targetPath) } catch (_) {}
-  }
-}
-
-function restoreSnapshotTables({ tables, customTableRows, uploads, uploadSourceRoot }) {
-  const providedTables = BACKUP_TABLES.filter((table) => Object.prototype.hasOwnProperty.call(tables, table))
-
-  db.transaction(() => {
-    const existingCustomTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
-    getCustomTableNames(existingCustomTables).forEach((tableName) => {
-      try { db.exec(`DROP TABLE IF EXISTS "${tableName}"`) } catch (_) {}
-    })
-
-    for (const table of BACKUP_CLEAR_ORDER) {
-      if (!providedTables.includes(table)) continue
-      replaceTableRows(table, [])
-    }
-    for (const table of BACKUP_TABLES) {
-      if (!providedTables.includes(table)) continue
-      replaceTableRows(table, tables[table])
-    }
-
-    const importedCustomTables = Array.isArray(tables.custom_tables) ? tables.custom_tables : []
-    const customTableNames = new Set([
-      ...getCustomTableNames(importedCustomTables),
-      ...Object.keys(customTableRows || {}).filter((tableName) => tableName.startsWith('ct_')),
-    ])
-    customTableNames.forEach((tableName) => {
-      const meta = importedCustomTables.find((row) => String(row?.name || '').trim() === tableName) || { name: tableName }
-      const rows = Array.isArray(customTableRows?.[tableName]) ? customTableRows[tableName] : []
-      recreateCustomTable(tableName, parseCustomTableDefinition(meta, rows))
-      replaceTableRows(tableName, rows)
-    })
-
-    if (providedTables.includes('branches')) {
-      const existingDefault = db.prepare('SELECT id FROM branches WHERE is_default = 1 LIMIT 1').get()
-      if (!existingDefault) {
-        const firstBranch = db.prepare('SELECT id FROM branches ORDER BY id LIMIT 1').get()
-        if (firstBranch) db.prepare('UPDATE branches SET is_default = 1 WHERE id = ?').run(firstBranch.id)
-      }
-    }
-    if (providedTables.includes('products') || providedTables.includes('branch_stock')) {
-      db.prepare(`
-        UPDATE products SET stock_quantity = (
-          SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE branch_stock.product_id = products.id
-        ), updated_at = datetime('now')
-      `).run()
-    }
-    repairRelationalConsistency()
-    ensureCoreDataInvariants({ repairUploads: false })
-  })()
-
-  if (uploadSourceRoot) restoreUploadsFromDataRoot(uploadSourceRoot)
-  else restoreBackupUploads(uploads)
-  ensureCoreDataInvariants()
-}
-
-// Bulk-insert using chunked multi-value INSERT (500 rows/stmt) for speed.
-// Unknown columns from older backups are silently dropped (insertColumns filter).
-// Missing columns from newer schemas default to NULL.
-function replaceTableRows(table, rows = []) {
-  const columns = getTableColumns(table)
-  if (columns.length === 0) return 0
-
-  db.prepare(`DELETE FROM ${q(table)}`).run()
-  if (columns.includes('id')) {
-    try { db.prepare('DELETE FROM sqlite_sequence WHERE name = ?').run(table) } catch (_) {}
-  }
-
-  if (!Array.isArray(rows) || rows.length === 0) return 0
-
-  const insertColumns = columns.filter(col => rows.some(row => Object.prototype.hasOwnProperty.call(row, col)))
-  if (insertColumns.length === 0) return 0
-
-  const CHUNK = 500
-  let count = 0
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK)
-    const placeholders = chunk.map(() => `(${insertColumns.map(() => '?').join(',')})`).join(',')
-    const values = chunk.flatMap(row => insertColumns.map(col => row[col] ?? null))
-    db.prepare(`INSERT INTO ${q(table)} (${insertColumns.map(q).join(',')}) VALUES ${placeholders}`).run(...values)
-    count += chunk.length
-  }
-
-  if (columns.includes('id')) {
-    const maxId = rows.reduce((max, row) => { const id = Number(row?.id || 0); return id > max ? id : max }, 0)
-    if (maxId > 0) {
-      try { db.prepare('INSERT OR REPLACE INTO sqlite_sequence(name, seq) VALUES(?, ?)').run(table, maxId) } catch (_) {}
-    }
-  }
-  return count
-}
-
-// Accept any version >= 1. Normalises both modern (tables:{}) and legacy
-// flat-key formats so old backups always import cleanly.
-function normaliseBackupTables(backup) {
-  if (backup?.tables && typeof backup.tables === 'object') return backup.tables
-  return {
-    products:            backup?.products            || [],
-    product_images:      backup?.product_images      || [],
-    categories:          backup?.categories          || [],
-    units:               backup?.units               || [],
-    branches:            backup?.branches            || [],
-    roles:               backup?.roles               || [],
-    users:               backup?.users               || [],
-    branch_stock:        backup?.branch_stock        || [],
-    customers:           backup?.customers           || [],
-    suppliers:           backup?.suppliers           || [],
-    delivery_contacts:   backup?.delivery_contacts   || [],
-    sales:               backup?.sales               || [],
-    sale_items:          backup?.sale_items          || [],
-    returns:             backup?.returns             || [],
-    return_items:        backup?.return_items        || [],
-    inventory_movements: backup?.inventory_movements || [],
-    stock_transfers:     backup?.stock_transfers     || [],
-    settings:            backup?.settings            || [],
-    custom_fields:       backup?.custom_fields       || [],
-    custom_tables:       backup?.custom_tables       || [],
-    customer_share_submissions: backup?.customer_share_submissions || [],
-    audit_logs:          backup?.audit_logs          || [],
-    file_assets:         backup?.file_assets         || [],
-    action_history:      backup?.action_history      || [],
-  }
-}
-
-function normaliseBackupCustomTableRows(backup) {
-  if (backup?.custom_table_rows && typeof backup.custom_table_rows === 'object') return backup.custom_table_rows
-  return {}
-}
-
-function repairRelationalConsistency() {
-  db.prepare('DELETE FROM branch_stock WHERE product_id NOT IN (SELECT id FROM products) OR branch_id NOT IN (SELECT id FROM branches)').run()
-  db.prepare('DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)').run()
-  db.prepare('DELETE FROM return_items WHERE return_id NOT IN (SELECT id FROM returns)').run()
-  db.prepare('UPDATE sale_items SET product_id = NULL WHERE product_id IS NOT NULL AND product_id NOT IN (SELECT id FROM products)').run()
-  db.prepare('UPDATE return_items SET product_id = NULL WHERE product_id IS NOT NULL AND product_id NOT IN (SELECT id FROM products)').run()
+function readFinalBackupManifest(sourceRoot) {
+  return validateLocalBackupPackage(sourceRoot)
 }
 
 function getCustomTableNames(rows = []) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => String(row?.name || '').trim())
     .filter((name) => name.startsWith('ct_'))
-}
-
-function parseCustomTableDefinition(row, sampleRows = []) {
-  let schema = []
-  try {
-    if (row?.schema) schema = JSON.parse(row.schema)
-    else if (row?.columns) schema = JSON.parse(row.columns)
-  } catch (_) {
-    schema = []
-  }
-
-  const fromSchema = Array.isArray(schema)
-    ? schema.map((field) => {
-        if (typeof field === 'string') return { name: field, sqlType: 'TEXT' }
-        const name = String(field?.name || '').trim()
-        if (!name) return null
-        const type = String(field?.type || field?.sqlType || 'text').trim().toLowerCase()
-        const sqlType = ({
-          text: 'TEXT',
-          long_text: 'TEXT',
-          date: 'TEXT',
-          timestamp: 'TEXT',
-          dropdown: 'TEXT',
-          number: 'INTEGER',
-          boolean: 'INTEGER',
-          decimal: 'REAL',
-          real: 'REAL',
-          integer: 'INTEGER',
-        })[type] || 'TEXT'
-        return { name, sqlType }
-      }).filter(Boolean)
-    : []
-
-  if (fromSchema.length) return fromSchema
-
-  const keySet = new Set()
-  ;(Array.isArray(sampleRows) ? sampleRows : []).forEach((rowValue) => {
-    Object.keys(rowValue || {}).forEach((key) => {
-      if (key !== 'id' && key !== 'created_at') keySet.add(key)
-    })
-  })
-
-  return Array.from(keySet).map((name) => ({ name, sqlType: 'TEXT' }))
-}
-
-function recreateCustomTable(tableName, columns = []) {
-  const defs = columns
-    .map((column) => `"${String(column.name).replace(/"/g, '')}" ${column.sqlType || 'TEXT'}`)
-    .join(', ')
-  const sql = defs
-    ? `CREATE TABLE IF NOT EXISTS "${tableName}" (id INTEGER PRIMARY KEY AUTOINCREMENT, ${defs}, created_at TEXT DEFAULT (datetime('now')))`
-    : `CREATE TABLE IF NOT EXISTS "${tableName}" (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT (datetime('now')))`
-  db.exec(sql)
-}
-
-function broadcastDataRestored() {
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
 }
 
 function getDefaultBackupDestinationDir() {
@@ -758,31 +457,14 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null 
   if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
     throw new Error('Choose a backup destination outside the current live data folder.')
   }
-  progress?.({
-    phase: 'snapshotting',
-    progress: 10,
-    message: 'Creating a safe filesystem snapshot',
-  })
-  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-  const workerResult = await runFsWorker('export-folder', {
-    sourceRoot: DATA_ROOT,
-    destinationDir: resolvedDestination,
-    dataFolderName: DATA_FOLDER_NAME,
-    backupVersion: BACKUP_VERSION,
-  })
+  const result = await createFinalBackupPackage({ destinationDir: resolvedDestination, actor, progress })
   audit(actor.userId, actor.userName, 'backup_export', 'system', null, {
-    destinationDir: resolvedDestination,
-    backupRoot: workerResult.backupRoot,
-    files: workerResult.copyStats?.copiedFileCount || 0,
+    packageId: result.packageId,
+    objectPrefix: result.objectPrefix,
+    localPath: result.localPath,
+    storageDriver: result.storageDriver,
   })
-  return {
-    backupRoot: workerResult.backupRoot,
-    dataRoot: workerResult.dataRoot,
-    infoPath: workerResult.infoPath,
-    summary: workerResult.summary,
-    copyStats: workerResult.copyStats,
-    message: 'Folder backup created successfully.',
-  }
+  return result
 }
 
 async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = {}) {
@@ -793,42 +475,114 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = 
     progress: 5,
     message: 'Validating backup folder',
   })
-  const snapshot = readBackupTablesFromDataRoot(rawSource)
+  const snapshot = readFinalBackupManifest(rawSource)
   if (isSamePath(snapshot.root, DATA_ROOT)) {
     throw new Error('Choose a backup folder, not the current live data folder.')
   }
   progress?.({
-    phase: 'stopping_imports',
-    progress: 20,
-    message: 'Stopping background imports before restore',
+    phase: 'validated',
+    progress: 100,
+    message: 'Validated final package. Confirm restore before replacing live data.',
   })
-  await stopImportsBeforeDestructiveAction('Folder backup restore')
-  progress?.({
-    phase: 'restoring',
-    progress: 45,
-    message: 'Restoring database tables and uploads',
-  })
-  restoreSnapshotTables({
-    tables: snapshot.tables,
-    customTableRows: snapshot.customTableRows,
-    uploadSourceRoot: snapshot.root,
-  })
-  bumpStorageVersion('backup-import-folder')
-  audit(actor.userId, actor.userName, 'backup_restore', 'system', null, {
+  audit(actor.userId, actor.userName, 'backup_restore_validated', 'system', null, {
     sourceDir: snapshot.root,
-    tableRows: snapshot.summary?.totals?.tableRowCount || 0,
+    backupFormat: snapshot.manifest?.format || '',
+    backupCreatedAt: snapshot.manifest?.created_at || snapshot.manifest?.createdAt || '',
   })
-  broadcastDataRestored()
   return {
-    message: 'Folder backup restored successfully',
-    sourceRoot: snapshot.root,
-    summary: snapshot.summary,
+    validated: true,
+    requiresConfirmation: true,
+    action: 'restore',
+    sourceDir: snapshot.root,
+    manifest: snapshot.manifest,
+    message: 'Backup package is valid. Restore apply is intentionally gated behind confirmation so live data is not replaced by accident.',
   }
 }
 
 // ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-router.get('/audit-logs', authToken, (req, res) => {
-  res.json(db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all())
+router.get('/audit-logs', authToken, requirePermission('audit_log'), (req, res) => {
+  try {
+    const adminUser = isAdminControlUser(req.user)
+    const page = Math.max(1, parseInt(req.query?.page || '1', 10) || 1)
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query?.pageSize || req.query?.limit || '50', 10) || 50))
+    const offset = (page - 1) * pageSize
+    const params = []
+    const where = []
+    const action = String(req.query?.action || '').trim()
+    const entity = String(req.query?.entity || '').trim()
+    const search = String(req.query?.search || req.query?.q || '').trim()
+    const startDate = String(req.query?.startDate || '').trim()
+    const endDate = String(req.query?.endDate || '').trim()
+    const userId = String(req.query?.userId || '').trim()
+
+    if (action) { where.push('action = ?'); params.push(action) }
+    if (entity) { where.push('entity = ?'); params.push(entity) }
+    if (startDate) { where.push('date(created_at) >= ?'); params.push(startDate) }
+    if (endDate) { where.push('date(created_at) <= ?'); params.push(endDate) }
+    if (userId) {
+      if (!adminUser) return err(res, 'Administrator access required for user audit filters.', 403)
+      where.push('user_id = ?')
+      params.push(parseInt(userId, 10) || userId)
+    }
+    if (search) {
+      where.push(`lower(coalesce(user_name, '') || ' ' || coalesce(action, '') || ' ' || coalesce(entity, '') || ' ' || coalesce(entity_id::text, '') || ' ' || coalesce(details, '')) LIKE ?`)
+      params.push(`%${search.toLowerCase()}%`)
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM audit_logs ${whereSql}`).get(...params)?.total || 0)
+    const items = db.prepare(`
+      SELECT *
+      FROM audit_logs
+      ${whereSql}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, pageSize, offset)
+    const users = adminUser
+      ? db.prepare(`
+          SELECT user_id AS id, COALESCE(NULLIF(user_name, ''), 'User ' || user_id) AS name
+          FROM audit_logs
+          WHERE user_id IS NOT NULL
+          GROUP BY user_id, user_name
+          ORDER BY name ASC
+          LIMIT 500
+        `).all()
+      : []
+
+    ok(res, {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      filters: { users },
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load audit logs')
+  }
+})
+
+router.delete('/audit-logs/retention', authToken, requirePermission('audit_log'), (req, res) => {
+  try {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required.', 403)
+    const olderThanDays = Math.max(1, parseInt(req.query?.olderThanDays || req.body?.olderThanDays || '30', 10) || 30)
+    const confirmed = req.body?.confirm === true
+      || String(req.query?.confirm || '').toLowerCase() === 'true'
+      || String(req.query?.confirm || '') === '1'
+    if (!confirmed) return err(res, 'Confirmation is required to clear old audit logs.', 400)
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000)
+    const cutoffDate = cutoff.toISOString().slice(0, 10)
+    const result = db.prepare('DELETE FROM audit_logs WHERE date(created_at) < ?').run(cutoffDate)
+    const actor = getAuditActor(req, req.body || {})
+    audit(actor.userId, actor.userName, 'audit_log_retention_delete', 'audit_log', null, {
+      olderThanDays,
+      cutoffDate,
+      deleted: result?.changes || 0,
+    })
+    ok(res, { olderThanDays, cutoffDate, deleted: result?.changes || 0 })
+  } catch (error) {
+    err(res, error?.message || 'Failed to clear old audit logs')
+  }
 })
 
 router.get('/debug/log', authToken, (req, res) => {
@@ -905,8 +659,9 @@ router.post('/drive-sync/oauth/start', authToken, requirePermission('settings'),
   try {
     const existing = getDriveSyncConfig()
     const clientId = String(req.body?.clientId || existing.clientId || '').trim()
-    const clientSecret = String(req.body?.clientSecret || existing.clientSecret || '').trim()
-    if (!clientId || !clientSecret) return err(res, 'Google OAuth client ID and client secret are required.')
+    const clientSecret = String(existing.clientSecret || '').trim()
+    if (!clientId) return err(res, 'Google OAuth client ID is required.')
+    if (!clientSecret) return err(res, 'Google Drive client secret is missing from the server env. Add it to the ignored Docker env file, then restart Business OS.')
 
     const baseUrl = buildRequestBaseUrl(req)
     const redirectUri = resolveDriveRedirectUri(req)
@@ -1059,10 +814,50 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
   }
 })
 
+async function sendBackupVersions(req, res) {
+  try {
+    ok(res, { items: await listBackupVersions({ limit: req.query?.limit || 50 }) })
+  } catch (error) {
+    err(res, error?.message || 'Failed to list backup versions')
+  }
+}
+
+router.get('/backups/versions', authToken, requirePermission('backup'), sendBackupVersions)
+router.get('/backups/versions/list', authToken, requirePermission('backup'), sendBackupVersions)
+
 router.get('/backups/:id', authToken, requirePermission('backup'), (req, res) => {
   const item = getSystemJob(req.params.id)
   if (!item) return err(res, 'Backup job not found', 404)
   ok(res, { item })
+})
+
+router.get('/object-storage/doctor', authToken, requireAnyPermission(['backup', 'settings']), async (_req, res) => {
+  try {
+    ok(res, { item: await testObjectStore() })
+  } catch (error) {
+    err(res, error?.message || 'Object storage doctor failed', 503)
+  }
+})
+
+router.post('/object-storage/test-write', authToken, requireAnyPermission(['backup', 'settings']), async (_req, res) => {
+  try {
+    ok(res, { item: await testObjectStore() })
+  } catch (error) {
+    err(res, error?.message || 'Object storage test failed', 503)
+  }
+})
+
+router.get('/integration-doctor', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
+  try {
+    ok(res, {
+      item: await buildIntegrationDoctor({
+        driveRedirectUri: resolveDriveRedirectUri(req),
+        runObjectStoreTest: req.query?.write === '1' || req.query?.deep === '1',
+      }),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Integration doctor failed', 503)
+  }
 })
 
 router.post('/backups', authToken, requirePermission('backup'), async (req, res) => {
@@ -1124,31 +919,7 @@ router.post('/backups/:id/restore', authToken, requirePermission('backup'), asyn
 })
 
 router.get('/backup/export', authToken, requirePermission('backup'), (req, res) => {
-  const customTables = db.prepare(`SELECT * FROM ${q('custom_tables')}`).all()
-  const tables = Object.fromEntries(
-    BACKUP_TABLES.map(table => [table, db.prepare(`SELECT * FROM ${q(table)}`).all()])
-  )
-  const uploads = collectBackupUploads()
-  const customTableRows = Object.fromEntries(
-    getCustomTableNames(customTables).map((tableName) => {
-      try {
-        return [tableName, db.prepare(`SELECT * FROM "${tableName}"`).all()]
-      } catch (_) {
-        return [tableName, []]
-      }
-    })
-  )
-  const backup = {
-    version: BACKUP_VERSION,
-    exported_at: new Date().toISOString(),
-    tables,
-    custom_table_rows: customTableRows,
-    uploads,
-    summary: buildBackupSummary({ tables, uploads, customTableRows }),
-  }
-  res.setHeader('Content-Disposition', `attachment; filename="business-os-backup-${today()}.json"`)
-  res.setHeader('Content-Type', 'application/json')
-  res.send(JSON.stringify(backup, null, 2))
+  err(res, 'Old single-file table downloads are not part of the final backup format. Use /api/system/backups with type export-folder.', 410)
 })
 
 router.post('/backup/export-folder', authToken, requirePermission('backup'), async (req, res) => {
@@ -1156,39 +927,26 @@ router.post('/backup/export-folder', authToken, requirePermission('backup'), asy
   const destinationDir = String(req.body?.destinationDir || '').trim() || getDefaultBackupDestinationDir()
 
   try {
-    return ok(res, await createFolderBackup({
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('backup_export_folder', ({ progress }) => createFolderBackup({
       destinationDir,
-      actor: { userId: req.user?.id, userName: req.user?.name },
-    }))
+      actor,
+      progress,
+    }), {
+      prefix: 'backup',
+      message: 'Backup export queued',
+      runningMessage: 'Backup export running',
+      completedMessage: 'Backup export complete',
+    })
+    return ok(res, { job_id: job.id, item: job })
   } catch (e) {
-    return err(res, `Failed to create folder backup: ${e.message}`)
+    return err(res, `Failed to queue backup: ${e.message}`)
   }
 })
 
-// ?€?€ Backup import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-// Accepts any version >= 1. Unknown columns are dropped, missing columns default to NULL.
 router.post('/backup/import', authToken, requirePermission('backup'), async (req, res) => {
   if (!applyRouteRateLimit(req, res, { name: 'system:backup_import', max: 6, windowMs: 10 * 60 * 1000 })) return
-  const backup = req.body
-  if (!backup || typeof backup !== 'object') return err(res, 'Invalid backup ??expected a JSON object')
-  const ver = backup.version
-  if (typeof ver !== 'number' || ver < 1) {
-    return err(res, `Unsupported backup version: ${ver}. File must be a Business OS backup (v1 or higher).`)
-  }
-
-  const tables = normaliseBackupTables(backup)
-  const customTableRows = normaliseBackupCustomTableRows(backup)
-
-  try {
-    await stopImportsBeforeDestructiveAction('Backup restore')
-    restoreSnapshotTables({ tables, customTableRows, uploads: backup.uploads })
-    bumpStorageVersion('backup-import')
-  } catch (e) {
-    return err(res, e.message)
-  }
-
-  ;['products', 'inventory', 'sales', 'returns', 'customers', 'suppliers', 'settings', 'dashboard', 'users', 'roles', 'customTables', 'portalSubmissions', 'actionHistory', 'runtime'].forEach(broadcast)
-  ok(res, { message: 'Backup imported successfully' })
+  err(res, 'Restore accepts final backup packages only. Use /api/system/backups with type restore-folder, or run run\\docker\\restore.bat.', 410)
 })
 
 router.post('/backup/import-folder', authToken, requirePermission('backup'), async (req, res) => {
@@ -1197,13 +955,20 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), asy
   if (!sourceDir) return err(res, 'sourceDir is required')
 
   try {
-    const result = await restoreFolderBackup({
+    const actor = getAuditActor(req, req.body || {})
+    const job = startSystemJob('backup_restore_folder', ({ progress }) => restoreFolderBackup({
       sourceDir,
-      actor: { userId: req.user?.id, userName: req.user?.name },
+      actor,
+      progress,
+    }), {
+      prefix: 'restore',
+      message: 'Backup restore validation queued',
+      runningMessage: 'Backup restore validation running',
+      completedMessage: 'Backup restore validation complete',
     })
-    return ok(res, result)
+    return ok(res, { job_id: job.id, item: job })
   } catch (e) {
-    return err(res, `Failed to restore folder backup: ${e.message}`)
+    return err(res, `Failed to queue restore validation: ${e.message}`)
   }
 })
 
@@ -1410,13 +1175,16 @@ router.get('/storage-mode', authToken, requireAnyPermission(['backup', 'settings
     const status = buildScaleMigrationStatus({ ...getQueueStatus(), ...queueStatus })
     ok(res, {
       item: {
-        databaseDriver: DATABASE_DRIVER || 'sqlite',
+        databaseDriver: DATABASE_DRIVER || 'postgres',
         objectStorageDriver: OBJECT_STORAGE_DRIVER || 'local',
-        queueDriver: JOB_QUEUE_DRIVER || 'sqlite',
+        objectStorageEndpoint: S3_ENDPOINT || null,
+        objectStorageBucket: S3_BUCKET || null,
+        r2Configured: OBJECT_STORAGE_DRIVER === 'r2',
+        offlineMinioAvailable: OBJECT_STORAGE_DRIVER === 'minio',
+        queueDriver: JOB_QUEUE_DRIVER || 'bullmq',
         cacheDriver: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
         analyticsEngine: ANALYTICS_ENGINE || 'none',
         parquetStore: PARQUET_STORE || 'none',
-        sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
         storageMode: status.mode,
         target: status.target,
         scaleServices: status.scaleServices,
@@ -1484,7 +1252,7 @@ router.post('/scale-migration/run', authToken, requireAnyPermission(['backup', '
   audit(req.user?.id, req.user?.name, 'blocked_migration_run', 'system', null, {
     reason: 'migration_runner_locked',
   }, { deviceName: req.body?.device_name, deviceTz: req.body?.device_tz })
-  return err(res, 'Verified Postgres/MinIO migration is not enabled yet. Run Prepare migration check and keep using SQLite/local files until migration verification is available.', 409)
+  return err(res, 'Postgres plus the configured object-storage adapter is the only supported runtime. Restore a final backup package if this Docker volume is missing data.', 409)
 })
 
 /**
@@ -1510,13 +1278,10 @@ router.post('/data-path', authToken, requireAnyPermission(['backup', 'settings']
             copyStats: { copiedFileCount: 0, copiedBytes: 0 },
             skipped: true,
           }
-        : await (async () => {
-            try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-            return runFsWorker('relocate-data-root', {
-              sourceRoot: STORAGE_ROOT,
-              targetRoot: DEFAULT_STORAGE_ROOT,
-            })
-          })()
+        : await runFsWorker('relocate-data-root', {
+            sourceRoot: STORAGE_ROOT,
+            targetRoot: DEFAULT_STORAGE_ROOT,
+          })
       if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)
       return ok(res, {
         dataDir: DEFAULT_STORAGE_ROOT,
@@ -1534,7 +1299,6 @@ router.post('/data-path', authToken, requireAnyPermission(['backup', 'settings']
   if (!target) return err(res, 'dataDir is required')
 
   try {
-    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
     const migration = await runFsWorker('relocate-data-root', {
       sourceRoot: STORAGE_ROOT,
       targetRoot: target,
@@ -1567,13 +1331,10 @@ router.delete('/data-path', authToken, requireAnyPermission(['backup', 'settings
           copyStats: { copiedFileCount: 0, copiedBytes: 0 },
           skipped: true,
         }
-      : await (async () => {
-          try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-          return runFsWorker('relocate-data-root', {
-            sourceRoot: STORAGE_ROOT,
-            targetRoot: DEFAULT_STORAGE_ROOT,
-          })
-        })()
+      : await runFsWorker('relocate-data-root', {
+          sourceRoot: STORAGE_ROOT,
+          targetRoot: DEFAULT_STORAGE_ROOT,
+        })
     if (fs.existsSync(DATA_LOCATION_FILE)) fs.unlinkSync(DATA_LOCATION_FILE)
     ok(res, {
       migration,

@@ -20,7 +20,7 @@ create table if not exists public.business_os_profiles (
 );
 
 comment on table public.business_os_profiles is
-  'Auth-only mirror for Business OS. Local SQLite remains the source of truth for app data and permissions.';
+  'Auth-only mirror for Business OS. Business OS Postgres remains the source of truth for app data and permissions.';
 
 create index if not exists idx_business_os_profiles_local_user_id
   on public.business_os_profiles(local_user_id)

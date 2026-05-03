@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { db } = require('../database')
-const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT } = require('../config')
+const { STORAGE_ROOT, DATA_ROOT, DB_PATH, UPLOADS_PATH, ORGANIZATIONS_ROOT, DATABASE_DRIVER, OBJECT_STORAGE_DRIVER, S3_BUCKET } = require('../config')
 const { isSamePath, summarizeDataRoot } = require('../dataPath')
 const { buildOrganizationFolderName } = require('../storage/organizationFolders')
 
@@ -145,7 +145,6 @@ function getOrganizationFilesystemLayout(organization) {
     orgRoot,
     metaRoot: path.join(orgRoot, 'meta'),
     userDataRoot: path.join(orgRoot, 'users'),
-    databaseRoot: path.join(orgRoot, 'db'),
     uploadsRoot: path.join(orgRoot, 'uploads'),
     importsRoot: path.join(orgRoot, 'imports'),
     exportsRoot: path.join(orgRoot, 'exports'),
@@ -175,14 +174,16 @@ function ensureOrganizationFilesystemLayout(organization) {
     runtime_source_of_truth: {
       storage_root: STORAGE_ROOT,
       runtime_data_root: DATA_ROOT,
-      db_path: DB_PATH,
+      database_driver: DATABASE_DRIVER,
+      database_endpoint: DB_PATH,
+      object_storage_driver: OBJECT_STORAGE_DRIVER,
+      object_storage_bucket: S3_BUCKET,
       uploads_path: UPLOADS_PATH,
     },
     organization_layout: {
       org_root: layout.orgRoot,
       meta_root: layout.metaRoot,
       users_root: layout.userDataRoot,
-      database_root: layout.databaseRoot,
       uploads_root: layout.uploadsRoot,
       imports_root: layout.importsRoot,
       exports_root: layout.exportsRoot,
@@ -192,8 +193,7 @@ function ensureOrganizationFilesystemLayout(organization) {
     },
     notes: [
       'This organization folder is the canonical layout target for multi-business storage.',
-      'The current server may still be running from the legacy shared runtime root listed above.',
-      'Backups, imports, exports, uploads, and future per-organization runtime files belong under this folder.',
+      'Backups, imports, exports, uploads, and per-organization runtime metadata belong under this folder.',
     ],
   }
   try {
@@ -208,10 +208,10 @@ function ensureOrganizationFilesystemLayout(organization) {
         '',
         'Purpose:',
         '- Keep organization-scoped files grouped together for future multi-business hosting.',
-        '- Provide a stable migration target away from the legacy shared runtime root.',
+        '- Provide a stable metadata and runtime artifact root for this organization.',
         '',
-        `Current live database: ${DB_PATH}`,
-        `Current live uploads: ${UPLOADS_PATH}`,
+        `Current live database: ${DATABASE_DRIVER}`,
+        `Current object storage: ${OBJECT_STORAGE_DRIVER} / ${S3_BUCKET}`,
       ].join('\r\n'),
       'utf8',
     )
@@ -227,9 +227,8 @@ function getOrganizationStorageStatus(organization) {
   const layout = getOrganizationFilesystemLayout(organization)
   if (!layout) return null
 
-  const organizationDataRoot = path.dirname(layout.databaseRoot)
+  const organizationDataRoot = layout.orgRoot
   const runtimeInsideOrganization = isSamePath(layout.orgRoot, DATA_ROOT)
-  const databaseAligned = isSamePath(DB_PATH, path.join(layout.databaseRoot, path.basename(DB_PATH)))
   const uploadsAligned = isSamePath(UPLOADS_PATH, layout.uploadsRoot)
 
   return {
@@ -238,12 +237,11 @@ function getOrganizationStorageStatus(organization) {
     storageRoot: STORAGE_ROOT,
     recommendedDataRoot: organizationDataRoot,
     runtimeDataRoot: DATA_ROOT,
-    runtimeDbPath: DB_PATH,
+    runtimeDatabaseDriver: DATABASE_DRIVER,
     runtimeUploadsPath: UPLOADS_PATH,
     runtimeInsideOrganization,
-    databaseAligned,
     uploadsAligned,
-    fullyAligned: runtimeInsideOrganization && databaseAligned && uploadsAligned,
+    fullyAligned: runtimeInsideOrganization && uploadsAligned,
     runtimeSummary: summarizeDataRoot(DATA_ROOT),
   }
 }

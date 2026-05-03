@@ -134,7 +134,7 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
   return toNumber(amountUsd, 0) * Math.max(0, policy.pointsPerUsd)
 }
 
-// ── Customers ─────────────────────────────────────────────────────────────────
+// â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/customers', authToken, requirePermission('contacts'), (req, res) => {
   const customers = db.prepare('SELECT * FROM customers ORDER BY name').all()
   if (!customers.length) return res.json([])
@@ -210,7 +210,7 @@ router.post('/customers', authToken, requirePermission('contacts'), (req, res) =
   if (!cleanMembershipNumber(d.membership_number)) return err(res, 'Membership number is required')
   try {
     const membershipNumber = ensureMembershipNumber(d.membership_number)
-    const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+    const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
       .run(d.name.trim(), membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null)
     audit(actor.userId, actor.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
     broadcast('customers')
@@ -228,7 +228,7 @@ router.put('/customers/:id', authToken, requirePermission('contacts'), (req, res
     if (!String(d.name || '').trim()) return err(res, 'Name required')
     if (!cleanMembershipNumber(d.membership_number)) return err(res, 'Membership number is required')
     const membershipNumber = ensureMembershipNumber(d.membership_number, parseInt(req.params.id, 10))
-    db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+    db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=\'now\' WHERE id=?')
       .run(d.name, membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null, req.params.id)
     audit(actor.userId, actor.userName, 'update', 'customer', req.params.id)
     broadcast('customers')
@@ -284,7 +284,7 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
   `)
   const updateCustomer = db.prepare(`
     UPDATE customers
-    SET name = ?, membership_number = ?, phone = ?, email = ?, address = ?, company = ?, notes = ?, updated_at = datetime('now')
+    SET name = ?, membership_number = ?, phone = ?, email = ?, address = ?, company = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
   const generatedMemberships = new Set()
@@ -398,7 +398,7 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
   ok(res, { imported, errors })
 })
 
-// ── Suppliers ─────────────────────────────────────────────────────────────────
+// â”€â”€ Suppliers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
   res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all())
 })
@@ -408,7 +408,7 @@ router.post('/suppliers', authToken, requirePermission('contacts'), (req, res) =
   const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
   const contactState = buildImportedContactState(d, { mode: 'address' })
-  const r = db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+  const r = db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
     .run(
       d.name.trim(),
       contactState.primary.phone || cleanText(d.phone),
@@ -431,7 +431,7 @@ router.put('/suppliers/:id', authToken, requirePermission('contacts'), (req, res
     if (!current) return err(res, 'Supplier not found', 404)
     assertUpdatedAtMatch('supplier', current, getExpectedUpdatedAt(d))
     const contactState = buildImportedContactState(d, { mode: 'address' })
-    db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+    db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=\'now\' WHERE id=?')
       .run(
         d.name,
         contactState.primary.phone || cleanText(d.phone),
@@ -490,7 +490,7 @@ router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), 
   `)
   const updateSupplier = db.prepare(`
     UPDATE suppliers
-    SET name = ?, phone = ?, email = ?, address = ?, company = ?, contact_person = ?, notes = ?, updated_at = datetime('now')
+    SET name = ?, phone = ?, email = ?, address = ?, company = ?, contact_person = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
 
@@ -590,7 +590,7 @@ router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), 
   ok(res, { imported, errors })
 })
 
-// ── Delivery contacts ─────────────────────────────────────────────────────────
+// â”€â”€ Delivery contacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {
   res.json(db.prepare('SELECT * FROM delivery_contacts ORDER BY name').all())
 })
@@ -604,7 +604,7 @@ router.post('/delivery-contacts', authToken, requirePermission('contacts'), (req
   const area = cleanText(contactState.primary.area || d.area)
   if (!name && !phone) return err(res, 'Driver name or phone is required')
   const finalName = name || `Driver ${phone}`
-  const r = db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
+  const r = db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,\'now\')')
     .run(finalName, phone || null, area || null, contactState.serialized || cleanText(d.address), cleanText(d.notes))
   audit(actor.userId, actor.userName, 'create', 'delivery_contact', r.lastInsertRowid, { name: finalName })
   broadcast('deliveryContacts')
@@ -624,7 +624,7 @@ router.put('/delivery-contacts/:id', authToken, requirePermission('contacts'), (
     const current = db.prepare('SELECT id, updated_at FROM delivery_contacts WHERE id = ?').get(req.params.id)
     if (!current) return err(res, 'Delivery contact not found', 404)
     assertUpdatedAtMatch('delivery contact', current, getExpectedUpdatedAt(d))
-    db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+    db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=\'now\' WHERE id=?')
       .run(finalName, phone || null, area || null, contactState.serialized || cleanText(d.address), cleanText(d.notes), req.params.id)
     audit(actor.userId, actor.userName, 'update', 'delivery_contact', req.params.id, { name: finalName })
     broadcast('deliveryContacts')
@@ -674,7 +674,7 @@ router.post('/delivery-contacts/bulk-import', authToken, requirePermission('cont
   `)
   const updateDelivery = db.prepare(`
     UPDATE delivery_contacts
-    SET name = ?, phone = ?, area = ?, address = ?, notes = ?, updated_at = datetime('now')
+    SET name = ?, phone = ?, area = ?, address = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
 

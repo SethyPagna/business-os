@@ -69,7 +69,7 @@ export default function Inventory() {
   const deferredSearch = useDeferredValue(search)
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('all')
+  const [groupFilter,   setGroupFilter]   = useState('all') // all | grouped | parent | variant | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
@@ -78,6 +78,8 @@ export default function Inventory() {
   const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
   const [tab,           setTab]           = useState('products')
   const [movFilter,     setMovFilter]     = useState('all')
+  const [movementUserFilter, setMovementUserFilter] = useState('all')
+  const [userOptions, setUserOptions] = useState([])
   const [movementYearFilter, setMovementYearFilter] = useState('all')
   const [movementMonthFilter, setMovementMonthFilter] = useState('all')
   const [movementGroupMode, setMovementGroupMode] = useState('time')
@@ -102,6 +104,17 @@ export default function Inventory() {
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
   )
+  const isAdmin = useMemo(() => {
+    const roleCode = String(user?.role_code || '').toLowerCase()
+    const username = String(user?.username || '').toLowerCase()
+    let permissions = user?.permissions || {}
+    try {
+      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
+    } catch {
+      permissions = {}
+    }
+    return username === 'admin' || roleCode === 'admin' || !!permissions.all
+  }, [user])
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -119,7 +132,10 @@ export default function Inventory() {
           }, 10000)
         }
       }
-      const branchOpts = branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}
+      const branchOpts = {
+        ...(branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}),
+        ...(isAdmin && movementUserFilter !== 'all' ? { userId: movementUserFilter } : {}),
+      }
       const productQuery = {
         ...branchOpts,
         page: inventoryProductPage,
@@ -223,6 +239,8 @@ export default function Inventory() {
     inventoryInitialFilter,
     inventoryProductPage,
     inventoryProductPageSize,
+    isAdmin,
+    movementUserFilter,
     searchMode,
     stockFilter,
     tr,
@@ -243,6 +261,12 @@ export default function Inventory() {
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
+  useEffect(() => {
+    if (!isActive || !isAdmin) return
+    window.api.getUsers()
+      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => setUserOptions([]))
+  }, [isActive, isAdmin])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
@@ -1361,6 +1385,22 @@ export default function Inventory() {
             onClick: () => setMovFilter(movFilter === value ? 'all' : value),
           })),
         },
+        isAdmin ? {
+          id: 'movement-user',
+          label: t('user') || 'User',
+          options: [
+            { id: 'all', label: t('all_users') || 'All users', active: movementUserFilter === 'all', onClick: () => setMovementUserFilter('all') },
+            ...userOptions.map((option) => {
+              const id = String(option?.id || '')
+              return {
+                id: `user-${id}`,
+                label: option?.name || option?.username || `User ${id}`,
+                active: movementUserFilter === id,
+                onClick: () => setMovementUserFilter(movementUserFilter === id ? 'all' : id),
+              }
+            }).filter((option) => option.id !== 'user-'),
+          ],
+        } : null,
         {
           id: 'movement-year',
           label: 'Year',
@@ -1446,6 +1486,7 @@ export default function Inventory() {
         label: t('product_group') || 'Product group',
         options: [
           { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+          { id: 'parents-variants', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
           { id: 'parents', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
           { id: 'variants', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
           { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1472,11 +1513,15 @@ export default function Inventory() {
     movementGroupMode,
     movementMonthFilter,
     movementSortDirection,
+    movementUserFilter,
     movementYearFilter,
     movementYears,
+    isAdmin,
     stockFilter,
     t,
     tab,
+    tr,
+    userOptions,
   ])
 
   const activeInventoryFilterCount = useMemo(() => {
@@ -1484,6 +1529,7 @@ export default function Inventory() {
       return [
         branchFilter !== 'all',
         movFilter !== 'all',
+        movementUserFilter !== 'all',
         movementYearFilter !== 'all',
         movementMonthFilter !== 'all',
         movementGroupMode !== 'time',
@@ -1498,7 +1544,7 @@ export default function Inventory() {
       stockFilter !== 'all',
       inventoryInitialFilter !== 'all',
     ].filter(Boolean).length
-  }, [branchFilter, brandFilter, groupFilter, inventoryInitialFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementYearFilter, stockFilter, tab])
+  }, [branchFilter, brandFilter, groupFilter, inventoryInitialFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementUserFilter, movementYearFilter, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
@@ -1507,6 +1553,7 @@ export default function Inventory() {
     setStockFilter('all')
     setInventoryInitialFilter('all')
     setMovFilter('all')
+    setMovementUserFilter('all')
     setMovementYearFilter('all')
     setMovementMonthFilter('all')
     setMovementGroupMode('time')

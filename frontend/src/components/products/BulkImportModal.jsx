@@ -1,12 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
-import { analyzeProductImportText } from './productImportPlanner.mjs'
+import {
+  analyzeProductImportText,
+  getProductImportBarcodeIssue,
+  isBlockingProductImportIssue,
+} from './productImportPlanner.mjs'
 
 const IMAGE_CONFLICT_OPTIONS = [
   { value: 'keep_existing', label: 'Keep existing images' },
   { value: 'replace_with_csv', label: 'Replace with CSV images' },
   { value: 'append_csv', label: 'Append CSV images' },
+]
+
+const IMPORT_DECISION_OPTIONS = [
+  { value: 'merge_stock', label: 'Add stock' },
+  { value: 'create_variant', label: 'Variant' },
+  { value: 'override_add', label: 'Override + stock' },
+  { value: 'override_replace', label: 'Override + replace' },
+  { value: 'new', label: 'New' },
+  { value: 'skip_row', label: 'Skip' },
+]
+
+const IDENTIFIER_DECISION_OPTIONS = [
+  { value: 'clear_imported', label: 'Clear duplicate ID' },
+  { value: 'allow_duplicate', label: 'Keep same ID' },
 ]
 
 function getBaseName(value) {
@@ -116,10 +134,167 @@ function csvEscape(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
+const IMPORT_REVIEW_DETAIL_FIELDS = [
+  ['name', 'Name'],
+  ['sku', 'SKU'],
+  ['barcode', 'Barcode'],
+  ['brand', 'Brand'],
+  ['category', 'Category'],
+  ['unit', 'Unit'],
+  ['supplier', 'Supplier'],
+  ['branch', 'Branch'],
+  ['stock_quantity', 'Stock'],
+  ['low_stock_threshold', 'Low stock'],
+  ['selling_price_usd', 'Sell USD'],
+  ['selling_price_khr', 'Sell KHR'],
+  ['special_price_usd', 'Special USD'],
+  ['special_price_khr', 'Special KHR'],
+  ['purchase_price_usd', 'Cost USD'],
+  ['purchase_price_khr', 'Cost KHR'],
+  ['discount_enabled', 'Discount on'],
+  ['discount_type', 'Discount type'],
+  ['discount_percent', 'Discount %'],
+  ['discount_amount_usd', 'Discount USD'],
+  ['discount_amount_khr', 'Discount KHR'],
+  ['description', 'Description'],
+]
+
+const IMPORT_REVIEW_EDIT_FIELDS = [
+  ['name', 'Name'],
+  ['sku', 'SKU'],
+  ['barcode', 'Barcode'],
+  ['brand', 'Brand'],
+  ['category', 'Category'],
+  ['unit', 'Unit'],
+  ['supplier', 'Supplier'],
+  ['branch', 'Branch'],
+  ['stock_quantity', 'Stock'],
+  ['low_stock_threshold', 'Low stock'],
+  ['purchase_price_usd', 'Cost USD'],
+  ['purchase_price_khr', 'Cost KHR'],
+  ['selling_price_usd', 'Sell USD'],
+  ['selling_price_khr', 'Sell KHR'],
+  ['special_price_usd', 'Special USD'],
+  ['special_price_khr', 'Special KHR'],
+  ['discount_percent', 'Discount %'],
+  ['discount_amount_usd', 'Discount USD'],
+  ['discount_amount_khr', 'Discount KHR'],
+  ['description', 'Description'],
+]
+
+const IMPORT_PRICE_FIELDS = ['purchase_price_usd', 'purchase_price_khr', 'selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr']
+
+function compactImportValue(value) {
+  const text = String(value ?? '').trim()
+  return text || '-'
+}
+
+function isBlankImportValue(value) {
+  return String(value ?? '').trim() === ''
+}
+
+function hasPriceReviewIssue(row = {}, existing = null, samePricing = true) {
+  if (existing && samePricing === false) return true
+  return IMPORT_PRICE_FIELDS.every((field) => isBlankImportValue(row?.[field]) || Number(row?.[field] || 0) === 0)
+}
+
+function getProductImportIssueLabel(issueType) {
+  if (issueType === 'barcode_scientific_notation') return 'Barcode exported as scientific notation'
+  if (issueType === 'barcode_too_long') return 'Barcode too long'
+  if (issueType === 'invalid_barcode') return 'Invalid barcode'
+  if (issueType === 'barcode_text') return 'Barcode text'
+  if (issueType === 'missing_name') return 'Missing name'
+  return String(issueType || '').replaceAll('_', ' ')
+}
+
+function getProductImportIssueHint(issueType) {
+  if (issueType === 'barcode_scientific_notation') return 'Edit this barcode, clear it, or re-export the CSV with the barcode column formatted as text. Scientific notation cannot be applied safely.'
+  if (issueType === 'barcode_too_long') return 'Shorten this barcode or clear it before importing.'
+  if (issueType === 'invalid_barcode') return 'Remove invalid control characters or clear this barcode before importing.'
+  if (issueType === 'barcode_text') return 'This barcode contains text or symbols. It can be kept if that is intentional.'
+  return 'Review this row before importing.'
+}
+
+function valuesDiffer(left, right) {
+  return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
+}
+
+function normalizeImageMatchKey(value) {
+  return String(value || '')
+    .split(/[\\/]/)
+    .pop()
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .normalize('NFC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function getImageReference(entryKey, entryValue) {
+  const textValue = typeof entryValue === 'string' ? entryValue.trim() : ''
+  if (textValue && (/^data:image\//i.test(textValue) || /^https?:\/\//i.test(textValue) || textValue.startsWith('/uploads/') || textValue.startsWith('uploads/'))) {
+    return textValue.startsWith('uploads/') ? `/${textValue}` : textValue
+  }
+  return getBaseName(entryKey || textValue || entryValue?.name || '')
+}
+
+function findImageReferenceForRow(row = {}, imageFiles = {}) {
+  const keys = [row.name, row.sku, row.barcode].map(normalizeImageMatchKey).filter(Boolean)
+  if (!keys.length) return ''
+  for (const [entryKey, entryValue] of Object.entries(imageFiles || {})) {
+    const imageKey = normalizeImageMatchKey(entryKey || entryValue?.name || '')
+    if (imageKey && keys.includes(imageKey)) return getImageReference(entryKey, entryValue)
+  }
+  return ''
+}
+
+function ImportDetailGrid({ title, row = {}, compareTo = null }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+      <div className="mb-2 font-semibold text-slate-700 dark:text-slate-100">{title}</div>
+      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+        {IMPORT_REVIEW_DETAIL_FIELDS.map(([field, label]) => {
+          const differs = compareTo && valuesDiffer(row?.[field], compareTo?.[field])
+          return (
+            <div key={field} className={`min-w-0 rounded px-2 py-1 ${differs ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100' : 'bg-white/70 text-slate-600 dark:bg-slate-950/50 dark:text-slate-300'}`}>
+              <span className="text-slate-400 dark:text-slate-500">{label}: </span>
+              <span className="break-words">{compactImportValue(row?.[field])}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ImportDetailEditor({ row = {}, onChange, title = 'Edit imported row details before apply' }) {
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+      <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-100">{title}</summary>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {IMPORT_REVIEW_EDIT_FIELDS.map(([field, label]) => (
+          <label key={field} className="grid gap-1">
+            <span className="text-slate-500 dark:text-slate-400">{label}</span>
+            <input
+              className="input h-8 min-w-0 py-1 text-xs"
+              value={row?.[field] ?? ''}
+              onChange={(event) => onChange?.(field, event.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 function buildImageOnlyCsv(imageFiles = {}) {
-  const rows = Object.keys(imageFiles || {})
+  const rows = Object.entries(imageFiles || {})
     .filter(Boolean)
-    .map((name) => [name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(), name])
+    .map(([name, value]) => [
+      getBaseName(name).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(),
+      getImageReference(name, value),
+    ])
   return [
     'name,image_filename_1,image_conflict_mode,_action',
     ...rows.map(([name, fileName]) => [
@@ -156,6 +331,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [imageDecisions, setImageDecisions] = useState({})
   const [identifierDecisions, setIdentifierDecisions] = useState({})
   const [identifierOverrides, setIdentifierOverrides] = useState({})
+  const [rowOverrides, setRowOverrides] = useState({})
   const [conflictFilter, setConflictFilter] = useState('all')
   const [conflictQuery, setConflictQuery] = useState('')
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
@@ -164,8 +340,29 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [currentJob, setCurrentJob] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
+  const cancelRequestedRef = useRef(false)
 
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+
+  const throwIfImportCancelled = () => {
+    if (!cancelRequestedRef.current) return
+    const error = new Error(T('import_cancelled', 'Import cancelled.'))
+    error.code = 'import_cancel_requested'
+    throw error
+  }
+
+  const setCancelledResult = (jobId = currentJob?.id) => {
+    setResult({
+      imported: 0,
+      updated: 0,
+      queued: 0,
+      jobId,
+      cancelled: true,
+      errors: [],
+      message: T('import_cancelled', 'Import cancelled.'),
+    })
+    setStep(3)
+  }
 
   const resetCsvState = () => {
     setCsvData(null)
@@ -178,12 +375,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setImageDecisions({})
     setIdentifierDecisions({})
     setIdentifierOverrides({})
+    setRowOverrides({})
     setConflictFilter('all')
     setConflictQuery('')
     setSelectedConflictIds(new Set())
     setFieldRules({})
     setZipFile(null)
     setCurrentJob(null)
+    cancelRequestedRef.current = false
     setStep(1)
   }
 
@@ -245,12 +444,18 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     const instructions = rows.map((row, index) => {
       const rowIndex = Number(row?._import_row_index ?? index)
       const action = decisions[rowIndex] || row?._planned_action || 'new'
-      return {
+      const editedRow = {
         ...row,
+        ...(rowOverrides[rowIndex] || {}),
         sku: identifierOverrides[rowIndex]?.sku ?? row.sku,
         barcode: identifierOverrides[rowIndex]?.barcode ?? row.barcode,
+      }
+      const matchedImageRef = getIncomingImageFilenames(editedRow).length ? '' : findImageReferenceForRow(editedRow, imageFiles)
+      return {
+        ...editedRow,
+        ...(matchedImageRef ? { image_filename_1: matchedImageRef } : {}),
         _action: action,
-        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(row).length ? 'replace_with_csv' : 'keep_existing'),
+        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(editedRow).length || matchedImageRef ? 'replace_with_csv' : 'keep_existing'),
         _field_rules: JSON.stringify(fieldRules || {}),
         _identifier_conflict_mode: identifierDecisions[rowIndex] || row?._identifier_conflict_mode || 'clear_imported',
         _target_product_id: row?._target_product_id || '',
@@ -269,8 +474,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleCancelCurrentJob = async () => {
     if (!currentJob?.id) return
+    if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
+      if (!confirmed) return
+    }
+    cancelRequestedRef.current = true
     try {
-      const payload = await window.api.cancelImportJob(currentJob.id)
+      const payload = await window.api.cancelImportJob(currentJob.id, { source: 'products_modal' })
       setCurrentJob(payload?.job || payload || currentJob)
       setAnalysisProgress((current) => ({
         progress: current?.progress || 0,
@@ -285,8 +495,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleImageOnlyImport = async () => {
     if (!Object.keys(imageFiles).length && !zipFile) return
+    cancelRequestedRef.current = false
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
+    let jobId = null
     try {
       const created = await window.api.createImportJob({
         type: 'products',
@@ -294,17 +506,20 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       })
       const job = created?.job || created
       setCurrentJob(job)
-      const jobId = job?.id
+      jobId = job?.id
       if (!jobId) throw new Error('Import job was not created')
+      throwIfImportCancelled()
 
       await window.api.uploadImportJobCsv({
         jobId,
         text: buildImageOnlyCsv(imageFiles),
         fileName: 'image-only-import.csv',
       })
+      throwIfImportCancelled()
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await window.api.uploadImportJobZip({ jobId, file: zipFile })
+        throwIfImportCancelled()
       }
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
@@ -313,8 +528,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           files: browserImages,
           onProgress: setAnalysisProgress,
         })
+        throwIfImportCancelled()
       }
-      await window.api.startImportJob(jobId)
+      throwIfImportCancelled()
+      await window.api.startImportJob(jobId, { source: 'products_modal' })
+      throwIfImportCancelled()
       setResult({
         imported: 0,
         updated: 0,
@@ -327,8 +545,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
-      setStep(3)
+      if (error?.code === 'import_cancel_requested') {
+        setCancelledResult(jobId)
+      } else {
+        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setStep(3)
+      }
     } finally {
       setLoading(false)
       setAnalysisProgress(null)
@@ -342,10 +564,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Preparing import' })
     try {
-      const existingProducts = await window.api.getProducts()
       const analysis = await analyzeProductCsvInWorker({
         text: picked.content,
-        existingProducts: Array.isArray(existingProducts) ? existingProducts : [],
+        // Keep the modal responsive for large catalogs. Existing-product conflicts
+        // are reviewed by the server import job; this local pass only previews CSV
+        // row grouping and same-file issues.
+        existingProducts: [],
         onProgress: setAnalysisProgress,
       })
       const nextConflicts = (analysis.conflicts || []).map((entry) => {
@@ -392,8 +616,10 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const handleImport = async () => {
     if (!csvData?.content) return
+    cancelRequestedRef.current = false
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
+    let jobId = null
     try {
       const created = await window.api.createImportJob({
         type: 'products',
@@ -404,17 +630,20 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       })
       const job = created?.job || created
       setCurrentJob(job)
-      const jobId = job?.id
+      jobId = job?.id
       if (!jobId) throw new Error('Import job was not created')
+      throwIfImportCancelled()
 
       await window.api.uploadImportJobCsv({
         jobId,
         text: buildCsvForImportJob(),
         fileName: csvData?.name || 'products-import.csv',
       })
+      throwIfImportCancelled()
       if (zipFile) {
         setAnalysisProgress({ progress: 10, label: 'Uploading ZIP image pack' })
         await window.api.uploadImportJobZip({ jobId, file: zipFile })
+        throwIfImportCancelled()
       }
       const browserImages = getBrowserImageEntries(imageFiles)
       if (browserImages.length) {
@@ -423,8 +652,11 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           files: browserImages,
           onProgress: setAnalysisProgress,
         })
+        throwIfImportCancelled()
       }
-      await window.api.startImportJob(jobId)
+      throwIfImportCancelled()
+      await window.api.startImportJob(jobId, { source: 'products_modal' })
+      throwIfImportCancelled()
       setResult({
         imported: 0,
         updated: 0,
@@ -436,8 +668,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
-      setStep(3)
+      if (error?.code === 'import_cancel_requested') {
+        setCancelledResult(jobId)
+      } else {
+        setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
+        setStep(3)
+      }
     } finally {
       setLoading(false)
       setAnalysisProgress(null)
@@ -445,7 +681,24 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }
 
   const pendingAsk = useMemo(() => conflicts.filter((item) => decisions[item.index] === 'ask'), [conflicts, decisions])
-  const allDecided = pendingAsk.length === 0
+  const blockingIssueEntries = useMemo(() => conflicts.map((entry) => {
+    const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
+    const editedRow = {
+      ...(entry.row || {}),
+      ...(rowOverrides[index] || {}),
+      sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? entry.row?.sku ?? '',
+      barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? entry.row?.barcode ?? '',
+    }
+    const issue = getProductImportBarcodeIssue(editedRow.barcode)
+    return {
+      index,
+      rowNumber: editedRow._rowNumber || index + 2,
+      barcode: editedRow.barcode || '',
+      issue,
+    }
+  }).filter((entry) => isBlockingProductImportIssue(entry.issue)), [conflicts, identifierOverrides, rowOverrides])
+  const blockingIssueCount = blockingIssueEntries.length
+  const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
   const conflictGroups = useMemo(() => ({
@@ -453,30 +706,41 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     identifier: conflicts.filter((entry) => (entry.conflictFields || []).length).length,
     barcode: conflicts.filter((entry) => (entry.conflictFields || []).includes('barcode')).length,
     sku: conflicts.filter((entry) => (entry.conflictFields || []).includes('sku')).length,
+    pricing: conflicts.filter((entry) => hasPriceReviewIssue({ ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }, entry.existing, entry.samePricing)).length,
+    existing: conflicts.filter((entry) => !!entry.existing).length,
+    variant: conflicts.filter((entry) => ['create_variant', 'link_variant'].includes(String(decisions[entry.index] || entry.plannedAction || ''))).length,
+    merge: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '') === 'merge_stock').length,
+    override: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '').startsWith('override')).length,
     errors: conflicts.filter((entry) => String(entry.conflictType || '').includes('missing_name') || (entry.issueTypes || []).length || (entry.conflictFields || []).includes('errors')).length,
-  }), [conflicts])
+  }), [conflicts, decisions, rowOverrides])
   const visibleConflicts = useMemo(() => {
     const query = conflictQuery.trim().toLowerCase()
     return conflicts.filter((entry) => {
       const type = String(entry.conflictType || '')
       const fields = entry.conflictFields || []
+      const planned = String(decisions[entry.index] || entry.plannedAction || '')
+      const editedRow = { ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }
       if (conflictFilter === 'same_name' && !type.includes('same_name')) return false
       if (conflictFilter === 'identifier' && !fields.length) return false
       if (conflictFilter === 'barcode' && !fields.includes('barcode')) return false
       if (conflictFilter === 'sku' && !fields.includes('sku')) return false
+      if (conflictFilter === 'pricing' && !hasPriceReviewIssue(editedRow, entry.existing, entry.samePricing)) return false
+      if (conflictFilter === 'existing' && !entry.existing) return false
+      if (conflictFilter === 'variant' && !['create_variant', 'link_variant'].includes(planned)) return false
+      if (conflictFilter === 'merge' && planned !== 'merge_stock') return false
+      if (conflictFilter === 'override' && !planned.startsWith('override')) return false
       if (conflictFilter === 'errors' && !type.includes('missing_name') && !(entry.issueTypes || []).length && !fields.includes('errors')) return false
-      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'errors'].includes(conflictFilter)) return false
+      if (!['all', 'same_name', 'identifier', 'barcode', 'sku', 'pricing', 'existing', 'variant', 'merge', 'override', 'errors'].includes(conflictFilter)) return false
       if (!query) return true
-      const row = entry.row || {}
       const existing = entry.existing || {}
       const hay = [
-        row.name, row.sku, row.barcode, row.category, row.brand, row.description,
-        existing.name, existing.sku, existing.barcode,
+        editedRow.name, editedRow.sku, editedRow.barcode, editedRow.category, editedRow.brand, editedRow.unit, editedRow.supplier, editedRow.branch, editedRow.description,
+        existing.name, existing.sku, existing.barcode, existing.category, existing.brand, existing.unit, existing.supplier,
         ...(entry.conflictFields || []),
       ].join(' ').toLowerCase()
       return hay.includes(query)
-    }).slice(0, 200)
-  }, [conflictFilter, conflictQuery, conflicts])
+    }).slice(0, 75)
+  }, [conflictFilter, conflictQuery, conflicts, decisions, rowOverrides])
 
   const toggleConflictSelection = (index) => {
     setSelectedConflictIds((current) => {
@@ -509,7 +773,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setImageDecisions((current) => {
       const next = { ...current }
       conflicts.forEach((entry) => {
-        if (selectedConflictIds.has(entry.index) && entry.incomingImages.length) next[entry.index] = value
+        const editedRow = { ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }
+        const hasImage = entry.incomingImages.length || findImageReferenceForRow(editedRow, imageFiles)
+        if (selectedConflictIds.has(entry.index) && hasImage) next[entry.index] = value
       })
       return next
     })
@@ -678,16 +944,21 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     className="input text-xs"
                     value={conflictQuery}
                     onChange={(event) => setConflictQuery(event.target.value)}
-                    placeholder="Search name, barcode, SKU, brand, category..."
+                    placeholder="Search conflict rows by name, barcode, SKU, brand, category..."
                     autoComplete="off"
                   />
                   <div className="flex flex-wrap gap-1.5 text-xs">
                     {[
                       ['all', `All (${conflicts.length})`],
-                      ['same_name', `Same name (${conflictGroups.sameName})`],
+                      ['same_name', `Family (${conflictGroups.sameName})`],
                       ['identifier', `SKU/barcode (${conflictGroups.identifier})`],
                       ['barcode', `Barcode (${conflictGroups.barcode})`],
                       ['sku', `SKU (${conflictGroups.sku})`],
+                      ['pricing', `Pricing (${conflictGroups.pricing})`],
+                      ['existing', `Matched (${conflictGroups.existing})`],
+                      ['variant', `Variants (${conflictGroups.variant})`],
+                      ['merge', `Add stock (${conflictGroups.merge})`],
+                      ['override', `Override (${conflictGroups.override})`],
                       ['errors', `Errors (${conflictGroups.errors})`],
                     ].map(([value, label]) => (
                       <button
@@ -710,20 +981,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                     />
                     Visible matches
                   </label>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('merge_stock')}>Add stock only</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('create_variant')}>Create variants</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_add')}>Override + add stock</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('override_replace')}>Override + replace stock</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyDecisionToSelection('new')}>Create selected as new</button>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  {IMAGE_CONFLICT_OPTIONS.map((item) => (
-                    <button key={item.value} type="button" className="btn-secondary text-xs" onClick={() => applyImageDecisionToSelection(item.value)}>
-                      {item.label}
-                    </button>
-                  ))}
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('clear_imported')}>Clear duplicate SKU/barcode</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => applyIdentifierDecisionToSelection('allow_duplicate')}>Allow same SKU/barcode</button>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">Action</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply to selected...</option>
+                      {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">SKU/barcode</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyIdentifierDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply...</option>
+                      {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <span className="text-gray-500 dark:text-gray-400">Images</span>
+                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyImageDecisionToSelection(event.target.value); event.target.value = '' }}>
+                      <option value="">Apply...</option>
+                      {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </label>
                   <label className="ml-auto inline-flex min-w-[13rem] items-center gap-2">
                     <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
                     <select
@@ -742,119 +1020,155 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                 </div>
               </div>
               <div className="max-h-72 space-y-2 overflow-y-auto">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('existing_matches_label', 'Existing product matches')}</p>
-                {visibleConflicts.map(({ row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages }) => (
-                <div key={index} className={`space-y-2 rounded-xl border p-3 text-sm ${decisions[index] === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
-                      <span className="font-medium text-gray-900 dark:text-white">{row.name || `Row ${row._rowNumber || index + 2} needs a product name`}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-xs">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Plan: {(decisions[index] || plannedAction || '').replaceAll('_', ' ')}</span>
-                      {String(conflictType || '').includes('same_name') ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">Same name</span> : null}
-                      {conflictFields.length ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
-                      {!sameBasic || !samePricing ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">Different details</span> : <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">Same details</span>}
-                      {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
-                    </div>
-                  </div>
-
-                  {incomingImages.length ? (
-                    <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
-                      <div>CSV images: {incomingImages.join(', ')}</div>
-                      <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
-                    </div>
-                  ) : null}
-
-                  {conflictFields.length ? (
-                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
-                      <div className="font-semibold">Identifier conflict</div>
-                      <div>Imported: SKU {(identifierOverrides[index]?.sku ?? row.sku) || '-'} / Barcode {(identifierOverrides[index]?.barcode ?? row.barcode) || '-'}</div>
-                      <div>Existing: {existing?.name || '-'} - SKU {existing?.sku || '-'} / Barcode {existing?.barcode || '-'}</div>
-                      {importDuplicateRows?.sku?.length > 1 || importDuplicateRows?.barcode?.length > 1 ? (
-                        <div className="mt-1 rounded bg-white/70 px-2 py-1 dark:bg-slate-900/60">
-                          {importDuplicateRows?.sku?.length > 1 ? <div>Same SKU appears in CSV rows: {importDuplicateRows.sku.join(', ')}</div> : null}
-                          {importDuplicateRows?.barcode?.length > 1 ? <div>Same barcode appears in CSV rows: {importDuplicateRows.barcode.join(', ')}</div> : null}
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {T('import_conflict_rows_label', 'Rows that need review')}
+                  </p>
+                {visibleConflicts.map((entry) => {
+                  const { row, index, existing, plannedAction, conflictType, conflictFields = [], importDuplicateRows = {}, sameBasic, samePricing, sameImages, incomingImages, existingImages } = entry
+                  const editedRow = {
+                    ...(row || {}),
+                    ...(rowOverrides[index] || {}),
+                    sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? row?.sku ?? '',
+                    barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? row?.barcode ?? '',
+                  }
+                  const updateEditedRow = (field, value) => {
+                    setRowOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
+                    if (field === 'sku' || field === 'barcode') {
+                      setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), [field]: value } }))
+                      setIdentifierDecisions((state) => ({ ...state, [index]: value === (row?.[field] || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
+                    }
+                  }
+                  const decisionValue = decisions[index] || plannedAction || 'merge_stock'
+                  const identifierDecision = identifierDecisions[index] || row?._identifier_conflict_mode || 'clear_imported'
+                  const imageDecision = imageDecisions[index] || row?.image_conflict_mode || 'keep_existing'
+                  const matchedLibraryImage = incomingImages.length ? '' : findImageReferenceForRow(editedRow, imageFiles)
+                  const rowIncomingImages = incomingImages.length ? incomingImages : (matchedLibraryImage ? [matchedLibraryImage] : [])
+                  const liveBarcodeIssue = getProductImportBarcodeIssue(editedRow.barcode)
+                  const liveBarcodeBlocking = isBlockingProductImportIssue(liveBarcodeIssue)
+                  return (
+                    <div key={index} className={`rounded-xl border p-2 text-sm ${liveBarcodeBlocking ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} />
+                        <div className="min-w-[12rem] flex-1">
+                          <div className="truncate font-medium text-gray-900 dark:text-white">Row {editedRow._rowNumber || index + 2}: {editedRow.name || 'Needs a product name'}</div>
+                          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                            {String(conflictType || '').includes('same_name') ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">Family</span> : null}
+                            {conflictFields.length ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">Same {conflictFields.join(' + ').toUpperCase()}</span> : null}
+                            {!sameBasic || !samePricing ? <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">Different details</span> : <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">Same details</span>}
+                            {existing ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-700 dark:text-slate-200">Matched: {existing.name}</span> : null}
+                            {rowIncomingImages.length ? <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Image ready</span> : null}
+                            {!sameImages ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Image difference</span> : null}
+                            {liveBarcodeIssue ? (
+                              <span className={`rounded px-1.5 py-0.5 ${liveBarcodeBlocking ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
+                                {getProductImportIssueLabel(liveBarcodeIssue)}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
-                      ) : null}
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <label className="block">
-                          <span className="mb-1 block font-medium">New SKU</span>
-                          <input
-                            className="input h-8 py-1 text-xs"
-                            value={identifierOverrides[index]?.sku ?? row.sku ?? ''}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), sku: value } }))
-                              setIdentifierDecisions((state) => ({ ...state, [index]: value === (row.sku || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
-                            }}
-                            placeholder="Keep, clear, or type new SKU"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block font-medium">New barcode</span>
-                          <input
-                            className="input h-8 py-1 text-xs"
-                            value={identifierOverrides[index]?.barcode ?? row.barcode ?? ''}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              setIdentifierOverrides((state) => ({ ...state, [index]: { ...(state[index] || {}), barcode: value } }))
-                              setIdentifierDecisions((state) => ({ ...state, [index]: value === (row.barcode || '') ? (state[index] || 'clear_imported') : 'change_identifier' }))
-                            }}
-                            placeholder="Keep, clear, or type new barcode"
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIdentifierDecisions((state) => ({ ...state, [index]: 'clear_imported' }))
-                            setIdentifierOverrides((state) => ({ ...state, [index]: { sku: '', barcode: '' } }))
-                          }}
-                          className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] !== 'allow_duplicate' && identifierDecisions[index] !== 'change_identifier' ? 'border-orange-600 bg-orange-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}
-                        >Clear duplicate SKU/barcode</button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIdentifierDecisions((state) => ({ ...state, [index]: 'allow_duplicate' }))
-                            setIdentifierOverrides((state) => ({ ...state, [index]: { sku: row.sku || '', barcode: row.barcode || '' } }))
-                          }}
-                          className={`rounded-lg border px-2 py-1 font-medium ${identifierDecisions[index] === 'allow_duplicate' ? 'border-purple-600 bg-purple-600 text-white' : 'border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-200'}`}
-                        >Keep same SKU/barcode</button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-1.5 text-xs">
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'merge_stock' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'merge_stock' ? 'border-green-600 bg-green-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Add stock only</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'create_variant' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'create_variant' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create variant</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_add' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_add' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override info + add stock</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'override_replace' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'override_replace' ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Override all + replace stock</button>
-                    <button type="button" onClick={() => setDecisions((state) => ({ ...state, [index]: 'new' }))} className={`rounded-lg border px-2.5 py-1.5 font-medium ${decisions[index] === 'new' ? 'border-purple-600 bg-purple-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}>Create new row</button>
-                  </div>
-
-                  {incomingImages.length ? (
-                    <div className="flex flex-wrap gap-1.5 text-xs">
-                      {IMAGE_CONFLICT_OPTIONS.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onClick={() => setImageDecisions((state) => ({ ...state, [index]: item.value }))}
-                          className={`rounded-lg border px-2.5 py-1.5 font-medium ${imageDecisions[index] === item.value ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                        <select
+                          className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                          value={decisionValue}
+                          onChange={(event) => setDecisions((state) => ({ ...state, [index]: event.target.value }))}
                         >
-                          {item.label}
-                        </button>
-                      ))}
+                          {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                        {conflictFields.length ? (
+                          <select
+                            className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                            value={identifierDecision}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setIdentifierDecisions((state) => ({ ...state, [index]: value }))
+                              if (value === 'allow_duplicate') {
+                                setIdentifierOverrides((state) => ({ ...state, [index]: { sku: row.sku || '', barcode: row.barcode || '' } }))
+                              }
+                              if (value === 'clear_imported') {
+                                setIdentifierOverrides((state) => ({ ...state, [index]: { sku: '', barcode: '' } }))
+                              }
+                            }}
+                          >
+                            {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          </select>
+                        ) : null}
+                        {rowIncomingImages.length ? (
+                          <select
+                            className="input h-8 min-w-[8.5rem] py-1 text-xs"
+                            value={imageDecision}
+                            onChange={(event) => setImageDecisions((state) => ({ ...state, [index]: event.target.value }))}
+                          >
+                            {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                          </select>
+                        ) : null}
+                      </div>
+
+                      <details className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/60">
+                        <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-200">Details, existing match, and edits</summary>
+                        <div className="mt-2 grid gap-2 xl:grid-cols-2">
+                          <ImportDetailGrid title={T('csv_row_details', 'CSV row details')} row={editedRow} compareTo={existing} />
+                          {existing ? (
+                            <details className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+                              <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-100">
+                                {T('existing_product_match', 'Existing product match')}: {existing.name || `#${existing.id}`}
+                              </summary>
+                              <div className="mt-2">
+                                <ImportDetailGrid title={T('existing_product_match', 'Existing product match')} row={existing} compareTo={editedRow} />
+                              </div>
+                            </details>
+                          ) : (
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                              {T('no_existing_product_match_hint', 'No existing product match. This row can be created as new, merged with a selected family action, or skipped.')}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-2">
+                          <ImportDetailEditor row={editedRow} onChange={updateEditedRow} title={T('edit_imported_row_details', 'Edit imported row details before apply')} />
+                        </div>
+
+                        {conflictFields.length ? (
+                          <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
+                            <div className="font-semibold">Identifier conflict</div>
+                            <div>Imported: SKU {(identifierOverrides[index]?.sku ?? row.sku) || '-'} / Barcode {(identifierOverrides[index]?.barcode ?? row.barcode) || '-'}</div>
+                            <div>Existing: {existing?.name || '-'} - SKU {existing?.sku || '-'} / Barcode {existing?.barcode || '-'}</div>
+                            {importDuplicateRows?.sku?.length > 1 || importDuplicateRows?.barcode?.length > 1 ? (
+                              <div className="mt-1 rounded bg-white/70 px-2 py-1 dark:bg-slate-900/60">
+                                {importDuplicateRows?.sku?.length > 1 ? <div>Same SKU appears in CSV rows: {importDuplicateRows.sku.join(', ')}</div> : null}
+                                {importDuplicateRows?.barcode?.length > 1 ? <div>Same barcode appears in CSV rows: {importDuplicateRows.barcode.join(', ')}</div> : null}
+                              </div>
+                            ) : null}
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="mb-1 block font-medium">New SKU</span>
+                                <input className="input h-8 py-1 text-xs" value={identifierOverrides[index]?.sku ?? row.sku ?? ''} onChange={(event) => updateEditedRow('sku', event.target.value)} placeholder="Keep, clear, or type new SKU" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block font-medium">New barcode</span>
+                                <input className="input h-8 py-1 text-xs" value={identifierOverrides[index]?.barcode ?? row.barcode ?? ''} onChange={(event) => updateEditedRow('barcode', event.target.value)} placeholder="Keep, clear, or type new barcode" />
+                              </label>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {liveBarcodeIssue ? (
+                          <div className={`mt-2 rounded-lg border p-2 text-xs ${liveBarcodeBlocking ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'}`}>
+                            <div className="font-semibold">{getProductImportIssueLabel(liveBarcodeIssue)}</div>
+                            <div>{getProductImportIssueHint(liveBarcodeIssue)}</div>
+                          </div>
+                        ) : null}
+
+                        {rowIncomingImages.length ? (
+                          <div className="mt-2 rounded-lg bg-white p-2 text-xs text-gray-500 dark:bg-slate-950/50 dark:text-gray-400">
+                            <div>Incoming images: {rowIncomingImages.join(', ')}</div>
+                            <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
+                          </div>
+                        ) : null}
+                      </details>
                     </div>
-                  ) : (
-                    <p className="text-xs text-gray-400">No incoming image columns for this row.</p>
-                  )}
-                </div>
-                ))}
+                  )
+                })}
                 {conflicts.length > visibleConflicts.length ? (
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                    Showing first {visibleConflicts.length} of {conflicts.length} planned conflict/variant rows. All rows will still be imported with their selected action.
+                    Showing first {visibleConflicts.length} of {conflicts.length} review rows. Search or use filters to narrow the rows before applying bulk actions.
                   </p>
                 ) : null}
               </div>
@@ -870,6 +1184,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
             </div>
           </div>
+
+          {blockingIssueCount ? (
+            <p className="rounded-lg bg-red-50 p-2 text-xs text-red-600 dark:bg-red-950/30 dark:text-red-300">
+              {T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}
+              {' '}
+              {blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${getProductImportIssueLabel(entry.issue)}`).join('; ')}
+            </p>
+          ) : null}
 
           {pendingAsk.length ? (
             <p className="rounded-lg bg-yellow-50 p-2 text-xs text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400">

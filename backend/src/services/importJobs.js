@@ -44,7 +44,7 @@ const runningLocalJobs = new Set()
 let bullConnection = null
 let bullQueues = { analyze: null, apply: null }
 let bullWorkers = { analyze: null, apply: null }
-let bullStatus = { driver: 'sqlite', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
+let bullStatus = { driver: 'bullmq', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
 
 function nowIso() {
   return new Date().toISOString()
@@ -145,7 +145,7 @@ function markStoredImportFilesCancelled(jobId, reason = 'Import cleanup removed 
     UPDATE import_job_files
     SET status = 'cancelled',
         error_message = COALESCE(error_message, ?),
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
     WHERE job_id = ? AND status IN ('stored', 'queued_media', 'processing')
   `).run(reason, jobId)
 }
@@ -164,8 +164,8 @@ function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
     SET status = 'cancelled',
         phase = 'cancelled',
         cancel_requested = 1,
-        finished_at = COALESCE(finished_at, datetime('now')),
-        updated_at = datetime('now')
+        finished_at = COALESCE(finished_at::text, CURRENT_TIMESTAMP::text),
+        updated_at = CURRENT_TIMESTAMP::text
     WHERE id = ?
   `).run(row.id)
   return db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(row.id)
@@ -210,7 +210,7 @@ function clearImportRuntimeFiles() {
   }
 }
 
-function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriver = 'sqlite' } = {}) {
+function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriver = 'bullmq' } = {}) {
   ensureImportRoot()
   const id = `imp_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`
   ensureDir(getJobRoot(id))
@@ -218,7 +218,7 @@ function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriv
     INSERT INTO import_jobs (
       id, type, status, phase, queue_driver, policy_json,
       created_by_id, created_by_name, created_at, updated_at
-    ) VALUES (?, ?, 'pending', 'created', ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ) VALUES (?, ?, 'pending', 'created', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     id,
     String(type || 'products').trim().toLowerCase(),
@@ -240,7 +240,7 @@ function listImportJobs({ limit = 50 } = {}) {
   return db.prepare(`
     SELECT *
     FROM import_jobs
-    ORDER BY datetime(created_at) DESC, id DESC
+    ORDER BY created_at DESC, id DESC
     LIMIT ?
   `).all(Math.max(1, Math.min(200, Number(limit || 50)))).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
 }
@@ -267,7 +267,7 @@ function updateJob(id, patch = {}) {
   const entries = Object.entries(patch).filter(([key]) => allowed.includes(key))
   if (!entries.length) return getImportJob(id)
   const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ')
-  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = datetime('now') WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
+  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP::text WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
   return getImportJob(id)
 }
 
@@ -307,8 +307,14 @@ function getBarcodeReviewIssue(value) {
   return ''
 }
 
+const BLOCKING_BARCODE_ISSUES = new Set([
+  'invalid_barcode',
+  'barcode_scientific_notation',
+  'barcode_too_long',
+])
+
 function isBlockingBarcodeIssue(issueType) {
-  return ['invalid_barcode', 'barcode_too_long'].includes(String(issueType || ''))
+  return BLOCKING_BARCODE_ISSUES.has(String(issueType || ''))
 }
 
 async function buildProductImportReviewState(csvFile) {
@@ -490,6 +496,109 @@ function getProductConflictForReview(row = {}, index, importState = null) {
   }
 }
 
+function getReviewRowNumber(row = {}, fallback = null) {
+  const value = Number(row?._rowNumber || fallback || 0)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function summarizeImportReviewRow(row = {}, conflict = {}) {
+  return {
+    rowNumber: getReviewRowNumber(row),
+    name: normalizeText(row.name),
+    sku: normalizeText(row.sku),
+    barcode: normalizeText(row.barcode),
+    brand: normalizeText(row.brand),
+    category: normalizeText(row.category),
+    unit: normalizeText(row.unit),
+    supplier: normalizeText(row.supplier),
+    branch: normalizeText(row.branch),
+    stock_quantity: row.stock_quantity ?? '',
+    selling_price_usd: row.selling_price_usd ?? '',
+    purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
+    plannedAction: conflict.plannedAction || row._action || row._planned_action || '',
+    fields: conflict.fields || [],
+    issueTypes: conflict.issueTypes || [],
+  }
+}
+
+function addProductReviewGroup(groupsByName, row = {}, conflict = {}) {
+  const nameKey = normalizeReviewIdentifier(row.name)
+  if (!nameKey) return
+  if (!groupsByName.has(nameKey)) {
+    groupsByName.set(nameKey, {
+      key: nameKey,
+      title: normalizeText(row.name),
+      rowNumbers: [],
+      rows: [],
+      fields: new Set(),
+      issueTypes: new Set(['same_name']),
+      subgroupsBySignature: new Map(),
+      existingMatches: new Map(),
+    })
+  }
+  const group = groupsByName.get(nameKey)
+  const rowNumber = getReviewRowNumber(row)
+  let signature = ''
+  try {
+    signature = normalizeProductSignature(normalizeRowForProduct(row))
+  } catch (_) {
+    signature = `row-error:${rowNumber || group.rows.length}`
+  }
+  if (rowNumber) group.rowNumbers.push(rowNumber)
+  ;(conflict.fields || []).forEach((field) => group.fields.add(field))
+  ;(conflict.issueTypes || []).forEach((issueType) => group.issueTypes.add(issueType))
+  if (conflict.existing?.id) group.existingMatches.set(Number(conflict.existing.id), conflict.existing)
+  group.rows.push(summarizeImportReviewRow(row, conflict))
+  if (!group.subgroupsBySignature.has(signature)) {
+    group.subgroupsBySignature.set(signature, {
+      signature,
+      rowNumbers: [],
+      rows: [],
+      fields: new Set(),
+      issueTypes: new Set(),
+    })
+  }
+  const subgroup = group.subgroupsBySignature.get(signature)
+  if (rowNumber) subgroup.rowNumbers.push(rowNumber)
+  ;(conflict.fields || []).forEach((field) => subgroup.fields.add(field))
+  ;(conflict.issueTypes || []).forEach((issueType) => subgroup.issueTypes.add(issueType))
+  subgroup.rows.push(summarizeImportReviewRow(row, conflict))
+}
+
+function finalizeProductReviewGroups(groupsByName) {
+  return Array.from(groupsByName.values())
+    .filter((group) => group.rowNumbers.length > 1)
+    .map((group) => {
+      const subgroups = Array.from(group.subgroupsBySignature.values())
+        .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
+        .map((subgroup, index, all) => ({
+          signature: subgroup.signature,
+          rowNumbers: subgroup.rowNumbers,
+          fields: Array.from(subgroup.fields),
+          issueTypes: Array.from(subgroup.issueTypes),
+          suggestedAction: subgroup.rowNumbers.length > 1
+            ? 'merge_stock'
+            : all.length > 1 || index > 0
+              ? 'create_variant'
+              : 'new',
+          rows: subgroup.rows,
+        }))
+      return {
+        key: group.key,
+        groupId: `name:${group.key}`,
+        title: group.title,
+        issueTypes: Array.from(group.issueTypes),
+        fields: Array.from(group.fields),
+        rowNumbers: group.rowNumbers,
+        rows: group.rows,
+        subgroups,
+        suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
+        existing: Array.from(group.existingMatches.values()),
+      }
+    })
+    .sort((left, right) => Math.min(...left.rowNumbers) - Math.min(...right.rowNumbers))
+}
+
 function buildContactReviewIndex(type) {
   const table = type === 'suppliers' ? 'suppliers' : type === 'delivery_contacts' ? 'delivery_contacts' : 'customers'
   const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id ASC`).all()
@@ -577,19 +686,57 @@ function getGenericImportConflictForReview(row = {}, type) {
 function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
   const rowNumber = String(row?._rowNumber || '')
   const zeroBased = String(Math.max(0, Number(row?._rowNumber || 2) - 2))
-  const decision = decisionsByRow[rowNumber] || decisionsByRow[zeroBased] || null
+  const groupKey = normalizeReviewIdentifier(row?.name)
+  const groupDecision = groupKey
+    ? (decisionsByRow.__groups?.[groupKey] || decisionsByRow.__groups?.[`name:${groupKey}`] || null)
+    : null
+  const rowDecision = decisionsByRow[rowNumber] || decisionsByRow[zeroBased] || null
+  const decision = groupDecision || rowDecision
   if (!decision || typeof decision !== 'object') return row
+  const mergedDecision = groupDecision && rowDecision && typeof rowDecision === 'object'
+    ? { ...groupDecision, ...rowDecision }
+    : decision
   const next = { ...row }
   ;['_action', '_target_product_id', '_parent_id', '_identifier_conflict_mode', 'image_conflict_mode', '_conflict_mode'].forEach((key) => {
-    if (decision[key] != null) next[key] = decision[key]
+    if (mergedDecision[key] != null) next[key] = mergedDecision[key]
   })
-  if (decision.field_rules || decision._field_rules) {
-    next._field_rules = typeof (decision.field_rules || decision._field_rules) === 'string'
-      ? (decision.field_rules || decision._field_rules)
-      : stringify(decision.field_rules || decision._field_rules)
+  const fieldOverrides = mergedDecision.field_overrides || mergedDecision.overrides || mergedDecision.fields || null
+  if (fieldOverrides && typeof fieldOverrides === 'object' && !Array.isArray(fieldOverrides)) {
+    ;['name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description', 'supplier', 'branch'].forEach((key) => {
+      if (fieldOverrides[key] != null) next[key] = fieldOverrides[key]
+    })
   }
-  const normalizedDecision = normalizeLookup(decision.decision || decision._decision || '')
-  const decisionValue = normalizeText(decision.decision_value || decision.value || '')
+  if (mergedDecision.field_rules || mergedDecision._field_rules) {
+    next._field_rules = typeof (mergedDecision.field_rules || mergedDecision._field_rules) === 'string'
+      ? (mergedDecision.field_rules || mergedDecision._field_rules)
+      : stringify(mergedDecision.field_rules || mergedDecision._field_rules)
+  }
+  const normalizedAction = normalizeLookup(mergedDecision.action || mergedDecision.import_action || mergedDecision._action || '')
+  if (normalizedAction === 'create_variant') next._action = 'create_variant'
+  if (normalizedAction === 'merge_stock' || normalizedAction === 'add_stock') next._action = 'merge_stock'
+  if (normalizedAction === 'create_new' || normalizedAction === 'new') next._action = 'new'
+  if (normalizedAction === 'skip_row' || normalizedAction === 'skip') next._action = 'skip_row'
+  if (normalizedAction === 'link_variant') next._action = 'link_variant'
+
+  const normalizedIdentifierDecision = normalizeLookup(
+    mergedDecision.identifier_decision
+    || mergedDecision.identifierDecision
+    || mergedDecision.identifier_mode
+    || mergedDecision._identifier_conflict_mode
+    || '',
+  )
+  if (['allow_duplicate', 'allow_duplicates', 'keep_barcode', 'keep_sku', 'keep_same', 'same_barcode'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'allow_duplicate'
+  }
+  if (['clear', 'clear_imported', 'clear_barcode', 'clear_sku'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'clear_imported'
+  }
+  if (['fail', 'reject', 'error'].includes(normalizedIdentifierDecision)) {
+    next._identifier_conflict_mode = 'fail'
+  }
+
+  const normalizedDecision = normalizeLookup(mergedDecision.decision || mergedDecision._decision || '')
+  const decisionValue = normalizeText(mergedDecision.decision_value || mergedDecision.value || '')
   if (normalizedDecision === 'allow_duplicate') next._identifier_conflict_mode = 'allow_duplicate'
   if (normalizedDecision === 'keep_barcode') next._identifier_conflict_mode = next._identifier_conflict_mode || 'allow_duplicate'
   if (normalizedDecision === 'clear_barcode') next.barcode = ''
@@ -607,7 +754,10 @@ function applyImportDecisionToRow(row = {}, decisionsByRow = {}) {
 function getImportDecisionMap(jobId) {
   const policy = getImportJob(jobId)?.policy || {}
   const decisions = policy.decisionsByRowNumber || policy.decisions_by_row_number || policy.decisions || {}
-  return decisions && typeof decisions === 'object' ? decisions : {}
+  const rows = decisions && typeof decisions === 'object' ? { ...decisions } : {}
+  const groups = policy.groupDecisionsByKey || policy.group_decisions || {}
+  if (groups && typeof groups === 'object') rows.__groups = groups
+  return rows
 }
 
 async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'all', query = '' } = {}) {
@@ -655,6 +805,7 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
   }
   const contactIndex = ['customers', 'suppliers', 'delivery_contacts'].includes(job.type) ? buildContactReviewIndex(job.type) : null
   const decisionsByRow = getImportDecisionMap(jobId)
+  const productGroupsByName = job.type === 'products' ? new Map() : null
   let matched = 0
   for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(200, IMPORT_ROW_BATCH_SIZE) })) {
     for (const sourceRow of batchRows) {
@@ -691,6 +842,9 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
         if (Object.prototype.hasOwnProperty.call(counts, issueType)) counts[issueType] += 1
       })
       if (conflict.type === 'new') counts.new += 1
+      if (productGroupsByName && normalizeReviewIdentifier(row.name)) {
+        addProductReviewGroup(productGroupsByName, row, conflict)
+      }
       if (!matchesReviewFilter(conflict, normalizedFilter)) continue
       if (!hasReviewQueryMatch(row, conflict, query)) continue
       matched += 1
@@ -711,6 +865,7 @@ async function getImportJobReview(jobId, { page = 1, pageSize = 50, filter = 'al
     pageSize: safePageSize,
     total: matched,
     counts,
+    groups: productGroupsByName ? finalizeProductReviewGroups(productGroupsByName) : [],
     rows,
   }
 }
@@ -723,7 +878,27 @@ function updateImportJobDecisions(jobId, decisions = {}) {
     ? policy.decisionsByRowNumber
     : {}
   const incoming = decisions && typeof decisions === 'object' ? decisions : {}
-  policy.decisionsByRowNumber = { ...current, ...incoming }
+  const incomingRows = incoming.rows && typeof incoming.rows === 'object'
+    ? incoming.rows
+    : incoming.byRow && typeof incoming.byRow === 'object'
+      ? incoming.byRow
+      : incoming.decisions && typeof incoming.decisions === 'object'
+        ? incoming.decisions
+        : incoming.groups
+          ? {}
+          : incoming
+  const incomingGroups = incoming.groups && typeof incoming.groups === 'object' ? incoming.groups : {}
+  const currentGroups = policy.groupDecisionsByKey && typeof policy.groupDecisionsByKey === 'object'
+    ? policy.groupDecisionsByKey
+    : {}
+  const normalizedGroups = {}
+  Object.entries(incomingGroups).forEach(([key, value]) => {
+    const normalizedKey = normalizeReviewIdentifier(String(key || '').replace(/^name:/i, ''))
+    if (!normalizedKey || !value || typeof value !== 'object') return
+    normalizedGroups[normalizedKey] = value
+  })
+  policy.decisionsByRowNumber = { ...current, ...incomingRows }
+  policy.groupDecisionsByKey = { ...currentGroups, ...normalizedGroups }
   updateJob(jobId, { policy_json: stringify(policy) })
   return getImportJob(jobId)
 }
@@ -734,7 +909,7 @@ function addJobFile(jobId, file = {}, kind = 'csv', relativePath = '') {
     INSERT INTO import_job_files (
       job_id, kind, original_name, stored_path, relative_path, mime_type, byte_size,
       status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'stored', datetime('now'), datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'stored', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     jobId,
     kind,
@@ -792,14 +967,14 @@ async function waitForQueuedImportMedia(jobId) {
 function finalizeSkippedImportImages(jobId) {
   const result = db.prepare(`
     UPDATE import_job_files
-    SET status = 'skipped', error_message = COALESCE(error_message, 'Image was uploaded but not referenced by the applied import rows.'), updated_at = datetime('now')
+    SET status = 'skipped', error_message = COALESCE(error_message, 'Image was uploaded but not referenced by the applied import rows.'), updated_at = CURRENT_TIMESTAMP
     WHERE job_id = ? AND kind = 'image' AND status = 'stored'
   `).run(jobId)
   const skipped = Number(result.changes || 0)
   if (skipped > 0) {
     db.prepare(`
       UPDATE import_jobs
-      SET processed_images = processed_images + ?, updated_at = datetime('now')
+      SET processed_images = processed_images + ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(skipped, jobId)
   }
@@ -833,24 +1008,6 @@ const DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 
 const MONEY_FIELDS = new Set([
@@ -951,12 +1108,12 @@ function syncProductImageGallery(productId, gallery = []) {
   const normalized = clean.slice(0, 5)
   db.prepare('DELETE FROM product_images WHERE product_id = ?').run(productId)
   if (!normalized.length) {
-    db.prepare("UPDATE products SET image_path = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+    db.prepare("UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
     return []
   }
   const insert = db.prepare('INSERT INTO product_images (product_id, image_path, sort_order) VALUES (?, ?, ?)')
   normalized.forEach((imagePath, index) => insert.run(productId, imagePath, index))
-  db.prepare("UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?").run(normalized[0], productId)
+  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
   return normalized
 }
 
@@ -972,7 +1129,7 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
   const parent = db.prepare('SELECT id, name FROM products WHERE id = ?').get(parentId)
   if (!parent) throw new Error('Parent product not found')
   if (childId && Number(parent.id) === Number(childId)) throw new Error('A product cannot be its own parent')
-  db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = datetime('now') WHERE id = ?").run(parent.id)
+  db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(parent.id)
   return parent
 }
 
@@ -1100,14 +1257,14 @@ async function copyImageIntoAssets(sourcePath, originalName, actor = {}, { impor
     },
   })
   if (importFileId) {
-    db.prepare("UPDATE import_job_files SET status = 'queued_media', updated_at = datetime('now') WHERE id = ?").run(importFileId)
+    db.prepare("UPDATE import_job_files SET status = 'queued_media', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(importFileId)
   }
   try {
     await enqueueMediaOptimization({ storedName, source: 'bulk_import', importJobId, importFileId })
   } catch (error) {
     console.warn(`[media-queue] Could not enqueue ${storedName}: ${error?.message || error}`)
     if (importFileId) {
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?")
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(error?.message || 'Media queue unavailable', importFileId)
     }
     throw error
@@ -1146,18 +1303,18 @@ async function resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCac
       imageAssetCache.set(cacheKey, copied)
       gallery.push(copied.publicPath)
       if (!copied.mediaQueued) {
-        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(file.id)
         db.prepare(`
           UPDATE import_jobs
-          SET processed_images = processed_images + 1, updated_at = datetime('now')
+          SET processed_images = processed_images + 1, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `).run(jobId)
       }
     } catch (error) {
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
       db.prepare(`
         UPDATE import_jobs
-        SET failed_images = failed_images + 1, updated_at = datetime('now')
+        SET failed_images = failed_images + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(jobId)
       addJobError(jobId, {
@@ -1183,8 +1340,8 @@ function ensureSettingOptionMap(key) {
 
 function upsertSettingJson(key, value) {
   db.prepare(`
-    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run(key, stringify(value))
 }
 
@@ -1253,7 +1410,14 @@ function createProductContext() {
       suppliers: false,
     },
     importParentsByName: new Map(),
+    importProductsBySignature: new Map(),
   }
+}
+
+function buildImportSignatureKey(nameKey, signature) {
+  const safeName = String(nameKey || '').trim()
+  const safeSignature = String(signature || '').trim()
+  return safeName && safeSignature ? `${safeName}::${safeSignature}` : ''
 }
 
 function ensureCategory(ctx, value) {
@@ -1339,18 +1503,21 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
 
-function insertInventoryMovement({ productId, productName, branch, movementType, qty, buyUsd, buyKhr, reason, actor }) {
+function insertInventoryMovement({ productId, productName, branch, movementType, qty, buyUsd, buyKhr, reason, actor, referenceId = null }) {
   if (!(qty > 0)) return
+  const safeReferenceId = Number.isFinite(Number(referenceId)) && Number(referenceId) > 0
+    ? Number(referenceId)
+    : null
   db.prepare(`
     INSERT INTO inventory_movements
       (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-       unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     productId,
     productName,
@@ -1363,6 +1530,7 @@ function insertInventoryMovement({ productId, productName, branch, movementType,
     qty * buyUsd,
     qty * buyKhr,
     reason,
+    safeReferenceId,
     actor.userId || null,
     actor.userName || null,
   )
@@ -1399,11 +1567,12 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   `).all(normalized.name)
   const nameKey = normalizeLookup(normalized.name)
   const importedParent = nameKey ? ctx.importParentsByName.get(nameKey) || null : null
+  const signature = normalizeProductSignature(normalized)
+  const importedSignatureMatch = ctx.importProductsBySignature.get(buildImportSignatureKey(nameKey, signature)) || null
   const candidateParents = importedParent
     ? [...sameName, importedParent]
     : sameName
-  const signature = normalizeProductSignature(normalized)
-  const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || null
+  const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || importedSignatureMatch || null
   const selectedParent = chooseParentProduct(candidateParents)
 
   let importActionLabel = normalizeLookup(row._action || '')
@@ -1411,7 +1580,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
     if (matching) {
       importActionLabel = sameName.length > 1 ? 'link_variant' : 'merge_stock'
       row._target_product_id = matching.id
-    } else if (sameName.length) {
+    } else if (sameName.length || importedParent) {
       importActionLabel = 'create_variant'
       row._parent_id = selectedParent?.parent_id || selectedParent?.id || null
     } else {
@@ -1438,7 +1607,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         name: normalized.name,
         sku: identifiers.sku,
         barcode: identifiers.barcode,
-        allowDuplicateName: importActionLabel === 'create_variant' && !!normalizedParentId,
+        allowDuplicateName: true,
         allowDuplicateSku: identifiers.allowDuplicateSku,
         allowDuplicateBarcode: identifiers.allowDuplicateBarcode,
       })
@@ -1486,6 +1655,15 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         normalizedParentId,
       )
       const productId = result.lastInsertRowid
+      const insertedRecord = {
+        ...normalized,
+        id: productId,
+        is_group: normalizedParentId ? 0 : normalized.is_group,
+        parent_id: normalizedParentId,
+        created_at: nowIso(),
+      }
+      const signatureKey = buildImportSignatureKey(nameKey, signature)
+      if (signatureKey) ctx.importProductsBySignature.set(signatureKey, insertedRecord)
       syncProductImageGallery(productId, incomingGallery)
       if (normalizedParentId) {
         ctx.importParentsByName.set(nameKey, ctx.importParentsByName.get(nameKey) || {
@@ -1497,14 +1675,12 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         })
       } else if (nameKey && !ctx.importParentsByName.has(nameKey)) {
         ctx.importParentsByName.set(nameKey, {
-          ...normalized,
-          id: productId,
+          ...insertedRecord,
           is_group: importActionLabel === 'create_variant' ? 1 : normalized.is_group,
           parent_id: null,
-          created_at: nowIso(),
         })
         if (importActionLabel === 'create_variant') {
-          db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+          db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
         }
       }
       seedBranchRows(productId, ctx)
@@ -1519,6 +1695,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         buyKhr: normalized.purchase_price_khr,
         reason: 'CSV import - new product',
         actor,
+        referenceId: jobId,
       })
       return { imported: 1, updated: 0, variant: normalizedParentId ? 1 : 0 }
     }
@@ -1581,7 +1758,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         discount_enabled = ?, discount_type = ?, discount_percent = ?, discount_amount_usd = ?, discount_amount_khr = ?,
         discount_label = ?, discount_badge_color = ?, discount_starts_at = ?, discount_ends_at = ?,
         purchase_price_usd = ?, purchase_price_khr = ?, cost_price_usd = ?, cost_price_khr = ?,
-        low_stock_threshold = ?, is_group = ?, parent_id = ?, updated_at = datetime('now')
+        low_stock_threshold = ?, is_group = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       resolved.category,
@@ -1626,6 +1803,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         buyKhr: normalized.purchase_price_khr || existing.purchase_price_khr || 0,
         reason: replaceStock ? 'CSV import - override replace stock' : 'CSV import - merge add stock',
         actor,
+        referenceId: jobId,
       })
     }
     return { imported: 0, updated: 1, merged: action === 'merge' ? 1 : 0 }
@@ -1651,7 +1829,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       SET processed_rows = processed_rows + ?,
           failed_rows = ?,
           summary_json = ?,
-          updated_at = datetime('now')
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(pendingProgressRows, failed, stringify({
       imported,
@@ -1677,12 +1855,12 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
     const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
-      VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
         attempts = attempts + 1,
-        started_at = datetime('now'),
-        updated_at = datetime('now')
+        started_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
     for (const sourceRow of batchRows) {
@@ -1713,7 +1891,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       if (pendingProgressRows >= 25) flushProgress()
     }
     flushProgress()
-    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(batchId)
     if (totalRows) {
       updateJob(jobId, {
         processed_rows: Math.min(totalRows, offset + batchRows.length),
@@ -1753,6 +1931,112 @@ async function processProductRows({ jobId, rows, imageLookup, actor }) {
     imageLookup,
     actor,
   })
+}
+
+async function preflightImportJob(jobId) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const csvFile = getJobFiles(jobId, 'csv')[0]
+  if (!csvFile?.stored_path || !fs.existsSync(csvFile.stored_path)) {
+    throw new Error('CSV file is required before preflight')
+  }
+  const decisionsByRow = getImportDecisionMap(jobId)
+  const failures = []
+  const warnings = []
+  const simulatedSignaturesByName = new Map()
+  const simulatedFamilyByName = new Set()
+  let checkedRows = 0
+
+  const addFailure = (row, message, code = 'preflight_failed') => {
+    failures.push({
+      rowNumber: getReviewRowNumber(row),
+      code,
+      name: normalizeText(row?.name),
+      message,
+    })
+  }
+
+  if (job.type !== 'products') {
+    return { ok: true, job, checkedRows: 0, failures, warnings, groups: [] }
+  }
+
+  const productIndex = buildProductReviewIndex()
+  const productImportState = await buildProductImportReviewState(csvFile)
+  const groupsByName = new Map()
+  for await (const batchRows of parseCsvRowBatchesFromFile(csvFile.stored_path, { batchSize: Math.max(200, IMPORT_ROW_BATCH_SIZE) })) {
+    for (const sourceRow of batchRows) {
+      const row = applyImportDecisionToRow(sourceRow, decisionsByRow)
+      checkedRows += 1
+      const actionLabel = normalizeLookup(row._action || row.action || row.decision || row._decision || '')
+      if (actionLabel === 'skip_row' || actionLabel === 'skip') continue
+      let conflict = null
+      let normalized = null
+      try {
+        normalized = normalizeRowForProduct(row)
+        conflict = getProductConflictForReview(row, productIndex, productImportState)
+        addProductReviewGroup(groupsByName, row, conflict)
+      } catch (error) {
+        addFailure(row, error?.message || 'Unable to preflight row')
+        continue
+      }
+      if (!normalized.name) {
+        addFailure(row, 'Product name required', 'missing_name')
+        continue
+      }
+      const barcodeIssue = getBarcodeReviewIssue(normalized.barcode)
+      if (isBlockingBarcodeIssue(barcodeIssue)) {
+        addFailure(row, `Invalid barcode "${normalized.barcode}". Clear it or change it in import review.`, barcodeIssue)
+        continue
+      }
+      if (barcodeIssue) {
+        warnings.push({
+          rowNumber: getReviewRowNumber(row),
+          code: barcodeIssue,
+          message: `Barcode "${normalized.barcode}" needs review but can be kept as text if you choose that decision.`,
+        })
+      }
+      const nameKey = normalizeReviewIdentifier(normalized.name)
+      const signature = normalizeProductSignature(normalized)
+      const sameName = productIndex.byName.get(nameKey) || []
+      const matchingExisting = sameName.find((product) => normalizeProductSignature(product) === signature) || null
+      const knownSignatures = simulatedSignaturesByName.get(nameKey) || new Set()
+      const normalizedAction = normalizeImportAction(actionLabel) || (conflict?.plannedAction ? normalizeImportAction(conflict.plannedAction) : 'new') || 'new'
+      const wantsMerge = normalizedAction === 'merge'
+      if (wantsMerge) {
+        const targetId = parseOptionalImportId(row, '_target_product_id')
+        if (!targetId && !matchingExisting && !knownSignatures.has(signature)) {
+          addFailure(row, 'Merge/add stock needs an existing product or an earlier imported row with the same details.', 'merge_target_missing')
+          continue
+        }
+      }
+      const identifierConflict = findProductIdentifierConflict({ sku: normalized.sku, barcode: normalized.barcode })
+      const identifierMode = normalizeIdentifierConflictMode(row._identifier_conflict_mode || row.identifier_conflict_mode)
+      if (identifierConflict && identifierMode === 'fail') {
+        addFailure(row, 'Duplicate barcode/SKU is set to reject. Choose keep, clear, or edit before applying.', 'identifier_rejected')
+        continue
+      }
+      if (!simulatedSignaturesByName.has(nameKey)) simulatedSignaturesByName.set(nameKey, new Set())
+      simulatedSignaturesByName.get(nameKey).add(signature)
+      simulatedFamilyByName.add(nameKey)
+    }
+    await yieldImportWorker()
+  }
+  const groups = finalizeProductReviewGroups(groupsByName)
+  return {
+    ok: failures.length === 0,
+    job: getImportJob(jobId),
+    checkedRows,
+    failures,
+    warnings,
+    groups,
+    summary: {
+      checkedRows,
+      failures: failures.length,
+      warnings: warnings.length,
+      groups: groups.length,
+      families: simulatedFamilyByName.size,
+    },
+  }
 }
 
 function buildImageLookup(files = []) {
@@ -1800,7 +2084,7 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
     const product = byKey.get(matchKey)
     if (!product) {
       failed += 1
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run('No active product matched this image filename.', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run('No active product matched this image filename.', file.id)
       updateJob(jobId, { failed_images: failed })
       addJobError(jobId, {
         fileName: file.relative_path || file.original_name,
@@ -1816,12 +2100,12 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
         const gallery = loadCurrentGallery(product.id, product.image_path)
         syncProductImageGallery(product.id, [...gallery, publicPath])
         if (!copied.mediaQueued) {
-          db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+          db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(file.id)
           db.prepare(`
             UPDATE import_jobs
             SET processed_images = processed_images + 1,
                 summary_json = ?,
-                updated_at = datetime('now')
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
           `).run(stringify({ imported: 0, updated: 0, images_matched: imagesMatched + 1, failed }), jobId)
         }
@@ -1829,7 +2113,7 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
       imagesMatched += 1
     } catch (error) {
       failed += 1
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
       updateJob(jobId, { failed_images: failed })
       addJobError(jobId, {
         fileName: file.relative_path || file.original_name,
@@ -1902,12 +2186,12 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
     const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
-      VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
         attempts = attempts + 1,
-        started_at = datetime('now'),
-        updated_at = datetime('now')
+        started_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
 
@@ -1937,11 +2221,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
               || (incoming.phone ? findCustomerByPhone.get(incoming.phone) : null)
               || findCustomerByName.get(incoming.name)
             if (!existing) {
-              db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.membership_number, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.membership_number, incoming.membership_number, fieldRules.membership_number, defaultRule),
@@ -1967,11 +2251,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
             if (!incoming.name) throw new Error('name is required')
             existing = findSupplierByName.get(incoming.name) || (incoming.phone ? findSupplierByPhone.get(incoming.phone) : null)
             if (!existing) {
-              db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.contact_person, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
@@ -1998,11 +2282,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
             if (!incoming.name && !incoming.phone) throw new Error('driver name or phone is required')
             existing = findDeliveryByName.get(incoming.name) || (incoming.phone ? findDeliveryByPhone.get(incoming.phone) : null)
             if (!existing) {
-              db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.phone, incoming.area, incoming.address, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
@@ -2032,7 +2316,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
       failed_rows: failed,
       summary_json: stringify({ imported, updated, failed }),
     })
-    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(batchId)
     await yieldImportWorker()
   }
 
@@ -2117,8 +2401,8 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
           db.prepare(`
             INSERT INTO inventory_movements
               (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
             product.id,
             product.name,
@@ -2131,6 +2415,7 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
             qty * unitCostUsd,
             qty * unitCostKhr,
             normalizeText(row.reason) || 'CSV import - inventory',
+            Number(jobId) || null,
             actor.userId || null,
             actor.userName || null,
           )
@@ -2283,7 +2568,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
             branch_id, branch_name, subtotal_usd, subtotal_khr, total_usd, total_khr,
             payment_method, payment_currency, amount_paid_usd, amount_paid_khr,
             sale_status, notes, created_at, updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, datetime('now')), datetime('now'))
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP::text), CURRENT_TIMESTAMP::text)
         `).run(
           sale.receiptNumber,
           actor.userId || null,
@@ -2458,7 +2743,7 @@ async function extractZipImages(jobId, zipFile) {
     })
   })
 
-  db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(zipFile.id)
+  db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(zipFile.id)
   return added
 }
 
@@ -2613,9 +2898,8 @@ function queueNameForMode(mode = 'analyze') {
 }
 
 function configuredQueueDriver() {
-  if (JOB_QUEUE_DRIVER === 'sqlite') return 'sqlite'
   if (JOB_QUEUE_DRIVER === 'bullmq') return 'bullmq'
-  return BUSINESS_OS_REQUIRE_SCALE_SERVICES ? 'bullmq' : 'auto'
+  return 'bullmq'
 }
 
 function getImportQueueConcurrency() {
@@ -2668,10 +2952,6 @@ async function getBullConnection() {
 
 async function initializeBullQueue() {
   if (hasBullProducer()) return bullStatus
-  if (JOB_QUEUE_DRIVER === 'sqlite') {
-    bullStatus = { driver: 'sqlite', available: false, reason: 'sqlite_configured', producerReady: false, workerActive: hasBullWorkers() }
-    return bullStatus
-  }
   try {
     const { Queue } = require('bullmq')
     const connection = await getBullConnection()
@@ -2681,7 +2961,7 @@ async function initializeBullQueue() {
   } catch (error) {
     bullConnection = null
     bullQueues = { analyze: null, apply: null }
-    bullStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: hasBullWorkers() }
+    bullStatus = { driver: 'bullmq', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: hasBullWorkers() }
     if (JOB_QUEUE_DRIVER === 'bullmq') {
       console.warn(`[import-jobs] BullMQ unavailable: ${bullStatus.reason}`)
     }
@@ -2735,6 +3015,13 @@ async function startImportWorkers({ concurrency = getImportQueueConcurrency() } 
 async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {}) {
   const normalizedMode = normalizeQueueMode(mode)
   const currentJob = getImportJob(jobId)
+  if (!currentJob) throw new Error('Import job not found')
+  const currentStatus = String(currentJob.status || '').toLowerCase()
+  if (!force && (currentJob.cancel_requested || currentStatus === 'cancelled' || currentStatus === 'cancelling')) {
+    const error = new Error('Import was cancelled. Retry the import before starting it again.')
+    error.code = 'import_cancelled'
+    throw error
+  }
   if (!force && ['running', 'queued', 'cancelling'].includes(String(currentJob?.status || '').toLowerCase())) {
     return currentJob
   }
@@ -2759,12 +3046,68 @@ async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {})
     })
     throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
   }
-  updateJob(jobId, { queue_driver: 'sqlite', status: 'queued', phase: normalizedMode === 'apply' ? 'apply_queued' : 'analyze_queued' })
-  setImmediate(() => { runLocalJob(jobId, normalizedMode).catch(() => {}) })
+  updateJob(jobId, {
+    status: 'failed',
+    phase: 'queue_unavailable',
+    last_error: `Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`,
+    finished_at: nowIso(),
+  })
+  throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
+}
+
+function resetImportJobForRetry(jobId, { mode = 'analyze' } = {}) {
+  const job = getImportJob(jobId)
+  if (!job) throw new Error('Import job not found')
+  const normalizedMode = normalizeQueueMode(mode)
+  const retrySummary = {
+    ...(job.summary || {}),
+    retry_count: Number(job.summary?.retry_count || 0) + 1,
+    retry_mode: normalizedMode,
+    retry_reset_at: nowIso(),
+  }
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM import_job_errors WHERE job_id = ?').run(jobId)
+    db.prepare(`
+      UPDATE import_job_files
+      SET status = 'stored',
+          error_message = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE job_id = ?
+        AND lower(status) IN ('cancelled', 'failed', 'queued_media', 'processing')
+    `).run(jobId)
+    db.prepare(`
+      UPDATE import_jobs
+      SET status = 'pending',
+          phase = ?,
+          cancel_requested = 0,
+          last_error = NULL,
+          started_at = NULL,
+          finished_at = NULL,
+          total_rows = CASE WHEN ? = 'analyze' THEN 0 ELSE total_rows END,
+          processed_rows = 0,
+          failed_rows = 0,
+          total_images = CASE WHEN ? = 'analyze' THEN 0 ELSE total_images END,
+          processed_images = 0,
+          failed_images = 0,
+          warning_count = 0,
+          summary_json = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      normalizedMode === 'apply' ? 'retry_apply_ready' : 'retry_analyze_ready',
+      normalizedMode,
+      normalizedMode,
+      stringify(retrySummary),
+      jobId,
+    )
+  })()
+
+  broadcast('runtime')
   return getImportJob(jobId)
 }
 
-async function cancelImportJob(jobId) {
+async function cancelImportJob(jobId, _options = {}) {
   const job = getImportJob(jobId)
   if (!job) throw new Error('Import job not found')
   const status = String(job.status || '').toLowerCase()
@@ -2802,7 +3145,7 @@ function listCancellableImportJobs() {
     SELECT *
     FROM import_jobs
     WHERE lower(status) IN (${CANCELLABLE_IMPORT_STATUSES.map(() => '?').join(',')})
-    ORDER BY datetime(created_at) ASC, id ASC
+    ORDER BY created_at ASC, id ASC
   `).all(...CANCELLABLE_IMPORT_STATUSES)
 }
 
@@ -2844,15 +3187,15 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
         status = CASE WHEN lower(status) = 'running' THEN 'cancelling' ELSE 'cancelled' END,
         phase = CASE WHEN lower(status) = 'running' THEN 'cancel_requested' ELSE 'cancelled' END,
         last_error = ?,
-        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE datetime('now') END,
-        updated_at = datetime('now')
+        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at::text ELSE CURRENT_TIMESTAMP::text END,
+        updated_at = CURRENT_TIMESTAMP::text
     WHERE id IN (${placeholders})
   `).run(reason, ...jobIds)
   db.prepare(`
     UPDATE import_job_files
     SET status = 'cancelled',
         error_message = COALESCE(error_message, ?),
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
     WHERE job_id IN (${placeholders}) AND status IN ('stored', 'queued_media')
   `).run(reason, ...jobIds)
   const remaining = await waitForImportJobsToStop(jobIds, waitMs)
@@ -2914,6 +3257,11 @@ async function approveImportJob(jobId) {
   if (!['awaiting_review', 'completed_with_errors', 'failed', 'cancelled', 'approved'].includes(String(job.status || '').toLowerCase())) {
     throw new Error('Import job is not ready to apply')
   }
+  const preflight = await preflightImportJob(jobId)
+  if (!preflight.ok) {
+    const firstFailure = preflight.failures[0]
+    throw new Error(firstFailure?.message || 'Import decisions need review before applying')
+  }
   updateJob(jobId, {
     status: 'approved',
     phase: 'approved',
@@ -2929,25 +3277,20 @@ async function recoverImportJobs({ forceQueue = false } = {}) {
     SELECT id, phase
     FROM import_jobs
     WHERE status IN ('running', 'queued', 'cancelling')
-    ORDER BY datetime(created_at) ASC
+    ORDER BY created_at ASC
     LIMIT 20
   `).all()
   for (const row of rows) {
     const mode = String(row.phase || '').includes('apply') ? 'apply' : 'analyze'
-    if (forceQueue || configuredQueueDriver() !== 'sqlite') {
-      try {
-        await enqueueImportJob(row.id, { mode, force: true })
-      } catch (error) {
-        updateJob(row.id, {
-          status: 'queued',
-          phase: 'queue_recovery_waiting',
-          last_error: error?.message || 'Import queue recovery failed',
-        })
-      }
-      continue
+    try {
+      await enqueueImportJob(row.id, { mode, force: true })
+    } catch (error) {
+      updateJob(row.id, {
+        status: 'queued',
+        phase: 'queue_recovery_waiting',
+        last_error: error?.message || 'Import queue recovery failed',
+      })
     }
-    updateJob(row.id, { status: 'queued', phase: mode === 'apply' ? 'apply_recovered_after_restart' : 'analyze_recovered_after_restart' })
-    setImmediate(() => { runLocalJob(row.id, mode).catch(() => {}) })
   }
 }
 
@@ -3000,8 +3343,10 @@ module.exports = {
   initializeBullQueue,
   listImportJobs,
   markJobCancelled,
+  preflightImportJob,
   processImportJob,
   recoverImportJobs,
+  resetImportJobForRetry,
   startImportWorkers,
   updateImportJobDecisions,
   updateJob,

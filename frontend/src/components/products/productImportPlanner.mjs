@@ -56,24 +56,6 @@ const DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 
 function normalizeText(value) {
@@ -86,6 +68,35 @@ export function normalizeImportProductName(value) {
 
 function normalizeComparableText(value) {
   return normalizeText(value).toLocaleLowerCase()
+}
+
+export const BLOCKING_PRODUCT_IMPORT_ISSUES = new Set([
+  'invalid_barcode',
+  'barcode_scientific_notation',
+  'barcode_too_long',
+])
+
+export function isBlockingProductImportIssue(issueType) {
+  return BLOCKING_PRODUCT_IMPORT_ISSUES.has(String(issueType || ''))
+}
+
+export function getProductImportBarcodeIssue(value) {
+  const barcode = normalizeText(value)
+  if (!barcode) return ''
+  if (/[\u0000-\u001F\u007F]/.test(barcode)) return 'invalid_barcode'
+  if (barcode.length > 128) return 'barcode_too_long'
+  if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(barcode)) return 'barcode_scientific_notation'
+  if (/[^\x20-\x7E]/.test(barcode)) return 'barcode_text'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+() -]*$/.test(barcode)) return 'barcode_text'
+  return ''
+}
+
+function getBlockingIssueMessage(issueType, rowNumber, barcode) {
+  const prefix = `Row ${rowNumber}:`
+  if (issueType === 'barcode_scientific_notation') return `${prefix} barcode "${barcode}" looks like scientific notation. Re-export it as text, edit it, or clear it before importing.`
+  if (issueType === 'barcode_too_long') return `${prefix} barcode is too long. Shorten or clear it before importing.`
+  if (issueType === 'invalid_barcode') return `${prefix} barcode contains invalid control characters. Edit or clear it before importing.`
+  return `${prefix} barcode needs review.`
 }
 
 function normalizeFlag(value, fallback = 0) {
@@ -223,6 +234,125 @@ function buildImportedIdentifierIndex(rows = []) {
   return { bySku, byBarcode }
 }
 
+function buildProductImportReviewGroups(rows = []) {
+  const byName = new Map()
+  ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const nameKey = normalizeImportProductName(row?.name)
+    if (!nameKey) return
+    if (!byName.has(nameKey)) {
+      byName.set(nameKey, {
+        key: nameKey,
+        title: normalizeText(row?.name),
+        rowIndexes: [],
+        rowNumbers: [],
+        rows: [],
+        subgroupsBySignature: new Map(),
+        issueTypes: new Set(['same_name']),
+      })
+    }
+    const group = byName.get(nameKey)
+    const rowIndex = Number(row?._import_row_index ?? index)
+    const rowNumber = Number(row?._rowNumber ?? rowIndex + 2)
+    const signature = row?._detail_signature || getProductImportDetailSignature(row)
+    group.rowIndexes.push(rowIndex)
+    group.rowNumbers.push(rowNumber)
+    group.rows.push({
+      rowIndex,
+      rowNumber,
+      name: row?.name || '',
+      sku: row?.sku || '',
+      barcode: row?.barcode || '',
+      brand: row?.brand || '',
+      category: row?.category || '',
+      unit: row?.unit || '',
+      supplier: row?.supplier || '',
+      branch: row?.branch || '',
+      stock_quantity: row?.stock_quantity ?? '',
+      low_stock_threshold: row?.low_stock_threshold ?? '',
+      selling_price_usd: row?.selling_price_usd ?? '',
+      selling_price_khr: row?.selling_price_khr ?? '',
+      special_price_usd: row?.special_price_usd ?? '',
+      special_price_khr: row?.special_price_khr ?? '',
+      purchase_price_usd: row?.purchase_price_usd ?? row?.cost_price_usd ?? '',
+      purchase_price_khr: row?.purchase_price_khr ?? row?.cost_price_khr ?? '',
+      discount_enabled: row?.discount_enabled ?? '',
+      discount_type: row?.discount_type || '',
+      discount_percent: row?.discount_percent ?? '',
+      discount_amount_usd: row?.discount_amount_usd ?? '',
+      discount_amount_khr: row?.discount_amount_khr ?? '',
+      description: row?.description || '',
+      plannedAction: row?._planned_action || '',
+    })
+    if (!group.subgroupsBySignature.has(signature)) {
+      group.subgroupsBySignature.set(signature, {
+        signature,
+        rowIndexes: [],
+        rowNumbers: [],
+        rows: [],
+        suggestedAction: 'create_variant',
+      })
+    }
+    const subgroup = group.subgroupsBySignature.get(signature)
+    subgroup.rowIndexes.push(rowIndex)
+    subgroup.rowNumbers.push(rowNumber)
+    subgroup.rows.push(row)
+  })
+
+  return Array.from(byName.values())
+    .filter((group) => group.rowIndexes.length > 1)
+    .map((group) => {
+      const subgroups = Array.from(group.subgroupsBySignature.values())
+        .sort((left, right) => Math.min(...left.rowIndexes) - Math.min(...right.rowIndexes))
+        .map((subgroup, index, all) => ({
+          signature: subgroup.signature,
+          rowIndexes: subgroup.rowIndexes,
+          rowNumbers: subgroup.rowNumbers,
+          suggestedAction: subgroup.rowIndexes.length > 1
+            ? 'merge_stock'
+            : all.length > 1 || index > 0
+              ? 'create_variant'
+              : 'new',
+          rows: subgroup.rows.map((row) => ({
+            rowIndex: row._import_row_index,
+            rowNumber: row._rowNumber,
+            sku: row.sku || '',
+            barcode: row.barcode || '',
+            brand: row.brand || '',
+            category: row.category || '',
+            unit: row.unit || '',
+            supplier: row.supplier || '',
+            branch: row.branch || '',
+            stock_quantity: row.stock_quantity ?? '',
+            low_stock_threshold: row.low_stock_threshold ?? '',
+            selling_price_usd: row.selling_price_usd ?? '',
+            selling_price_khr: row.selling_price_khr ?? '',
+            special_price_usd: row.special_price_usd ?? '',
+            special_price_khr: row.special_price_khr ?? '',
+            purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
+            purchase_price_khr: row.purchase_price_khr ?? row.cost_price_khr ?? '',
+            discount_enabled: row.discount_enabled ?? '',
+            discount_type: row.discount_type || '',
+            discount_percent: row.discount_percent ?? '',
+            discount_amount_usd: row.discount_amount_usd ?? '',
+            discount_amount_khr: row.discount_amount_khr ?? '',
+            description: row.description || '',
+            plannedAction: row._planned_action || '',
+          })),
+        }))
+      return {
+        key: group.key,
+        title: group.title,
+        issueTypes: Array.from(group.issueTypes),
+        rowIndexes: group.rowIndexes,
+        rowNumbers: group.rowNumbers,
+        rows: group.rows,
+        subgroups,
+        suggestedAction: subgroups.length > 1 ? 'create_variant' : 'merge_stock',
+      }
+    })
+    .sort((left, right) => Math.min(...left.rowIndexes) - Math.min(...right.rowIndexes))
+}
+
 export function analyzeProductImportRows(rows = [], existingProducts = []) {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .map((row, index) => normalizeProductImportRow(row, index))
@@ -238,7 +368,12 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
 
   normalizedRows.forEach((row, index) => {
     const rowIndex = Number(row._import_row_index ?? index)
+    const barcodeIssue = getProductImportBarcodeIssue(row.barcode)
+    const issueTypes = barcodeIssue ? [barcodeIssue] : []
+    const blockingIssue = issueTypes.find(isBlockingProductImportIssue) || ''
+    if (blockingIssue) errors.push(getBlockingIssueMessage(blockingIssue, row._rowNumber || rowIndex + 2, row.barcode))
     if (!normalizeText(row.name)) {
+      const missingIssueTypes = ['missing_name', ...issueTypes]
       const plannedRow = {
         ...row,
         _planned_action: 'skip_row',
@@ -255,9 +390,9 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         index: rowIndex,
         existing: null,
         plannedAction: 'skip_row',
-        conflictType: 'missing_name',
-        conflictFields: ['errors'],
-        issueTypes: ['missing_name'],
+        conflictType: blockingIssue || 'missing_name',
+        conflictFields: barcodeIssue ? ['errors', 'barcode'] : ['errors'],
+        issueTypes: missingIssueTypes,
         sameBasic: false,
         samePricing: false,
         sameImages: true,
@@ -290,6 +425,14 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       barcodeMatch && !identifierMatchSameName ? 'barcode' : '',
       ...sameFileIdentifierFields,
     ].filter(Boolean)))
+    const reviewConflictFields = Array.from(new Set([
+      ...identifierMatchFields,
+      ...(barcodeIssue ? ['barcode'] : []),
+    ]))
+    const issueConflictFields = Array.from(new Set([
+      ...identifierConflictFields,
+      ...reviewConflictFields,
+    ]))
     const existingCandidates = skuMatch && normalizeImportProductName(skuMatch.name) === nameKey
       ? [skuMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(skuMatch.id))]
       : barcodeMatch && normalizeImportProductName(barcodeMatch.name) === nameKey
@@ -332,12 +475,12 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
       _target_product_id: targetProductId,
       _parent_id: parentId,
       _detail_signature: signature,
-      _identifier_conflict_mode: identifierMatchFields.length && ['new', 'create_variant'].includes(plannedAction) ? 'clear_imported' : '',
+      _identifier_conflict_mode: issueConflictFields.length && ['new', 'create_variant'].includes(plannedAction) ? 'clear_imported' : '',
     }
     normalizedRows[index] = plannedRow
     decisions[rowIndex] = plannedAction
 
-    if (plannedAction === 'new' && !identifierConflictFields.length) {
+    if (plannedAction === 'new' && !issueConflictFields.length && !issueTypes.length) {
       cleanRows.push({ row: plannedRow, index: rowIndex, incomingImages: [] })
     } else {
       conflicts.push({
@@ -346,8 +489,9 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
         index: rowIndex,
         existing: matchingExisting || parent || identifierMatch || null,
         plannedAction,
-        conflictType: identifierConflictFields.length ? 'identifier' : (identifierMatchFields.length ? 'same_name_identifier' : 'same_name'),
-        conflictFields: identifierMatchFields,
+        conflictType: blockingIssue || (identifierConflictFields.length ? 'identifier' : (reviewConflictFields.length ? 'same_name_identifier' : 'same_name')),
+        conflictFields: issueConflictFields,
+        issueTypes,
         importDuplicateRows: {
           sku: sameFileSkuRows,
           barcode: sameFileBarcodeRows,
@@ -367,6 +511,7 @@ export function analyzeProductImportRows(rows = [], existingProducts = []) {
     conflicts,
     decisions,
     errors,
+    groups: buildProductImportReviewGroups(normalizedRows),
     summary: {
       total: normalizedRows.length,
       newCount: normalizedRows.filter((row) => row._planned_action === 'new').length,

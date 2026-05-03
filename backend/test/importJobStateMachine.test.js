@@ -7,7 +7,7 @@ const path = require('path')
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-import-state-'))
 process.env.BUSINESS_OS_RUNTIME_DIR = tempRoot
-process.env.JOB_QUEUE_DRIVER = 'sqlite'
+process.env.JOB_QUEUE_DRIVER = 'bullmq'
 process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES = '0'
 process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 
@@ -23,6 +23,7 @@ const {
   getImportJob,
   getImportJobReview,
   getJobFiles,
+  preflightImportJob,
   processImportJob,
   updateImportJobDecisions,
   updateJob,
@@ -273,6 +274,116 @@ async function main() {
     assert.equal(review.rows.every((entry) => entry.conflict.type === 'same_name_import'), true)
     assert.equal(review.rows.every((entry) => entry.conflict.plannedAction === 'create_variant'), true)
     assert.equal(review.rows.every((entry) => entry.conflict.decisionDefaults._action === 'create_variant'), true)
+  })
+
+  await runTest('product import review groups same-name rows into detail subgroups', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const productName = `Grouped Import Variant ${Date.now()}`
+    const csvPath = writeJobFile(job.id, 'review-same-name-subgroups.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,purchase_price_usd,selling_price_usd,stock_quantity',
+      `${productName},,BAR-GROUP-1,Brand A,pcs,5,10,2`,
+      `${productName},,BAR-GROUP-1,Brand A,pcs,5,10,3`,
+      `${productName},,BAR-GROUP-2,Brand B,pcs,7,14,4`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'review-same-name-subgroups.csv', mimetype: 'text/csv' }, 'csv', 'review-same-name-subgroups.csv')
+
+    const review = await getImportJobReview(job.id, { filter: 'same_name', pageSize: 20 })
+    const group = (review.groups || []).find((entry) => entry.key === productName.toLowerCase())
+
+    assert.ok(group, 'Expected grouped same-name review payload')
+    assert.equal(group.issueTypes.includes('same_name'), true)
+    assert.equal(group.rowNumbers.length, 3)
+    assert.equal(group.subgroups.length, 2)
+    assert.deepEqual(group.subgroups.map((entry) => entry.rowNumbers).sort((a, b) => b.length - a.length), [[2, 3], [4]])
+    assert.equal(group.subgroups[0].suggestedAction, 'merge_stock')
+    assert.equal(group.subgroups.some((entry) => entry.suggestedAction === 'create_variant'), true)
+  })
+
+  await runTest('product import grouping ignores price-only differences', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const productName = `Grouped Price Only ${Date.now()}`
+    const csvPath = writeJobFile(job.id, 'review-price-only-subgroups.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,purchase_price_usd,selling_price_usd,discount_percent,stock_quantity',
+      `${productName},SKU-PRICE-ONLY,BAR-PRICE-ONLY,Brand A,pcs,5,10,5,2`,
+      `${productName},SKU-PRICE-ONLY,BAR-PRICE-ONLY,Brand A,pcs,8,15,12,3`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'review-price-only-subgroups.csv', mimetype: 'text/csv' }, 'csv', 'review-price-only-subgroups.csv')
+
+    const review = await getImportJobReview(job.id, { filter: 'same_name', pageSize: 20 })
+    const group = (review.groups || []).find((entry) => entry.key === productName.toLowerCase())
+
+    assert.ok(group, 'Expected grouped same-name review payload')
+    assert.equal(group.subgroups.length, 1)
+    assert.equal(group.subgroups[0].suggestedAction, 'merge_stock')
+  })
+
+  await runTest('product import preflight honors variant and keep-barcode decisions before apply', async () => {
+    db.prepare(`
+      INSERT INTO products (name, sku, barcode, brand, unit, purchase_price_usd, selling_price_usd, stock_quantity, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `).run('Decision Serum', 'DEC-BASE', 'SAME-BARCODE', 'Brand A', 'pcs', 5, 10, 2)
+    const parentId = db.prepare('SELECT id FROM products WHERE sku = ?').get('DEC-BASE').id
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const csvPath = writeJobFile(job.id, 'decision-variant-keep-barcode.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,purchase_price_usd,selling_price_usd,stock_quantity',
+      'Decision Serum,DEC-VARIANT,SAME-BARCODE,Brand B,pcs,7,14,3',
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'decision-variant-keep-barcode.csv', mimetype: 'text/csv' }, 'csv', 'decision-variant-keep-barcode.csv')
+    updateImportJobDecisions(job.id, {
+      2: {
+        action: 'create_variant',
+        identifier_decision: 'allow_duplicate',
+        decision: 'create_variant',
+        _parent_id: parentId,
+      },
+    })
+
+    const preflight = await preflightImportJob(job.id)
+    assert.equal(preflight.ok, true)
+    assert.equal(preflight.failures.length, 0)
+
+    const result = await processImportJob(job.id, { mode: 'apply' })
+    const rows = db.prepare('SELECT id, name, sku, barcode, parent_id, is_group, stock_quantity FROM products WHERE name = ? ORDER BY id ASC').all('Decision Serum')
+
+    assert.equal(result.status, 'completed')
+    assert.equal(Number(result.failed_rows || 0), 0)
+    assert.equal(rows.length, 2)
+    assert.equal(Number(rows[0].is_group), 1)
+    assert.equal(Number(rows[1].parent_id), Number(parentId))
+    assert.equal(rows[1].barcode, 'SAME-BARCODE')
+    assert.equal(Number(rows[1].stock_quantity), 3)
+  })
+
+  await runTest('product import applies same-name subgroup plan by merging identical details and creating variants', async () => {
+    const job = createImportJob({ type: 'products', actor: { userName: 'test' } })
+    const productName = `Apply Subgroup Variant ${Date.now()}`
+    const csvPath = writeJobFile(job.id, 'apply-same-name-subgroups.csv', [
+      '\uFEFFname,sku,barcode,brand,unit,purchase_price_usd,selling_price_usd,stock_quantity',
+      `${productName},,BAR-SUB-1,Brand A,pcs,5,10,2`,
+      `${productName},,BAR-SUB-1,Brand A,pcs,5,10,3`,
+      `${productName},,BAR-SUB-2,Brand B,pcs,7,14,4`,
+    ].join('\n'))
+    addJobFile(job.id, { path: csvPath, originalname: 'apply-same-name-subgroups.csv', mimetype: 'text/csv' }, 'csv', 'apply-same-name-subgroups.csv')
+    updateImportJobDecisions(job.id, {
+      2: { action: 'create_variant', identifier_decision: 'allow_duplicate' },
+      3: { action: 'merge_stock', identifier_decision: 'allow_duplicate' },
+      4: { action: 'create_variant', identifier_decision: 'allow_duplicate' },
+    })
+
+    const result = await processImportJob(job.id, { mode: 'apply' })
+    const products = db.prepare('SELECT id, name, brand, barcode, parent_id, is_group, stock_quantity FROM products WHERE name = ? ORDER BY id ASC').all(productName)
+
+    assert.equal(result.status, 'completed')
+    assert.equal(Number(result.failed_rows || 0), 0)
+    assert.equal(products.length, 2)
+    const parent = products.find((row) => Number(row.parent_id || 0) === 0)
+    const variant = products.find((row) => Number(row.parent_id || 0) > 0)
+    assert.ok(parent, 'Expected one parent/root row')
+    assert.ok(variant, 'Expected one child variant row')
+    assert.equal(Number(parent.stock_quantity), 5)
+    assert.equal(Number(parent.is_group), 1)
+    assert.equal(Number(variant.parent_id), Number(parent.id))
+    assert.equal(Number(variant.stock_quantity), 4)
   })
 
   await runTest('deleteAllImportJobs clears all import job records and runtime folders', async () => {

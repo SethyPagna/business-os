@@ -47,6 +47,19 @@ export default function ActionHistoryBar({
           <History className="h-3.5 w-3.5 text-slate-400" />
           <span>{T('history', 'History')}</span>
         </button>
+        {history.isAdmin && Array.isArray(history.userOptions) && history.userOptions.length ? (
+          <select
+            className="max-w-32 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            value={history.userFilter || 'all'}
+            onChange={(event) => history.setUserFilter?.(event.target.value)}
+            title={T('filter_by_user', 'Filter by user')}
+          >
+            <option value="all">{T('all_users', 'All users')}</option>
+            {history.userOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.name || option.username || `User ${option.id}`}</option>
+            ))}
+          </select>
+        ) : null}
         <div className="hidden min-w-0 items-center gap-2 md:flex">
           {undoItems.length ? <span className="truncate text-slate-500">{T('undo', 'Undo')}: {undoItems.join(' / ')}</span> : null}
           {redoItems.length ? <span className="truncate text-slate-400">{T('redo', 'Redo')}: {redoItems.join(' / ')}</span> : null}

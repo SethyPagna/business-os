@@ -208,6 +208,7 @@ export function isBrokenLocalizedString(value) {
   if (!trimmed) return false
   if (trimmed.includes('\ufffd')) return true
   if (/[\uE000-\uF8FF]/.test(trimmed)) return true
+  if (/(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù)/.test(trimmed)) return true
   const questionMarks = (trimmed.match(/\?/g) || []).length
   return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
 }

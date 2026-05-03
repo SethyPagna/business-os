@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/productImportPlanner.mjs'
 
 let failed = 0
@@ -36,6 +37,18 @@ await runTest('same product name and different details plans variant creation', 
   assert.equal(analysis.rows[0]._planned_action, 'create_variant')
   assert.equal(analysis.rows[0]._parent_id, 10)
   assert.equal(analysis.summary.variantCount, 1)
+})
+
+await runTest('same product name with only price changes plans stock merge', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '15', purchase_price_usd: '8', discount_percent: '10', stock_quantity: '2' },
+  ], [
+    { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12, purchase_price_usd: 6, discount_percent: 0 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 10)
+  assert.equal(analysis.summary.mergeCount, 1)
 })
 
 await runTest('malformed existing product rows do not crash import analysis', () => {
@@ -90,6 +103,19 @@ await runTest('same-file duplicate barcode rows become review conflicts', () => 
   assert.equal(analysis.rows[1]._identifier_conflict_mode, 'clear_imported')
 })
 
+await runTest('scientific notation barcodes are blocking review conflicts', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum A', barcode: '8.19265E+11', selling_price_usd: '12', stock_quantity: '1' },
+  ], [])
+
+  assert.equal(analysis.cleanRows.length, 0)
+  assert.equal(analysis.conflicts.length, 1)
+  assert.equal(analysis.conflicts[0].conflictType, 'barcode_scientific_notation')
+  assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
+  assert.deepEqual(analysis.conflicts[0].issueTypes, ['barcode_scientific_notation'])
+  assert.equal(analysis.summary.errorCount, 1)
+})
+
 await runTest('missing product name rows stay visible as review issues', () => {
   const analysis = analyzeProductImportRows([
     { name: '', barcode: 'HAS-BARCODE', selling_price_usd: '12', stock_quantity: '1' },
@@ -115,6 +141,22 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
 })
 
+await runTest('same imported name groups rows into detail subgroups for review', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Cream', barcode: 'BC-1', brand: 'A', unit: 'pcs', selling_price_usd: '3.001', stock_quantity: '1' },
+    { name: 'Cream', barcode: 'BC-1', brand: 'A', unit: 'pcs', selling_price_usd: '3.001', stock_quantity: '4' },
+    { name: 'Cream', barcode: 'BC-2', brand: 'B', unit: 'pcs', selling_price_usd: '4.001', stock_quantity: '2' },
+  ], [])
+
+  const group = (analysis.groups || []).find((entry) => entry.key === 'cream')
+  assert.ok(group, 'Expected same-name group in analysis')
+  assert.equal(group.rowNumbers.length, 3)
+  assert.equal(group.subgroups.length, 2)
+  assert.deepEqual(group.subgroups.map((entry) => entry.rowIndexes).sort((a, b) => b.length - a.length), [[0, 1], [2]])
+  assert.equal(group.subgroups[0].suggestedAction, 'merge_stock')
+  assert.equal(group.subgroups.some((entry) => entry.suggestedAction === 'create_variant'), true)
+})
+
 await runTest('large product import analysis keeps deterministic row counts', () => {
   const rows = ['name,sku,selling_price_usd,stock_quantity']
   for (let index = 0; index < 10000; index += 1) {
@@ -125,6 +167,31 @@ await runTest('large product import analysis keeps deterministic row counts', ()
   assert.equal(analysis.summary.total, 10000)
   assert.equal(analysis.rows.length, 10000)
   assert.equal(analysis.errors.length, 0)
+})
+
+await runTest('bulk import modal does not fetch the full product catalog before review', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /await\s+window\.api\.getProducts\(/)
+  assert.match(source, /Existing-product conflicts\s+[\s\S]*server import job/)
+})
+
+await runTest('bulk import modal stops the async start sequence after cancel is requested', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  assert.match(source, /useRef/)
+  assert.match(source, /cancelRequestedRef/)
+  assert.match(source, /throwIfImportCancelled/)
+  assert.match(source, /cancelImportJob\(currentJob\.id,\s*\{\s*source:/)
+  assert.match(source, /getProductImportBarcodeIssue/)
+  assert.match(source, /isBlockingProductImportIssue/)
+  assert.match(source, /blockingIssueCount/)
+
+  const startMatches = [...source.matchAll(/await\s+window\.api\.startImportJob\(jobId,\s*\{\s*source:/g)]
+  assert.ok(startMatches.length >= 2, 'expected image-only and CSV import start calls')
+  for (const match of startMatches) {
+    const previousGuard = source.lastIndexOf('throwIfImportCancelled()', match.index)
+    assert.ok(previousGuard >= 0, 'startImportJob must be guarded by throwIfImportCancelled')
+    assert.ok(match.index - previousGuard < 900, 'start guard should be close to the start call')
+  }
 })
 
 if (failed > 0) {

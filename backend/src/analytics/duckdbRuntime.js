@@ -1,5 +1,7 @@
 'use strict'
 
+const path = require('path')
+
 const {
   ANALYTICS_ENGINE,
   PARQUET_STORE,
@@ -9,6 +11,19 @@ const {
 
 let cachedProbe = null
 
+function tryRequireDuckDbPackage(packageName) {
+  try {
+    return require(packageName)
+  } catch (error) {
+    if (!process.pkg) throw error
+    try {
+      return require(path.join(path.dirname(process.execPath), 'node_modules', packageName))
+    } catch (_) {
+      throw error
+    }
+  }
+}
+
 function probeDuckDbPackage() {
   if (cachedProbe) return cachedProbe
   const candidates = ['@duckdb/node-api', 'duckdb']
@@ -16,7 +31,7 @@ function probeDuckDbPackage() {
     try {
       // Optional runtime dependency: only load when diagnostics need to know if
       // the DuckDB bridge is installed in this specific release image.
-      require(packageName)
+      tryRequireDuckDbPackage(packageName)
       cachedProbe = { available: true, packageName, reason: 'available' }
       return cachedProbe
     } catch (error) {
@@ -45,8 +60,9 @@ function getDuckDbRuntimeStatus(options = {}) {
     ? { available: false, packageName: null, reason: 'probe skipped' }
     : probeDuckDbPackage()
   const enabled = configuredEngine === 'duckdb'
-  const parquetEnabled = configuredStore === 'minio' || configuredStore === 'local'
-  const productionStoreReady = configuredStore === 'minio' && OBJECT_STORAGE_DRIVER === 'minio' && !!S3_BUCKET
+  const objectStores = new Set(['r2', 'minio'])
+  const parquetEnabled = objectStores.has(configuredStore) || configuredStore === 'local'
+  const productionStoreReady = objectStores.has(configuredStore) && configuredStore === OBJECT_STORAGE_DRIVER && !!S3_BUCKET
 
   return {
     engine: configuredEngine,

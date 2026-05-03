@@ -18,7 +18,7 @@ echo   Business OS
 echo ========================================================================
 echo.
 echo   Starting the app, Docker services, workers, and Cloudflare access...
-echo   You do not need to run Docker, Redis, Postgres, MinIO, or workers by hand.
+echo   You do not need to run Docker, Redis, Postgres, R2/offline storage, or workers by hand.
 echo.
 
 if exist "%ROOT%\run\docker\start.bat" (

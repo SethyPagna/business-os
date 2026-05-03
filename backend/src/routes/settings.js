@@ -38,8 +38,14 @@ function normalizeBrandOptionsValue(rawValue) {
 
 function settingsHasUpdatedAt() {
   try {
-    const columns = db.prepare(`PRAGMA table_info(settings)`).all()
-    return columns.some((column) => String(column?.name || '').toLowerCase() === 'updated_at')
+    return db.prepare(`
+      SELECT 1 AS exists
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1
+    `).get('settings', 'updated_at')?.exists === 1
   } catch (_) {
     return false
   }
@@ -57,7 +63,7 @@ function getSettingsUpdatedAt() {
     return normalizeUpdatedAt(new Date().toISOString()) || null
   }
   const row = db.prepare(`
-    SELECT MAX(COALESCE(updated_at, datetime('now'))) AS updated_at
+    SELECT MAX(COALESCE(updated_at::text, CURRENT_TIMESTAMP::text)) AS updated_at
     FROM settings
   `).get()
   return normalizeUpdatedAt(row?.updated_at) || normalizeUpdatedAt(new Date().toISOString()) || null
@@ -83,8 +89,8 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
   const hasUpdatedAt = settingsHasUpdatedAt()
   const upsert  = hasUpdatedAt
     ? db.prepare(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
     )
     : db.prepare(
       `INSERT INTO settings (key, value) VALUES (?, ?)

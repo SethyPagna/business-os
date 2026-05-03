@@ -306,7 +306,6 @@ function writeRunReleaseReference() {
     'run/build-release.bat',
     'run/clean-generated.bat',
     'run/docker/release.bat',
-    'run/docker/publish-release.bat',
     'run/docker/install.bat',
     'run/docker/start.bat',
     'run/docker/update.bat',

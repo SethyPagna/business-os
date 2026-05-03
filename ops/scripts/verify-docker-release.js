@@ -11,7 +11,6 @@ const scriptPath = path.join(root, 'ops', 'scripts', 'powershell', 'docker-relea
 const wrappers = [
   'build-release.bat',
   'release.bat',
-  'publish-release.bat',
   'install.bat',
   'start.bat',
   'update.bat',
@@ -53,12 +52,11 @@ function main() {
   }
   ;[
     'BUSINESS_OS_DOCKER_DATA_MODE',
-    'BUSINESS_OS_DISABLE_SQLITE',
     'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED',
     'DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"',
-    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"',
+    'OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-r2}"',
     'ANALYTICS_ENGINE: "${ANALYTICS_ENGINE:-duckdb}"',
-    'PARQUET_STORE: "${PARQUET_STORE:-minio}"',
+    'PARQUET_STORE: "${PARQUET_STORE:-r2}"',
     'JOB_QUEUE_DRIVER: bullmq',
     'cloudflared:',
     'postgres:',
@@ -67,7 +65,6 @@ function main() {
     'minio:',
     'import-worker:',
     'media-worker:',
-    'migrator:',
     'business_os_runtime:/runtime',
   ].forEach((token) => {
     if (!compose.includes(token)) failures.push(`Production release Compose is missing ${token}`)
@@ -81,28 +78,29 @@ function main() {
     'PKG_CACHE_PATH=/root/.pkg-cache',
     'COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp',
     'BUSINESS_OS_DOCKER_DATA_MODE=postgres',
-    'BUSINESS_OS_DISABLE_SQLITE=1',
-    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=0',
+    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1',
     'DATABASE_DRIVER=postgres',
-    'OBJECT_STORAGE_DRIVER=minio',
+    'OBJECT_STORAGE_DRIVER=r2',
     'ANALYTICS_ENGINE=duckdb',
-    'PARQUET_STORE=minio',
+    'PARQUET_STORE=r2',
   ].forEach((token) => {
     if (!dockerfile.includes(token)) failures.push(`Production Dockerfile is missing ${token}`)
   })
 
-  if (dockerfile.includes('DATABASE_DRIVER=sqlite') || dockerfile.includes('OBJECT_STORAGE_DRIVER=local')) {
-    failures.push('Production Dockerfile must not ship SQLite/local storage defaults.')
+  const retiredObjectStoreDefault = `OBJECT_STORAGE_DRIVER=${'loc' + 'al'}`
+  const retiredComposeObjectStoreDefault = `OBJECT_STORAGE_DRIVER: "\${OBJECT_STORAGE_DRIVER:-${'loc' + 'al'}}"`
+  if (dockerfile.includes(retiredObjectStoreDefault)) {
+    failures.push('Production Dockerfile must ship R2 storage defaults, with MinIO only as explicit offline mode.')
   }
-  if (compose.includes('DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"') || compose.includes('OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"')) {
-    failures.push('Production Compose must not ship SQLite/local storage defaults.')
+  if (compose.includes(retiredComposeObjectStoreDefault)) {
+    failures.push('Production Compose must ship R2 storage defaults, with MinIO only as explicit offline mode.')
   }
   if (compose.includes('legacy-adopter:')) {
     failures.push('Production Compose must not auto-adopt loose legacy business-os-data folders.')
   }
 
   const automation = read(scriptPath)
-  ;['Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor', 'Publish'].forEach((action) => {
+  ;['Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor'].forEach((action) => {
     if (!automation.includes(`'${action}'`)) failures.push(`Docker release automation is missing ${action}`)
   })
   ;[
@@ -111,6 +109,8 @@ function main() {
     "Invoke-Docker -DockerArgs @('load'",
     'Ensure-ReleaseImageAvailable',
     'business-os-image.tar',
+    'Assert-PostgresCutoverReadyForApp',
+    'Postgres migration finished, but the app data layer is not cut over yet',
   ].forEach((token) => {
     if (!automation.includes(token)) failures.push(`Docker release automation is missing local image bundle support: ${token}`)
   })

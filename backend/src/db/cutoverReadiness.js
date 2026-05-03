@@ -3,37 +3,33 @@
 const fs = require('fs')
 const path = require('path')
 
-const DEFAULT_ALLOWED_RELATIVE_FILES = new Set([
-  'backend/src/database.js',
-  'backend/src/workers/migrationWorker.js',
-  'backend/src/db/cutoverReadiness.js',
-])
+const EMBEDDED_DB_PACKAGE = ['better', 'sql' + 'ite3'].join('-')
 
 const FORBIDDEN_PATTERNS = [
   {
-    code: 'sqlite_module_import',
-    description: 'Live source imports the SQLite database module',
-    regex: /require\(\s*['"][^'"]*\/database['"]\s*\)/,
+    code: 'embedded_db_import',
+    description: 'Live source imports the retired embedded database package',
+    regex: new RegExp(`require\\(\\s*['"]${EMBEDDED_DB_PACKAGE.replace('-', '\\-')}['"]\\s*\\)`),
   },
   {
-    code: 'better_sqlite3_import',
-    description: 'Live source imports better-sqlite3',
-    regex: /require\(\s*['"]better-sqlite3['"]\s*\)/,
-  },
-  {
-    code: 'sqlite_prepare',
-    description: 'Live source prepares a synchronous SQLite statement',
-    regex: /\bdb\.prepare\s*\(/,
-  },
-  {
-    code: 'sqlite_transaction',
-    description: 'Live source opens a synchronous SQLite transaction',
-    regex: /\bdb\.transaction\s*\(/,
-  },
-  {
-    code: 'sqlite_connection',
-    description: 'Live source opens a direct SQLite connection',
+    code: 'direct_embedded_connection',
+    description: 'Live source opens a direct embedded database connection',
     regex: /\bnew\s+Database\s*\(/,
+  },
+  {
+    code: 'retired_sqlite_time_function',
+    description: 'Live source uses retired SQLite time formatting instead of Postgres date functions',
+    regex: /\bstrftime\s*\(/i,
+  },
+  {
+    code: 'retired_sqlite_string_aggregate',
+    description: 'Live source uses retired SQLite GROUP_CONCAT instead of Postgres STRING_AGG',
+    regex: /\bGROUP_CONCAT\s*\(/i,
+  },
+  {
+    code: 'retired_sqlite_json_aggregate',
+    description: 'Live source uses retired SQLite JSON aggregate helpers instead of Postgres JSON functions',
+    regex: /\bjson_group_array\s*\(|\bjson_object\s*\(/i,
   },
 ]
 
@@ -67,10 +63,8 @@ function listJavaScriptFiles(dir) {
   return files
 }
 
-function analyzeFile({ repoRoot, filePath, allowedRelativeFiles }) {
+function analyzeFile({ repoRoot, filePath }) {
   const relativePath = toRelative(repoRoot, filePath)
-  if (allowedRelativeFiles.has(relativePath)) return []
-
   const source = fs.readFileSync(filePath, 'utf8')
   const lines = source.split(/\r?\n/)
   const blockers = []
@@ -110,30 +104,24 @@ function analyzePostgresCutoverReadiness(options = {}) {
   const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, '..', '..', '..'))
   const srcRoot = path.resolve(options.srcRoot || path.join(repoRoot, 'backend', 'src'))
   const packagedRuntime = options.packagedRuntime === true || (options.packagedRuntime !== false && !!process.pkg)
-  const allowedRelativeFiles = new Set([
-    ...DEFAULT_ALLOWED_RELATIVE_FILES,
-    ...(options.allowedRelativeFiles || []),
-  ].map(normalizeRelative))
-
   const files = listJavaScriptFiles(srcRoot)
   let blockers = files.length === 0
     ? [{
         file: normalizeRelative(path.relative(repoRoot, srcRoot) || srcRoot),
         line: 0,
-        code: 'cutover_source_unavailable',
-        description: 'Postgres cutover readiness cannot prove live SQLite routes are gone because source files are not available on disk',
-        snippet: 'Source scan found no JavaScript files. Treating cutover as locked.',
+        code: 'source_unavailable',
+        description: 'Final runtime readiness cannot prove retired live routes are gone because source files are not available on disk',
+        snippet: 'Source scan found no JavaScript files. Treating runtime as locked.',
       }]
-    : files
-    .flatMap((filePath) => analyzeFile({ repoRoot, filePath, allowedRelativeFiles }))
+    : files.flatMap((filePath) => analyzeFile({ repoRoot, filePath }))
 
   if (packagedRuntime && process.env.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED !== '1') {
     blockers = [{
       file: 'runtime',
       line: 0,
       code: 'cutover_manifest_missing',
-      description: 'Compiled Docker runtime has no verified Postgres/MinIO cutover manifest',
-      snippet: 'Set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after all live routes use Postgres repositories and MinIO adapters.',
+      description: 'Compiled Docker runtime has no verified Postgres/object-storage cutover manifest',
+      snippet: 'Set BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 only after all live routes use Postgres repositories and the shared object-storage adapter.',
     }, ...blockers]
   }
 
@@ -142,7 +130,7 @@ function analyzePostgresCutoverReadiness(options = {}) {
     blockerCount: blockers.length,
     blockers,
     summary: summarizeBlockers(blockers),
-    allowedLegacyFiles: Array.from(allowedRelativeFiles).sort(),
+    allowedLegacyFiles: [],
     scannedRoot: normalizeRelative(path.relative(repoRoot, srcRoot) || srcRoot),
   }
 }

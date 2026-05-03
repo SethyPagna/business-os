@@ -552,6 +552,17 @@ export const searchProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`))
 }
+export const getProductsByIds = (ids = [], params = {}) => {
+  const uniqueIds = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))).slice(0, 100)
+  if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })
+  return searchProducts({
+    page: 1,
+    pageSize: Math.min(Math.max(uniqueIds.length, 1), 100),
+    ids: uniqueIds.join(','),
+    include: 'branch_stock,images',
+    ...params,
+  })
+}
 export const getProductFilters = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`products:filters:${q}`, () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`))
@@ -766,10 +777,15 @@ export const getImportJobReview = (id, params = {}) => {
 }
 export const updateImportJobDecisions = (id, decisions = {}) =>
   route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, { decisions }), null, true)
-export const startImportJob = id => route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/start`, {}), null, true)
-export const approveImportJob = id => route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/approve`, {}), null, true)
-export const cancelImportJob = id => route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/cancel`, {}), null, true)
-export const retryImportJob = id => route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${id}/retry`, {}), null, true)
+export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, {}), null, true)
+export const startImportJob = (id, options = {}) =>
+  route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/start`, { source: options.source || 'ui' }), null, true)
+export const approveImportJob = (id, options = {}) =>
+  route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/approve`, { source: options.source || 'ui' }), null, true)
+export const cancelImportJob = (id, options = {}) =>
+  route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/cancel`, { source: options.source || 'ui' }), null, true)
+export const retryImportJob = (id, options = {}) =>
+  route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/retry`, { source: options.source || 'ui' }), null, true)
 export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${id}`, async () => {
   const encodedId = encodeURIComponent(id)
   const force = options.force ? '?force=1' : ''
@@ -1016,8 +1032,10 @@ export { getSyncServerUrl, getAuthSessionToken }
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
-export const getActionHistory = (scope = 'global', limit = 3) =>
-  route(`actionHistory:get:${scope}:${limit}`, () => apiFetch('GET', `/api/action-history?scope=${encodeURIComponent(scope)}&limit=${encodeURIComponent(limit)}`), () => ({ items: [] }))
+export const getActionHistory = (scope = 'global', limit = 3, params = {}) => {
+  const query = new URLSearchParams(Object.entries({ scope, limit, ...(params || {}) }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`actionHistory:get:${query}`, () => apiFetch('GET', `/api/action-history?${query}`), () => ({ items: [] }))
+}
 export const createActionHistory = payload =>
   route('actionHistory:create', () => apiFetch('POST', '/api/action-history', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
 export const updateActionHistory = (id, payload) =>
@@ -1031,7 +1049,10 @@ export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
-export const getInventoryMovements = ({ branchId } = {}, limit) => route(branchId ? `inventory:movements:${branchId}` : 'inventory:movements', () => apiFetch('GET', `/api/inventory/movements?limit=${limit || 500}${branchId ? `&branchId=${branchId}` : ''}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
+export const getInventoryMovements = ({ branchId, userId } = {}, limit) => {
+  const q = new URLSearchParams(Object.entries({ limit: limit || 500, branchId, userId }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
+}
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
@@ -1147,26 +1168,26 @@ export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) =
 export const deleteCustomRow    = ({ tableName, id, payload })     => route('customTables:deleteRow', () => apiFetch('DELETE', `/api/custom-tables/${tableName}/rows/${id}`, payload),                  null, true)
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray(), mirrorTable('audit_logs'))
-
-// ─── Backup ───────────────────────────────────────────────────────────────────
-export async function exportBackup() {
-  const url = getSyncServerUrl()
-  if (!url) throw new Error('Server required for backup export')
-  const headers = { 'bypass-tunnel-reminder': 'true' }
-  const authToken = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
-  const res  = await fetch(`${url}/api/system/backup/export`, { headers })
-  if (!res.ok) throw new Error('Backup export failed')
-  const blob = await res.blob()
-  const a    = document.createElement('a')
-  a.href     = URL.createObjectURL(blob)
-  a.download = `business-os-backup-${new Date().toISOString().split('T')[0]}.json`
-  a.click()
-  URL.revokeObjectURL(a.href)
-  return { success: true }
+export const getAuditLogs = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return routeMirrored(
+    `audit_log:get:${q}`,
+    () => apiFetch('GET', `/api/system/audit-logs${q ? `?${q}` : ''}`),
+    async () => {
+      const rows = await dexieDb.audit_logs.orderBy('created_at').reverse().limit(params?.pageSize || 50).toArray()
+      return { items: rows, total: rows.length, page: 1, pageSize: rows.length || Number(params?.pageSize || 50), totalPages: 1, filters: { users: [] } }
+    },
+    async (result) => {
+      const rows = Array.isArray(result) ? result : (result?.items || [])
+      return mirrorTable('audit_logs')(rows)
+    },
+  )
 }
 
+export const deleteAuditLogsRetention = (olderThanDays = 30) =>
+  route('audit_log:retention:delete', () => apiFetch('DELETE', `/api/system/audit-logs/retention?olderThanDays=${encodeURIComponent(olderThanDays)}&confirm=1`, undefined), null, true)
+
+// ─── Backup ───────────────────────────────────────────────────────────────────
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -1210,6 +1231,17 @@ async function waitForSystemJob(jobId, {
   return pollSystemJob(jobId, { timeoutMs, pollMs, reason })
 }
 
+export async function getIntegrationDoctor(options = {}) {
+  const params = new URLSearchParams()
+  if (options.deep || options.write) params.set('deep', '1')
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return route(
+    'system:integrationDoctor',
+    () => apiFetch('GET', `/api/system/integration-doctor${suffix}`, undefined, SYNC.REQUEST_TIMEOUT_MS),
+    undefined,
+  )
+}
+
 export async function queueBackupFolderExport(destinationDir = '') {
   const payload = {
     type: 'export-folder',
@@ -1220,32 +1252,7 @@ export async function queueBackupFolderExport(destinationDir = '') {
 }
 
 export async function exportBackupFolder(destinationDir) {
-  const queued = await queueBackupFolderExport(destinationDir)
-  const jobId = queued?.job_id || queued?.item?.id
-  if (!jobId) return queued
-  return waitForSystemJob(jobId, { reason: 'backup export' })
-}
-
-export function pickBackupFile() {
-  return new Promise((resolve, reject) => {
-    const input  = document.createElement('input')
-    input.type   = 'file'
-    input.accept = '.json,application/json'
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0]
-      if (!file) { resolve(null); return }
-      resolve(file)
-    }
-    input.oncancel = () => resolve(null)
-    input.click()
-  })
-}
-
-export async function importBackupData(data) {
-  const result = await apiFetch('POST', '/api/system/backup/import', data)
-  await invalidateClientRuntimeState('backup-import')
-  cacheClearAll()
-  return result
+  return queueBackupFolderExport(destinationDir)
 }
 
 export async function queueBackupFolderRestore(sourceDir) {
@@ -1256,25 +1263,7 @@ export async function queueBackupFolderRestore(sourceDir) {
 }
 
 export async function importBackupFolder(sourceDir) {
-  const queued = await queueBackupFolderRestore(sourceDir)
-  const jobId = queued?.job_id || queued?.item?.id
-  const result = jobId
-    ? await waitForSystemJob(jobId, { reason: 'backup restore' })
-    : queued
-  await invalidateClientRuntimeState('backup-import-folder')
-  cacheClearAll()
-  return result
-}
-
-export async function importBackup() {
-  const file = await pickBackupFile()
-  if (!file) return { success: false }
-  try {
-    const data = JSON.parse(await file.text())
-    return await importBackupData(data)
-  } catch (err) {
-    return Promise.reject(err)
-  }
+  return queueBackupFolderRestore(sourceDir)
 }
 
 // ─── Data reset ───────────────────────────────────────────────────────────────
@@ -1332,18 +1321,7 @@ export const queueGoogleDriveSyncNow = () =>
 
 export const syncGoogleDriveNow = () =>
   route('system:driveSyncNow', async () => {
-    const queued = await queueGoogleDriveSyncNow()
-    const jobId = queued?.job_id || queued?.item?.id
-    if (!jobId) return queued
-    const result = await waitForSystemJob(jobId, {
-      reason: 'Google Drive sync',
-      timeoutMs: LONG_SYSTEM_ACTION_TIMEOUT_MS,
-    })
-    return {
-      ...result,
-      summary: result.summary || result.result?.summary || result.job?.result?.summary || {},
-      item: result.item || result.result?.item || result.job?.result?.item || null,
-    }
+    return queueGoogleDriveSyncNow()
   }, null, true)
 
 export async function resetData(mode = 'sales') {

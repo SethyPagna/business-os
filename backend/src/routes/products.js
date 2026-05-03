@@ -1,4 +1,4 @@
-﻿'use strict'
+'use strict'
 const path    = require('path')
 const fs      = require('fs')
 const express = require('express')
@@ -42,7 +42,7 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -58,7 +58,7 @@ function syncProductImageGallery(productId, gallery) {
   const normalized = normalizeImageGallery(gallery)
   db.prepare('DELETE FROM product_images WHERE product_id = ?').run(productId)
   if (!normalized.length) {
-    db.prepare("UPDATE products SET image_path = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+    db.prepare("UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
     return []
   }
   const insert = db.prepare(`
@@ -68,7 +68,7 @@ function syncProductImageGallery(productId, gallery) {
   normalized.forEach((imagePath, index) => {
     insert.run(productId, imagePath, index)
   })
-  db.prepare("UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?").run(normalized[0], productId)
+  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
   return normalized
 }
 
@@ -159,7 +159,7 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
 
 function markParentProductAsGroup(parentId) {
   if (!parentId) return
-  db.prepare("UPDATE products SET is_group = 1, updated_at = datetime('now') WHERE id = ?").run(parentId)
+  db.prepare("UPDATE products SET is_group = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(parentId)
 }
 
 function normalizeImportLookup(value) {
@@ -182,24 +182,6 @@ const IMPORT_DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'discount_enabled',
-  'discount_type',
-  'discount_percent',
-  'discount_amount_usd',
-  'discount_amount_khr',
-  'discount_label',
-  'discount_badge_color',
-  'discount_starts_at',
-  'discount_ends_at',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
-  'low_stock_threshold',
 ]
 const IMPORT_MONEY_FIELDS = new Set([
   'selling_price_usd',
@@ -297,6 +279,23 @@ function appendProductSearchFilters(query = {}) {
   const where = ['p.is_active = 1']
   const params = {}
   const joins = []
+  const rawIds = String(query.ids || query.productIds || query.product_ids || '').trim()
+  if (rawIds) {
+    const ids = Array.from(new Set(
+      rawIds
+        .split(',')
+        .map((value) => Number.parseInt(String(value || '').trim(), 10))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    )).slice(0, 100)
+    if (ids.length) {
+      const idKeys = ids.map((id, index) => {
+        const key = `productId${index}`
+        params[key] = id
+        return `@${key}`
+      })
+      where.push(`p.id IN (${idKeys.join(',')})`)
+    }
+  }
   const branchId = Number.parseInt(query.branchId || query.branch_id || '', 10)
   if (Number.isFinite(branchId) && branchId > 0) {
     params.branchId = branchId
@@ -329,6 +328,9 @@ function appendProductSearchFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || 'all').toLowerCase()
   if (groupState === 'parent') where.push('COALESCE(p.is_group, 0) = 1')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+    where.push('(COALESCE(p.is_group, 0) = 1 OR COALESCE(p.parent_id, 0) > 0)')
+  }
   if (groupState === 'standalone') where.push('COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0')
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockState = String(query.stockState || query.stock_state || 'all').toLowerCase()
@@ -417,9 +419,9 @@ router.get('/search', authToken, (req, res) => {
     const joinSql = joins.join('\n')
     const sort = String(req.query.sort || 'name_asc').toLowerCase()
     const orderSql = sort === 'created_desc'
-      ? 'datetime(p.created_at) DESC, p.id DESC'
+      ? 'p.created_at DESC, p.id DESC'
       : sort === 'created_asc'
-        ? 'datetime(p.created_at) ASC, p.id ASC'
+        ? 'p.created_at ASC, p.id ASC'
         : sort === 'stock_desc'
           ? `${stockExpr} DESC, p.name COLLATE NOCASE ASC, p.id ASC`
           : 'p.name COLLATE NOCASE ASC, p.id ASC'
@@ -482,11 +484,11 @@ router.get('/', authToken, (req, res) => {
   const products = db.prepare(`
     SELECT 
       p.*,
-      COALESCE(json_group_array(json_object(
+      COALESCE(json_agg(json_build_object(
         'branch_id', b.id,
         'branch_name', b.name,
         'quantity', COALESCE(bs.quantity, 0)
-      )) FILTER (WHERE b.id IS NOT NULL), '[]') AS branch_stock_json
+      )) FILTER (WHERE b.id IS NOT NULL), '[]'::json)::text AS branch_stock_json
     FROM products p
     LEFT JOIN branches b ON b.is_active = 1
     LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
@@ -708,7 +710,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           purchase_price_usd=?, purchase_price_khr=?,
           cost_price_usd=?, cost_price_khr=?,
           stock_quantity=?, low_stock_threshold=?, out_of_stock_threshold=?,
-          image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=datetime('now')
+          image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
         String(merged.name || '').trim(),
@@ -920,7 +922,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
     db.transaction(() => {
       for (const { id, path: imgPath } of resolved) {
-        db.prepare("UPDATE products SET image_path=?, updated_at=datetime('now') WHERE id=?")
+        db.prepare("UPDATE products SET image_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
           .run(imgPath, id)
         syncProductImageGallery(id, [imgPath])
         images_matched++
@@ -947,12 +949,18 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all()
       .map((row) => [normalizeLookup(row.name), row])
   )
-  const settingsSupportsUpdatedAt = db.prepare('PRAGMA table_info(settings)').all()
-    .some((column) => String(column?.name || '').toLowerCase() === 'updated_at')
+  const settingsSupportsUpdatedAt = db.prepare(`
+    SELECT 1 AS exists
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ?
+      AND column_name = ?
+    LIMIT 1
+  `).get('settings', 'updated_at')?.exists === 1
   const upsertSetting = settingsSupportsUpdatedAt
     ? db.prepare(`
-      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `)
     : db.prepare(`
       INSERT INTO settings (key, value) VALUES (?, ?)
@@ -1398,7 +1406,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                   purchase_price_usd=?, purchase_price_khr=?,
                   cost_price_usd=?, cost_price_khr=?,
                   low_stock_threshold=?, is_group=?, parent_id=?,
-                  updated_at=datetime('now')
+                  updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
               `).run(
                 resolvedCategory,
@@ -1451,7 +1459,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 purchase_price_usd=?, purchase_price_khr=?,
                 cost_price_usd=?, cost_price_khr=?,
                 low_stock_threshold=?, is_group=?, parent_id=?,
-                updated_at=datetime('now') WHERE id=?
+                updated_at=CURRENT_TIMESTAMP WHERE id=?
             `).run(
               resolvedCategory,
               resolvedUnit,

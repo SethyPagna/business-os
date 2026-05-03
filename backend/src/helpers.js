@@ -1,6 +1,6 @@
 'use strict'
 /**
- * helpers.js — Shared utility functions for route handlers.
+ * helpers.js â€” Shared utility functions for route handlers.
  *
  * Keeping these here (rather than inlining in routes) means:
  *  - One audit() signature change propagates everywhere.
@@ -11,7 +11,7 @@
 const { db } = require('./database')
 const { getRequestMeta } = require('./requestContext')
 
-// ── Server-side operation log ─────────────────────────────────────────────────
+// â”€â”€ Server-side operation log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const serverLog = []
 const MAX_LOG   = 500
 
@@ -25,7 +25,7 @@ function logOp(channel, ms, ok = true) {
 
 function getServerLog() { return serverLog }
 
-// ── HTTP response helpers ─────────────────────────────────────────────────────
+// â”€â”€ HTTP response helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /** Send a successful JSON response, merging `data` into `{ success: true }`. */
 function ok(res, data = {}) {
   return res.json({ success: true, ...data })
@@ -36,7 +36,7 @@ function err(res, msg, status = 400) {
   return res.status(status).json({ success: false, error: msg })
 }
 
-// ── Audit log writer ──────────────────────────────────────────────────────────
+// â”€â”€ Audit log writer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * Write a row to audit_logs.
  * @param {number|null} userId
@@ -96,7 +96,7 @@ function audit(userId, userName, action, entity, entityId, details, opts = {}) {
   }
 }
 
-// ── WebSocket broadcast ───────────────────────────────────────────────────────
+// â”€â”€ WebSocket broadcast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // wss_clients is shared across middleware and routes via this module.
 const wss_clients = new Set()
 
@@ -120,7 +120,7 @@ function broadcast(channel, data = {}) {
   } catch (_) {}
 }
 
-// ── Data helpers ──────────────────────────────────────────────────────────────
+// â”€â”€ Data helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /** Safely parse JSON; return `fallback` on any error. */
 function tryParse(str, fallback) {
   try { return JSON.parse(str) } catch { return fallback }
@@ -131,11 +131,11 @@ function today() {
   return new Date().toISOString().split('T')[0]
 }
 
-// ── CSV bulk import ───────────────────────────────────────────────────────────
+// â”€â”€ CSV bulk import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * Generic CSV import runner.
  * @param {string}   csvText      Full CSV string (header row required)
- * @param {string[]} _expectedCols Reserved for documentation only — not used at runtime
+ * @param {string[]} _expectedCols Reserved for documentation only â€” not used at runtime
  * @param {Function} insertFn     Called once per data row with a `{header: value}` object
  * @returns {{ imported: number, errors: string[] }}
  */
@@ -218,7 +218,7 @@ function importRows(table, rows = [], cols) {
   })
 }
 
-// ── Data Integrity & Validation ──────────────────────────────────────────────
+// â”€â”€ Data Integrity & Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * Verify and repair stock quantities based on inventory movements.
  * Rebuilds product.stock_quantity and branch_stock from movement history.
@@ -259,7 +259,7 @@ function verifyAndRepairStockQuantities() {
         const branchTotal = Math.max(0, Number(prod.branch_total || 0))
         const actual = Number(prod.stock_quantity || 0)
         if (Math.abs(actual - branchTotal) > 0.01) {
-          db.prepare("UPDATE products SET stock_quantity = ?, updated_at = datetime('now') WHERE id = ?")
+          db.prepare("UPDATE products SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
             .run(branchTotal, prod.id)
           repairs++
           errors.push(`Product ${prod.id}: stock corrected from ${actual} to ${branchTotal}`)

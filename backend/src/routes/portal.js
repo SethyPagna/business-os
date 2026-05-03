@@ -363,7 +363,7 @@ function getPortalProductSignals(config) {
     SELECT id
     FROM products
     WHERE is_active = 1
-    ORDER BY datetime(COALESCE(created_at, updated_at)) DESC, id DESC
+    ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
   `).all().forEach((row, index) => {
     const productId = Number(row.id || 0)
     if (!productId) return
@@ -461,18 +461,11 @@ function getPortalProducts(config = buildPortalConfig()) {
       p.low_stock_threshold,
       p.out_of_stock_threshold,
       p.image_path,
-      p.created_at,
-      COALESCE(json_group_array(json_object(
-        'branch_id', b.id,
-        'branch_name', b.name,
-        'quantity', COALESCE(bs.quantity, 0)
-      )) FILTER (WHERE b.id IS NOT NULL), '[]') AS branch_stock_json
+      p.created_at
     FROM products p
-    LEFT JOIN branches b ON b.is_active = 1
-    LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
     WHERE p.is_active = 1
-    GROUP BY p.id
     ORDER BY p.name COLLATE NOCASE ASC
+    LIMIT 500
   `).all()
 
   const ids = products.map((product) => product.id)
@@ -489,6 +482,29 @@ function getPortalProducts(config = buildPortalConfig()) {
     if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
     imageMap.get(row.product_id).push(row.image_path)
   })
+  const branchRows = ids.length
+    ? db.prepare(`
+      SELECT
+        bs.product_id,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        COALESCE(bs.quantity, 0) AS quantity
+      FROM branch_stock bs
+      JOIN branches b ON b.id = bs.branch_id
+      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
+        AND b.is_active = 1
+      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
+    `).all(...ids)
+    : []
+  const branchStockMap = new Map()
+  branchRows.forEach((row) => {
+    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
+    branchStockMap.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
+  })
 
   return products.map((product) => {
     const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
@@ -498,13 +514,12 @@ function getPortalProducts(config = buildPortalConfig()) {
       ...product,
       image_path: gallery[0] || null,
       image_gallery: gallery,
-      branch_stock: tryParse(product.branch_stock_json, []),
+      branch_stock: branchStockMap.get(product.id) || [],
       top_seller_rank: signals.topSellerRank.get(product.id) || 0,
       top_product_rank: signals.topProductRank.get(product.id) || 0,
       new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
       portal_recommended: signals.recommendedRank.has(product.id),
       recommended_rank: signals.recommendedRank.get(product.id) || 0,
-      branch_stock_json: undefined,
     }
   })
 }
@@ -674,17 +689,7 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       p.out_of_stock_threshold,
       p.image_path,
       p.created_at,
-      ${stockExpr} AS selected_branch_quantity,
-      (
-        SELECT COALESCE(json_group_array(json_object(
-          'branch_id', b.id,
-          'branch_name', b.name,
-          'quantity', COALESCE(bs.quantity, 0)
-        )), '[]')
-        FROM branches b
-        LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
-        WHERE b.is_active = 1
-      ) AS branch_stock_json
+      ${stockExpr} AS selected_branch_quantity
     FROM products p
     ${joinSql}
     ${whereSql}
@@ -701,10 +706,33 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       ORDER BY sort_order ASC, id ASC
     `).all(...ids)
     : []
+  const branchRows = ids.length
+    ? db.prepare(`
+      SELECT
+        bs.product_id,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        COALESCE(bs.quantity, 0) AS quantity
+      FROM branch_stock bs
+      JOIN branches b ON b.id = bs.branch_id
+      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
+        AND b.is_active = 1
+      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
+    `).all(...ids)
+    : []
   const imageMap = new Map()
   imageRows.forEach((row) => {
     if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
     imageMap.get(row.product_id).push(row.image_path)
+  })
+  const branchStockMap = new Map()
+  branchRows.forEach((row) => {
+    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
+    branchStockMap.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
   })
 
   const items = products.map((product) => {
@@ -715,13 +743,12 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       ...product,
       image_path: gallery[0] || null,
       image_gallery: gallery,
-      branch_stock: tryParse(product.branch_stock_json, []),
+      branch_stock: branchStockMap.get(product.id) || [],
       top_seller_rank: signals.topSellerRank.get(product.id) || 0,
       top_product_rank: signals.topProductRank.get(product.id) || 0,
       new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
       portal_recommended: signals.recommendedRank.has(product.id),
       recommended_rank: signals.recommendedRank.get(product.id) || 0,
-      branch_stock_json: undefined,
     }
   })
   const filters = getPortalCatalogSearchMetadata(query, config)
@@ -1015,7 +1042,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       COALESCE(s.membership_discount_usd, 0) AS membership_discount_usd,
       COALESCE(s.membership_discount_khr, 0) AS membership_discount_khr,
       COALESCE(s.membership_points_redeemed, 0) AS membership_points_redeemed,
-      GROUP_CONCAT(si.product_name || ' x' || si.quantity, ', ') AS items_summary
+      STRING_AGG(si.product_name || ' x' || si.quantity, ', ' ORDER BY si.id) FILTER (WHERE si.id IS NOT NULL) AS items_summary
     FROM sales s
     LEFT JOIN sale_items si ON si.sale_id = s.id
     WHERE
@@ -1044,7 +1071,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       r.status,
       r.total_refund_usd,
       r.total_refund_khr,
-      GROUP_CONCAT(ri.product_name || ' x' || ri.quantity, ', ') AS items_summary
+      STRING_AGG(ri.product_name || ' x' || ri.quantity, ', ' ORDER BY ri.id) FILTER (WHERE ri.id IS NOT NULL) AS items_summary
     FROM returns r
     LEFT JOIN return_items ri ON ri.return_id = r.id
     WHERE
@@ -1225,7 +1252,7 @@ router.patch('/submissions/:id/review', authToken, requirePermission('settings')
       review_note = ?,
       reviewed_by_id = ?,
       reviewed_by_name = ?,
-      reviewed_at = datetime('now')
+      reviewed_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     status,

@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
-import { cacheClearAll } from '../../api/http'
-import { refreshAppData } from '../../utils/appRefresh'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -15,21 +13,6 @@ import {
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 
-const BACKUP_SECTION_CONFIG = [
-  { key: 'products', labelKey: 'products', label: 'Products' },
-  { key: 'sales', labelKey: 'sales', label: 'Sales' },
-  { key: 'returns', labelKey: 'returns', label: 'Returns' },
-  { key: 'customers', labelKey: 'customers', label: 'Customers' },
-  { key: 'suppliers', labelKey: 'suppliers', label: 'Suppliers' },
-  { key: 'delivery_contacts', labelKey: 'delivery', label: 'Delivery' },
-  { key: 'users', labelKey: 'users', label: 'Users' },
-  { key: 'roles', labelKey: 'roles', label: 'Roles' },
-  { key: 'settings', labelKey: 'settings', label: 'Settings' },
-  { key: 'customer_share_submissions', labelKey: 'portal_submissions', label: 'Portal submissions' },
-  { key: 'audit_logs', labelKey: 'audit_log', label: 'Audit log' },
-  { key: 'file_assets', labelKey: 'library', label: 'Files library' },
-]
-
 const QUICK_BACKUP_SECTIONS = [
   'Products + inventory',
   'Sales + returns',
@@ -40,39 +23,48 @@ const QUICK_BACKUP_SECTIONS = [
 const BACKUP_LOCAL_COPY = {
   km: {
     backup: 'បម្រុងទុក',
-    export_backup_desc: 'នាំចេញបម្រុងទុកពេញលេញ ឬទាញយក JSON ចាស់នៅពេលចាំបាច់។',
+    export_backup_desc: 'បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញ ដែលមានទិន្នន័យ Postgres, R2 ឬ object storage offline, ការកំណត់, អ្នកប្រើ, ឯកសារ portal និង metadata សម្រាប់ស្ដារ។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
-    folder_backup_placeholder: 'ជ្រើសថតមេ សម្រាប់ចម្លង backup',
+    folder_backup_placeholder: 'ថតម៉ាស៊ីនមេជាជម្រើសសម្រាប់ backup ពេញលេញ',
     browse_folder: 'ជ្រើសថត',
-    browse: 'ថតនៅម៉ាស៊ីនមេ',
+    browse: 'រុករក',
     hide_advanced_browser: 'លាក់',
     export_backup_btn: 'នាំចេញ',
-    download_json_backup: 'JSON',
     exporting: 'កំពុងនាំចេញ...',
-    import_backup_title: 'ស្តារបម្រុងទុក',
-    import_backup_desc: 'ស្តារបម្រុងទុកជាថតទាំងមូល ឬជ្រើសឯកសារ JSON ចាស់បើចាំបាច់។',
-    folder_restore_placeholder: 'ជ្រើសថត backup ឬថត business-os-data',
-    restore_backup_btn: 'ស្តារ',
-    legacy_json_backup: 'JSON ចាស់',
-    import_backup_btn: 'នាំចូល JSON',
-    importing_backup: 'កំពុងនាំចូល...',
-    folder_restore_note: 'ការស្តារជាថតនឹងជំនួសទិន្នន័យបច្ចុប្បន្នដោយមាតិកា backup ដែលបានជ្រើស។',
+    import_backup_title: 'ស្ដារបម្រុងទុក',
+    import_backup_desc: 'ស្ដារថតបម្រុងទុក Business OS ពេញលេញពីម៉ាស៊ីនមេ។',
+    folder_restore_placeholder: 'ជ្រើសផ្លូវថត backup ពេញលេញ',
+    restore_backup_btn: 'ស្ដារ',
+    importing_backup: 'កំពុងស្ដារ...',
+    folder_restore_note: 'ការស្ដារទទួលយកតែកញ្ចប់ backup Business OS ចុងក្រោយ ឬ Google Drive datasync version។',
     rows: 'ជួរ',
     uploads: 'ឯកសារផ្ទុកឡើង',
     custom_tables: 'តារាងផ្ទាល់ខ្លួន',
     exported: 'បាននាំចេញ',
     clear: 'សម្អាត',
     choose_folder_first: 'សូមជ្រើសថតជាមុន',
-    server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ បើអ្នកភ្ជាប់ពីចម្ងាយ សូមជ្រើស ឬបិទភ្ជាប់ path ដែលមាននៅលើម៉ាស៊ីនមេនោះ។',
-    server_restore_note: 'ការស្តារប្រើថតពីម៉ាស៊ីនមេ Business OS។ Browser ពីចម្ងាយមិនអាចរុករកថាសក្នុងម៉ាស៊ីនរបស់ខ្លួនចូល runtime ម៉ាស៊ីនមេបានទេ។',
-    host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ប្រើ Browse folders ឬវាយ path របស់ម៉ាស៊ីនមេដោយដៃ នៅពេលភ្ជាប់ពីចម្ងាយ។',
-    restore: 'ស្តារ',
+    server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ សូមវាយ path ដែលមាននៅលើម៉ាស៊ីនមេ មិនមែនឧបករណ៍ browser ពីចម្ងាយទេ។',
+    server_restore_note: 'Restore ប្រើថត backup ចុងក្រោយពីម៉ាស៊ីនមេ Business OS។ សូមវាយ path ម៉ាស៊ីនមេ ឬស្ដារពី Google Drive datasync version។',
+    host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ពេលភ្ជាប់ពីចម្ងាយ សូមវាយ ឬបិទភ្ជាប់ path ម៉ាស៊ីនមេដោយដៃ។',
+    restore: 'ស្ដារ',
     export: 'នាំចេញ',
-    refresh: 'ស្រស់ថ្មី',
+    refresh: 'ផ្ទុកឡើងវិញ',
     save: 'រក្សាទុក',
+    integration_doctor_title: 'ពិនិត្យការភ្ជាប់ប្រព័ន្ធ',
+    integration_doctor_desc: 'ពិនិត្យ Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs និង DuckDB/Parquet ដោយមិនបង្ហាញ secret។',
+    integration_doctor_complete: 'ពិនិត្យប្រព័ន្ធរួចរាល់',
+    integration_doctor_failed: 'ពិនិត្យប្រព័ន្ធបរាជ័យ',
+    run_deep_doctor: 'ពិនិត្យ storage',
+    secrets_redacted: 'បង្ហាញតែមាន/ខ្វះប៉ុណ្ណោះ; តម្លៃត្រូវបានលាក់។',
+    oauth_setup_checklist: 'បញ្ជីពិនិត្យ OAuth',
+    authorized_redirect_uris: 'Authorized redirect URIs',
+    authorized_js_origins: 'Authorized JavaScript origins',
+    object_storage_write_test: 'តេស្តសរសេរ/អាន/លុប object storage',
+    passed: 'បានជោគជ័យ',
+    failed: 'បរាជ័យ',
+    checking: 'កំពុងពិនិត្យ...',
   },
 }
-
 function PathActionButton({ children, ...props }) {
   return (
     <button
@@ -103,15 +95,24 @@ function JobProgressCard({ job, copy, onClear }) {
   const status = String(job.status || '').toLowerCase()
   const failed = status === 'failed' || status === 'cancelled'
   const completed = status === 'completed'
+  const result = job.result || {}
   return (
     <div className={`mt-4 rounded-2xl border p-4 text-sm ${failed ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200' : completed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100'}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="font-semibold">{job.message || copy('job_running', 'Working...')}</div>
           <div className="mt-1 text-xs opacity-80">
-            {job.type || 'system job'} · {job.phase || job.status || 'queued'}
+            {job.type || 'system job'} Â· {job.phase || job.status || 'queued'}
           </div>
           {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
+          {result.packageId || result.localPath || result.objectPrefix ? (
+            <div className="mt-2 rounded-xl border border-current/20 bg-white/50 p-3 text-xs dark:bg-slate-950/30">
+              {result.packageId ? <div><span className="font-semibold">{copy('backup_version', 'Version')}:</span> {result.packageId}</div> : null}
+              {result.objectPrefix ? <div className="break-all"><span className="font-semibold">{copy('object_prefix', 'Object prefix')}:</span> {result.objectPrefix}</div> : null}
+              {result.localPath ? <div className="break-all"><span className="font-semibold">{copy('local_copy', 'Local copy')}:</span> {result.localPath}</div> : null}
+              {result.message ? <div className="mt-1">{result.message}</div> : null}
+            </div>
+          ) : null}
         </div>
         {completed || failed ? (
           <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onClear}>
@@ -122,6 +123,122 @@ function JobProgressCard({ job, copy, onClear }) {
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-slate-950/50">
         <div className={`h-full rounded-full ${failed ? 'bg-red-500' : completed ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
       </div>
+    </div>
+  )
+}
+
+function DoctorStatusPill({ label, check }) {
+  const ok = check?.ok === true
+  const attention = check?.status === 'needs_attention' || check?.ok === false
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-xs ${ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200' : attention ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300'}`}>
+      <div className="flex items-center gap-2 font-semibold">
+        <CheckCircle2 className={`h-3.5 w-3.5 ${ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`} />
+        <span>{label}</span>
+      </div>
+      {check?.message ? <div className="mt-1 break-words opacity-80">{check.message}</div> : null}
+    </div>
+  )
+}
+
+function IntegrationDoctorCard({ copy, notify, active }) {
+  const [doctor, setDoctor] = useState(null)
+  const [busy, setBusy] = useState('')
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const runDoctor = useCallback(async (deep = false) => {
+    if (busy) return
+    setBusy(deep ? 'deep' : 'quick')
+    try {
+      await yieldToBrowser()
+      const result = await window.api.getIntegrationDoctor?.({ deep })
+      if (!mountedRef.current) return
+      setDoctor(result?.item || null)
+      if (deep) notify(copy('integration_doctor_complete', 'Integration doctor complete'), 'success')
+    } catch (error) {
+      if (mountedRef.current) notify(`${copy('integration_doctor_failed', 'Integration doctor failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      if (mountedRef.current) setBusy('')
+    }
+  }, [busy, copy, notify])
+
+  useEffect(() => {
+    if (!active || doctor) return
+    const timer = window.setTimeout(() => runDoctor(false), 250)
+    return () => window.clearTimeout(timer)
+  }, [active, doctor, runDoctor])
+
+  const checks = doctor?.checks || {}
+  const runtime = doctor?.runtime || {}
+  const drive = checks.googleDrive || {}
+  const supabase = checks.supabaseAuth || {}
+  const storage = checks.objectStorage || {}
+  const oauth = doctor?.expectedOauth || {}
+
+  return (
+    <div className="card p-5 sm:p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            {copy('integration_doctor_title', 'Integration doctor')}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {copy('integration_doctor_desc', 'Checks Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs, and DuckDB/Parquet without showing secrets.')}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <PathActionButton onClick={() => runDoctor(false)} disabled={!!busy}>
+            <RefreshCw className={`h-4 w-4 ${busy === 'quick' ? 'animate-spin' : ''}`} />
+            {busy === 'quick' ? copy('checking', 'Checking...') : copy('refresh', 'Refresh')}
+          </PathActionButton>
+          <PrimaryActionButton onClick={() => runDoctor(true)} disabled={!!busy}>
+            <RefreshCw className={`h-4 w-4 ${busy === 'deep' ? 'animate-spin' : ''}`} />
+            {busy === 'deep' ? copy('checking', 'Checking...') : copy('run_deep_doctor', 'Run storage test')}
+          </PrimaryActionButton>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <DoctorStatusPill label="Postgres" check={checks.database} />
+        <DoctorStatusPill label={`${String(runtime.objectStorageDriver || 'R2').toUpperCase()} storage`} check={storage} />
+        <DoctorStatusPill label="Redis jobs" check={checks.queue} />
+        <DoctorStatusPill label="DuckDB / Parquet" check={checks.analytics} />
+        <DoctorStatusPill label="Google Drive" check={drive} />
+        <DoctorStatusPill label="Supabase Auth" check={supabase} />
+        <DoctorStatusPill label="Backup packages" check={checks.backup} />
+        <DoctorStatusPill label="Secrets" check={{ ok: true, message: copy('secrets_redacted', 'Present/missing only; values are redacted.') }} />
+      </div>
+
+      {doctor ? (
+        <details className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300">
+          <summary className="cursor-pointer font-semibold text-gray-800 dark:text-gray-100">
+            {copy('oauth_setup_checklist', 'OAuth setup checklist')}
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div>
+              <div className="font-semibold text-gray-900 dark:text-white">{oauth.googleLoginClient?.name || 'business-os'}</div>
+              <div className="mt-1">{copy('authorized_redirect_uris', 'Authorized redirect URIs')}: {(oauth.googleLoginClient?.authorizedRedirectUris || []).join(', ') || '--'}</div>
+              <div className="mt-1">{copy('authorized_js_origins', 'Authorized JavaScript origins')}: {(oauth.googleLoginClient?.authorizedJavaScriptOrigins || []).join(', ') || '--'}</div>
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900 dark:text-white">{oauth.googleDriveClient?.name || 'Business-os Drive'}</div>
+              <div className="mt-1">{copy('authorized_redirect_uris', 'Authorized redirect URIs')}: {(oauth.googleDriveClient?.authorizedRedirectUris || []).join(', ') || '--'}</div>
+              <div className="mt-1">{copy('authorized_js_origins', 'Authorized JavaScript origins')}: {(oauth.googleDriveClient?.authorizedJavaScriptOrigins || []).join(', ') || '--'}</div>
+            </div>
+          </div>
+          {storage.writeReadDelete ? (
+            <div className="mt-3 rounded-lg border border-current/10 bg-white/60 p-2 dark:bg-zinc-900/50">
+              {copy('object_storage_write_test', 'Object storage write/read/delete test')}: {storage.writeReadDelete.ok ? copy('passed', 'Passed') : storage.writeReadDelete.error || copy('failed', 'Failed')}
+            </div>
+          ) : null}
+        </details>
+      ) : null}
     </div>
   )
 }
@@ -191,102 +308,70 @@ function formatBytes(value) {
   return `${(amount / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-function countBackupRows(backup, tableName) {
-  if (backup?.summary?.tables && Number.isFinite(Number(backup.summary.tables[tableName]))) {
-    return Number(backup.summary.tables[tableName]) || 0
-  }
-  if (backup?.tables && typeof backup.tables === 'object') {
-    return Array.isArray(backup.tables[tableName]) ? backup.tables[tableName].length : 0
-  }
-  return Array.isArray(backup?.[tableName]) ? backup[tableName].length : 0
-}
-
-function buildBackupPreview(backup, fileName, copy = (_key, fallback) => fallback) {
-  const counts = Object.fromEntries(
-    BACKUP_SECTION_CONFIG.map((section) => [section.key, countBackupRows(backup, section.key)]),
-  )
-  const uploadsCount = Number(backup?.summary?.totals?.uploadCount)
-    || (Array.isArray(backup?.uploads) ? backup.uploads.length : 0)
-  const totalRows = Number(backup?.summary?.totals?.tableRowCount)
-    || Object.values(counts).reduce((sum, value) => sum + value, 0)
-  const customTableCount = Number(backup?.summary?.totals?.customTableCount)
-    || (backup?.custom_table_rows && typeof backup.custom_table_rows === 'object' ? Object.keys(backup.custom_table_rows).length : 0)
-  const customTableRowCount = Number(backup?.summary?.totals?.customTableRowCount)
-    || Object.values(backup?.custom_table_rows || {}).reduce((sum, value) => sum + (Array.isArray(value) ? value.length : 0), 0)
-  const populatedSections = BACKUP_SECTION_CONFIG
-    .filter((section) => counts[section.key] > 0)
-    .map((section) => ({
-      ...section,
-      count: counts[section.key],
-      label: copy(section.labelKey, section.label),
-    }))
-
-  const warnings = []
-  if (!countBackupRows(backup, 'file_assets') && uploadsCount > 0) {
-    warnings.push('This backup has uploads but no file-library metadata. Restore still works, but Files entries may need to be rebuilt.')
-  }
-  if (Number(backup?.version || 0) > 0 && Number(backup.version) < 10) {
-    warnings.push('This is an older backup format. Business data should restore, but newer file coverage is more limited.')
-  }
-
-  return {
-    fileName,
-    version: Number(backup?.version || 0) || null,
-    exportedAt: backup?.exported_at || '',
-    uploadsCount,
-    totalRows,
-    customTableCount,
-    customTableRowCount,
-    populatedSections,
-    warnings,
-    counts,
-  }
-}
-
 function yieldToBrowser() {
   if (typeof window === 'undefined') return Promise.resolve()
+  if (typeof window.requestAnimationFrame === 'function') {
+    return new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)))
+  }
   return new Promise((resolve) => window.setTimeout(resolve, 0))
 }
 
-async function parseBackupJsonFile(file) {
-  const text = await file.text()
-  await yieldToBrowser()
-  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') {
-    return JSON.parse(text)
+function startJobWatcher(jobId, {
+  reason = 'System job',
+  pollMs = 1200,
+  onUpdate = null,
+  onComplete = null,
+  onError = null,
+} = {}) {
+  if (typeof window === 'undefined' || !jobId) return () => {}
+  let stopped = false
+  let inFlight = false
+  let timer = null
+
+  const stop = () => {
+    stopped = true
+    if (timer) window.clearInterval(timer)
+    timer = null
   }
-  const workerSource = `
-    self.onmessage = function(event) {
-      try {
-        var parsed = JSON.parse(event.data || '{}');
-        self.postMessage({ ok: true, parsed: parsed });
-      } catch (error) {
-        self.postMessage({ ok: false, message: error && error.message ? error.message : 'Invalid JSON' });
+
+  const tick = async () => {
+    if (stopped || inFlight) return
+    inFlight = true
+    try {
+      const result = await window.api.getSystemJob?.(jobId)
+      const job = result?.item || result
+      if (stopped) return
+      if (job && typeof onUpdate === 'function') onUpdate(job)
+      const status = String(job?.status || '').toLowerCase()
+      if (status === 'completed') {
+        stop()
+        if (typeof onComplete === 'function') onComplete(job)
+      } else if (status === 'failed' || status === 'cancelled') {
+        stop()
+        const message = job?.error || job?.message || `${reason} failed`
+        if (typeof onError === 'function') onError(new Error(message), job)
       }
-    };
-  `
-  const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }))
-  try {
-    return await new Promise((resolve, reject) => {
-      const worker = new Worker(workerUrl)
-      const timer = window.setTimeout(() => {
-        worker.terminate()
-        reject(new Error('Backup preview took too long to parse.'))
-      }, 45000)
-      worker.onmessage = (event) => {
-        window.clearTimeout(timer)
-        worker.terminate()
-        if (event.data?.ok) resolve(event.data.parsed)
-        else reject(new Error(event.data?.message || 'Invalid backup JSON'))
-      }
-      worker.onerror = (error) => {
-        window.clearTimeout(timer)
-        worker.terminate()
-        reject(new Error(error?.message || 'Invalid backup JSON'))
-      }
-      worker.postMessage(text)
-    })
-  } finally {
-    URL.revokeObjectURL(workerUrl)
+    } catch (error) {
+      stop()
+      if (typeof onError === 'function') onError(error)
+    } finally {
+      inFlight = false
+    }
+  }
+
+  timer = window.setInterval(tick, Math.max(750, Number(pollMs || 1200)))
+  window.setTimeout(tick, 0)
+  return stop
+}
+
+function normalizeFolderBrowserResult(result, maxDirs = 200) {
+  if (!result || typeof result !== 'object') return result
+  const dirs = Array.isArray(result.dirs) ? result.dirs : []
+  if (dirs.length <= maxDirs) return { ...result, dirs }
+  return {
+    ...result,
+    dirs: dirs.slice(0, maxDirs),
+    truncatedCount: dirs.length - maxDirs,
   }
 }
 
@@ -373,6 +458,11 @@ function FolderBrowserPanel({
         {!browseState.error && browseState.dirs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-200 px-4 py-4 text-sm text-gray-400 dark:border-zinc-700">
             {copy('no_subfolders_found', 'No subfolders found')}
+          </div>
+        ) : null}
+        {Number(browseState.truncatedCount || 0) > 0 ? (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            {copy('folder_browser_limited', 'Showing the first 200 folders so the page stays responsive. Type a more specific path to narrow the list.')} ({browseState.truncatedCount} {copy('hidden', 'hidden')})
           </div>
         ) : null}
 
@@ -478,8 +568,9 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
     if (busy) return
     try {
       setBusy(true)
+      await yieldToBrowser()
       const result = await window.api.browseDir(dir || inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
-      if (result) setBrowseState(result)
+      if (result) setBrowseState(normalizeFolderBrowserResult(result))
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -496,11 +587,11 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
     if (!hostUiAvailable) {
       notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
       setShowAdvancedBrowser(true)
-      await openDriveBrowser()
       return
     }
     try {
       setBusy(true)
+      await yieldToBrowser()
       const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
       if (selectedFolder && typeof selectedFolder === 'string') {
         setInputPath(selectedFolder)
@@ -522,9 +613,7 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
   const openInlinePicker = async () => {
     const next = !showAdvancedBrowser
     setShowAdvancedBrowser(next)
-    if (next && !browseState) {
-      await openDriveBrowser()
-    }
+    if (next && !browseState && String(inputPath || '').trim()) await openBrowser(inputPath)
   }
 
   const openInExplorer = async () => {
@@ -628,7 +717,7 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
           <div className="grid gap-3 lg:grid-cols-2">
             <SectionChip
               label={copy('organization_runtime_alignment', 'Organization runtime alignment')}
-              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('legacy_shared_runtime', 'Legacy shared runtime')}
+              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('docker_runtime_pending', 'Docker runtime pending')}
               tone={orgStorageStatus.fullyAligned ? 'blue' : 'amber'}
             />
             <SectionChip
@@ -726,13 +815,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const [status, setStatus] = useState(null)
   const [form, setForm] = useState({
     clientId: '',
-    clientSecret: '',
     folderName: 'Business OS Sync',
     deleteMissing: true,
     enabled: true,
     syncIntervalSeconds: 120,
   })
   const [activeJob, setActiveJob] = useState(null)
+  const [pendingAuthUrl, setPendingAuthUrl] = useState('')
   const loadRequestRef = useRef(0)
   const retryTimerRef = useRef(null)
   const failureCountRef = useRef(0)
@@ -741,6 +830,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const unavailableUntilRef = useRef(0)
   const loadRef = useRef(null)
   const isMountedRef = useRef(true)
+  const jobStopRef = useRef(null)
 
   const scheduleRetry = useCallback((delayMs) => {
     window.clearTimeout(retryTimerRef.current)
@@ -774,7 +864,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       setStatus((current) => item || current || null)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
-        clientSecret: current.clientSecret || '',
         folderName: item?.folderName || current.folderName || 'Business OS Sync',
         deleteMissing: !!item?.deleteMissing,
         enabled: item?.enabled !== false,
@@ -818,6 +907,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   useEffect(() => () => {
     isMountedRef.current = false
     window.clearTimeout(retryTimerRef.current)
+    jobStopRef.current?.()
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
@@ -827,7 +917,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       if (event?.data?.type !== 'business-os-drive-sync') return
       if (event.data.status === 'connected') {
         notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
-        setForm((current) => ({ ...current, clientSecret: '' }))
         load({ force: true })
         return
       }
@@ -839,28 +928,37 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
-  const trackQueuedJob = useCallback(async (queued, reason) => {
+  const trackQueuedJob = useCallback((queued, reason, handlers = {}) => {
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
+    jobStopRef.current?.()
     setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: reason })
-    const result = await window.api.pollSystemJob?.(jobId, {
+    jobStopRef.current = startJobWatcher(jobId, {
       reason,
       pollMs: 1000,
       onUpdate: (job) => {
         if (isMountedRef.current && job) setActiveJob(job)
       },
+      onComplete: (job) => {
+        if (!isMountedRef.current) return
+        setActiveJob(job || null)
+        load({ force: true })
+        handlers.onComplete?.(job)
+      },
+      onError: (error, job) => {
+        if (!isMountedRef.current) return
+        if (job) setActiveJob(job)
+        handlers.onError?.(error, job)
+      },
     })
-    if (isMountedRef.current) {
-      setActiveJob(result?.job || null)
-      await load({ force: true })
-    }
-    return result
+    return queued
   }, [load])
 
   const savePreferences = async () => {
     if (busy) return
     setBusy('save')
     try {
+      await yieldToBrowser()
       const result = await window.api.saveGoogleDriveSyncPreferences?.({
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
@@ -874,7 +972,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         label: copy('drive_sync_preferences_saved', 'Google Drive sync preferences saved'),
       })
       notify(copy('saved', 'Saved'), 'success')
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
     } catch (error) {
       notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -888,16 +986,24 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       notify(copy('drive_sync_client_required', 'Google OAuth client ID is required'), 'error')
       return
     }
-    if (!String(form.clientSecret || '').trim() && !status?.hasClientSecret) {
-      notify(copy('drive_sync_secret_required', 'Google OAuth client secret is required'), 'error')
+    if (status && !status.hasClientSecret) {
+      notify(copy('drive_sync_secret_env_required', 'Google Drive client secret is missing from the server env. Add it to the ignored Docker env file, then restart Business OS.'), 'error')
       return
     }
 
+    setPendingAuthUrl('')
+    const popup = window.open('', 'business-os-drive-sync', 'width=640,height=760')
+    if (popup) {
+      try {
+        popup.document.title = 'Business OS Google Drive'
+        popup.document.body.innerHTML = '<div style="font-family:system-ui;padding:24px"><h2>Business OS</h2><p>Preparing Google Drive connection...</p></div>'
+      } catch (_) {}
+    }
     setBusy('connect')
     try {
+      await yieldToBrowser()
       const result = await window.api.startGoogleDriveSyncOauth?.({
         clientId: form.clientId,
-        clientSecret: form.clientSecret,
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
         enabled: form.enabled,
@@ -912,10 +1018,15 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         entity: 'google_drive_sync',
         label: copy('drive_sync_connect_started', 'Google Drive connection started'),
       })
-      const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
-      if (!popup) window.location.assign(authUrl)
+      if (popup && !popup.closed) {
+        popup.location.href = authUrl
+      } else {
+        setPendingAuthUrl(authUrl)
+        notify(copy('drive_sync_popup_blocked', 'Google Drive setup is ready. Use the open setup button to continue.'), 'info')
+      }
       notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
     } catch (error) {
+      if (popup && !popup.closed) popup.close()
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
       setBusy('')
@@ -926,12 +1037,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (busy) return
     setBusy('sync')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueGoogleDriveSyncNow?.()
       notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
       window.setTimeout(() => {
-        trackQueuedJob(queued, 'Google Drive sync')
-          .then((result) => {
-            const summary = result?.summary || {}
+        trackQueuedJob(queued, 'Google Drive sync', {
+          onComplete: (job) => {
+            const summary = job?.result?.summary || {}
             actionHistory?.pushAction?.({
               scope: 'backup',
               entity: 'google_drive_sync',
@@ -942,10 +1054,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
               `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
               'success',
             )
-          })
-          .catch((error) => {
+          },
+          onError: (error) => {
             notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-          })
+          },
+        })
       }, 0)
     } catch (error) {
       notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -959,9 +1072,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
     setBusy('disconnect')
     try {
+      await yieldToBrowser()
       await window.api.disconnectGoogleDriveSync?.()
-      setForm((current) => ({ ...current, clientSecret: '' }))
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -980,13 +1093,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
     setBusy('forget')
     try {
+      await yieldToBrowser()
       await window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true })
       setForm((current) => ({
         ...current,
         clientId: '',
-        clientSecret: '',
       }))
-      await load({ force: true })
+      window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -1031,19 +1144,17 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             placeholder="xxxxxxxx.apps.googleusercontent.com"
           />
         </label>
-        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
-          <span>{copy('drive_sync_client_secret', 'OAuth client secret')}</span>
-          <input
-            id="drive-sync-client-secret"
-            name="drive_sync_client_secret"
-            type="password"
-            className="input"
-            autoComplete="off"
-            value={form.clientSecret}
-            onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
-            placeholder={status?.hasClientSecret ? copy('drive_sync_secret_saved', 'Leave blank to keep the saved secret') : 'GOCSPX-...'}
-          />
-        </label>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-gray-300">
+          <div className="font-medium text-gray-800 dark:text-gray-100">{copy('drive_sync_client_secret', 'OAuth client secret')}</div>
+          <div className={`mt-1 text-xs font-semibold ${status?.hasClientSecret ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            {status?.hasClientSecret
+              ? copy('drive_sync_secret_env_configured', 'Stored in server env')
+              : copy('drive_sync_secret_env_missing', 'Missing from server env')}
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_secret_env_note', 'The secret is never typed or shown in the browser. Update the ignored Docker env file when it changes.')}
+          </p>
+        </div>
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <span>{copy('drive_sync_folder_name', 'Drive folder name')}</span>
           <input
@@ -1103,10 +1214,38 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         </div>
       </div>
 
-      {status?.connectedEmail || status?.connectedName ? (
+      {status?.connected && (status?.connectedEmail || status?.connectedName) ? (
         <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
           {copy('drive_sync_connected_as', 'Connected as')} {status.connectedName || status.connectedEmail}
           {status.connectedName && status.connectedEmail ? ` (${status.connectedEmail})` : ''}
+        </div>
+      ) : null}
+
+      {!status?.connected && (status?.connectedEmail || status?.connectedName) ? (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-100">
+          {copy('drive_sync_previous_account', 'Previous Google account')}: {status.connectedName || status.connectedEmail}
+          {status.connectedName && status.connectedEmail ? ` (${status.connectedEmail})` : ''}. {copy('drive_sync_reconnect_required', 'Reconnect to resume Drive sync.')}
+        </div>
+      ) : null}
+
+      {pendingAuthUrl ? (
+        <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100">
+          <div className="font-medium">{copy('drive_sync_setup_ready', 'Google Drive setup is ready.')}</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a
+              href={pendingAuthUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs"
+              onClick={() => setPendingAuthUrl('')}
+            >
+              <Link2 className="h-4 w-4" />
+              {copy('drive_sync_open_setup', 'Open Google Drive setup')}
+            </a>
+            <button type="button" className="btn-secondary px-3 py-2 text-xs" onClick={() => setPendingAuthUrl('')}>
+              {copy('dismiss', 'Dismiss')}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -1197,10 +1336,10 @@ function ScaleMigrationSection({ t, notify, active = true }) {
   const driveSafety = automation.driveSync || {}
   const driveSafetyOk = driveSafety.status === 'ok'
   const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
-  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'sqlite').toLowerCase()
+  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'postgres').toLowerCase()
   const activeStorageLabel = activeDatabaseDriver === 'postgres'
-    ? copy('postgres_minio_storage', 'Postgres / MinIO')
-    : copy('sqlite_local_files', 'SQLite / Local files')
+    ? copy('postgres_object_storage', 'Postgres / object storage')
+    : copy('unsupported_storage_mode', 'Unsupported storage mode')
 
   return (
     <div className="card p-5 sm:p-6">
@@ -1296,117 +1435,20 @@ export default function Backup() {
   const isActive = useIsPageActive('backup')
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' })
   const [loading, setLoading] = useState('')
-  const [pendingImport, setPendingImport] = useState(null)
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
-  const [hostUiAvailable, setHostUiAvailable] = useState(false)
-  const [exportBrowser, setExportBrowser] = useState(null)
-  const [restoreBrowser, setRestoreBrowser] = useState(null)
-  const [browserBusy, setBrowserBusy] = useState('')
   const [activeJob, setActiveJob] = useState(null)
-  const hostConfigRequestRef = useRef(0)
-  const exportBrowseRequestRef = useRef(0)
-  const restoreBrowseRequestRef = useRef(0)
+  const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const aliveRef = useRef(true)
+  const jobStopRef = useRef(null)
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
-      invalidateTrackedRequest(hostConfigRequestRef)
-      invalidateTrackedRequest(exportBrowseRequestRef)
-      invalidateTrackedRequest(restoreBrowseRequestRef)
+      jobStopRef.current?.()
     }
   }, [])
-
-  useEffect(() => {
-    if (!isActive) {
-      invalidateTrackedRequest(hostConfigRequestRef)
-      return
-    }
-    async function loadHostConfig() {
-      const requestId = beginTrackedRequest(hostConfigRequestRef)
-      try {
-        const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
-        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(!!config?.hostUiAvailable)
-      } catch {
-        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(false)
-      }
-    }
-    loadHostConfig()
-  }, [isActive])
-
-  const browseServerFolders = async (target, dir) => {
-    const requestRef = target === 'export' ? exportBrowseRequestRef : restoreBrowseRequestRef
-    const requestId = beginTrackedRequest(requestRef)
-    try {
-      setBrowserBusy(target)
-      const result = await withLoaderTimeout(
-        () => window.api.browseDir(dir || '__ROOTS__'),
-        target === 'export' ? 'Backup export folders' : 'Backup restore folders',
-      )
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      if (target === 'export') setExportBrowser(result)
-      if (target === 'restore') setRestoreBrowser(result)
-    } catch (error) {
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      if (aliveRef.current && isTrackedRequestCurrent(requestRef, requestId)) {
-        setBrowserBusy((current) => (current === target ? '' : current))
-      }
-    }
-  }
-
-  const toggleServerBrowser = async (target, currentPath = '') => {
-    const isExport = target === 'export'
-    const requestRef = isExport ? exportBrowseRequestRef : restoreBrowseRequestRef
-    const visible = isExport ? !!exportBrowser : !!restoreBrowser
-    if (visible) {
-      invalidateTrackedRequest(requestRef)
-      setBrowserBusy((current) => (current === target ? '' : current))
-      if (isExport) setExportBrowser(null)
-      else setRestoreBrowser(null)
-      return
-    }
-    await browseServerFolders(target, currentPath || '__ROOTS__')
-  }
-
-  const handleExport = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    setLoading('export')
-    try {
-      const result = await window.api.exportBackup()
-      if (result?.success) {
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('export_backup_success', 'Backup exported successfully'),
-        })
-        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-      }
-      else notify(copy('export_failed', 'Export failed'), 'error')
-    } catch (error) {
-      notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
-    }
-    setLoading('')
-  }
-
-  const pickFolder = async (setter, hintPath = '') => {
-    if (!hostUiAvailable) {
-      notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
-      return
-    }
-    try {
-      const folder = await window.api.openFolderDialog?.(hintPath)
-      if (folder && typeof folder === 'string') setter(folder)
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    }
-  }
 
   const handleFolderExport = async () => {
     if (loading) return
@@ -1414,54 +1456,44 @@ export default function Backup() {
     const exportDestination = String(folderExportPath || '').trim()
     setLoading('folder-export')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueBackupFolderExport?.(exportDestination)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
       if (jobId) {
         notify(copy('backup_export_queued', 'Backup export queued'), 'info')
+        jobStopRef.current?.()
         window.setTimeout(() => {
-          window.api.pollSystemJob?.(jobId, {
+          jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup export',
             pollMs: 1000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
-          })
-            .then((result) => {
+            onComplete: (job) => {
               if (!aliveRef.current) return
-              if (result?.job) setActiveJob(result.job)
+              if (job) setActiveJob(job)
+              const result = job?.result || {}
               actionHistory.pushAction({
                 scope: 'backup',
                 entity: 'backup',
                 label: copy('export_backup_success', 'Backup exported successfully'),
-                redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
+                redo_payload: { packageId: result.packageId || '', objectPrefix: result.objectPrefix || '', destinationDir: exportDestination || 'default' },
               })
               notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-              if (result.backupRoot) setFolderImportPath(result.backupRoot)
-            })
-            .catch((error) => {
+              if (job?.result?.localPath) setFolderImportPath(job.result.localPath)
+              setLoading('')
+            },
+            onError: (error, job) => {
+              if (job && aliveRef.current) setActiveJob(job)
               if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
-            })
-            .finally(() => {
               if (aliveRef.current) setLoading('')
-            })
+            },
+          })
         }, 0)
         return
       }
-      const result = await window.api.exportBackupFolder(exportDestination)
-      if (result?.success) {
-        if (result?.job) setActiveJob(result.job)
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('export_backup_success', 'Backup exported successfully'),
-          redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
-        })
-        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-        if (result.backupRoot) setFolderImportPath(result.backupRoot)
-      } else {
-        notify(result?.error || copy('export_failed', 'Export failed'), 'error')
-      }
+      throw new Error(copy('backup_job_not_queued', 'Backup job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
       notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
     } finally {
@@ -1473,114 +1505,52 @@ export default function Backup() {
     if (loading) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
-    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+    if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
 
     setLoading('folder-import')
     try {
+      await yieldToBrowser()
       const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
       const jobId = queued?.job_id || queued?.item?.id
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
       if (jobId) {
         notify(copy('backup_restore_queued', 'Backup restore queued'), 'info')
+        jobStopRef.current?.()
         window.setTimeout(() => {
-          window.api.pollSystemJob?.(jobId, {
+          jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup restore',
             pollMs: 1000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
-          })
-            .then((result) => {
+            onComplete: (job) => {
               if (!aliveRef.current) return
-              if (result?.job) setActiveJob(result.job)
-              cacheClearAll()
+              if (job) setActiveJob(job)
+              const result = job?.result || {}
               actionHistory.pushAction({
                 scope: 'backup',
                 entity: 'backup',
-                label: copy('import_backup_success', 'Backup imported successfully'),
-                undo_payload: { sourceDir: folderImportPath },
+                label: copy('backup_restore_validated', 'Backup restore validated'),
+                undo_payload: { sourceDir: folderImportPath, manifest: result.manifest || null },
               })
-              notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-              setTimeout(() => refreshAppData(), 200)
-            })
-            .catch((error) => {
+              notify(copy('backup_restore_validated', 'Backup restore validated'), 'success')
+              setLoading('')
+            },
+            onError: (error, job) => {
+              if (job && aliveRef.current) setActiveJob(job)
               if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
-            })
-            .finally(() => {
               if (aliveRef.current) setLoading('')
-            })
+            },
+          })
         }, 0)
         return
       }
-      const result = await window.api.importBackupFolder(folderImportPath)
-      if (result?.success) {
-        if (result?.job) setActiveJob(result.job)
-        cacheClearAll()
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('import_backup_success', 'Backup imported successfully'),
-          undo_payload: { sourceDir: folderImportPath },
-        })
-        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-        setTimeout(() => refreshAppData(), 200)
-      } else {
-        notify(result?.error || copy('import_failed', 'Import failed'), 'error')
-      }
+      throw new Error(copy('backup_restore_job_not_queued', 'Restore job could not be queued. Run Doctor or restart Business OS.'))
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
     } finally {
       if (aliveRef.current) setLoading((current) => (current === 'folder-import' ? '' : current))
     }
-  }
-
-  const handleChooseImportFile = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    try {
-      const file = await window.api.pickBackupFile?.()
-      if (!file) return
-      setLoading('preview-import')
-      const parsed = await parseBackupJsonFile(file)
-      setPendingImport({
-        data: parsed,
-        preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json', copy),
-      })
-      notify(copy('backup_file_ready', 'Backup file loaded. Review it, then confirm restore.'), 'success')
-    } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setLoading((current) => (current === 'preview-import' ? '' : current))
-    }
-  }
-
-  const handleConfirmImport = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    if (!pendingImport?.data) return
-    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
-
-    setLoading('import')
-    try {
-      const result = await window.api.importBackupData(pendingImport.data)
-      if (result?.success) {
-        cacheClearAll()
-        setPendingImport(null)
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('import_backup_success', 'Backup imported successfully'),
-          undo_payload: { fileName: pendingImport.preview?.fileName || '' },
-        })
-        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-        setTimeout(() => refreshAppData(), 200)
-      } else {
-        notify(`${copy('import_failed', 'Import failed')}: ${result?.error || copy('unknown_error', 'Unknown error')}`, 'error')
-      }
-    } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
-    }
-    setLoading('')
   }
 
   return (
@@ -1590,17 +1560,18 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
+          subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+        <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
+            {copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (
@@ -1616,10 +1587,6 @@ export default function Backup() {
                 <ArchiveRestore className="h-4 w-4" />
                 {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleExport} disabled={!!loading}>
-                <Download className="h-4 w-4" />
-                {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Legacy JSON')}
-              </PathActionButton>
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {folderExportPath
@@ -1641,41 +1608,10 @@ export default function Backup() {
                     onChange={(event) => setFolderExportPath(event.target.value)}
                     placeholder={copy('folder_backup_placeholder', 'Optional server folder for full backups')}
                   />
-                  {hostUiAvailable ? (
-                    <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
-                      <FolderOutput className="h-4 w-4" />
-                      {copy('browse_folder', 'Choose Folder')}
-                    </PathActionButton>
-                  ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export'}>
-                    <FolderOutput className="h-4 w-4" />
-                    {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-                  </PathActionButton>
                 </div>
                 <p className="text-xs text-blue-700 dark:text-blue-300">
-                  {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. When you are connected remotely through Cloudflare, choose or paste a path that exists on the server machine, not your phone or browser device.')}
+                  {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. Type a path that exists on the server machine, not your phone or browser device.')}
                 </p>
-
-                {exportBrowser ? (
-                  <FolderBrowserPanel
-                    browseState={exportBrowser}
-                    busy={browserBusy === 'export'}
-                    copy={copy}
-                    onBrowse={(dir) => browseServerFolders('export', dir)}
-                    onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
-                    onClose={() => {
-                      invalidateTrackedRequest(exportBrowseRequestRef)
-                      setBrowserBusy((current) => (current === 'export' ? '' : current))
-                      setExportBrowser(null)
-                    }}
-                    onSelect={(fullPath) => {
-                      invalidateTrackedRequest(exportBrowseRequestRef)
-                      setFolderExportPath(fullPath)
-                      setExportBrowser(null)
-                    }}
-                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-                  />
-                ) : null}
               </div>
             </details>
           </div>
@@ -1696,16 +1632,6 @@ export default function Backup() {
                 <Upload className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleChooseImportFile} disabled={!!loading}>
-                <FileArchive className="h-4 w-4" />
-                {loading === 'preview-import' ? copy('loading', 'Loading...') : copy('legacy_json_backup', 'Legacy JSON')}
-              </PathActionButton>
-              {pendingImport ? (
-                <PathActionButton onClick={handleConfirmImport} disabled={!!loading}>
-                  <Upload className="h-4 w-4" />
-                  {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Restore JSON backup')}
-                </PathActionButton>
-              ) : null}
             </div>
 
             <p className="text-xs text-amber-700 dark:text-amber-300">
@@ -1726,97 +1652,36 @@ export default function Backup() {
                     onChange={(event) => setFolderImportPath(event.target.value)}
                     placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
                   />
-                  {hostUiAvailable ? (
-                    <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
-                      <FolderInput className="h-4 w-4" />
-                      {copy('browse_folder', 'Choose Folder')}
-                    </PathActionButton>
-                  ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore'}>
-                    <FolderInput className="h-4 w-4" />
-                    {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-                  </PathActionButton>
                 </div>
                 <p className="text-xs text-amber-700 dark:text-amber-300">
-                  {copy('server_restore_note', 'Restore uses a folder from the Business OS server/container. Remote browsers cannot browse their own local disk into the server runtime.')}
+                  {copy('server_restore_note', 'Restore uses a final backup folder from the Business OS server/container. Type a server path or restore from a Google Drive datasync version.')}
                 </p>
-
-                {restoreBrowser ? (
-                  <FolderBrowserPanel
-                    browseState={restoreBrowser}
-                    busy={browserBusy === 'restore'}
-                    copy={copy}
-                    onBrowse={(dir) => browseServerFolders('restore', dir)}
-                    onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
-                    onClose={() => {
-                      invalidateTrackedRequest(restoreBrowseRequestRef)
-                      setBrowserBusy((current) => (current === 'restore' ? '' : current))
-                      setRestoreBrowser(null)
-                    }}
-                    onSelect={(fullPath) => {
-                      invalidateTrackedRequest(restoreBrowseRequestRef)
-                      setFolderImportPath(fullPath)
-                      setRestoreBrowser(null)
-                    }}
-                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-                  />
-                ) : null}
               </div>
             </details>
           </div>
 
-          {pendingImport ? (
-            <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{pendingImport.preview.fileName}</div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {copy('exported', 'Exported')} {formatDateTime(pendingImport.preview.exportedAt)}{pendingImport.preview.version ? ` | v${pendingImport.preview.version}` : ''}
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
-                  <SectionChip label={copy('rows', 'Rows')} value={pendingImport.preview.totalRows} />
-                  <SectionChip label={copy('uploads', 'Uploads')} value={pendingImport.preview.uploadsCount} />
-                  <SectionChip label={copy('custom_tables', 'Custom tables')} value={`${pendingImport.preview.customTableCount} (${pendingImport.preview.customTableRowCount} ${copy('rows', 'rows')})`} />
-                </div>
-              </div>
-
-              {pendingImport.preview.populatedSections.length ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {pendingImport.preview.populatedSections.map((section) => (
-                    <span key={section.key} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-200">
-                      {section.label}: {section.count}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-
-              {pendingImport.preview.warnings.length ? (
-                <div className="mt-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-                  {pendingImport.preview.warnings.map((warning, index) => (
-                    <div key={`${warning}-${index}`}>{warning}</div>
-                  ))}
-                </div>
-              ) : null}
-
-              <p className="mt-4 text-xs text-amber-600 dark:text-amber-400">
-                {copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}
-              </p>
-              <div className="mt-3">
-                <PathActionButton onClick={() => setPendingImport(null)} disabled={loading === 'import'}>
-                  {copy('clear', 'Clear')}
-                </PathActionButton>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
-        {isActive ? <ScaleMigrationSection t={t} notify={notify} active={isActive} /> : null}
-        {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
-        <ResetData actionHistory={actionHistory} />
-        <FactoryReset actionHistory={actionHistory} />
+        <details
+          className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          onToggle={(event) => setAdvancedMaintenanceOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {copy('advanced_maintenance', 'Advanced maintenance and reset tools')}
+          </summary>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {copy('advanced_maintenance_desc', 'These tools are loaded only when opened so backup, restore, and Drive actions stay responsive.')}
+          </p>
+          {advancedMaintenanceOpen ? (
+            <div className="mt-4 space-y-4">
+              <ResetData actionHistory={actionHistory} />
+              <FactoryReset actionHistory={actionHistory} />
+            </div>
+          ) : null}
+        </details>
       </div>
     </div>
   )
 }
+

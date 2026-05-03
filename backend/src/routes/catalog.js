@@ -38,11 +38,11 @@ router.get('/products', (_req, res) => {
       p.low_stock_threshold,
       p.out_of_stock_threshold,
       p.image_path,
-      COALESCE(json_group_array(json_object(
+      COALESCE(json_agg(json_build_object(
         'branch_id', b.id,
         'branch_name', b.name,
         'quantity', COALESCE(bs.quantity, 0)
-      )) FILTER (WHERE b.id IS NOT NULL), '[]') AS branch_stock_json
+      )) FILTER (WHERE b.id IS NOT NULL), '[]'::json)::text AS branch_stock_json
     FROM products p
     LEFT JOIN branches b ON b.is_active = 1
     LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id

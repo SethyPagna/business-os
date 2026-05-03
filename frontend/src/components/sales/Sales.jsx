@@ -41,6 +41,8 @@ export default function Sales() {
   const [sales, setSales] = useState([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [userFilter, setUserFilter] = useState('all')
+  const [userOptions, setUserOptions] = useState([])
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(() => new Set())
@@ -64,6 +66,17 @@ export default function Sales() {
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify })
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const isAdmin = useMemo(() => {
+    const roleCode = String(user?.role_code || '').toLowerCase()
+    const username = String(user?.username || '').toLowerCase()
+    let permissions = user?.permissions || {}
+    try {
+      permissions = typeof permissions === 'string' ? JSON.parse(permissions || '{}') : permissions
+    } catch {
+      permissions = {}
+    }
+    return username === 'admin' || roleCode === 'admin' || !!permissions.all
+  }, [user])
 
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
@@ -89,7 +102,7 @@ export default function Sales() {
         }
       }
       try {
-        const result = await withLoaderTimeout(() => window.api.getSales(), 'Sales')
+        const result = await withLoaderTimeout(() => window.api.getSales(isAdmin && userFilter !== 'all' ? { userId: userFilter } : undefined), 'Sales')
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         if (Array.isArray(result)) {
           setSales(result)
@@ -116,7 +129,7 @@ export default function Sales() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [translateOr])
+  }, [isAdmin, translateOr, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -134,6 +147,12 @@ export default function Sales() {
     if (!isActive || !syncChannel?.channel) return
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
   }, [isActive, loadSales, syncChannel?.channel, syncChannel?.ts])
+  useEffect(() => {
+    if (!isActive || !isAdmin) return
+    window.api.getUsers()
+      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => setUserOptions([]))
+  }, [isActive, isAdmin])
   useEffect(() => () => {
     aliveRef.current = false
     window.clearTimeout(loadWatchdogRef.current)
@@ -519,6 +538,22 @@ export default function Sales() {
         }),
       ],
     },
+    isAdmin ? {
+      id: 'user',
+      label: t('user') || 'User',
+      options: [
+        { id: 'all', label: t('all_users') || 'All users', active: userFilter === 'all', onClick: () => setUserFilter('all') },
+        ...userOptions.map((option) => {
+          const id = String(option?.id || '')
+          return {
+            id: `user-${id}`,
+            label: option?.name || option?.username || `User ${id}`,
+            active: userFilter === id,
+            onClick: () => setUserFilter(userFilter === id ? 'all' : id),
+          }
+        }).filter((option) => option.id !== 'user-'),
+      ],
+    } : null,
     {
       id: 'grouping',
       label: translateOr('group_by', 'Group by', 'ដាក់ជាក្រុមតាម'),
@@ -535,11 +570,11 @@ export default function Sales() {
         { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
       ],
     },
-  ]), [availableYears, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, yearFilter])
+  ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
 
   const activeSalesFilterCount = useMemo(
-    () => [statusFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time', salesSortDirection !== 'desc'].filter(Boolean).length,
-    [monthFilter, salesGroupMode, salesSortDirection, statusFilter, yearFilter],
+    () => [statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time', salesSortDirection !== 'desc'].filter(Boolean).length,
+    [monthFilter, salesGroupMode, salesSortDirection, statusFilter, userFilter, yearFilter],
   )
   const showSalesActionGroups = salesGroupMode === 'time+action'
 
@@ -593,6 +628,7 @@ export default function Sales() {
           sections={salesFilterSections}
           onClear={() => {
             setStatusFilter('all')
+            setUserFilter('all')
             setYearFilter('all')
             setMonthFilter('all')
             setSalesGroupMode('time')

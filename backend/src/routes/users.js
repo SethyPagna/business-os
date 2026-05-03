@@ -698,7 +698,7 @@ router.put('/users/:id', authToken, async (req, res) => {
     }
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?, updated_at = datetime('now')
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, permissions = ?, role_id = ?, is_active = ?, deleted_at = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       normalizedUsername,
@@ -727,7 +727,7 @@ router.put('/users/:id', authToken, async (req, res) => {
         return err(res, synced.error || 'Failed to sync authentication account')
       }
       if (synced.success && synced.userId && !updatedUser.supabase_user_id) {
-        db.prepare('UPDATE users SET supabase_user_id = ?, updated_at = datetime(\'now\') WHERE id = ?').run(synced.userId, updatedUser.id)
+        db.prepare('UPDATE users SET supabase_user_id = ?, updated_at = \'now\' WHERE id = ?').run(synced.userId, updatedUser.id)
         updatedUser.supabase_user_id = synced.userId
       }
       if (updatedUser.supabase_user_id) {
@@ -846,7 +846,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
 
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id), updated_at = datetime('now')
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id), updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       normalizedUsername,
@@ -932,7 +932,7 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = datetime(\'now\') WHERE id = ?')
+  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = \'now\' WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id, { mode: allowAdminOverride ? 'admin' : 'self_service' })
@@ -967,7 +967,7 @@ router.post('/users/:id/reset-password', authToken, async (req, res) => {
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = datetime(\'now\') WHERE id = ?')
+  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = \'now\' WHERE id = ?')
     .run(hash, supabaseUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id)
@@ -1019,7 +1019,7 @@ router.put('/roles/:id', authToken, (req, res) => {
     const normalizedName = String(name || '').trim()
     if (!normalizedName) return err(res, 'Name required')
     if (normalizedName.toLowerCase() === 'admin') return err(res, 'Admin role is reserved', 400)
-    db.prepare('UPDATE roles SET name = ?, permissions = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    db.prepare('UPDATE roles SET name = ?, permissions = ?, updated_at = \'now\' WHERE id = ?')
       .run(normalizedName, JSON.stringify(permissions || {}), req.params.id)
     audit(actor.id, actor.name, 'update', 'role', req.params.id, { name: normalizedName })
     broadcast('roles')

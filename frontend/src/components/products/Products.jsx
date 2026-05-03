@@ -121,7 +121,7 @@ export default function Products() {
   const [branches,     setBranches]     = useState([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
-  const [groupFilter, setGroupFilter] = useState('all') // all | parent | variant | standalone
+  const [groupFilter, setGroupFilter] = useState('all') // all | grouped | parent | variant | standalone
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
   const [productSortDirection, setProductSortDirection] = useState('desc')
@@ -260,6 +260,17 @@ export default function Products() {
     return wrappedPromise
   }, [branchFilter, brandFilter, catFilter, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr])
 
+  const fetchProductsByIds = useCallback(async (ids = []) => {
+    const uniqueIds = Array.from(new Set(
+      (ids || [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    )).slice(0, 100)
+    if (!uniqueIds.length) return []
+    const payload = await window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images' })
+    return Array.isArray(payload?.items) ? payload.items : []
+  }, [])
+
   useEffect(() => {
     if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
@@ -372,9 +383,8 @@ export default function Products() {
         if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
       }
 
-      await load(true)
-      const latestProducts = await window.api.getProducts()
       const targetProductId = selected ? Number(selected.id || 0) : createdProductId
+      const latestProducts = await fetchProductsByIds([targetProductId])
       const latestProductSnapshot = selected
         ? cloneHistorySnapshot(
             (latestProducts || []).find((product) => Number(product?.id || 0) === targetProductId)
@@ -1031,7 +1041,7 @@ export default function Products() {
 
   const restoreProductSnapshots = useCallback(async (snapshots = [], reason = 'Restore products') => {
     if (!snapshots.length) return
-    const latestProducts = await window.api.getProducts()
+    const latestProducts = await fetchProductsByIds(snapshots.map((snapshot) => snapshot?.id))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     for (const snapshot of snapshots) {
       const productId = Number(snapshot?.id || 0)
@@ -1041,7 +1051,7 @@ export default function Products() {
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     }
     await load(true)
-  }, [buildProductWritePayload, load, restoreProductBranchStock])
+  }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
 
   const restoreDeletedProducts = useCallback(async (snapshots = [], reason = 'Restore deleted products') => {
     if (!snapshots.length) return []
@@ -1077,7 +1087,7 @@ export default function Products() {
       if (snapshotId > 0) restoredIdMap.set(snapshotId, restoredId)
       restored.push({ snapshot, restoredId })
     }
-    const latestProducts = await window.api.getProducts()
+    const latestProducts = await fetchProductsByIds(restored.map((entry) => entry.restoredId))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     for (const entry of restored) {
       const currentProduct = latestMap.get(entry.restoredId)
@@ -1085,7 +1095,7 @@ export default function Products() {
     }
     await load(true)
     return restored
-  }, [branches, buildProductWritePayload, load, restoreProductBranchStock])
+  }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
 
   const pushCreatedProductHistory = useCallback((snapshot, label = '') => {
     const baseSnapshot = cloneHistorySnapshot(snapshot)
@@ -1109,9 +1119,8 @@ export default function Products() {
 
   const handleVariantDone = useCallback(async (payload = {}) => {
     setVariantModal(null)
-    await load(true)
-    const latestProducts = await window.api.getProducts()
     const createdProductId = Number(payload?.createdProductId || 0)
+    const latestProducts = await fetchProductsByIds([createdProductId])
     const latestVariantSnapshot = cloneHistorySnapshot(
       (latestProducts || []).find((product) => Number(product?.id || 0) === createdProductId)
       || { ...(payload?.snapshot || {}), id: createdProductId },
@@ -1119,11 +1128,12 @@ export default function Products() {
     if (latestVariantSnapshot?.id) {
       pushCreatedProductHistory(latestVariantSnapshot, `Add variant ${latestVariantSnapshot.name || ''}`.trim())
     }
-  }, [load, pushCreatedProductHistory])
+    await load(true)
+  }, [fetchProductsByIds, load, pushCreatedProductHistory])
 
   const clearProductStockByIds = useCallback(async (productIds = [], reason = 'Set products out of stock') => {
     if (!productIds.length) return
-    const latestProducts = await window.api.getProducts()
+    const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     for (const productId of productIds) {
       const currentProduct = latestMap.get(Number(productId))
@@ -1145,7 +1155,7 @@ export default function Products() {
       }
     }
     await load(true)
-  }, [load, user.id, user.name])
+  }, [fetchProductsByIds, load, user.id, user.name])
 
   const addStockToProducts = useCallback(async (productIds = [], quantity, branchId, reason = 'Bulk add stock') => {
     const amount = Number(quantity || 0)
@@ -1154,7 +1164,7 @@ export default function Products() {
       return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
     }
 
-    const latestProducts = await window.api.getProducts()
+    const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     const failedIds = []
     const updatedIds = []
@@ -1191,7 +1201,7 @@ export default function Products() {
       failedIds,
       updatedIds,
     }
-  }, [load, user.id, user.name])
+  }, [fetchProductsByIds, load, user.id, user.name])
 
   const moveProductsToBranch = useCallback(async (productIds = [], branchId, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
@@ -1199,7 +1209,7 @@ export default function Products() {
       return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
     }
 
-    const latestProducts = await window.api.getProducts()
+    const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     const failedIds = []
     const updatedIds = []
@@ -1248,7 +1258,7 @@ export default function Products() {
       failedIds,
       updatedIds,
     }
-  }, [load, user.id, user.name])
+  }, [fetchProductsByIds, load, user.id, user.name])
 
   const runBulkProductUpdates = useCallback(async (updates) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -1324,6 +1334,7 @@ export default function Products() {
       label: t('product_group') || 'Product group',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+        { id: 'group-grouped', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
         { id: 'group-parent', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
         { id: 'group-variant', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1429,7 +1440,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0

@@ -1,3 +1,5 @@
+import { getPortalLanguageText } from './portalLanguagePacks.mjs'
+
 const TRANSLATABLE_CONFIG_FIELDS = [
   'aboutTitle',
   'aboutContent',
@@ -8,6 +10,14 @@ const TRANSLATABLE_CONFIG_FIELDS = [
   'membershipInfoText',
   'submissionInstructions',
 ]
+
+const DEFAULT_CONFIG_COPY_KEYS = {
+  aboutTitle: ['About us', 'aboutTitle'],
+  aiTitle: ['Beauty Assistant', 'aiTitle'],
+  aiIntro: ['Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.', 'aiIntro'],
+  aiDisclaimer: ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.', 'aiDisclaimer'],
+  faqTitle: ['Frequently asked questions', 'faqTitle'],
+}
 
 const PRODUCT_TRANSLATABLE_FIELDS = [
   'name',
@@ -79,6 +89,13 @@ function pickTranslatedText(block, field, fallback) {
   return fallback
 }
 
+function pickDefaultFirstPartyText(language, field, fallback) {
+  const [englishDefault, resourceKey] = DEFAULT_CONFIG_COPY_KEYS[field] || []
+  if (!englishDefault || normalizeLanguageKey(language) === 'en') return fallback
+  if (normalizeText(fallback) !== normalizeText(englishDefault)) return fallback
+  return getPortalLanguageText(language, resourceKey) || fallback
+}
+
 function getCollectionEntry(collection, id, index) {
   if (!collection) return {}
   if (Array.isArray(collection)) {
@@ -113,11 +130,10 @@ export function localizePortalConfig(config, language) {
   const source = isPlainObject(config) ? config : {}
   const translations = normalizePortalTranslations(source.translations)
   const langBlock = getLanguageBlock(translations, language)
-  if (!Object.keys(langBlock).length) return source
 
   const next = { ...source, translations }
   TRANSLATABLE_CONFIG_FIELDS.forEach((field) => {
-    next[field] = pickTranslatedText(langBlock, field, next[field])
+    next[field] = pickDefaultFirstPartyText(language, field, pickTranslatedText(langBlock, field, next[field]))
   })
 
   if (isPlainObject(source.linkLabels) && isPlainObject(langBlock.linkLabels)) {

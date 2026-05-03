@@ -19,6 +19,19 @@ if defined BUSINESS_OS_REPO_ROOT (
     for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+echo.
+echo [INFO] Business OS is Docker/Postgres/R2 object storage by default; MinIO is offline emergency mode.
+echo        This support launcher is forwarding to run\docker\start.bat.
+echo.
+if exist "%ROOT%\run\docker\start.bat" (
+    call "%ROOT%\run\docker\start.bat" %*
+    exit /b %ERRORLEVEL%
+)
+echo [ERROR] Missing Docker start script: %ROOT%\run\docker\start.bat
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
+exit /b 1
+
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
 set "RUN_LOG=%LOG_DIR%\start-server.log"
 set "ENV_FILE=%ROOT%\backend\.env"
@@ -47,14 +60,8 @@ set "WORKER_RUNTIME=host"
 if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
 if not defined RUNTIME_CACHE_ENABLED set "RUNTIME_CACHE_ENABLED=1"
 if not defined CACHE_REDIS_URL set "CACHE_REDIS_URL=redis://127.0.0.1:6380"
-if not defined DATABASE_DRIVER set "DATABASE_DRIVER=sqlite"
-if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=local"
-if not defined SQLITE_BUSY_TIMEOUT_MS set "SQLITE_BUSY_TIMEOUT_MS=30000"
-if not defined SQLITE_CACHE_SIZE_KB set "SQLITE_CACHE_SIZE_KB=196608"
-if not defined SQLITE_MMAP_SIZE_MB set "SQLITE_MMAP_SIZE_MB=1024"
-if not defined SQLITE_WAL_AUTOCHECKPOINT set "SQLITE_WAL_AUTOCHECKPOINT=4000"
-if not defined SQLITE_JOURNAL_SIZE_LIMIT_MB set "SQLITE_JOURNAL_SIZE_LIMIT_MB=128"
-if not defined SQLITE_SYNCHRONOUS set "SQLITE_SYNCHRONOUS=NORMAL"
+if not defined DATABASE_DRIVER set "DATABASE_DRIVER=postgres"
+if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=r2"
 if not defined IMPORT_QUEUE_CONCURRENCY set "IMPORT_QUEUE_CONCURRENCY=1"
 if not defined MEDIA_QUEUE_CONCURRENCY set "MEDIA_QUEUE_CONCURRENCY=4"
 if not defined IMPORT_ROW_BATCH_SIZE set "IMPORT_ROW_BATCH_SIZE=400"

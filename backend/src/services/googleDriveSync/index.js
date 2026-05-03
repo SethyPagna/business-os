@@ -6,10 +6,8 @@ const path = require('path')
 const crypto = require('crypto')
 const { db } = require('../../database')
 const {
-  ACTIVE_ENV_FILE,
   DATA_ROOT,
   DATA_FOLDER_NAME,
-  DB_PATH,
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
   ORGANIZATION_FOLDER_NAME,
@@ -22,6 +20,7 @@ const {
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
 } = require('./versioning')
+const { createFinalBackupPackage } = require('../backupPackages')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
@@ -209,7 +208,7 @@ function deleteDriveSyncEntriesUnder(relativePrefix) {
 
 function inferMimeType(filePath) {
   const ext = String(path.extname(filePath || '').toLowerCase())
-  if (ext === '.db') return 'application/x-sqlite3'
+  if (ext === '.sql') return 'application/sql'
   if (ext === '.json') return 'application/json'
   if (ext === '.csv') return 'text/csv'
   if (ext === '.txt' || ext === '.log') return 'text/plain'
@@ -506,13 +505,12 @@ function buildManagedSnapshotRoot(snapshotRoot) {
 
 function ensureSnapshotLayout(snapshotRoot) {
   const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
-  fs.mkdirSync(path.join(managedRoot, 'db'), { recursive: true })
   fs.mkdirSync(path.join(managedRoot, 'uploads'), { recursive: true })
+  fs.mkdirSync(path.join(managedRoot, 'backups'), { recursive: true })
 }
 
 function shouldSkipSnapshotFile(relativePath) {
-  const normalized = String(relativePath || '').replace(/\\/g, '/').toLowerCase()
-  return normalized === 'db/business.db'
+  return !String(relativePath || '').trim()
 }
 
 function createDataRootSnapshot() {
@@ -522,8 +520,6 @@ function createDataRootSnapshot() {
   ensureSnapshotLayout(snapshotRoot)
 
   try {
-    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-
     walkFiles(DATA_ROOT, (absolutePath) => {
       const relativePath = path.relative(DATA_ROOT, absolutePath)
       if (!relativePath || shouldSkipSnapshotFile(relativePath)) return
@@ -532,11 +528,11 @@ function createDataRootSnapshot() {
       fs.copyFileSync(absolutePath, targetPath)
     })
 
-    if (fs.existsSync(DB_PATH)) {
-      const snapshotDbPath = path.join(managedRoot, 'db', 'business.db')
-      fs.mkdirSync(path.dirname(snapshotDbPath), { recursive: true })
-      fs.copyFileSync(DB_PATH, snapshotDbPath)
-    }
+    fs.writeFileSync(path.join(managedRoot, 'manifest.json'), JSON.stringify({
+      format: 'business-os-drive-snapshot-v3',
+      createdAt: new Date().toISOString(),
+      note: 'Live database and object storage are backed up through Docker final backup packages. This Drive snapshot mirrors runtime backup artifacts and metadata.',
+    }, null, 2), 'utf8')
 
     return { tempDir, snapshotRoot, managedRoot }
   } catch (error) {
@@ -660,6 +656,10 @@ async function runDriveSync(reason = 'manual') {
     [SETTINGS_KEYS.lastError]: '',
   })
 
+  const backupPackage = await createFinalBackupPackage({
+    destinationDir: path.join(DATA_ROOT, 'backups'),
+    actor: { userName: 'Google Drive sync' },
+  })
   const snapshot = createDataRootSnapshot()
   try {
     let mappings = getDriveSyncEntriesMap()
@@ -792,6 +792,13 @@ async function runDriveSync(reason = 'manual') {
         startedAt: versionState.startedAt,
         rotated: versionState.rotated,
       },
+      backupPackage: {
+        packageId: backupPackage.packageId,
+        localPath: backupPackage.localPath,
+        objectPrefix: backupPackage.objectPrefix,
+        objectsCopied: backupPackage.objectsCopied,
+        objectsFailed: backupPackage.objectsFailed,
+      },
       manifest,
     }
     runtimeState.lastSummary = summary
@@ -839,6 +846,11 @@ function scheduleDriveSync(reason = 'change', delayMs = 5000) {
 
 function getDriveSyncStatus(redirectUri = '') {
   const config = getDriveSyncConfig()
+  const hasPreviousAccount = !!(config.connectedEmail || config.connectedName || config.rootFolderId)
+  const needsReconnect = !config.ready && hasPreviousAccount
+  const reconnectMessage = needsReconnect
+    ? 'Google Drive was connected before, but the saved OAuth secret or token is missing. Reconnect Google Drive to resume sync.'
+    : ''
   return {
     enabled: config.enabled,
     connected: !!config.ready,
@@ -867,12 +879,12 @@ function getDriveSyncStatus(redirectUri = '') {
       queued: !!runtimeState.timer || !!trim(runtimeState.queuedReason),
       lastRunAt: runtimeState.lastRunAt,
       lastReason: runtimeState.lastReason,
-      lastError: runtimeState.lastError || config.lastError,
+      lastError: runtimeState.lastError || config.lastError || reconnectMessage,
       lastSummary: runtimeState.lastSummary,
     },
     lastSyncedAt: config.lastSyncedAt,
-    lastError: runtimeState.lastError || config.lastError,
-    lastStatus: config.lastStatus,
+    lastError: runtimeState.lastError || config.lastError || reconnectMessage,
+    lastStatus: needsReconnect ? 'needs_reconnect' : config.lastStatus,
   }
 }
 
@@ -982,32 +994,12 @@ function disconnectDriveSync() {
   runtimeState.lastRunAt = ''
 }
 
-function updateEnvSettingLines(filePath, updates = {}) {
-  const lines = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8').split(/\r?\n/) : []
-  const nextLines = [...lines]
-  Object.entries(updates).forEach(([key, value]) => {
-    const nextLine = `${key}=${String(value ?? '').trim()}`
-    const index = nextLines.findIndex((entry) => entry.startsWith(`${key}=`))
-    if (index >= 0) nextLines[index] = nextLine
-    else nextLines.push(nextLine)
-  })
-  const normalized = nextLines.filter((line, index, all) => !(index === all.length - 1 && line === ''))
-  fs.writeFileSync(filePath, `${normalized.join('\r\n')}\r\n`, 'utf8')
-}
-
 function forgetDriveSyncCredentials() {
   disconnectDriveSync()
   writeSettingsMap({
     [SETTINGS_KEYS.clientId]: null,
     [SETTINGS_KEYS.clientSecretEncrypted]: null,
   })
-  if (trim(ACTIVE_ENV_FILE)) {
-    updateEnvSettingLines(ACTIVE_ENV_FILE, {
-      GOOGLE_DRIVE_CLIENT_ID: '',
-      GOOGLE_DRIVE_CLIENT_SECRET: '',
-      GOOGLE_DRIVE_OAUTH_REDIRECT_URI: '',
-    })
-  }
 }
 
 function schedulePeriodicDriveSync() {

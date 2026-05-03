@@ -18,15 +18,19 @@ All user-facing `.bat` files keep the window open and print the next step or rep
 
 ## Docker Release Commands
 
-These are for a private Docker release or support:
+These are for the local Docker release or support:
 
-- `run\docker\install.bat` installs/pulls the Docker release.
+- `run\docker\install.bat` installs the local Docker image bundle.
 - `run\docker\start.bat` starts Docker release services.
-- `run\docker\update.bat` backs up, pulls, migrates, checks health, and rolls back when possible.
-- `run\docker\backup.bat` backs up Docker release data. In the current runnable Docker release this means the Docker runtime data volume; Postgres/MinIO backups are used when the verified Postgres data mode is enabled.
+- `run\docker\update.bat` backs up, reloads the local image bundle, checks health, and rolls back when possible.
+- `run\docker\backup.bat` backs up Docker release data from Postgres, R2 or emergency/offline MinIO, settings, users/roles, and runtime metadata.
 - `run\docker\restore.bat` restores a selected verified backup.
-- `run\docker\doctor.bat` diagnoses Docker, ports, registry login, Cloudflare, database, workers, and storage.
+- `run\docker\doctor.bat` diagnoses Docker, ports, local image bundles, Cloudflare, database, workers, and storage.
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.
+
+## Release Verification
+
+Before merging a release branch, run the backend utility suite, frontend utility suite, production frontend build, frontend i18n/UI/performance verifiers, backend integrity verifier, Docker release doctor, and local/public health checks. The Docker release is ready only when the app container is healthy and Postgres, Redis queue/cache, R2 object storage, BullMQ, DuckDB/Parquet, and Cloudflare diagnostics report clean status.
 
 ## Support-Only / Legacy
 
@@ -36,3 +40,7 @@ These are for a private Docker release or support:
 - `run\sh\` contains shell equivalents for non-Windows support.
 
 Do not add new normal-user commands unless the root launcher cannot own the workflow.
+
+## Runtime Secrets
+
+Put real service credentials only in ignored runtime env files such as `ops\runtime\docker-release\docker-release.env`. The verification flow includes a tracked-secret hygiene check, and the Backup page Integration Doctor reports only redacted presence/status for R2, Google Drive OAuth, Supabase Auth, Cloudflare, and app secrets.

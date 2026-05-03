@@ -159,8 +159,8 @@ function Write-DockerScaleProfile {
   $values = [ordered]@{
     BUSINESS_OS_DOCKER_PROFILE = $profile
     BUSINESS_OS_APP_RUNTIME = 'docker'
-    DATABASE_DRIVER = 'sqlite'
-    OBJECT_STORAGE_DRIVER = 'local'
+    DATABASE_DRIVER = 'postgres'
+  OBJECT_STORAGE_DRIVER = 'r2'
     REDIS_QUEUE_BIND_HOST = '127.0.0.1'
     REDIS_QUEUE_PORT = '6379'
     REDIS_QUEUE_MAX_MEMORY = '1536mb'
@@ -192,7 +192,6 @@ function Write-DockerScaleProfile {
     IMPORT_WORKER_CPUS = '3.0'
     MEDIA_WORKER_MEMORY_LIMIT = '3072m'
     MEDIA_WORKER_CPUS = '3.5'
-    SQLITE_SAFE_WRITER_MODE = '1'
     IMPORT_QUEUE_CONCURRENCY = '1'
     MEDIA_QUEUE_CONCURRENCY = '2'
     IMPORT_WORKER_REPLICAS = '1'

@@ -2,7 +2,7 @@
 const express = require('express')
 const { db }  = require('../database')
 const { ok, err, audit, broadcast, logOp } = require('../helpers')
-const { authToken, requirePermission, getAuditActor } = require('../middleware')
+const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
@@ -21,7 +21,7 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -86,13 +86,16 @@ function appendInventoryProductFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || '').toLowerCase()
   if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
+  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+    where.push('((COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0) OR COALESCE(p.parent_id, 0) > 0)')
+  }
   if (groupState === 'standalone') where.push('(COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0)')
   const initial = String(query.initial || '').normalize('NFC').trim()
   if (initial && initial.toLowerCase() !== 'all') {
     const key = getInitialKey(initial)
     params.initial = key
-    if (getInitialType(key) === 'latin') where.push('upper(substr(trim(COALESCE(p.name, "")), 1, 1)) = @initial')
-    else where.push('substr(trim(COALESCE(p.name, "")), 1, 1) = @initial')
+    if (getInitialType(key) === 'latin') where.push("upper(substr(trim(COALESCE(p.name, '')), 1, 1)) = @initial")
+    else where.push("substr(trim(COALESCE(p.name, '')), 1, 1) = @initial")
   }
   return { where, joins, params, stockExpr }
 }
@@ -146,14 +149,14 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
         if (requestedBranchId) {
           const available = getBranchQty(requestedBranchId)
           if (available <= 0) throw new Error('No stock available in this branch to remove')
-          if (qty > available) throw new Error(`Cannot remove ${qty} — only ${available} available in this branch`)
+          if (qty > available) throw new Error(`Cannot remove ${qty} â€” only ${available} available in this branch`)
 
           db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
             .run(qty, productId, requestedBranchId)
           movementBranchId = requestedBranchId
         } else {
           if (totalAvailable <= 0) throw new Error('No stock available to remove')
-          if (qty > totalAvailable) throw new Error(`Cannot remove ${qty} — only ${totalAvailable} available`)
+          if (qty > totalAvailable) throw new Error(`Cannot remove ${qty} â€” only ${totalAvailable} available`)
 
           let remaining = qty
           const rowsToDeduct = branchRows
@@ -200,7 +203,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
       db.prepare(`
         UPDATE products SET
           stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-          updated_at = datetime('now')
+          updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(productId, productId)
 
@@ -305,7 +308,7 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
         } else {
           const discount = normalizeProductDiscount(destinationDraft, source)
           const rootParentId = source.parent_id || source.id
-          db.prepare('UPDATE products SET is_group = 1, updated_at = datetime(\'now\') WHERE id = ?').run(rootParentId)
+          db.prepare('UPDATE products SET is_group = 1, updated_at = \'now\' WHERE id = ?').run(rootParentId)
           const inserted = db.prepare(`
             INSERT INTO products (
               name, sku, barcode, category, brand, unit, description,
@@ -453,7 +456,11 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
         (
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+          SELECT COALESCE(
+            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+              FILTER (WHERE bs2.branch_id IS NOT NULL),
+            '[]'::json
+          )::text
           FROM branch_stock bs2
           JOIN branches b2 ON b2.id = bs2.branch_id
           WHERE bs2.product_id = p.id
@@ -514,7 +521,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   let products
 
-  // Detect whether parent_id column exists (added via migration — may be absent on older DBs)
+  // Detect whether parent_id column exists (added via migration â€” may be absent on older DBs)
   let hasParentId = true
   try { db.prepare('SELECT parent_id FROM products LIMIT 0').run() } catch (_) { hasParentId = false }
   const parentFilter = hasParentId ? 'AND (p.parent_id IS NULL OR p.parent_id = 0)' : ''
@@ -604,7 +611,11 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
         COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0)               AS cogs_usd,
         COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0)               AS cogs_khr,
         (
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+          SELECT COALESCE(
+            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+              FILTER (WHERE bs2.branch_id IS NOT NULL),
+            '[]'::json
+          )::text
           FROM branch_stock bs2
           JOIN branches b2 ON b2.id = bs2.branch_id
           WHERE bs2.product_id = p.id
@@ -680,18 +691,25 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
 // GET /api/inventory/movements
 router.get('/movements', authToken, requirePermission('inventory'), (req, res) => {
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
-  let rows
+  const userId = req.query.userId ? String(req.query.userId).trim() : ''
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '1000', 10) || 1000, 1), 1000)
+  const where = []
+  const params = []
   if (branchId) {
-    rows = db.prepare(`
-      SELECT * FROM inventory_movements WHERE branch_id = ?
-      ORDER BY created_at DESC LIMIT 1000
-    `).all(branchId)
-  } else {
-    rows = db.prepare(`
-      SELECT * FROM inventory_movements
-      ORDER BY created_at DESC LIMIT 1000
-    `).all()
+    where.push('branch_id = ?')
+    params.push(branchId)
   }
+  if (userId) {
+    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for movement user filters.', 403)
+    where.push('user_id = ?')
+    params.push(parseInt(userId, 10) || userId)
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const rows = db.prepare(`
+    SELECT * FROM inventory_movements
+    ${whereSql}
+    ORDER BY created_at DESC LIMIT ?
+  `).all(...params, limit)
   res.json(rows)
 })
 

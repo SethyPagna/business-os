@@ -57,6 +57,19 @@ assert.equal(localized.businessName, 'Leang Cosmetic')
 assert.equal(localized.businessTagline, 'Glow daily')
 assert.equal(localized.intro, 'Browse our newest products.')
 
+const defaultCopyLocalized = localizePortalConfig({
+  aboutTitle: 'About us',
+  aiTitle: 'Beauty Assistant',
+  aiIntro: 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.',
+  aiDisclaimer: 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
+  faqTitle: 'Frequently asked questions',
+  translations: {},
+}, 'zh-CN')
+
+assert.notEqual(defaultCopyLocalized.aboutTitle, 'About us')
+assert.notEqual(defaultCopyLocalized.aiTitle, 'Beauty Assistant')
+assert.notEqual(defaultCopyLocalized.faqTitle, 'Frequently asked questions')
+
 const product = localizePortalProduct({
   id: 123,
   name: 'AHA Serum',
