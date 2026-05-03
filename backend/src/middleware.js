@@ -6,6 +6,7 @@ const multer = require('multer')
 const { UPLOADS_PATH } = require('./config')
 const { authorizeProtectedRequest, isPublicApiRequest } = require('./accessControl')
 const { buildUniqueStoredName, getMediaType, sanitizeOriginalFileName } = require('./fileAssets')
+const { hasPermissionValue } = require('./permissions')
 const { getSessionUser } = require('./sessionAuth')
 const { checkRateLimit } = require('./security')
 const { validateUploadedPath, validateUploadedBuffer } = require('./uploadSecurity')
@@ -270,7 +271,7 @@ function hasPermission(user, key) {
   if (!key) return !!user
   if (isAdminControlUser(user)) return true
   const permissions = getMergedPermissions(user)
-  return !!permissions[String(key || '').trim()]
+  return hasPermissionValue(permissions, key)
 }
 
 function requirePermission(key) {

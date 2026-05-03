@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { analyzeProductImportRows, analyzeProductImportText } from '../src/components/products/productImportPlanner.mjs'
 
 let failed = 0
@@ -153,6 +154,12 @@ await runTest('large product import analysis keeps deterministic row counts', ()
   assert.equal(analysis.summary.total, 10000)
   assert.equal(analysis.rows.length, 10000)
   assert.equal(analysis.errors.length, 0)
+})
+
+await runTest('bulk import modal does not fetch the full product catalog before review', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /await\s+window\.api\.getProducts\(/)
+  assert.match(source, /Existing-product conflicts\s+[\s\S]*server import job/)
 })
 
 if (failed > 0) {

@@ -2,8 +2,13 @@
 
 const fs = require('fs')
 const path = require('path')
-const { DATABASE_URL } = require('./config')
+const bcrypt = require('bcryptjs')
+const {
+  DATABASE_URL,
+  DEFAULT_ORGANIZATION_BOOTSTRAP,
+} = require('./config')
 const { coerceRow, translateSql } = require('./db/postgresQueryCompat')
+const { DEFAULT_ROLE_PERMISSIONS } = require('./permissions')
 
 function loadPgNative() {
   try {
@@ -149,6 +154,11 @@ class PostgresCompatDatabase {
       'CREATE EXTENSION IF NOT EXISTS unaccent',
       'CREATE EXTENSION IF NOT EXISTS btree_gin',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_key_unique ON settings(key)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_code_unique ON roles(code) WHERE code IS NOT NULL',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(lower(trim(username))) WHERE deleted_at IS NULL',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_public_id_unique ON organizations(public_id)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_slug_unique ON organizations(slug)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_groups_org_slug_unique ON organization_groups(organization_id, slug)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_branch_stock_product_branch_unique ON branch_stock(product_id, branch_id)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_public_path_unique ON file_assets(public_path)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_google_drive_sync_entries_path_unique ON google_drive_sync_entries(relative_path)',
@@ -171,6 +181,89 @@ class PostgresCompatDatabase {
         console.warn(`[postgres] schema/index check skipped for "${statement.slice(0, 80)}": ${error?.message || error}`)
       }
     })
+    this.ensureDefaultSeedData()
+  }
+
+  ensureDefaultSeedData() {
+    const orgSeed = DEFAULT_ORGANIZATION_BOOTSTRAP || {}
+    const orgName = String(process.env.BUSINESS_OS_ORGANIZATION_NAME || orgSeed.name || 'Business OS').trim() || 'Business OS'
+    const orgSlug = String(process.env.BUSINESS_OS_ORGANIZATION_SLUG || orgSeed.slug || 'business-os').trim() || 'business-os'
+    const publicId = String(process.env.BUSINESS_OS_ORGANIZATION_PUBLIC_ID || orgSeed.publicId || 'org_business_os').trim() || 'org_business_os'
+
+    const existingOrg = this.queryRows(`
+      SELECT id, slug, public_id
+      FROM organizations
+      WHERE public_id = $1 OR slug = $2
+      ORDER BY CASE WHEN public_id = $1 THEN 0 ELSE 1 END, id ASC
+      LIMIT 1
+    `, [publicId, orgSlug])[0]
+    const org = existingOrg
+      ? this.queryRows(`
+          UPDATE organizations
+          SET name = $1,
+              is_active = 1,
+              setup_enabled = 0
+          WHERE id = $2
+          RETURNING id
+        `, [orgName, existingOrg.id])[0]
+      : this.queryRows(`
+          INSERT INTO organizations (name, slug, public_id, is_active, setup_enabled)
+          VALUES ($1, $2, $3, 1, 0)
+          RETURNING id
+        `, [orgName, orgSlug, publicId])[0]
+    const orgId = Number(org?.id || 0) || Number(existingOrg?.id || 0)
+    if (orgId) {
+      this.queryRows(`
+        INSERT INTO organization_groups (organization_id, name, slug, is_default, is_active)
+        VALUES ($1, 'Main', 'main', 1, 1)
+        ON CONFLICT (organization_id, slug) DO UPDATE SET
+          is_default = 1,
+          is_active = 1
+      `, [orgId])
+    }
+
+    const roleRows = [
+      ['Admin', 'admin', 1, DEFAULT_ROLE_PERMISSIONS.admin],
+      ['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS.manager],
+      ['Employee', 'employee', 0, DEFAULT_ROLE_PERMISSIONS.employee],
+    ]
+    roleRows.forEach(([name, code, isSystem, permissions]) => {
+      const existingRole = this.queryRows('SELECT id, code FROM roles WHERE code = $1 LIMIT 1', [code])[0]
+      if (existingRole?.id) {
+        this.queryRows(`
+          UPDATE roles
+          SET name = $1,
+              is_system = $2,
+              permissions = CASE
+                WHEN code = 'admin' THEN $3
+                ELSE permissions
+              END,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $4
+        `, [name, isSystem, JSON.stringify(permissions || {}), existingRole.id])
+      } else {
+        this.queryRows(`
+          INSERT INTO roles (name, code, is_system, permissions, updated_at)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        `, [name, code, isSystem, JSON.stringify(permissions || {})])
+      }
+    })
+
+    const adminRole = this.queryRows("SELECT id FROM roles WHERE code = 'admin' LIMIT 1")[0]
+    const existingAdmin = this.queryRows("SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1")[0]
+    if (!existingAdmin?.id) {
+      const defaultPassword = String(process.env.BUSINESS_OS_ADMIN_PASSWORD || 'Admin123456!')
+      const passwordHash = bcrypt.hashSync(defaultPassword, 10)
+      const groupId = orgId
+        ? Number(this.queryRows('SELECT id FROM organization_groups WHERE organization_id = $1 ORDER BY is_default DESC, id ASC LIMIT 1', [orgId])[0]?.id || 0) || null
+        : null
+      this.queryRows(`
+        INSERT INTO users (
+          username, name, password, role_id, permissions, is_active,
+          organization_id, organization_group_id, created_at, updated_at
+        ) VALUES ('admin', 'Admin', $1, $2, '{}', 1, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `, [passwordHash, adminRole?.id || null, orgId || null, groupId])
+    }
   }
 
   close() {

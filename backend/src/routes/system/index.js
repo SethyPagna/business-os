@@ -478,7 +478,13 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null 
     destinationDir: resolvedDestination,
     command: 'run\\docker\\backup.bat',
   })
-  throw new Error('Final backup must be created by the Docker host so Postgres and MinIO are captured atomically. Run run\\docker\\backup.bat on this Business OS folder, then sync/copy the generated backup folder or Google Drive datasync version.')
+  return {
+    requiresHostAction: true,
+    action: 'backup',
+    destinationDir: resolvedDestination,
+    command: 'run\\docker\\backup.bat',
+    message: 'Final backups are created by the Docker host so Postgres and MinIO are captured atomically. Run run\\docker\\backup.bat from this Business OS folder, then sync/copy the generated backup folder or Google Drive datasync version.',
+  }
 }
 
 async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = {}) {
@@ -494,17 +500,24 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null } = 
     throw new Error('Choose a backup folder, not the current live data folder.')
   }
   progress?.({
-    phase: 'stopping_imports',
-    progress: 20,
-    message: 'Stopping background imports before restore',
-  })
-  await stopImportsBeforeDestructiveAction('Folder backup restore')
-  progress?.({
-    phase: 'restoring',
-    progress: 45,
+    phase: 'host_restore_required',
+    progress: 100,
     message: 'Validated final package. Docker restore must replace Postgres and MinIO atomically.',
   })
-  throw new Error('Final backup restore must be applied by the Docker restore command so Postgres and MinIO are replaced atomically. Use run\\docker\\restore.bat with this backup folder.')
+  audit(actor.userId, actor.userName, 'backup_restore_handoff', 'system', null, {
+    sourceDir: snapshot.root,
+    command: `run\\docker\\restore.bat -BackupPath "${snapshot.root}"`,
+    backupFormat: snapshot.manifest?.format || '',
+    backupCreatedAt: snapshot.manifest?.created_at || snapshot.manifest?.createdAt || '',
+  })
+  return {
+    requiresHostAction: true,
+    action: 'restore',
+    sourceDir: snapshot.root,
+    manifest: snapshot.manifest,
+    command: `run\\docker\\restore.bat -BackupPath "${snapshot.root}"`,
+    message: 'Backup package is valid. Final restore must be applied by the Docker host so Postgres and MinIO are replaced atomically.',
+  }
 }
 
 // ?€?€ Audit log ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€

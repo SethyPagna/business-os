@@ -279,6 +279,23 @@ function appendProductSearchFilters(query = {}) {
   const where = ['p.is_active = 1']
   const params = {}
   const joins = []
+  const rawIds = String(query.ids || query.productIds || query.product_ids || '').trim()
+  if (rawIds) {
+    const ids = Array.from(new Set(
+      rawIds
+        .split(',')
+        .map((value) => Number.parseInt(String(value || '').trim(), 10))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    )).slice(0, 100)
+    if (ids.length) {
+      const idKeys = ids.map((id, index) => {
+        const key = `productId${index}`
+        params[key] = id
+        return `@${key}`
+      })
+      where.push(`p.id IN (${idKeys.join(',')})`)
+    }
+  }
   const branchId = Number.parseInt(query.branchId || query.branch_id || '', 10)
   if (Number.isFinite(branchId) && branchId > 0) {
     params.branchId = branchId

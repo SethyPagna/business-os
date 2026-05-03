@@ -1404,7 +1404,14 @@ function createProductContext() {
       suppliers: false,
     },
     importParentsByName: new Map(),
+    importProductsBySignature: new Map(),
   }
+}
+
+function buildImportSignatureKey(nameKey, signature) {
+  const safeName = String(nameKey || '').trim()
+  const safeSignature = String(signature || '').trim()
+  return safeName && safeSignature ? `${safeName}::${safeSignature}` : ''
 }
 
 function ensureCategory(ctx, value) {
@@ -1495,13 +1502,16 @@ function recalcProductStock(productId) {
   `).run(productId, productId)
 }
 
-function insertInventoryMovement({ productId, productName, branch, movementType, qty, buyUsd, buyKhr, reason, actor }) {
+function insertInventoryMovement({ productId, productName, branch, movementType, qty, buyUsd, buyKhr, reason, actor, referenceId = null }) {
   if (!(qty > 0)) return
+  const safeReferenceId = Number.isFinite(Number(referenceId)) && Number(referenceId) > 0
+    ? Number(referenceId)
+    : null
   db.prepare(`
     INSERT INTO inventory_movements
       (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-       unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     productId,
     productName,
@@ -1514,6 +1524,7 @@ function insertInventoryMovement({ productId, productName, branch, movementType,
     qty * buyUsd,
     qty * buyKhr,
     reason,
+    safeReferenceId,
     actor.userId || null,
     actor.userName || null,
   )
@@ -1550,11 +1561,12 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
   `).all(normalized.name)
   const nameKey = normalizeLookup(normalized.name)
   const importedParent = nameKey ? ctx.importParentsByName.get(nameKey) || null : null
+  const signature = normalizeProductSignature(normalized)
+  const importedSignatureMatch = ctx.importProductsBySignature.get(buildImportSignatureKey(nameKey, signature)) || null
   const candidateParents = importedParent
     ? [...sameName, importedParent]
     : sameName
-  const signature = normalizeProductSignature(normalized)
-  const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || null
+  const matching = sameName.find((product) => normalizeProductSignature(product) === signature) || importedSignatureMatch || null
   const selectedParent = chooseParentProduct(candidateParents)
 
   let importActionLabel = normalizeLookup(row._action || '')
@@ -1562,7 +1574,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
     if (matching) {
       importActionLabel = sameName.length > 1 ? 'link_variant' : 'merge_stock'
       row._target_product_id = matching.id
-    } else if (sameName.length) {
+    } else if (sameName.length || importedParent) {
       importActionLabel = 'create_variant'
       row._parent_id = selectedParent?.parent_id || selectedParent?.id || null
     } else {
@@ -1589,7 +1601,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         name: normalized.name,
         sku: identifiers.sku,
         barcode: identifiers.barcode,
-        allowDuplicateName: importActionLabel === 'create_variant' && !!normalizedParentId,
+        allowDuplicateName: true,
         allowDuplicateSku: identifiers.allowDuplicateSku,
         allowDuplicateBarcode: identifiers.allowDuplicateBarcode,
       })
@@ -1637,6 +1649,15 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         normalizedParentId,
       )
       const productId = result.lastInsertRowid
+      const insertedRecord = {
+        ...normalized,
+        id: productId,
+        is_group: normalizedParentId ? 0 : normalized.is_group,
+        parent_id: normalizedParentId,
+        created_at: nowIso(),
+      }
+      const signatureKey = buildImportSignatureKey(nameKey, signature)
+      if (signatureKey) ctx.importProductsBySignature.set(signatureKey, insertedRecord)
       syncProductImageGallery(productId, incomingGallery)
       if (normalizedParentId) {
         ctx.importParentsByName.set(nameKey, ctx.importParentsByName.get(nameKey) || {
@@ -1648,11 +1669,9 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         })
       } else if (nameKey && !ctx.importParentsByName.has(nameKey)) {
         ctx.importParentsByName.set(nameKey, {
-          ...normalized,
-          id: productId,
+          ...insertedRecord,
           is_group: importActionLabel === 'create_variant' ? 1 : normalized.is_group,
           parent_id: null,
-          created_at: nowIso(),
         })
         if (importActionLabel === 'create_variant') {
           db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
@@ -1670,6 +1689,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         buyKhr: normalized.purchase_price_khr,
         reason: 'CSV import - new product',
         actor,
+        referenceId: jobId,
       })
       return { imported: 1, updated: 0, variant: normalizedParentId ? 1 : 0 }
     }
@@ -1777,6 +1797,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         buyKhr: normalized.purchase_price_khr || existing.purchase_price_khr || 0,
         reason: replaceStock ? 'CSV import - override replace stock' : 'CSV import - merge add stock',
         actor,
+        referenceId: jobId,
       })
     }
     return { imported: 0, updated: 1, merged: action === 'merge' ? 1 : 0 }
@@ -2374,8 +2395,8 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
           db.prepare(`
             INSERT INTO inventory_movements
               (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
             product.id,
             product.name,
@@ -2388,6 +2409,7 @@ async function processInventoryRowBatches({ jobId, rowBatches, totalRows = null,
             qty * unitCostUsd,
             qty * unitCostKhr,
             normalizeText(row.reason) || 'CSV import - inventory',
+            Number(jobId) || null,
             actor.userId || null,
             actor.userName || null,
           )

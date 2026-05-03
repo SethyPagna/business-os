@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const {
   BACKUP_VERSION,
   BACKUP_TABLES,
@@ -61,6 +63,14 @@ runTest('buildBackupSummary returns row counts and totals', () => {
   assert.equal(summary.totals.customTableCount, 1)
   assert.equal(summary.totals.customTableRowCount, 3)
   assert.equal(summary.totals.uploadCount, 2)
+})
+
+runTest('Docker backup API completes with explicit host action handoff instead of failing silently', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  assert.match(source, /requiresHostAction:\s*true/)
+  assert.match(source, /command:\s*'run\\\\docker\\\\backup\.bat'/)
+  assert.match(source, /command:\s*`run\\\\docker\\\\restore\.bat -BackupPath/)
+  assert.doesNotMatch(source, /Final backup must be created[\s\S]*throw new Error/)
 })
 
 if (failed > 0) {

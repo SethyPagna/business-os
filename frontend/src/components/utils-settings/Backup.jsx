@@ -85,6 +85,7 @@ function JobProgressCard({ job, copy, onClear }) {
   const status = String(job.status || '').toLowerCase()
   const failed = status === 'failed' || status === 'cancelled'
   const completed = status === 'completed'
+  const result = job.result || {}
   return (
     <div className={`mt-4 rounded-2xl border p-4 text-sm ${failed ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200' : completed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100'}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -94,6 +95,12 @@ function JobProgressCard({ job, copy, onClear }) {
             {job.type || 'system job'} · {job.phase || job.status || 'queued'}
           </div>
           {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
+          {result.requiresHostAction ? (
+            <div className="mt-2 rounded-xl border border-current/20 bg-white/50 p-3 text-xs dark:bg-slate-950/30">
+              <div className="font-semibold">{result.message || copy('host_action_required', 'Run this on the Business OS computer to finish safely.')}</div>
+              {result.command ? <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 font-mono text-[11px] text-white">{result.command}</code> : null}
+            </div>
+          ) : null}
         </div>
         {completed || failed ? (
           <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onClear}>
@@ -179,6 +186,54 @@ function yieldToBrowser() {
     return new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)))
   }
   return new Promise((resolve) => window.setTimeout(resolve, 0))
+}
+
+function startJobWatcher(jobId, {
+  reason = 'System job',
+  pollMs = 1200,
+  onUpdate = null,
+  onComplete = null,
+  onError = null,
+} = {}) {
+  if (typeof window === 'undefined' || !jobId) return () => {}
+  let stopped = false
+  let inFlight = false
+  let timer = null
+
+  const stop = () => {
+    stopped = true
+    if (timer) window.clearInterval(timer)
+    timer = null
+  }
+
+  const tick = async () => {
+    if (stopped || inFlight) return
+    inFlight = true
+    try {
+      const result = await window.api.getSystemJob?.(jobId)
+      const job = result?.item || result
+      if (stopped) return
+      if (job && typeof onUpdate === 'function') onUpdate(job)
+      const status = String(job?.status || '').toLowerCase()
+      if (status === 'completed') {
+        stop()
+        if (typeof onComplete === 'function') onComplete(job)
+      } else if (status === 'failed' || status === 'cancelled') {
+        stop()
+        const message = job?.error || job?.message || `${reason} failed`
+        if (typeof onError === 'function') onError(new Error(message), job)
+      }
+    } catch (error) {
+      stop()
+      if (typeof onError === 'function') onError(error)
+    } finally {
+      inFlight = false
+    }
+  }
+
+  timer = window.setInterval(tick, Math.max(750, Number(pollMs || 1200)))
+  window.setTimeout(tick, 0)
+  return stop
 }
 
 function normalizeFolderBrowserResult(result, maxDirs = 200) {
@@ -647,6 +702,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const unavailableUntilRef = useRef(0)
   const loadRef = useRef(null)
   const isMountedRef = useRef(true)
+  const jobStopRef = useRef(null)
 
   const scheduleRetry = useCallback((delayMs) => {
     window.clearTimeout(retryTimerRef.current)
@@ -724,6 +780,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   useEffect(() => () => {
     isMountedRef.current = false
     window.clearTimeout(retryTimerRef.current)
+    jobStopRef.current?.()
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
@@ -745,22 +802,30 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return () => window.removeEventListener('message', handler)
   }, [active, copy, load, notify])
 
-  const trackQueuedJob = useCallback(async (queued, reason) => {
+  const trackQueuedJob = useCallback((queued, reason, handlers = {}) => {
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
+    jobStopRef.current?.()
     setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: reason })
-    const result = await window.api.pollSystemJob?.(jobId, {
+    jobStopRef.current = startJobWatcher(jobId, {
       reason,
       pollMs: 1000,
       onUpdate: (job) => {
         if (isMountedRef.current && job) setActiveJob(job)
       },
+      onComplete: (job) => {
+        if (!isMountedRef.current) return
+        setActiveJob(job || null)
+        load({ force: true })
+        handlers.onComplete?.(job)
+      },
+      onError: (error, job) => {
+        if (!isMountedRef.current) return
+        if (job) setActiveJob(job)
+        handlers.onError?.(error, job)
+      },
     })
-    if (isMountedRef.current) {
-      setActiveJob(result?.job || null)
-      await load({ force: true })
-    }
-    return result
+    return queued
   }, [load])
 
   const savePreferences = async () => {
@@ -838,9 +903,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       const queued = await window.api.queueGoogleDriveSyncNow?.()
       notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
       window.setTimeout(() => {
-        trackQueuedJob(queued, 'Google Drive sync')
-          .then((result) => {
-            const summary = result?.summary || {}
+        trackQueuedJob(queued, 'Google Drive sync', {
+          onComplete: (job) => {
+            const summary = job?.result?.summary || {}
             actionHistory?.pushAction?.({
               scope: 'backup',
               entity: 'google_drive_sync',
@@ -851,10 +916,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
               `${copy('drive_sync_complete', 'Drive sync complete')}: ${summary.uploaded || 0} ${copy('uploaded', 'uploaded')}, ${summary.updated || 0} ${copy('updated', 'updated')}, ${summary.skipped || 0} ${copy('skipped', 'skipped')}`,
               'success',
             )
-          })
-          .catch((error) => {
+          },
+          onError: (error) => {
             notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-          })
+          },
+        })
       }, 0)
     } catch (error) {
       notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -1212,11 +1278,13 @@ export default function Backup() {
   const [activeJob, setActiveJob] = useState(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
   const aliveRef = useRef(true)
+  const jobStopRef = useRef(null)
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
+      jobStopRef.current?.()
     }
   }, [])
 
@@ -1232,17 +1300,29 @@ export default function Backup() {
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
       if (jobId) {
         notify(copy('backup_export_queued', 'Backup export queued'), 'info')
+        jobStopRef.current?.()
         window.setTimeout(() => {
-          window.api.pollSystemJob?.(jobId, {
+          jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup export',
             pollMs: 1000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
-          })
-            .then((result) => {
+            onComplete: (job) => {
               if (!aliveRef.current) return
-              if (result?.job) setActiveJob(result.job)
+              if (job) setActiveJob(job)
+              const result = job?.result || {}
+              if (result.requiresHostAction) {
+                actionHistory.pushAction({
+                  scope: 'backup',
+                  entity: 'backup',
+                  label: copy('backup_host_command_ready', 'Docker backup command is ready'),
+                  redo_payload: { command: result.command, destinationDir: result.destinationDir },
+                })
+                notify(`${copy('backup_host_command_ready', 'Docker backup command is ready')}: ${result.command || 'run\\docker\\backup.bat'}`, 'info')
+                setLoading('')
+                return
+              }
               actionHistory.pushAction({
                 scope: 'backup',
                 entity: 'backup',
@@ -1250,14 +1330,15 @@ export default function Backup() {
                 redo_payload: exportDestination ? { destinationDir: exportDestination } : { destinationDir: 'default' },
               })
               notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-              if (result.backupRoot) setFolderImportPath(result.backupRoot)
-            })
-            .catch((error) => {
+              if (job?.result?.backupRoot) setFolderImportPath(job.result.backupRoot)
+              setLoading('')
+            },
+            onError: (error, job) => {
+              if (job && aliveRef.current) setActiveJob(job)
               if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
-            })
-            .finally(() => {
               if (aliveRef.current) setLoading('')
-            })
+            },
+          })
         }, 0)
         return
       }
@@ -1283,17 +1364,29 @@ export default function Backup() {
       if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
       if (jobId) {
         notify(copy('backup_restore_queued', 'Backup restore queued'), 'info')
+        jobStopRef.current?.()
         window.setTimeout(() => {
-          window.api.pollSystemJob?.(jobId, {
+          jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup restore',
             pollMs: 1000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
-          })
-            .then((result) => {
+            onComplete: (job) => {
               if (!aliveRef.current) return
-              if (result?.job) setActiveJob(result.job)
+              if (job) setActiveJob(job)
+              const result = job?.result || {}
+              if (result.requiresHostAction) {
+                actionHistory.pushAction({
+                  scope: 'backup',
+                  entity: 'backup',
+                  label: copy('restore_host_command_ready', 'Docker restore command is ready'),
+                  undo_payload: { command: result.command, sourceDir: result.sourceDir },
+                })
+                notify(`${copy('restore_host_command_ready', 'Docker restore command is ready')}: ${result.command || 'run\\docker\\restore.bat'}`, 'info')
+                setLoading('')
+                return
+              }
               cacheClearAll()
               actionHistory.pushAction({
                 scope: 'backup',
@@ -1303,13 +1396,14 @@ export default function Backup() {
               })
               notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
               setTimeout(() => refreshAppData(), 200)
-            })
-            .catch((error) => {
+              setLoading('')
+            },
+            onError: (error, job) => {
+              if (job && aliveRef.current) setActiveJob(job)
               if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
-            })
-            .finally(() => {
               if (aliveRef.current) setLoading('')
-            })
+            },
+          })
         }, 0)
         return
       }

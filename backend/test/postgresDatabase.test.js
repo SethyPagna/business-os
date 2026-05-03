@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const { PostgresCompatDatabase } = require('../src/postgresDatabase')
 
 let failed = 0
@@ -72,6 +74,19 @@ runTest('transaction commits and rolls back with sync query boundaries', () => {
     throw new Error('boom')
   })(), /boom/)
   assert.equal(client.queries.at(-1).sql, 'ROLLBACK')
+})
+
+runTest('default organization seed reuses existing slug or public id', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  assert.match(source, /WHERE public_id = \$1 OR slug = \$2/)
+  assert.match(source, /UPDATE organizations[\s\S]+WHERE id = \$2/)
+})
+
+runTest('default role seed avoids partial-index ON CONFLICT', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  assert.doesNotMatch(source, /ON CONFLICT \(code\)/)
+  assert.match(source, /SELECT id, code FROM roles WHERE code = \$1 LIMIT 1/)
+  assert.match(source, /UPDATE roles[\s\S]+WHERE id = \$4/)
 })
 
 if (failed > 0) {

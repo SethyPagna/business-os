@@ -552,6 +552,17 @@ export const searchProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`))
 }
+export const getProductsByIds = (ids = [], params = {}) => {
+  const uniqueIds = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))).slice(0, 100)
+  if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })
+  return searchProducts({
+    page: 1,
+    pageSize: Math.min(Math.max(uniqueIds.length, 1), 100),
+    ids: uniqueIds.join(','),
+    include: 'branch_stock,images',
+    ...params,
+  })
+}
 export const getProductFilters = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`products:filters:${q}`, () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`))
@@ -1204,10 +1215,7 @@ export async function queueBackupFolderExport(destinationDir = '') {
 }
 
 export async function exportBackupFolder(destinationDir) {
-  const queued = await queueBackupFolderExport(destinationDir)
-  const jobId = queued?.job_id || queued?.item?.id
-  if (!jobId) return queued
-  return waitForSystemJob(jobId, { reason: 'backup export' })
+  return queueBackupFolderExport(destinationDir)
 }
 
 export async function queueBackupFolderRestore(sourceDir) {
@@ -1218,14 +1226,7 @@ export async function queueBackupFolderRestore(sourceDir) {
 }
 
 export async function importBackupFolder(sourceDir) {
-  const queued = await queueBackupFolderRestore(sourceDir)
-  const jobId = queued?.job_id || queued?.item?.id
-  const result = jobId
-    ? await waitForSystemJob(jobId, { reason: 'backup restore' })
-    : queued
-  await invalidateClientRuntimeState('backup-import-folder')
-  cacheClearAll()
-  return result
+  return queueBackupFolderRestore(sourceDir)
 }
 
 // ─── Data reset ───────────────────────────────────────────────────────────────
@@ -1283,18 +1284,7 @@ export const queueGoogleDriveSyncNow = () =>
 
 export const syncGoogleDriveNow = () =>
   route('system:driveSyncNow', async () => {
-    const queued = await queueGoogleDriveSyncNow()
-    const jobId = queued?.job_id || queued?.item?.id
-    if (!jobId) return queued
-    const result = await waitForSystemJob(jobId, {
-      reason: 'Google Drive sync',
-      timeoutMs: LONG_SYSTEM_ACTION_TIMEOUT_MS,
-    })
-    return {
-      ...result,
-      summary: result.summary || result.result?.summary || result.job?.result?.summary || {},
-      item: result.item || result.result?.item || result.job?.result?.item || null,
-    }
+    return queueGoogleDriveSyncNow()
   }, null, true)
 
 export async function resetData(mode = 'sales') {

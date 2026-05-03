@@ -361,10 +361,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Preparing import' })
     try {
-      const existingProducts = await window.api.getProducts()
       const analysis = await analyzeProductCsvInWorker({
         text: picked.content,
-        existingProducts: Array.isArray(existingProducts) ? existingProducts : [],
+        // Keep the modal responsive for large catalogs. Existing-product conflicts
+        // are reviewed by the server import job; this local pass only previews CSV
+        // row grouping and same-file issues.
+        existingProducts: [],
         onProgress: setAnalysisProgress,
       })
       const nextConflicts = (analysis.conflicts || []).map((entry) => {
