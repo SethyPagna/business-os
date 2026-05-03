@@ -815,7 +815,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const [status, setStatus] = useState(null)
   const [form, setForm] = useState({
     clientId: '',
-    clientSecret: '',
     folderName: 'Business OS Sync',
     deleteMissing: true,
     enabled: true,
@@ -865,7 +864,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       setStatus((current) => item || current || null)
       setForm((current) => ({
         clientId: current.clientId || item?.clientId || '',
-        clientSecret: current.clientSecret || '',
         folderName: item?.folderName || current.folderName || 'Business OS Sync',
         deleteMissing: !!item?.deleteMissing,
         enabled: item?.enabled !== false,
@@ -919,7 +917,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       if (event?.data?.type !== 'business-os-drive-sync') return
       if (event.data.status === 'connected') {
         notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
-        setForm((current) => ({ ...current, clientSecret: '' }))
         load({ force: true })
         return
       }
@@ -989,8 +986,8 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       notify(copy('drive_sync_client_required', 'Google OAuth client ID is required'), 'error')
       return
     }
-    if (!String(form.clientSecret || '').trim() && !status?.hasClientSecret) {
-      notify(copy('drive_sync_secret_required', 'Google OAuth client secret is required'), 'error')
+    if (status && !status.hasClientSecret) {
+      notify(copy('drive_sync_secret_env_required', 'Google Drive client secret is missing from the server env. Add it to the ignored Docker env file, then restart Business OS.'), 'error')
       return
     }
 
@@ -1007,7 +1004,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       await yieldToBrowser()
       const result = await window.api.startGoogleDriveSyncOauth?.({
         clientId: form.clientId,
-        clientSecret: form.clientSecret,
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
         enabled: form.enabled,
@@ -1078,7 +1074,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       await yieldToBrowser()
       await window.api.disconnectGoogleDriveSync?.()
-      setForm((current) => ({ ...current, clientSecret: '' }))
       window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
         scope: 'backup',
@@ -1103,7 +1098,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       setForm((current) => ({
         ...current,
         clientId: '',
-        clientSecret: '',
       }))
       window.setTimeout(() => load({ force: true }), 0)
       actionHistory?.pushAction?.({
@@ -1150,19 +1144,17 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             placeholder="xxxxxxxx.apps.googleusercontent.com"
           />
         </label>
-        <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
-          <span>{copy('drive_sync_client_secret', 'OAuth client secret')}</span>
-          <input
-            id="drive-sync-client-secret"
-            name="drive_sync_client_secret"
-            type="password"
-            className="input"
-            autoComplete="off"
-            value={form.clientSecret}
-            onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
-            placeholder={status?.hasClientSecret ? copy('drive_sync_secret_saved', 'Leave blank to keep the saved secret') : 'GOCSPX-...'}
-          />
-        </label>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-gray-300">
+          <div className="font-medium text-gray-800 dark:text-gray-100">{copy('drive_sync_client_secret', 'OAuth client secret')}</div>
+          <div className={`mt-1 text-xs font-semibold ${status?.hasClientSecret ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            {status?.hasClientSecret
+              ? copy('drive_sync_secret_env_configured', 'Stored in server env')
+              : copy('drive_sync_secret_env_missing', 'Missing from server env')}
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_secret_env_note', 'The secret is never typed or shown in the browser. Update the ignored Docker env file when it changes.')}
+          </p>
+        </div>
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
           <span>{copy('drive_sync_folder_name', 'Drive folder name')}</span>
           <input

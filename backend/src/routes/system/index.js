@@ -578,8 +578,9 @@ router.post('/drive-sync/oauth/start', authToken, requirePermission('settings'),
   try {
     const existing = getDriveSyncConfig()
     const clientId = String(req.body?.clientId || existing.clientId || '').trim()
-    const clientSecret = String(req.body?.clientSecret || existing.clientSecret || '').trim()
-    if (!clientId || !clientSecret) return err(res, 'Google OAuth client ID and client secret are required.')
+    const clientSecret = String(existing.clientSecret || '').trim()
+    if (!clientId) return err(res, 'Google OAuth client ID is required.')
+    if (!clientSecret) return err(res, 'Google Drive client secret is missing from the server env. Add it to the ignored Docker env file, then restart Business OS.')
 
     const baseUrl = buildRequestBaseUrl(req)
     const redirectUri = resolveDriveRedirectUri(req)

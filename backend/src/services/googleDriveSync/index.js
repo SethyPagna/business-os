@@ -6,7 +6,6 @@ const path = require('path')
 const crypto = require('crypto')
 const { db } = require('../../database')
 const {
-  ACTIVE_ENV_FILE,
   DATA_ROOT,
   DATA_FOLDER_NAME,
   GOOGLE_DRIVE_CLIENT_ID,
@@ -995,32 +994,12 @@ function disconnectDriveSync() {
   runtimeState.lastRunAt = ''
 }
 
-function updateEnvSettingLines(filePath, updates = {}) {
-  const lines = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8').split(/\r?\n/) : []
-  const nextLines = [...lines]
-  Object.entries(updates).forEach(([key, value]) => {
-    const nextLine = `${key}=${String(value ?? '').trim()}`
-    const index = nextLines.findIndex((entry) => entry.startsWith(`${key}=`))
-    if (index >= 0) nextLines[index] = nextLine
-    else nextLines.push(nextLine)
-  })
-  const normalized = nextLines.filter((line, index, all) => !(index === all.length - 1 && line === ''))
-  fs.writeFileSync(filePath, `${normalized.join('\r\n')}\r\n`, 'utf8')
-}
-
 function forgetDriveSyncCredentials() {
   disconnectDriveSync()
   writeSettingsMap({
     [SETTINGS_KEYS.clientId]: null,
     [SETTINGS_KEYS.clientSecretEncrypted]: null,
   })
-  if (trim(ACTIVE_ENV_FILE)) {
-    updateEnvSettingLines(ACTIVE_ENV_FILE, {
-      GOOGLE_DRIVE_CLIENT_ID: '',
-      GOOGLE_DRIVE_CLIENT_SECRET: '',
-      GOOGLE_DRIVE_OAUTH_REDIRECT_URI: '',
-    })
-  }
 }
 
 function schedulePeriodicDriveSync() {

@@ -2271,7 +2271,6 @@
   "imported_rows_count": "បាននាំចូល {count} ជួរ",
   "imported_sales_count": "បាននាំចូលការលក់ {count}",
   "duplicates_skipped_count": "បានរំលងស្ទួន {count}",
-  "importing": "កំពុងនាំចូល...",
   "import_failed": "នាំចូលបរាជ័យ",
   "inventory_import_title": "នាំចូលស្តុក",
   "inventory_import_help": "នាំចូលការកែស្តុកពីជួរ CSV។ សកម្មភាពដែលគាំទ្រមាន add, remove និង set។",
@@ -2402,8 +2401,7 @@
   "export_visible_logs": "នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ",
   "export_selected_logs": "នាំចេញកំណត់ហេតុដែលបានជ្រើស",
   "export_filtered_action": "នាំចេញតាមសកម្មភាពដែលបានតម្រង",
-  "settings_write_conflict": "ការកំណត់ត្រូវបានប្ដូរនៅលើឧបករណ៍ផ្សេង។ តម្លៃចុងក្រោយត្រូវបានផ្ទុកឡើងវិញហើយ។"
-  ,
+  "settings_write_conflict": "ការកំណត់ត្រូវបានប្ដូរនៅលើឧបករណ៍ផ្សេង។ តម្លៃចុងក្រោយត្រូវបានផ្ទុកឡើងវិញហើយ។",
   "activity": "សកម្មភាព",
   "all_actions": "សកម្មភាពទាំងអស់",
   "all_months": "ខែទាំងអស់",
@@ -2433,5 +2431,9 @@
   "image_skipped": "រំលងរូបភាព",
   "queued": "បានដាក់ជួរ",
   "review_ready": "រួចរាល់សម្រាប់ពិនិត្យ",
-  "row_issue": "បញ្ហាជួរ"
+  "row_issue": "បញ្ហាជួរ",
+  "drive_sync_secret_env_configured": "បានរក្សាទុកក្នុង env របស់ម៉ាស៊ីនមេ",
+  "drive_sync_secret_env_missing": "ខ្វះពី env របស់ម៉ាស៊ីនមេ",
+  "drive_sync_secret_env_note": "Secret មិនត្រូវវាយ ឬបង្ហាញក្នុង browser ទេ។ បើវាប្តូរ សូមកែឯកសារ Docker env ដែលមិន commit។",
+  "drive_sync_secret_env_required": "ខ្វះ Google Drive client secret ពី server env។ សូមបន្ថែមវាទៅឯកសារ Docker env ដែលមិន commit ហើយ restart Business OS។"
 }
