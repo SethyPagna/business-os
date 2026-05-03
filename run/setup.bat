@@ -279,9 +279,10 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo REDIS_URL=redis://127.0.0.1:6379
     echo RUNTIME_CACHE_ENABLED=1
     echo CACHE_REDIS_URL=redis://127.0.0.1:6380
-    echo DATABASE_DRIVER=sqlite
-    echo DATABASE_URL=
-    echo OBJECT_STORAGE_DRIVER=local
+    echo DATABASE_DRIVER=postgres
+    echo DATABASE_URL=postgres://business_os:business_os_dev@127.0.0.1:55432/business_os
+    echo BUSINESS_OS_DISABLE_SQLITE=1
+    echo OBJECT_STORAGE_DRIVER=minio
     echo S3_ENDPOINT=http://127.0.0.1:9000
     echo S3_ACCESS_KEY_ID=
     echo S3_SECRET_ACCESS_KEY=

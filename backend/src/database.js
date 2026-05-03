@@ -18,7 +18,6 @@
 const path     = require('path')
 const fs       = require('fs')
 const crypto   = require('crypto')
-const Database = require('better-sqlite3')
 const bcrypt   = require('bcryptjs')
 const {
   DB_PATH,
@@ -35,12 +34,19 @@ const {
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 // Detailed relational reference: docs/SCHEMA-RELATIONSHIPS.md
 
+if (DATABASE_DRIVER === 'postgres') {
+  module.exports = require('./postgresDatabase')
+  return
+}
+
 if (BUSINESS_OS_DISABLE_SQLITE || process.env.BUSINESS_OS_ENFORCE_POSTGRES === '1' || DATABASE_DRIVER !== 'sqlite') {
   throw new Error(
     'This runtime disables SQLite or is configured for Postgres, but the application data layer still contains SQLite-only route code. ' +
     'Run the verified migration first, then finish the Postgres/MinIO repository cutover before serving production traffic.'
   )
 }
+
+const Database = require('better-sqlite3')
 
 // Ensure the DB directory exists before opening the file
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })

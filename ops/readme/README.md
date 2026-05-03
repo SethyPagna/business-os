@@ -70,7 +70,7 @@ The storage container is `business-os-data`. Active organization data resolves t
 business-os-data\organizations\<public_id> (<sanitized-name>)\
 ```
 
-Typical organization contents:
+Legacy/source organization folders may contain:
 
 - `db\business.db`
 - `uploads\`
@@ -86,17 +86,18 @@ Docker releases preserve:
 
 ## Environment Defaults
 
-Setup and release templates default to required scale services while keeping SQLite/local data authoritative:
+Setup and release templates default to Docker Postgres/MinIO with Redis jobs/cache:
 
 ```env
 BUSINESS_OS_REQUIRE_SCALE_SERVICES=1
 JOB_QUEUE_DRIVER=bullmq
 REDIS_URL=redis://127.0.0.1:6379
-DATABASE_DRIVER=sqlite
-OBJECT_STORAGE_DRIVER=local
+DATABASE_DRIVER=postgres
+OBJECT_STORAGE_DRIVER=minio
+BUSINESS_OS_DISABLE_SQLITE=1
 ```
 
-Postgres and MinIO are started and health-checked, but `DATABASE_DRIVER=sqlite` and `OBJECT_STORAGE_DRIVER=local` stay in place until the migration wizard is explicitly completed.
+Postgres and MinIO are live in the Docker release. SQLite/local folders are legacy migration input only and are not an allowed production Docker mode.
 
 The migration safety automation writes local snapshots to a sibling folder named `business-os-safety-backups`. That folder is intentionally ignored by Git and can be copied or synced externally. If Google Drive sync is connected, the same safety step also mirrors the current live data folder to Drive before reporting readiness.
 

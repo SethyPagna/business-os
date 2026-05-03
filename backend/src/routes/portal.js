@@ -461,18 +461,11 @@ function getPortalProducts(config = buildPortalConfig()) {
       p.low_stock_threshold,
       p.out_of_stock_threshold,
       p.image_path,
-      p.created_at,
-      COALESCE(json_group_array(json_object(
-        'branch_id', b.id,
-        'branch_name', b.name,
-        'quantity', COALESCE(bs.quantity, 0)
-      )) FILTER (WHERE b.id IS NOT NULL), '[]') AS branch_stock_json
+      p.created_at
     FROM products p
-    LEFT JOIN branches b ON b.is_active = 1
-    LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
     WHERE p.is_active = 1
-    GROUP BY p.id
     ORDER BY p.name COLLATE NOCASE ASC
+    LIMIT 500
   `).all()
 
   const ids = products.map((product) => product.id)
@@ -489,6 +482,29 @@ function getPortalProducts(config = buildPortalConfig()) {
     if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
     imageMap.get(row.product_id).push(row.image_path)
   })
+  const branchRows = ids.length
+    ? db.prepare(`
+      SELECT
+        bs.product_id,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        COALESCE(bs.quantity, 0) AS quantity
+      FROM branch_stock bs
+      JOIN branches b ON b.id = bs.branch_id
+      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
+        AND b.is_active = 1
+      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
+    `).all(...ids)
+    : []
+  const branchStockMap = new Map()
+  branchRows.forEach((row) => {
+    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
+    branchStockMap.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
+  })
 
   return products.map((product) => {
     const gallery = sanitizeMediaList(imageMap.get(product.id) || []).slice(0, 5)
@@ -498,13 +514,12 @@ function getPortalProducts(config = buildPortalConfig()) {
       ...product,
       image_path: gallery[0] || null,
       image_gallery: gallery,
-      branch_stock: tryParse(product.branch_stock_json, []),
+      branch_stock: branchStockMap.get(product.id) || [],
       top_seller_rank: signals.topSellerRank.get(product.id) || 0,
       top_product_rank: signals.topProductRank.get(product.id) || 0,
       new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
       portal_recommended: signals.recommendedRank.has(product.id),
       recommended_rank: signals.recommendedRank.get(product.id) || 0,
-      branch_stock_json: undefined,
     }
   })
 }
@@ -674,17 +689,7 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       p.out_of_stock_threshold,
       p.image_path,
       p.created_at,
-      ${stockExpr} AS selected_branch_quantity,
-      (
-        SELECT COALESCE(json_group_array(json_object(
-          'branch_id', b.id,
-          'branch_name', b.name,
-          'quantity', COALESCE(bs.quantity, 0)
-        )), '[]')
-        FROM branches b
-        LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = b.id
-        WHERE b.is_active = 1
-      ) AS branch_stock_json
+      ${stockExpr} AS selected_branch_quantity
     FROM products p
     ${joinSql}
     ${whereSql}
@@ -701,10 +706,33 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       ORDER BY sort_order ASC, id ASC
     `).all(...ids)
     : []
+  const branchRows = ids.length
+    ? db.prepare(`
+      SELECT
+        bs.product_id,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        COALESCE(bs.quantity, 0) AS quantity
+      FROM branch_stock bs
+      JOIN branches b ON b.id = bs.branch_id
+      WHERE bs.product_id IN (${ids.map(() => '?').join(',')})
+        AND b.is_active = 1
+      ORDER BY bs.product_id ASC, b.is_default DESC, b.name ASC
+    `).all(...ids)
+    : []
   const imageMap = new Map()
   imageRows.forEach((row) => {
     if (!imageMap.has(row.product_id)) imageMap.set(row.product_id, [])
     imageMap.get(row.product_id).push(row.image_path)
+  })
+  const branchStockMap = new Map()
+  branchRows.forEach((row) => {
+    if (!branchStockMap.has(row.product_id)) branchStockMap.set(row.product_id, [])
+    branchStockMap.get(row.product_id).push({
+      branch_id: row.branch_id,
+      branch_name: row.branch_name,
+      quantity: row.quantity,
+    })
   })
 
   const items = products.map((product) => {
@@ -715,13 +743,12 @@ function getPortalCatalogProductPage(config = {}, query = {}) {
       ...product,
       image_path: gallery[0] || null,
       image_gallery: gallery,
-      branch_stock: tryParse(product.branch_stock_json, []),
+      branch_stock: branchStockMap.get(product.id) || [],
       top_seller_rank: signals.topSellerRank.get(product.id) || 0,
       top_product_rank: signals.topProductRank.get(product.id) || 0,
       new_arrival_rank: signals.newArrivalRank.get(product.id) || 0,
       portal_recommended: signals.recommendedRank.has(product.id),
       recommended_rank: signals.recommendedRank.get(product.id) || 0,
-      branch_stock_json: undefined,
     }
   })
   const filters = getPortalCatalogSearchMetadata(query, config)

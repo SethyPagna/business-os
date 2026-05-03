@@ -2,11 +2,13 @@
 
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const { spawnSync } = require('child_process')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
 const { db } = require('./database')
 const { UPLOADS_PATH } = require('./config')
+const { deleteObject, isMinioEnabled, putObject } = require('./objectStore')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
 
@@ -85,10 +87,13 @@ function preserveOriginalDisplayName(originalName = '') {
 }
 
 function buildUniqueStoredName(originalName = '') {
-  ensureUploadsDirectory()
   const safeName = sanitizeOriginalFileName(originalName)
   const ext = path.extname(safeName) || '.bin'
   const base = path.basename(safeName, ext) || 'file'
+  if (isMinioEnabled()) {
+    return `${base}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`
+  }
+  ensureUploadsDirectory()
   let candidate = `${base}${ext}`
   let suffix = 2
   while (fs.existsSync(path.join(UPLOADS_PATH, candidate))) {
@@ -424,6 +429,12 @@ async function registerStoredAsset({
   const effectiveOptimization = optimization || imageOptimization || videoOptimization
   const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const dimensions = mediaType === 'image' ? await readImageDimensions(absPath) : { width: null, height: null }
+  if (isMinioEnabled() && fs.existsSync(absPath)) {
+    await putObject(`uploads/${storedName}`, fs.createReadStream(absPath), {
+      contentType: mimeType || getMimeTypeFromName(storedName),
+    })
+    try { fs.unlinkSync(absPath) } catch (_) {}
+  }
   return serializeAssetRow(createFileAssetRecord({
     original_name: preserveOriginalDisplayName(originalName || storedName),
     stored_name: storedName,
@@ -481,6 +492,7 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
 }
 
 async function backfillUploadAssets() {
+  if (isMinioEnabled()) return
   ensureUploadsDirectory()
   const files = fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -509,7 +521,7 @@ function getFileAssetById(id) {
   return row ? serializeAssetRow(row) : null
 }
 
-function deleteFileAsset(id) {
+async function deleteFileAsset(id) {
   const asset = getFileAssetById(id)
   if (!asset) throw new Error('File not found')
   if (asset.usageCount > 0) {
@@ -517,6 +529,7 @@ function deleteFileAsset(id) {
   }
   const absPath = getUploadFilePath(asset.public_path)
   if (fs.existsSync(absPath)) fs.unlinkSync(absPath)
+  if (isMinioEnabled()) await deleteObject(String(asset.public_path || '').replace(/^\/+/, ''))
   db.prepare('DELETE FROM file_assets WHERE id = ?').run(id)
   return asset
 }

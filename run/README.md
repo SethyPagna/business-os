@@ -23,7 +23,7 @@ These are for a private Docker release or support:
 - `run\docker\install.bat` installs/pulls the Docker release.
 - `run\docker\start.bat` starts Docker release services.
 - `run\docker\update.bat` backs up, pulls, migrates, checks health, and rolls back when possible.
-- `run\docker\backup.bat` backs up Docker release data. In the current runnable Docker release this means the Docker runtime data volume; Postgres/MinIO backups are used when the verified Postgres data mode is enabled.
+- `run\docker\backup.bat` backs up Docker release data from Postgres, MinIO, settings, users/roles, and runtime metadata.
 - `run\docker\restore.bat` restores a selected verified backup.
 - `run\docker\doctor.bat` diagnoses Docker, ports, registry login, Cloudflare, database, workers, and storage.
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.

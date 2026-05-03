@@ -2,15 +2,15 @@
 
 ## Runtime Model
 
-Business OS is a Node.js backend with an SPA frontend and required local scale services:
+Business OS is a Node.js backend with an SPA frontend and required Docker services:
 
-- Backend: Express + SQLite (`better-sqlite3`) + WebSocket (`ws`).
+- Backend: Express + Postgres data access + WebSocket (`ws`).
 - Frontend: React + Vite build artifacts served by backend.
-- Storage: local SQLite file and local uploads folder under `business-os-data` remain authoritative by default.
-- Scale services: Docker Compose starts Redis, Postgres, and MinIO for import queues and verified future migration targets.
+- Storage: Postgres owns live business rows, MinIO owns uploads/assets/backups, Redis owns queues/cache.
+- Scale services: Docker Compose starts Postgres, Redis queue/cache, MinIO, the app, workers, and Cloudflare Tunnel.
 - Sync/UI refresh: backend broadcasts channel updates via WebSocket `sync:update`.
 
-The backend is the source of truth for all business data. Frontend state is view/cache only. Postgres/MinIO are not used as the live data store until an admin explicitly completes the in-app migration wizard. The migration panel can automate the safety phase today: local backup first, Google Drive sync when connected, and no live storage switch until verified migration support is unlocked.
+The backend is the source of truth for all business data. Frontend state is view/cache only. SQLite/local files are retained only as explicit legacy migration input and are not allowed as the Docker production runtime.
 
 ## Major Layers
 
@@ -26,19 +26,17 @@ The backend is the source of truth for all business data. Frontend state is view
 ### 2) Configuration and Paths
 
 - `backend/src/config/index.js`
-  - Resolves runtime directory (source vs packaged EXE).
+  - Resolves runtime directory (source vs Docker release).
   - Loads `.env`.
-  - Resolves storage root via `data-location.json` or defaults.
-  - Resolves organization data under `business-os-data/organizations/<public_id> (<sanitized-name>)/`.
-  - Exposes derived paths (`DB_PATH`, `UPLOADS_PATH`, `IMPORTS_PATH`, `FRONTEND_DIST`) and scale service config.
+  - Resolves Docker runtime metadata paths without moving legacy data folders in Postgres mode.
+  - Exposes derived paths and service config for Postgres, MinIO, Redis, DuckDB/Parquet, and frontend assets.
 
 ### 3) Database and Schema
 
 - `backend/src/database.js`
-  - Creates/updates schema.
-  - Runs safe migrations.
-  - Seeds defaults (including primary admin and Admin role).
-  - Enforces baseline indexes and default settings.
+  - Routes Postgres runtime to `backend/src/postgresDatabase.js`.
+  - Blocks SQLite when `BUSINESS_OS_DISABLE_SQLITE=1` or Docker/Postgres mode is selected.
+  - Keeps legacy SQLite setup only for local tests and explicit old-data migration.
 
 ### 4) Shared Utilities
 

@@ -19,9 +19,10 @@ x-node-env: &node-env
   REDIS_URL: redis://redis-queue:6379
   RUNTIME_CACHE_ENABLED: "${RUNTIME_CACHE_ENABLED:-1}"
   CACHE_REDIS_URL: redis://redis-cache:6379
-  DATABASE_DRIVER: "${DATABASE_DRIVER:-sqlite}"
-  DATABASE_URL: "${DATABASE_URL:-}"
-  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-local}"
+  DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"
+  DATABASE_URL: "${DATABASE_URL:-postgres://business_os:businessos-dev-password@postgres:5432/business_os}"
+  BUSINESS_OS_DISABLE_SQLITE: "${BUSINESS_OS_DISABLE_SQLITE:-1}"
+  OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"
   S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-businessos-dev-password}"
@@ -212,7 +213,7 @@ services:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=768"
-    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/better-sqlite3/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm rebuild better-sqlite3 --loglevel=warn >/dev/null 2>&1 || true; npm run start"]
+    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/pg/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${PORT:-4000}:4000"
     volumes:
@@ -250,7 +251,7 @@ services:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=768"
-    command: ["sh", "-lc", "set -e; node -e \"require('better-sqlite3')\"; npm run worker:import"]
+    command: ["sh", "-lc", "set -e; npm run worker:import"]
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
@@ -271,7 +272,7 @@ services:
     cpus: "${IMPORT_WORKER_CPUS:-3.0}"
     stop_grace_period: 60s
     healthcheck:
-      test: ["CMD-SHELL", "test -f node_modules/better-sqlite3/package.json && find node_modules/better-sqlite3 -name better_sqlite3.node -print -quit | grep -q . && ps -ef | grep '[s]rc/workers/importWorker.js' >/dev/null"]
+      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/importWorker.js' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 18
@@ -287,7 +288,7 @@ services:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=1024"
-    command: ["sh", "-lc", "set -e; node -e \"require('better-sqlite3')\"; npm run worker:media"]
+    command: ["sh", "-lc", "set -e; npm run worker:media"]
     volumes:
       - ../../:/app
       - business_os_backend_node_modules:/app/backend/node_modules
@@ -308,7 +309,7 @@ services:
     cpus: "${MEDIA_WORKER_CPUS:-3.5}"
     stop_grace_period: 60s
     healthcheck:
-      test: ["CMD-SHELL", "test -f node_modules/better-sqlite3/package.json && find node_modules/better-sqlite3 -name better_sqlite3.node -print -quit | grep -q . && ps -ef | grep '[s]rc/workers/mediaWorker.js' >/dev/null"]
+      test: ["CMD-SHELL", "ps -ef | grep '[s]rc/workers/mediaWorker.js' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 18

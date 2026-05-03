@@ -177,7 +177,7 @@ runTest('sensitive system routes require backup or settings permission', async (
       authToken: adminToken,
     })
     assert.equal(status.response.ok, true)
-    assert.equal(status.json.item.mode, 'sqlite_authoritative')
+    assert.equal(status.json.item.mode, 'migration_required')
     assert.equal(status.json.item.target.databaseDriver, 'sqlite')
     assert.equal(status.json.item.backupRequired, true)
 
@@ -188,7 +188,7 @@ runTest('sensitive system routes require backup or settings permission', async (
       body: JSON.stringify({}),
     })
     assert.equal(prepare.response.ok, true)
-    assert.equal(prepare.json.item.mode, 'sqlite_authoritative')
+    assert.equal(prepare.json.item.mode, 'migration_required')
     assert.equal(prepare.json.item.requiresFreshBackup, false)
     assert.equal(prepare.json.item.safety.noDataMoved, true)
     assert.equal(prepare.json.item.automation.localBackup.exists, true)

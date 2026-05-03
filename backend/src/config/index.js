@@ -2,13 +2,23 @@
 
 const path = require('path')
 const fs = require('fs')
-const Database = require('better-sqlite3')
 const {
   trim,
   buildOrganizationFolderName,
   extractOrganizationPublicId,
   findOrganizationFolderByPublicId,
 } = require('../storage/organizationFolders')
+
+const RAW_DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
+const RAW_BUSINESS_OS_DISABLE_SQLITE = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_DISABLE_SQLITE || '').toLowerCase())
+const LEGACY_SQLITE_BOOTSTRAP_ENABLED = RAW_DATABASE_DRIVER === 'sqlite' && !RAW_BUSINESS_OS_DISABLE_SQLITE
+let SqliteDatabase = null
+
+function getSqliteDatabaseConstructor() {
+  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) return null
+  if (!SqliteDatabase) SqliteDatabase = require('better-sqlite3')
+  return SqliteDatabase
+}
 
 const IS_PKG = typeof process.pkg !== 'undefined'
 const RUNTIME_DIR = trim(process.env.BUSINESS_OS_RUNTIME_DIR)
@@ -110,6 +120,8 @@ function normalizeOrganizationSeed(seed = {}) {
 
 function readPrimaryOrganizationSeed(dbPath) {
   if (!pathExists(dbPath)) return null
+  const Database = getSqliteDatabaseConstructor()
+  if (!Database) return null
   let sqlite = null
   try {
     sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
@@ -173,6 +185,8 @@ function getOrganizationDbPath(runtimeRoot) {
 
 function isHealthySqliteDatabase(dbPath) {
   if (!pathExists(dbPath)) return false
+  const Database = getSqliteDatabaseConstructor()
+  if (!Database) return false
   let sqlite = null
   try {
     sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
@@ -288,6 +302,13 @@ const PRIMARY_ORGANIZATION_SEED = (() => {
       slug: DEFAULT_ORGANIZATION_BOOTSTRAP.slug,
     })
   }
+  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) {
+    return normalizeOrganizationSeed({
+      publicId: extractOrganizationPublicId(path.basename(detectExistingOrganizationRuntimeRoot(STORAGE_ROOT) || '')),
+      name: process.env.BUSINESS_OS_ORGANIZATION_NAME || DEFAULT_ORGANIZATION_BOOTSTRAP.name,
+      slug: process.env.BUSINESS_OS_ORGANIZATION_SLUG || DEFAULT_ORGANIZATION_BOOTSTRAP.slug,
+    })
+  }
   return readPrimaryOrganizationSeed(LEGACY_DB_PATH)
     || normalizeOrganizationSeed({ publicId: extractOrganizationPublicId(path.basename(detectExistingOrganizationRuntimeRoot(STORAGE_ROOT) || '')) })
     || normalizeOrganizationSeed(DEFAULT_ORGANIZATION_BOOTSTRAP)
@@ -309,6 +330,13 @@ const DATA_ROOT = (() => {
   const canonicalRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_FOLDER_NAME)
   const legacyExactRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_PUBLIC_ID)
   const existingRoot = detectExistingOrganizationRuntimeRoot(STORAGE_ROOT, ORGANIZATION_PUBLIC_ID)
+
+  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) {
+    const runtimeRoot = existingRoot || canonicalRoot
+    ensureOrganizationRuntimeLayout(runtimeRoot)
+    return runtimeRoot
+  }
+
   const canonicalDbPath = getOrganizationDbPath(canonicalRoot)
   const legacyExactDbPath = getOrganizationDbPath(legacyExactRoot)
 
@@ -361,7 +389,7 @@ const CACHE_REDIS_URL = trim(process.env.CACHE_REDIS_URL || 'redis://127.0.0.1:6
 const RUNTIME_CACHE_ENABLED = !['0', 'false', 'no', 'off', 'disabled'].includes(
   trim(process.env.RUNTIME_CACHE_ENABLED || (BUSINESS_OS_REQUIRE_SCALE_SERVICES ? '1' : '0')).toLowerCase()
 )
-const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
+const DATABASE_DRIVER = RAW_DATABASE_DRIVER
 const DATABASE_URL = trim(process.env.DATABASE_URL)
 const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'local').toLowerCase()
 const S3_ENDPOINT = trim(process.env.S3_ENDPOINT || 'http://127.0.0.1:9000')
@@ -370,7 +398,7 @@ const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.en
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
 const ANALYTICS_ENGINE = trim(process.env.ANALYTICS_ENGINE || 'none').toLowerCase()
 const PARQUET_STORE = trim(process.env.PARQUET_STORE || 'none').toLowerCase()
-const BUSINESS_OS_DISABLE_SQLITE = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_DISABLE_SQLITE || '').toLowerCase())
+const BUSINESS_OS_DISABLE_SQLITE = RAW_BUSINESS_OS_DISABLE_SQLITE
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
 const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '30000', 10) || 30000))
 const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '196608', 10) || 196608))

@@ -113,6 +113,17 @@ function Invoke-Compose {
   return Invoke-Docker -DockerArgs $dockerArgs -AllowFailure:$AllowFailure
 }
 
+function Test-PostgresAppSchemaReady($envMap) {
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  $dbName = if ($envMap.POSTGRES_DB) { [string]$envMap.POSTGRES_DB } else { 'business_os' }
+  $dbUser = if ($envMap.POSTGRES_USER) { [string]$envMap.POSTGRES_USER } else { 'business_os' }
+  $sql = "SELECT (to_regclass('public.products') IS NOT NULL AND to_regclass('public.settings') IS NOT NULL AND to_regclass('public.users') IS NOT NULL)::int;"
+  $output = & $docker compose --env-file $EnvFile -f $ComposeFile exec -T postgres psql -U $dbUser -d $dbName -Atc $sql 2>$null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  return (($output | Select-Object -First 1) -as [string]).Trim() -eq '1'
+}
+
 function New-Secret([int]$bytes = 32) {
   $buffer = New-Object byte[] $bytes
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -229,7 +240,7 @@ function Ensure-Env {
     OBJECT_STORAGE_DRIVER = 'minio'
     DATABASE_URL = $databaseUrl
     BUSINESS_OS_DISABLE_SQLITE = '1'
-    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' }
+    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ((Get-PostgresCutoverBlockerSummary) -match '"blockerCount"\s*:\s*0') { '1' } else { if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' } }
     ANALYTICS_ENGINE = if ($existing.ANALYTICS_ENGINE) { $existing.ANALYTICS_ENGINE } else { 'duckdb' }
     PARQUET_STORE = if ($existing.PARQUET_STORE) { $existing.PARQUET_STORE } else { 'minio' }
     SQLITE_SAFE_WRITER_MODE = '0'
@@ -481,7 +492,7 @@ function Write-DockerReleaseKit($imageName) {
     OBJECT_STORAGE_DRIVER = 'minio'
     DATABASE_URL = $databaseUrl
     BUSINESS_OS_DISABLE_SQLITE = '1'
-    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = '0'
+    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = '1'
     ANALYTICS_ENGINE = 'duckdb'
     PARQUET_STORE = 'minio'
     SQLITE_SAFE_WRITER_MODE = '0'
@@ -600,11 +611,19 @@ function Invoke-Start {
   }
   Write-Step 'Stopping retired Docker release containers if they exist...'
   Invoke-Docker -DockerArgs @('compose', '-p', $OldReleaseProjectName, '--env-file', $EnvFile, '-f', $ComposeFile, 'down', '--remove-orphans') -AllowFailure | Out-Null
-  if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -eq 'postgres') -or ($envMap.DATABASE_DRIVER -eq 'postgres')) {
-    Write-Step 'Running Postgres migration profile...'
+  if (($envMap.BUSINESS_OS_DOCKER_DATA_MODE -ne 'postgres') -and ($envMap.DATABASE_DRIVER -ne 'postgres')) {
+    Fail 'Docker release no longer supports SQLite/local runtime mode. Restore a verified Postgres/MinIO backup or run the explicit legacy migration before starting.'
+  }
+  Write-Step 'Starting Postgres, Redis, and MinIO data services...'
+  Invoke-Compose -ComposeArgs @('up', '-d', 'postgres', 'redis-queue', 'redis-cache', 'minio')
+  Start-Sleep -Seconds 2
+  if (Test-PostgresAppSchemaReady $envMap) {
+    Write-Ok 'Postgres live schema is ready. Skipping legacy SQLite migration.'
+  } elseif ($env:BUSINESS_OS_ALLOW_LEGACY_SQLITE_MIGRATION -eq '1') {
+    Write-Step 'Running one-time legacy SQLite migration because BUSINESS_OS_ALLOW_LEGACY_SQLITE_MIGRATION=1...'
     Invoke-Compose -ComposeArgs @('--profile', 'postgres-migrate', 'run', '--rm', 'migrator')
   } else {
-    Fail 'Docker release no longer supports SQLite/local runtime mode. Restore a verified Postgres/MinIO backup or run the explicit legacy migration before starting.'
+    Fail 'Postgres live schema is missing. Restore a verified Docker/Postgres backup first, or run the explicit legacy migration with BUSINESS_OS_ALLOW_LEGACY_SQLITE_MIGRATION=1 if this is an old SQLite data folder.'
   }
   Assert-PostgresCutoverReadyForApp $envMap
   Write-Step 'Starting Business OS Docker release runtime...'

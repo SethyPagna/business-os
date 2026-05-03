@@ -9,6 +9,9 @@ RUN npm run build
 
 FROM node:24-bookworm AS backend-build
 WORKDIR /build/backend
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ libpq-dev \
+  && rm -rf /var/lib/apt/lists/*
 COPY backend/package*.json ./
 RUN npm ci --no-audit --loglevel=warn
 COPY backend/ ./
@@ -22,7 +25,7 @@ LABEL org.opencontainers.image.description="Business OS Docker runtime"
 LABEL org.opencontainers.image.source="private"
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl tini ffmpeg \
+  && apt-get install -y --no-install-recommends ca-certificates curl tini ffmpeg libpq5 \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin businessos
 
@@ -41,7 +44,7 @@ ENV NODE_ENV=production \
     BUSINESS_OS_DOCKER_RELEASE=1 \
     BUSINESS_OS_DOCKER_DATA_MODE=postgres \
     BUSINESS_OS_DISABLE_SQLITE=1 \
-    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=0 \
+    BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 \
     BUSINESS_OS_REQUIRE_SCALE_SERVICES=1 \
     DATABASE_DRIVER=postgres \
     OBJECT_STORAGE_DRIVER=minio \

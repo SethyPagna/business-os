@@ -98,15 +98,15 @@ Example override:
 
 ## Data And Backups
 
-Current source-runtime business data stays under:
+Legacy/source-checkout business data may still exist under:
 
 `business-os-data\organizations\<organization-id> (<business-name>)\`
 
-Do **not** delete `business-os-data` manually when Docker looks mismatched. It is legacy/source data only after the Docker cutover. The final Docker release does not auto-import loose folders because an old folder could overwrite newer Docker data. Use **Settings > Backup**, `run\docker\backup.bat`, `run\docker\restore.bat`, or support-guided migration instead.
+Do **not** delete `business-os-data` manually when Docker looks mismatched. After the Docker cutover it is not the live database; it is legacy/source data or migration evidence only. The Docker release does not auto-import loose folders because an old folder could overwrite newer Docker data. Use **Settings > Backup**, `run\docker\backup.bat`, `run\docker\restore.bat`, or support-guided migration instead.
 
 Google Drive sync is managed in **Settings > Backup**. Use it as a backup/sync target, not as the only copy of the business database.
 
-The Docker release is the no-source-code runtime path. Its required data architecture is Postgres + MinIO + Redis + DuckDB/Parquet. SQLite/local files are not an allowed Docker production mode. If a live route still imports the legacy SQLite database module, Docker startup must fail loudly instead of silently running the wrong database. `BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED` stays `0` until the full repository data-layer cutover is proven.
+The Docker release is the no-source-code runtime path. Its required data architecture is Postgres + MinIO + Redis + DuckDB/Parquet. SQLite/local files are not an allowed Docker production mode. If Postgres/MinIO are not ready, Docker startup fails loudly instead of silently running the wrong database. `BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1` is written only after the route contract and cutover guard pass.
 
 Final data architecture target:
 

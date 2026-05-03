@@ -19,6 +19,19 @@ if defined BUSINESS_OS_REPO_ROOT (
     for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+echo.
+echo [INFO] Business OS is Docker/Postgres/MinIO only now.
+echo        This support launcher is forwarding to run\docker\start.bat.
+echo.
+if exist "%ROOT%\run\docker\start.bat" (
+    call "%ROOT%\run\docker\start.bat" %*
+    exit /b %ERRORLEVEL%
+)
+echo [ERROR] Missing Docker start script: %ROOT%\run\docker\start.bat
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
+exit /b 1
+
 set "LOG_DIR=%ROOT%\ops\runtime\logs"
 set "RUN_LOG=%LOG_DIR%\start-server.log"
 set "ENV_FILE=%ROOT%\backend\.env"
@@ -47,8 +60,9 @@ set "WORKER_RUNTIME=host"
 if not defined REDIS_URL set "REDIS_URL=redis://127.0.0.1:6379"
 if not defined RUNTIME_CACHE_ENABLED set "RUNTIME_CACHE_ENABLED=1"
 if not defined CACHE_REDIS_URL set "CACHE_REDIS_URL=redis://127.0.0.1:6380"
-if not defined DATABASE_DRIVER set "DATABASE_DRIVER=sqlite"
-if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=local"
+if not defined DATABASE_DRIVER set "DATABASE_DRIVER=postgres"
+if not defined BUSINESS_OS_DISABLE_SQLITE set "BUSINESS_OS_DISABLE_SQLITE=1"
+if not defined OBJECT_STORAGE_DRIVER set "OBJECT_STORAGE_DRIVER=minio"
 if not defined SQLITE_BUSY_TIMEOUT_MS set "SQLITE_BUSY_TIMEOUT_MS=30000"
 if not defined SQLITE_CACHE_SIZE_KB set "SQLITE_CACHE_SIZE_KB=196608"
 if not defined SQLITE_MMAP_SIZE_MB set "SQLITE_MMAP_SIZE_MB=1024"

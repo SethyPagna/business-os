@@ -13,9 +13,9 @@
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
-const Database = require('better-sqlite3')
 const express = require('express')
 const { db, ensureCoreDataInvariants } = require('../../database')
+const { openReadonlySqliteDatabase } = require('../../legacy/sqliteBackupReader')
 const {
   UPLOADS_PATH,
   DB_PATH,
@@ -371,12 +371,13 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
   const queueReady = queue?.available === true || (queue?.driver === 'bullmq' && queue?.reason === 'ready')
   const cutoverReadiness = analyzePostgresCutoverReadiness()
   const migrationEngineReady = cutoverReadiness.ready
+  const postgresLive = DATABASE_DRIVER === 'postgres' && OBJECT_STORAGE_DRIVER === 'minio' && BUSINESS_OS_DISABLE_SQLITE
   return {
-    mode: migrationEngineReady ? 'postgres_cutover_ready' : 'sqlite_authoritative',
+    mode: postgresLive && migrationEngineReady ? 'postgres_minio_live' : 'migration_required',
     authoritativeData: {
-      databaseDriver: 'sqlite',
-      databasePath: DB_PATH,
-      uploadsPath: UPLOADS_PATH,
+      databaseDriver: DATABASE_DRIVER || 'postgres',
+      databasePath: DATABASE_DRIVER === 'postgres' ? 'Postgres service: business_os/postgres' : DB_PATH,
+      uploadsPath: OBJECT_STORAGE_DRIVER === 'minio' ? `MinIO bucket: ${S3_BUCKET}` : UPLOADS_PATH,
       importsPath: IMPORTS_PATH,
       storageRoot: STORAGE_ROOT,
       dataRoot: DATA_ROOT,
@@ -409,9 +410,9 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
     automation: getMigrationSafetyState(),
     canPrepareMigration: true,
     canRunMigration: migrationEngineReady,
-    blockedReason: migrationEngineReady
+    blockedReason: postgresLive && migrationEngineReady
       ? ''
-      : `SQLite/local files remain authoritative. ${cutoverReadiness.blockerCount} live SQLite data-layer references remain. Docker production must stay locked until these routes/services move behind Postgres repositories and MinIO storage adapters.`,
+      : `Postgres/MinIO live mode is not fully verified. ${cutoverReadiness.blockerCount} live SQLite data-layer blockers remain or runtime drivers are not set to Postgres/MinIO.`,
     cutoverReadiness: {
       ready: cutoverReadiness.ready,
       blockerCount: cutoverReadiness.blockerCount,
@@ -507,7 +508,7 @@ function readBackupTablesFromDataRoot(sourceRoot) {
   if (!root) throw new Error(`No Business OS data folder was found in "${sourceRoot}"`)
 
   const dbPath = path.join(root, 'db', 'business.db')
-  const sourceDb = new Database(dbPath, { readonly: true, fileMustExist: true })
+  const sourceDb = openReadonlySqliteDatabase(dbPath)
 
   try {
     const customTables = sourceDb.prepare(`SELECT * FROM ${q('custom_tables')}`).all()

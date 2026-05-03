@@ -166,7 +166,7 @@ function Get-ComposeContainers($docker, $service) {
 
 function Test-WorkerContainerReady($docker, $container, $workerScript) {
   if (-not $container) { return $false }
-  $script = "test -f node_modules/better-sqlite3/package.json && find node_modules/better-sqlite3 -name better_sqlite3.node -print -quit | grep -q . && ps -ef | grep '[s]rc/workers/$workerScript' >/dev/null"
+  $script = "ps -ef | grep '[s]rc/workers/$workerScript' >/dev/null"
   & $docker exec $container sh -lc $script *> $null
   return $LASTEXITCODE -eq 0
 }
@@ -236,23 +236,9 @@ if ($LASTEXITCODE -ne 0) { Fail 'Runtime bootstrap failed. Open Docker Desktop, 
 $dockerEnvMap = Read-EnvFile $DockerEnv
 $importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 2 }
 $mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
-$databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'sqlite' }
+$databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'postgres' }
 if ($databaseDriver.Trim().ToLowerInvariant() -eq 'sqlite') {
-  if ($importWorkerReplicas -gt 1) {
-    Write-Warn 'SQLite mode supports one import writer. Capping import-worker replicas to 1 for data safety.'
-  }
-  if ($mediaWorkerReplicas -gt 1) {
-    Write-Warn 'SQLite mode keeps media workers conservative so metadata writes do not starve the app.'
-  }
-  $importWorkerReplicas = 1
-  $mediaWorkerReplicas = [Math]::Min(2, $mediaWorkerReplicas)
-  $env:IMPORT_WORKER_REPLICAS = '1'
-  $env:IMPORT_QUEUE_CONCURRENCY = '1'
-  $env:MEDIA_WORKER_REPLICAS = [string]$mediaWorkerReplicas
-  $pauseMs = 0
-  if (-not [int]::TryParse([string]$env:IMPORT_BATCH_PAUSE_MS, [ref]$pauseMs) -or $pauseMs -lt 50) {
-    $env:IMPORT_BATCH_PAUSE_MS = '50'
-  }
+  Fail 'SQLite/local runtime is retired. Use Start Business OS.bat or run\docker\start.bat for the Docker/Postgres/MinIO runtime.'
 }
 $importWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $importWorkerReplicas))
 $mediaWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $mediaWorkerReplicas))
@@ -262,8 +248,9 @@ if (-not $docker) { Fail 'Docker CLI was not found.' }
 $env:DOCKER_CONFIG = $DockerConfig
 $env:MINIO_LICENSE_HOST_FILE = Join-Path $Root 'ops\runtime\secrets\minio.license'
 $env:CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $tokenFile
-$env:DATABASE_DRIVER = 'sqlite'
-$env:OBJECT_STORAGE_DRIVER = 'local'
+$env:DATABASE_DRIVER = 'postgres'
+$env:OBJECT_STORAGE_DRIVER = 'minio'
+$env:BUSINESS_OS_DISABLE_SQLITE = '1'
 $env:BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
 $env:PUBLIC_BASE_URL = $publicUrl
 $env:CLOUDFLARE_PUBLIC_URL = $publicUrl

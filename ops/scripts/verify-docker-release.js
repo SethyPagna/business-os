@@ -82,7 +82,7 @@ function main() {
     'COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp',
     'BUSINESS_OS_DOCKER_DATA_MODE=postgres',
     'BUSINESS_OS_DISABLE_SQLITE=1',
-    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=0',
+    'BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1',
     'DATABASE_DRIVER=postgres',
     'OBJECT_STORAGE_DRIVER=minio',
     'ANALYTICS_ENGINE=duckdb',

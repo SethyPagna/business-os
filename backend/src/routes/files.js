@@ -71,14 +71,14 @@ router.post('/upload', authToken, requirePermission('settings'), routeRateLimit(
   }
 })
 
-router.delete('/:id', authToken, requirePermission('settings'), (req, res) => {
+router.delete('/:id', authToken, requirePermission('settings'), async (req, res) => {
   try {
     const actor = getAuditActor(req)
     const assetId = parseFileAssetId(req.params.id)
     const current = getFileAssetById(assetId)
     if (!current) return err(res, 'File not found', 404)
     assertUpdatedAtMatch('file asset', current, getExpectedUpdatedAt(req.body || req.query || {}))
-    const asset = deleteFileAsset(assetId)
+    const asset = await deleteFileAsset(assetId)
     audit(actor.userId, actor.userName, 'delete', 'file_asset', asset.id, {
       original_name: asset.original_name,
       public_path: asset.public_path,

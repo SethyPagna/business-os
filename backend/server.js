@@ -32,12 +32,13 @@ if (process.env.BUSINESS_OS_WORKER_ROLE === 'migrator') {
  * 2. Mount security/request policy middleware that applies to every request.
  * 3. Mount health, API, transfer alias, and SPA fallback routes.
  * 4. Attach the WebSocket server to the same HTTP listener.
- * 5. Register shutdown handlers so SQLite always closes cleanly.
+ * 5. Register shutdown handlers so Postgres connections close cleanly.
  */
 
 const fs = require('fs')
 const http = require('http')
 const path = require('path')
+const { pipeline } = require('stream')
 const cors = require('cors')
 const express = require('express')
 const { requestContextMiddleware } = require('./src/requestContext')
@@ -46,6 +47,7 @@ const { db, runDatabaseMaintenance } = require('./src/database')
 const { wss_clients } = require('./src/helpers')
 const { getRuntimeVersion } = require('./src/runtimeVersion')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime')
+const { getObjectStream, isMinioEnabled } = require('./src/objectStore')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
@@ -74,6 +76,7 @@ const {
   ANALYTICS_ENGINE,
   PARQUET_STORE,
   BUSINESS_OS_DISABLE_SQLITE,
+  S3_BUCKET,
 } = require('./src/config')
 
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
@@ -120,10 +123,28 @@ function applyCoreMiddleware(target) {
 }
 
 function mountStaticAssets(target) {
-  // Uploads stay on disk outside the bundled frontend and are served directly.
+  // Uploads live in MinIO for Docker releases and on disk for legacy local mode.
   // The compiled SPA is only mounted when a frontend build exists.
-  fs.mkdirSync(UPLOADS_PATH, { recursive: true })
-  target.use('/uploads', express.static(UPLOADS_PATH, { maxAge: '7d', setHeaders: setUploadStaticHeaders }))
+  if (isMinioEnabled()) {
+    target.get('/uploads/*', async (req, res) => {
+      try {
+        const key = `uploads/${String(req.params[0] || '').replace(/^\/+/, '')}`
+        const object = await getObjectStream(key)
+        if (!object?.body) return res.status(404).type('text/plain; charset=utf-8').send('File not found')
+        if (object.contentType) res.setHeader('Content-Type', object.contentType)
+        if (object.contentLength) res.setHeader('Content-Length', String(object.contentLength))
+        setUploadStaticHeaders(res, key)
+        pipeline(object.body, res, (error) => {
+          if (error && !res.headersSent) res.status(500).end()
+        })
+      } catch (_) {
+        res.status(404).type('text/plain; charset=utf-8').send('File not found')
+      }
+    })
+  } else {
+    fs.mkdirSync(UPLOADS_PATH, { recursive: true })
+    target.use('/uploads', express.static(UPLOADS_PATH, { maxAge: '7d', setHeaders: setUploadStaticHeaders }))
+  }
   if (!FRONTEND_DIST_EXISTS) return
 
   target.get(['/', '/index.html'], (req, res, next) => {
@@ -247,18 +268,20 @@ function mountErrorHandler(target) {
 
 function getStartupBanner() {
   // The launcher scripts and manual operators rely on this banner to confirm
-  // which DB/uploads/frontend paths the server actually resolved.
+  // which live drivers/frontend paths the server actually resolved.
   const frontendLine = FRONTEND_DIST_EXISTS
     ? FRONTEND_DIST
     : 'not built - run: cd frontend && npm run build'
+  const databaseLine = DATABASE_DRIVER === 'postgres' ? 'Postgres service: business_os/postgres' : DB_PATH
+  const uploadsLine = OBJECT_STORAGE_DRIVER === 'minio' ? `MinIO bucket: ${S3_BUCKET}` : UPLOADS_PATH
 
   return `
 ==========================================
   Business OS  |  Port ${PORT}
   Node:     ${process.version}
   Storage:  ${STORAGE_ROOT}
-  DB:       ${DB_PATH}
-  Uploads:  ${UPLOADS_PATH}
+  DB:       ${databaseLine}
+  Uploads:  ${uploadsLine}
   Token:    ${SYNC_TOKEN ? '(legacy token set)' : '(signed browser sessions)'}
   Frontend: ${frontendLine}
 ==========================================
