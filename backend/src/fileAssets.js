@@ -514,7 +514,7 @@ async function backfillUploadAssets() {
 }
 
 async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
-  repairMissingUploadReferences(db)
+  repairMissingUploadReferences(getDb())
   await backfillUploadAssets()
   return listAssetRows(search, mediaType).map(serializeAssetRow)
 }

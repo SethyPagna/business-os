@@ -63,7 +63,7 @@ function getSettingsUpdatedAt() {
     return normalizeUpdatedAt(new Date().toISOString()) || null
   }
   const row = db.prepare(`
-    SELECT MAX(COALESCE(updated_at, CURRENT_TIMESTAMP)) AS updated_at
+    SELECT MAX(COALESCE(updated_at, CURRENT_TIMESTAMP::text)) AS updated_at
     FROM settings
   `).get()
   return normalizeUpdatedAt(row?.updated_at) || normalizeUpdatedAt(new Date().toISOString()) || null

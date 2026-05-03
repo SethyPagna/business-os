@@ -456,7 +456,11 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
         (
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+          SELECT COALESCE(
+            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+              FILTER (WHERE bs2.branch_id IS NOT NULL),
+            '[]'::json
+          )::text
           FROM branch_stock bs2
           JOIN branches b2 ON b2.id = bs2.branch_id
           WHERE bs2.product_id = p.id
@@ -607,7 +611,11 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
         COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0)               AS cogs_usd,
         COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0)               AS cogs_khr,
         (
-          SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+          SELECT COALESCE(
+            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+              FILTER (WHERE bs2.branch_id IS NOT NULL),
+            '[]'::json
+          )::text
           FROM branch_stock bs2
           JOIN branches b2 ON b2.id = bs2.branch_id
           WHERE bs2.product_id = p.id

@@ -16,6 +16,21 @@ const FORBIDDEN_PATTERNS = [
     description: 'Live source opens a direct embedded database connection',
     regex: /\bnew\s+Database\s*\(/,
   },
+  {
+    code: 'retired_sqlite_time_function',
+    description: 'Live source uses retired SQLite time formatting instead of Postgres date functions',
+    regex: /\bstrftime\s*\(/i,
+  },
+  {
+    code: 'retired_sqlite_string_aggregate',
+    description: 'Live source uses retired SQLite GROUP_CONCAT instead of Postgres STRING_AGG',
+    regex: /\bGROUP_CONCAT\s*\(/i,
+  },
+  {
+    code: 'retired_sqlite_json_aggregate',
+    description: 'Live source uses retired SQLite JSON aggregate helpers instead of Postgres JSON functions',
+    regex: /\bjson_group_array\s*\(|\bjson_object\s*\(/i,
+  },
 ]
 
 function normalizeRelative(filePath) {

@@ -8,6 +8,17 @@ const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 
+function periodExpression(alias, granularity = 'day') {
+  const createdAt = `NULLIF(${alias}.created_at, '')::timestamptz`
+  if (granularity === 'week') return `to_char(${createdAt}, 'IYYY-"W"IW')`
+  if (granularity === 'month') return `to_char(${createdAt}, 'YYYY-MM')`
+  return `to_char(${createdAt}, 'YYYY-MM-DD')`
+}
+
+function hourExpression(column = 'created_at') {
+  return `to_char(NULLIF(${column}, '')::timestamptz, 'HH24')`
+}
+
 function normalizeImportedTimestamp(value) {
   const raw = String(value || '').trim()
   if (!raw) return null
@@ -648,13 +659,12 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, cashier, branchId, status, limit = 100 } = req.query
   // Fetch sales with all items in a single query (avoids N+1 problem)
   let q = `SELECT s.*,
-             c.membership_number AS customer_membership_number,
-             COALESCE(r.refund_usd, 0) AS refund_usd,
-             COALESCE(r.refund_khr, 0) AS refund_khr,
-             COALESCE(r.return_count, 0) AS return_count,
-             GROUP_CONCAT(si.product_name || ' x' || si.quantity, ', ') AS items_summary,
-             COALESCE(json_group_array(CASE 
-               WHEN si.id IS NOT NULL THEN json_object(
+             MAX(c.membership_number) AS customer_membership_number,
+             COALESCE(MAX(r.refund_usd), 0) AS refund_usd,
+             COALESCE(MAX(r.refund_khr), 0) AS refund_khr,
+             COALESCE(MAX(r.return_count), 0) AS return_count,
+             STRING_AGG(si.product_name || ' x' || si.quantity, ', ' ORDER BY si.id) FILTER (WHERE si.id IS NOT NULL) AS items_summary,
+             COALESCE(json_agg(json_build_object(
                  'id', si.id,
                  'sale_id', si.sale_id,
                  'product_id', si.product_id,
@@ -668,8 +678,8 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
                  'total_khr', si.total_khr,
                  'branch_id', si.branch_id,
                  'branch_name', bsi.name
-               ) ELSE NULL END
-             ) FILTER (WHERE si.id IS NOT NULL), '[]') AS items_json
+               )
+             ) FILTER (WHERE si.id IS NOT NULL), '[]'::json)::text AS items_json
            FROM sales s
            LEFT JOIN customers c ON c.id = s.customer_id
            LEFT JOIN (
@@ -981,16 +991,8 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, granularity = 'day' } = req.query
   if (!startDate || !endDate) return err(res, 'startDate and endDate required')
 
-  const saleGroupExpr = {
-    day:   "strftime('%Y-%m-%d', s.created_at)",
-    week:  "strftime('%Y-W%W', s.created_at)",
-    month: "strftime('%Y-%m', s.created_at)",
-  }[granularity] || "strftime('%Y-%m-%d', s.created_at)"
-  const returnGroupExpr = {
-    day:   "strftime('%Y-%m-%d', r.created_at)",
-    week:  "strftime('%Y-W%W', r.created_at)",
-    month: "strftime('%Y-%m', r.created_at)",
-  }[granularity] || "strftime('%Y-%m-%d', r.created_at)"
+  const saleGroupExpr = periodExpression('s', granularity)
+  const returnGroupExpr = periodExpression('r', granularity)
 
   const periodData = db.prepare(`
     WITH sale_costs AS (
@@ -1313,7 +1315,7 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
     `).all(startDate, endDate, startDate, endDate),
     hourlyDist:     db.prepare(`
       SELECT
-        strftime('%H', created_at) AS hour,
+        ${hourExpression('created_at')} AS hour,
         COUNT(*) AS count,
         COALESCE(SUM(subtotal_usd - discount_usd - COALESCE(membership_discount_usd,0)),0) AS revenue_usd
       FROM sales

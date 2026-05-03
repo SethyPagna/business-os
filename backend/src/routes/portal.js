@@ -1042,7 +1042,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       COALESCE(s.membership_discount_usd, 0) AS membership_discount_usd,
       COALESCE(s.membership_discount_khr, 0) AS membership_discount_khr,
       COALESCE(s.membership_points_redeemed, 0) AS membership_points_redeemed,
-      GROUP_CONCAT(si.product_name || ' x' || si.quantity, ', ') AS items_summary
+      STRING_AGG(si.product_name || ' x' || si.quantity, ', ' ORDER BY si.id) FILTER (WHERE si.id IS NOT NULL) AS items_summary
     FROM sales s
     LEFT JOIN sale_items si ON si.sale_id = s.id
     WHERE
@@ -1071,7 +1071,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       r.status,
       r.total_refund_usd,
       r.total_refund_khr,
-      GROUP_CONCAT(ri.product_name || ' x' || ri.quantity, ', ') AS items_summary
+      STRING_AGG(ri.product_name || ' x' || ri.quantity, ', ' ORDER BY ri.id) FILTER (WHERE ri.id IS NOT NULL) AS items_summary
     FROM returns r
     LEFT JOIN return_items ri ON ri.return_id = r.id
     WHERE
