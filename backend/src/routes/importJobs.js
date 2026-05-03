@@ -168,7 +168,7 @@ router.post('/', authToken, requireImportPermission, routeRateLimit({ name: 'imp
       type,
       actor,
       policy: parsePolicy(req),
-      queueDriver: getQueueStatus().driver || 'sqlite',
+      queueDriver: getQueueStatus().driver || 'bullmq',
     })
     ok(res, { job })
   } catch (error) {

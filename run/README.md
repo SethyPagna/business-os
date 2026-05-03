@@ -18,14 +18,14 @@ All user-facing `.bat` files keep the window open and print the next step or rep
 
 ## Docker Release Commands
 
-These are for a private Docker release or support:
+These are for the local Docker release or support:
 
-- `run\docker\install.bat` installs/pulls the Docker release.
+- `run\docker\install.bat` installs the local Docker image bundle.
 - `run\docker\start.bat` starts Docker release services.
-- `run\docker\update.bat` backs up, pulls, migrates, checks health, and rolls back when possible.
+- `run\docker\update.bat` backs up, reloads the local image bundle, checks health, and rolls back when possible.
 - `run\docker\backup.bat` backs up Docker release data from Postgres, MinIO, settings, users/roles, and runtime metadata.
 - `run\docker\restore.bat` restores a selected verified backup.
-- `run\docker\doctor.bat` diagnoses Docker, ports, registry login, Cloudflare, database, workers, and storage.
+- `run\docker\doctor.bat` diagnoses Docker, ports, local image bundles, Cloudflare, database, workers, and storage.
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.
 
 ## Support-Only / Legacy

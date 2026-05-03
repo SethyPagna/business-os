@@ -44,7 +44,7 @@ const runningLocalJobs = new Set()
 let bullConnection = null
 let bullQueues = { analyze: null, apply: null }
 let bullWorkers = { analyze: null, apply: null }
-let bullStatus = { driver: 'sqlite', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
+let bullStatus = { driver: 'bullmq', available: false, reason: 'not_checked', producerReady: false, workerActive: false }
 
 function nowIso() {
   return new Date().toISOString()
@@ -145,7 +145,7 @@ function markStoredImportFilesCancelled(jobId, reason = 'Import cleanup removed 
     UPDATE import_job_files
     SET status = 'cancelled',
         error_message = COALESCE(error_message, ?),
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
     WHERE job_id = ? AND status IN ('stored', 'queued_media', 'processing')
   `).run(reason, jobId)
 }
@@ -164,8 +164,8 @@ function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
     SET status = 'cancelled',
         phase = 'cancelled',
         cancel_requested = 1,
-        finished_at = COALESCE(finished_at, datetime('now')),
-        updated_at = datetime('now')
+        finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(row.id)
   return db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(row.id)
@@ -210,7 +210,7 @@ function clearImportRuntimeFiles() {
   }
 }
 
-function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriver = 'sqlite' } = {}) {
+function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriver = 'bullmq' } = {}) {
   ensureImportRoot()
   const id = `imp_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`
   ensureDir(getJobRoot(id))
@@ -218,7 +218,7 @@ function createImportJob({ type = 'products', actor = {}, policy = {}, queueDriv
     INSERT INTO import_jobs (
       id, type, status, phase, queue_driver, policy_json,
       created_by_id, created_by_name, created_at, updated_at
-    ) VALUES (?, ?, 'pending', 'created', ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ) VALUES (?, ?, 'pending', 'created', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     id,
     String(type || 'products').trim().toLowerCase(),
@@ -240,7 +240,7 @@ function listImportJobs({ limit = 50 } = {}) {
   return db.prepare(`
     SELECT *
     FROM import_jobs
-    ORDER BY datetime(created_at) DESC, id DESC
+    ORDER BY created_at DESC, id DESC
     LIMIT ?
   `).all(Math.max(1, Math.min(200, Number(limit || 50)))).map((row) => decorateImportJobRow(reconcileImportJobRow(row))).filter(Boolean)
 }
@@ -267,7 +267,7 @@ function updateJob(id, patch = {}) {
   const entries = Object.entries(patch).filter(([key]) => allowed.includes(key))
   if (!entries.length) return getImportJob(id)
   const assignments = entries.map(([key]) => `${key} = @${key}`).join(', ')
-  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = datetime('now') WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
+  db.prepare(`UPDATE import_jobs SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id, ...Object.fromEntries(entries) })
   return getImportJob(id)
 }
 
@@ -903,7 +903,7 @@ function addJobFile(jobId, file = {}, kind = 'csv', relativePath = '') {
     INSERT INTO import_job_files (
       job_id, kind, original_name, stored_path, relative_path, mime_type, byte_size,
       status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'stored', datetime('now'), datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'stored', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     jobId,
     kind,
@@ -961,14 +961,14 @@ async function waitForQueuedImportMedia(jobId) {
 function finalizeSkippedImportImages(jobId) {
   const result = db.prepare(`
     UPDATE import_job_files
-    SET status = 'skipped', error_message = COALESCE(error_message, 'Image was uploaded but not referenced by the applied import rows.'), updated_at = datetime('now')
+    SET status = 'skipped', error_message = COALESCE(error_message, 'Image was uploaded but not referenced by the applied import rows.'), updated_at = CURRENT_TIMESTAMP
     WHERE job_id = ? AND kind = 'image' AND status = 'stored'
   `).run(jobId)
   const skipped = Number(result.changes || 0)
   if (skipped > 0) {
     db.prepare(`
       UPDATE import_jobs
-      SET processed_images = processed_images + ?, updated_at = datetime('now')
+      SET processed_images = processed_images + ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(skipped, jobId)
   }
@@ -1102,12 +1102,12 @@ function syncProductImageGallery(productId, gallery = []) {
   const normalized = clean.slice(0, 5)
   db.prepare('DELETE FROM product_images WHERE product_id = ?').run(productId)
   if (!normalized.length) {
-    db.prepare("UPDATE products SET image_path = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+    db.prepare("UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
     return []
   }
   const insert = db.prepare('INSERT INTO product_images (product_id, image_path, sort_order) VALUES (?, ?, ?)')
   normalized.forEach((imagePath, index) => insert.run(productId, imagePath, index))
-  db.prepare("UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?").run(normalized[0], productId)
+  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
   return normalized
 }
 
@@ -1123,7 +1123,7 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
   const parent = db.prepare('SELECT id, name FROM products WHERE id = ?').get(parentId)
   if (!parent) throw new Error('Parent product not found')
   if (childId && Number(parent.id) === Number(childId)) throw new Error('A product cannot be its own parent')
-  db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = datetime('now') WHERE id = ?").run(parent.id)
+  db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(parent.id)
   return parent
 }
 
@@ -1251,14 +1251,14 @@ async function copyImageIntoAssets(sourcePath, originalName, actor = {}, { impor
     },
   })
   if (importFileId) {
-    db.prepare("UPDATE import_job_files SET status = 'queued_media', updated_at = datetime('now') WHERE id = ?").run(importFileId)
+    db.prepare("UPDATE import_job_files SET status = 'queued_media', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(importFileId)
   }
   try {
     await enqueueMediaOptimization({ storedName, source: 'bulk_import', importJobId, importFileId })
   } catch (error) {
     console.warn(`[media-queue] Could not enqueue ${storedName}: ${error?.message || error}`)
     if (importFileId) {
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?")
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(error?.message || 'Media queue unavailable', importFileId)
     }
     throw error
@@ -1297,18 +1297,18 @@ async function resolveImageGallery(row, imageLookup, actor, jobId, imageAssetCac
       imageAssetCache.set(cacheKey, copied)
       gallery.push(copied.publicPath)
       if (!copied.mediaQueued) {
-        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+        db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(file.id)
         db.prepare(`
           UPDATE import_jobs
-          SET processed_images = processed_images + 1, updated_at = datetime('now')
+          SET processed_images = processed_images + 1, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `).run(jobId)
       }
     } catch (error) {
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
       db.prepare(`
         UPDATE import_jobs
-        SET failed_images = failed_images + 1, updated_at = datetime('now')
+        SET failed_images = failed_images + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(jobId)
       addJobError(jobId, {
@@ -1334,8 +1334,8 @@ function ensureSettingOptionMap(key) {
 
 function upsertSettingJson(key, value) {
   db.prepare(`
-    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run(key, stringify(value))
 }
 
@@ -1490,7 +1490,7 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -1655,7 +1655,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
           created_at: nowIso(),
         })
         if (importActionLabel === 'create_variant') {
-          db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+          db.prepare("UPDATE products SET is_group = 1, parent_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
         }
       }
       seedBranchRows(productId, ctx)
@@ -1732,7 +1732,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         discount_enabled = ?, discount_type = ?, discount_percent = ?, discount_amount_usd = ?, discount_amount_khr = ?,
         discount_label = ?, discount_badge_color = ?, discount_starts_at = ?, discount_ends_at = ?,
         purchase_price_usd = ?, purchase_price_khr = ?, cost_price_usd = ?, cost_price_khr = ?,
-        low_stock_threshold = ?, is_group = ?, parent_id = ?, updated_at = datetime('now')
+        low_stock_threshold = ?, is_group = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       resolved.category,
@@ -1802,7 +1802,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       SET processed_rows = processed_rows + ?,
           failed_rows = ?,
           summary_json = ?,
-          updated_at = datetime('now')
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(pendingProgressRows, failed, stringify({
       imported,
@@ -1828,12 +1828,12 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
     const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
-      VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
         attempts = attempts + 1,
-        started_at = datetime('now'),
-        updated_at = datetime('now')
+        started_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
     for (const sourceRow of batchRows) {
@@ -1864,7 +1864,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       if (pendingProgressRows >= 25) flushProgress()
     }
     flushProgress()
-    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(batchId)
     if (totalRows) {
       updateJob(jobId, {
         processed_rows: Math.min(totalRows, offset + batchRows.length),
@@ -2057,7 +2057,7 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
     const product = byKey.get(matchKey)
     if (!product) {
       failed += 1
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run('No active product matched this image filename.', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run('No active product matched this image filename.', file.id)
       updateJob(jobId, { failed_images: failed })
       addJobError(jobId, {
         fileName: file.relative_path || file.original_name,
@@ -2073,12 +2073,12 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
         const gallery = loadCurrentGallery(product.id, product.image_path)
         syncProductImageGallery(product.id, [...gallery, publicPath])
         if (!copied.mediaQueued) {
-          db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(file.id)
+          db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(file.id)
           db.prepare(`
             UPDATE import_jobs
             SET processed_images = processed_images + 1,
                 summary_json = ?,
-                updated_at = datetime('now')
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
           `).run(stringify({ imported: 0, updated: 0, images_matched: imagesMatched + 1, failed }), jobId)
         }
@@ -2086,7 +2086,7 @@ async function processImageOnlyFiles({ jobId, imageFiles, actor }) {
       imagesMatched += 1
     } catch (error) {
       failed += 1
-      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = datetime('now') WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
+      db.prepare("UPDATE import_job_files SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(error?.message || 'Image processing failed', file.id)
       updateJob(jobId, { failed_images: failed })
       addJobError(jobId, {
         fileName: file.relative_path || file.original_name,
@@ -2159,12 +2159,12 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
     const batchIndex = Number(batch?.batchIndex || Math.floor(offset / IMPORT_ROW_BATCH_SIZE))
     const batchResult = db.prepare(`
       INSERT INTO import_job_batches (job_id, batch_index, start_row, end_row, status, attempts, started_at, updated_at)
-      VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
         attempts = attempts + 1,
-        started_at = datetime('now'),
-        updated_at = datetime('now')
+        started_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
     const batchId = batchResult.lastInsertRowid || db.prepare('SELECT id FROM import_job_batches WHERE job_id = ? AND batch_index = ?').get(jobId, batchIndex)?.id
 
@@ -2194,11 +2194,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
               || (incoming.phone ? findCustomerByPhone.get(incoming.phone) : null)
               || findCustomerByName.get(incoming.name)
             if (!existing) {
-              db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.membership_number, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE customers SET name=?, membership_number=?, phone=?, email=?, address=?, company=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.membership_number, incoming.membership_number, fieldRules.membership_number, defaultRule),
@@ -2224,11 +2224,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
             if (!incoming.name) throw new Error('name is required')
             existing = findSupplierByName.get(incoming.name) || (incoming.phone ? findSupplierByPhone.get(incoming.phone) : null)
             if (!existing) {
-              db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO suppliers (name, phone, email, address, company, contact_person, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.phone, incoming.email, incoming.address, incoming.company, incoming.contact_person, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE suppliers SET name=?, phone=?, email=?, address=?, company=?, contact_person=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
@@ -2255,11 +2255,11 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
             if (!incoming.name && !incoming.phone) throw new Error('driver name or phone is required')
             existing = findDeliveryByName.get(incoming.name) || (incoming.phone ? findDeliveryByPhone.get(incoming.phone) : null)
             if (!existing) {
-              db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,datetime(\'now\'))')
+              db.prepare('INSERT INTO delivery_contacts (name, phone, area, address, notes, updated_at) VALUES (?,?,?,?,?,\'now\')')
                 .run(incoming.name, incoming.phone, incoming.area, incoming.address, incoming.notes)
               imported += 1
             } else if (mode !== 'skip') {
-              db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=datetime(\'now\') WHERE id=?')
+              db.prepare('UPDATE delivery_contacts SET name=?, phone=?, area=?, address=?, notes=?, updated_at=\'now\' WHERE id=?')
                 .run(
                   resolveContactValue(existing.name, incoming.name, fieldRules.name, defaultRule),
                   resolveContactValue(existing.phone, incoming.phone, fieldRules.phone, defaultRule),
@@ -2289,7 +2289,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
       failed_rows: failed,
       summary_json: stringify({ imported, updated, failed }),
     })
-    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(batchId)
+    db.prepare("UPDATE import_job_batches SET status = 'completed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(batchId)
     await yieldImportWorker()
   }
 
@@ -2540,7 +2540,7 @@ async function processSalesRowBatches({ jobId, rowBatches, totalRows = null, act
             branch_id, branch_name, subtotal_usd, subtotal_khr, total_usd, total_khr,
             payment_method, payment_currency, amount_paid_usd, amount_paid_khr,
             sale_status, notes, created_at, updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, datetime('now')), datetime('now'))
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
         `).run(
           sale.receiptNumber,
           actor.userId || null,
@@ -2715,7 +2715,7 @@ async function extractZipImages(jobId, zipFile) {
     })
   })
 
-  db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = datetime('now') WHERE id = ?").run(zipFile.id)
+  db.prepare("UPDATE import_job_files SET status = 'processed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(zipFile.id)
   return added
 }
 
@@ -2870,9 +2870,8 @@ function queueNameForMode(mode = 'analyze') {
 }
 
 function configuredQueueDriver() {
-  if (JOB_QUEUE_DRIVER === 'sqlite') return 'sqlite'
   if (JOB_QUEUE_DRIVER === 'bullmq') return 'bullmq'
-  return BUSINESS_OS_REQUIRE_SCALE_SERVICES ? 'bullmq' : 'auto'
+  return 'bullmq'
 }
 
 function getImportQueueConcurrency() {
@@ -2925,10 +2924,6 @@ async function getBullConnection() {
 
 async function initializeBullQueue() {
   if (hasBullProducer()) return bullStatus
-  if (JOB_QUEUE_DRIVER === 'sqlite') {
-    bullStatus = { driver: 'sqlite', available: false, reason: 'sqlite_configured', producerReady: false, workerActive: hasBullWorkers() }
-    return bullStatus
-  }
   try {
     const { Queue } = require('bullmq')
     const connection = await getBullConnection()
@@ -2938,7 +2933,7 @@ async function initializeBullQueue() {
   } catch (error) {
     bullConnection = null
     bullQueues = { analyze: null, apply: null }
-    bullStatus = { driver: 'sqlite', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: hasBullWorkers() }
+    bullStatus = { driver: 'bullmq', available: false, reason: error?.message || 'Redis unavailable', producerReady: false, workerActive: hasBullWorkers() }
     if (JOB_QUEUE_DRIVER === 'bullmq') {
       console.warn(`[import-jobs] BullMQ unavailable: ${bullStatus.reason}`)
     }
@@ -3016,9 +3011,13 @@ async function enqueueImportJob(jobId, { mode = 'analyze', force = false } = {})
     })
     throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
   }
-  updateJob(jobId, { queue_driver: 'sqlite', status: 'queued', phase: normalizedMode === 'apply' ? 'apply_queued' : 'analyze_queued' })
-  setImmediate(() => { runLocalJob(jobId, normalizedMode).catch(() => {}) })
-  return getImportJob(jobId)
+  updateJob(jobId, {
+    status: 'failed',
+    phase: 'queue_unavailable',
+    last_error: `Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`,
+    finished_at: nowIso(),
+  })
+  throw new Error(`Required import queue is unavailable: ${status.reason || 'Redis/BullMQ unavailable'}`)
 }
 
 async function cancelImportJob(jobId) {
@@ -3059,7 +3058,7 @@ function listCancellableImportJobs() {
     SELECT *
     FROM import_jobs
     WHERE lower(status) IN (${CANCELLABLE_IMPORT_STATUSES.map(() => '?').join(',')})
-    ORDER BY datetime(created_at) ASC, id ASC
+    ORDER BY created_at ASC, id ASC
   `).all(...CANCELLABLE_IMPORT_STATUSES)
 }
 
@@ -3101,15 +3100,15 @@ async function cancelAllImportJobs({ reason = 'Background import cancelled by sy
         status = CASE WHEN lower(status) = 'running' THEN 'cancelling' ELSE 'cancelled' END,
         phase = CASE WHEN lower(status) = 'running' THEN 'cancel_requested' ELSE 'cancelled' END,
         last_error = ?,
-        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE datetime('now') END,
-        updated_at = datetime('now')
+        finished_at = CASE WHEN lower(status) = 'running' THEN finished_at ELSE CURRENT_TIMESTAMP END,
+        updated_at = CURRENT_TIMESTAMP
     WHERE id IN (${placeholders})
   `).run(reason, ...jobIds)
   db.prepare(`
     UPDATE import_job_files
     SET status = 'cancelled',
         error_message = COALESCE(error_message, ?),
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
     WHERE job_id IN (${placeholders}) AND status IN ('stored', 'queued_media')
   `).run(reason, ...jobIds)
   const remaining = await waitForImportJobsToStop(jobIds, waitMs)
@@ -3191,25 +3190,20 @@ async function recoverImportJobs({ forceQueue = false } = {}) {
     SELECT id, phase
     FROM import_jobs
     WHERE status IN ('running', 'queued', 'cancelling')
-    ORDER BY datetime(created_at) ASC
+    ORDER BY created_at ASC
     LIMIT 20
   `).all()
   for (const row of rows) {
     const mode = String(row.phase || '').includes('apply') ? 'apply' : 'analyze'
-    if (forceQueue || configuredQueueDriver() !== 'sqlite') {
-      try {
-        await enqueueImportJob(row.id, { mode, force: true })
-      } catch (error) {
-        updateJob(row.id, {
-          status: 'queued',
-          phase: 'queue_recovery_waiting',
-          last_error: error?.message || 'Import queue recovery failed',
-        })
-      }
-      continue
+    try {
+      await enqueueImportJob(row.id, { mode, force: true })
+    } catch (error) {
+      updateJob(row.id, {
+        status: 'queued',
+        phase: 'queue_recovery_waiting',
+        last_error: error?.message || 'Import queue recovery failed',
+      })
     }
-    updateJob(row.id, { status: 'queued', phase: mode === 'apply' ? 'apply_recovered_after_restart' : 'analyze_recovered_after_restart' })
-    setImmediate(() => { runLocalJob(row.id, mode).catch(() => {}) })
   }
 }
 

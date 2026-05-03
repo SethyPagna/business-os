@@ -10,7 +10,7 @@ Routes call service functions as dependency boundaries. The service owns provide
 
 - `supabaseAuth.js`
   - Supabase Auth integration for email/password, provider login, provider linking, and admin-side ban state
-  - keeps Supabase limited to identity concerns while local SQLite remains the app authority
+  - keeps Supabase limited to identity concerns while Business OS Postgres remains the app authority
 
 - `firebaseAuth.js`
   - legacy Firebase Identity Toolkit integration kept for migration rollback/reference

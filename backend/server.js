@@ -16,14 +16,6 @@ if (process.env.BUSINESS_OS_WORKER_ROLE === 'media-worker') {
   return
 }
 
-if (process.env.BUSINESS_OS_WORKER_ROLE === 'migrator') {
-  require('./src/workers/migrationWorker').start().catch((error) => {
-    console.error(`[migrator] failed: ${error?.message || error}`)
-    process.exit(1)
-  })
-  return
-}
-
 /**
  * Backend runtime entrypoint.
  *
@@ -75,7 +67,6 @@ const {
   RUNTIME_CACHE_ENABLED,
   ANALYTICS_ENGINE,
   PARQUET_STORE,
-  BUSINESS_OS_DISABLE_SQLITE,
   S3_BUCKET,
 } = require('./src/config')
 
@@ -123,8 +114,8 @@ function applyCoreMiddleware(target) {
 }
 
 function mountStaticAssets(target) {
-  // Uploads live in MinIO for Docker releases and on disk for legacy local mode.
-  // The compiled SPA is only mounted when a frontend build exists.
+  // Uploads live in MinIO for Docker releases. The compiled SPA is only mounted
+  // when a frontend build exists.
   if (isMinioEnabled()) {
     target.get('/uploads/*', async (req, res) => {
       try {
@@ -175,9 +166,8 @@ function mountHealthRoute(target) {
         cache: RUNTIME_CACHE_ENABLED ? 'redis' : 'memory',
         analytics: ANALYTICS_ENGINE,
         parquetStore: PARQUET_STORE,
-        sqliteDisabled: BUSINESS_OS_DISABLE_SQLITE,
       },
-      analytics: getDuckDbRuntimeStatus({ probe: false }),
+      analytics: getDuckDbRuntimeStatus(),
     })
   })
 }
@@ -254,7 +244,7 @@ function mountSpaFallback(target) {
 
 function mountErrorHandler(target) {
   // Centralize API error translation so callers always receive a normalized
-  // JSON shape instead of raw Express/SQLite exceptions.
+  // JSON shape instead of raw Express/Postgres exceptions.
   target.use((error, _req, res, next) => {
     if (!error) return next()
 
@@ -308,8 +298,7 @@ function startDatabaseMaintenanceTimer() {
 }
 
 function registerShutdownHandlers() {
-  // SQLite WAL mode is resilient, but explicit close() avoids locked files and
-  // incomplete shutdowns during PM2/script restarts.
+  // Close the pooled database client cleanly during script/container restarts.
   process.on('SIGINT', () => {
     closeDatabase()
     process.exit(0)

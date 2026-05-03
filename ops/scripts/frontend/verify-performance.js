@@ -105,8 +105,13 @@ assert(backendPackage.includes('worker:import') && backendPackage.includes('work
 assert(!/new\s+Worker\s*\([^)]*IMPORT_QUEUE_NAME/.test(backendImportJobs), 'Web import service must not create an in-process BullMQ worker.')
 assert(backendImportJobs.includes('startImportWorkers'), 'Import worker startup must be explicit and separate from web queue producers.')
 
-const verificationReport = path.join(PROJECT_ROOT, 'ops', 'reports', 'whole-app-verification.md')
-assert(fs.existsSync(verificationReport), 'Whole-app verification report is missing.')
+const buildMetadata = read(path.join(DIST_ROOT, 'business-os-build.json'))
+assert(buildMetadata.includes('"hash"') || buildMetadata.includes('"buildHash"'), 'Frontend build metadata is missing a build hash.')
+
+const dockerReleaseScript = read(path.join(PROJECT_ROOT, 'ops', 'scripts', 'powershell', 'docker-release.ps1'))
+assert(dockerReleaseScript.includes('business-os-image.tar'), 'Docker release must publish a local portable image tar.')
+assert(dockerReleaseScript.includes('postgres.sql'), 'Docker backup must include a Postgres dump artifact.')
+assert(dockerReleaseScript.includes('minio.tgz'), 'Docker backup must include a MinIO object-store artifact.')
 
 const indexHtml = read(path.join(FRONTEND_ROOT, 'index.html'))
 const preconnectCount = (indexHtml.match(/rel=["']preconnect["']/g) || []).length

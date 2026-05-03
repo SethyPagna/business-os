@@ -17,7 +17,13 @@ function toDbBool(value, fallback = 1) {
 
 function getStockTransferNoteColumn() {
   try {
-    const columns = db.prepare(`PRAGMA table_info(stock_transfers)`).all()
+    const columns = db.prepare(`
+      SELECT column_name AS name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = ?
+      ORDER BY ordinal_position
+    `).all('stock_transfers')
     if (columns.some((column) => String(column?.name || '').toLowerCase() === 'notes')) return 'notes'
     if (columns.some((column) => String(column?.name || '').toLowerCase() === 'note')) return 'note'
   } catch (_) {}
@@ -129,7 +135,7 @@ router.post('/stock-integrity/repair', authToken, requirePermission('inventory')
     const recalc = db.prepare(`
       UPDATE products SET
         stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = ?),
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `)
     const touched = new Set()
@@ -161,7 +167,7 @@ router.post('/', authToken, requirePermission('inventory'), (req, res) => {
     const activeFlag = toDbBool(is_active, 1)
     if (defaultFlag) db.prepare('UPDATE branches SET is_default = 0').run()
     const r = db.prepare(
-      'INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
+      'INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')'
     ).run(name.trim(), location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag)
     audit(actor.userId, actor.userName, 'create', 'branch', r.lastInsertRowid, { name }, {
       tableName: 'branches', recordId: r.lastInsertRowid,
@@ -186,7 +192,7 @@ router.put('/:id', authToken, requirePermission('inventory'), (req, res) => {
       const activeFlag = toDbBool(is_active, 1)
       if (defaultFlag) db.prepare('UPDATE branches SET is_default = 0').run()
       db.prepare(
-        'UPDATE branches SET name=?, location=?, phone=?, manager=?, notes=?, is_default=?, is_active=?, updated_at=datetime(\'now\') WHERE id=?'
+        'UPDATE branches SET name=?, location=?, phone=?, manager=?, notes=?, is_default=?, is_active=?, updated_at=\'now\' WHERE id=?'
       ).run(name, location || null, phone || null, manager || null, notes || null, defaultFlag, activeFlag, req.params.id)
       audit(actor.userId, actor.userName, 'update', 'branch', req.params.id, { name }, {
         tableName: 'branches', recordId: req.params.id,
@@ -214,7 +220,7 @@ router.delete('/:id', authToken, requirePermission('inventory'), (req, res) => {
       SELECT SUM(quantity) as total FROM branch_stock WHERE branch_id = ? AND quantity > 0
     `).get(req.params.id)
     if (stockCheck && stockCheck.total > 0) {
-      return err(res, `Cannot delete branch — it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
+      return err(res, `Cannot delete branch â€” it still contains ${Math.round(stockCheck.total)} unit(s) of stock. Transfer all stock to another branch first.`)
     }
 
     db.prepare('DELETE FROM branch_stock WHERE branch_id = ?').run(req.params.id)

@@ -21,7 +21,7 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -149,14 +149,14 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
         if (requestedBranchId) {
           const available = getBranchQty(requestedBranchId)
           if (available <= 0) throw new Error('No stock available in this branch to remove')
-          if (qty > available) throw new Error(`Cannot remove ${qty} — only ${available} available in this branch`)
+          if (qty > available) throw new Error(`Cannot remove ${qty} â€” only ${available} available in this branch`)
 
           db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
             .run(qty, productId, requestedBranchId)
           movementBranchId = requestedBranchId
         } else {
           if (totalAvailable <= 0) throw new Error('No stock available to remove')
-          if (qty > totalAvailable) throw new Error(`Cannot remove ${qty} — only ${totalAvailable} available`)
+          if (qty > totalAvailable) throw new Error(`Cannot remove ${qty} â€” only ${totalAvailable} available`)
 
           let remaining = qty
           const rowsToDeduct = branchRows
@@ -203,7 +203,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
       db.prepare(`
         UPDATE products SET
           stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-          updated_at = datetime('now')
+          updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(productId, productId)
 
@@ -308,7 +308,7 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
         } else {
           const discount = normalizeProductDiscount(destinationDraft, source)
           const rootParentId = source.parent_id || source.id
-          db.prepare('UPDATE products SET is_group = 1, updated_at = datetime(\'now\') WHERE id = ?').run(rootParentId)
+          db.prepare('UPDATE products SET is_group = 1, updated_at = \'now\' WHERE id = ?').run(rootParentId)
           const inserted = db.prepare(`
             INSERT INTO products (
               name, sku, barcode, category, brand, unit, description,
@@ -517,7 +517,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   let products
 
-  // Detect whether parent_id column exists (added via migration — may be absent on older DBs)
+  // Detect whether parent_id column exists (added via migration â€” may be absent on older DBs)
   let hasParentId = true
   try { db.prepare('SELECT parent_id FROM products LIMIT 0').run() } catch (_) { hasParentId = false }
   const parentFilter = hasParentId ? 'AND (p.parent_id IS NULL OR p.parent_id = 0)' : ''

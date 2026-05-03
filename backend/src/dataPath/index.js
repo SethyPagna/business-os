@@ -3,9 +3,8 @@
 const fs = require('fs')
 const path = require('path')
 
-const DB_FOLDER_NAME = 'db'
-const DB_FILE_NAME = 'business.db'
 const UPLOADS_FOLDER_NAME = 'uploads'
+const BACKUPS_FOLDER_NAME = 'backups'
 
 function normalizePathForCompare(value) {
   return path.resolve(String(value || ''))
@@ -23,8 +22,9 @@ function isSubPath(parent, child) {
 }
 
 function ensureDataRootLayout(root) {
-  fs.mkdirSync(path.join(root, DB_FOLDER_NAME), { recursive: true })
-  fs.mkdirSync(path.join(root, UPLOADS_FOLDER_NAME), { recursive: true })
+  ;[UPLOADS_FOLDER_NAME, BACKUPS_FOLDER_NAME, 'imports', 'exports', 'logs', 'tmp', 'meta', 'snapshots'].forEach((folder) => {
+    fs.mkdirSync(path.join(root, folder), { recursive: true })
+  })
 }
 
 function walkFiles(root, visitor) {
@@ -47,13 +47,15 @@ function walkFiles(root, visitor) {
 
 function summarizeDataRoot(root) {
   const resolvedRoot = path.resolve(root)
-  const dbPath = path.join(resolvedRoot, DB_FOLDER_NAME, DB_FILE_NAME)
   const uploadsPath = path.join(resolvedRoot, UPLOADS_FOLDER_NAME)
+  const backupsPath = path.join(resolvedRoot, BACKUPS_FOLDER_NAME)
 
   let totalFileCount = 0
   let totalBytes = 0
   let uploadCount = 0
   let uploadBytes = 0
+  let backupCount = 0
+  let backupBytes = 0
   let lastModifiedMs = 0
 
   walkFiles(resolvedRoot, (filePath) => {
@@ -66,20 +68,20 @@ function summarizeDataRoot(root) {
       uploadCount += 1
       uploadBytes += stats.size
     }
+    if (isSamePath(path.dirname(filePath), backupsPath) || isSubPath(backupsPath, filePath)) {
+      backupCount += 1
+      backupBytes += stats.size
+    }
   })
-
-  const dbExists = fs.existsSync(dbPath)
-  const dbSizeBytes = dbExists ? fs.statSync(dbPath).size : 0
 
   return {
     root: resolvedRoot,
     exists: fs.existsSync(resolvedRoot),
-    hasData: dbExists || totalFileCount > 0,
-    dbPath,
-    dbExists,
-    dbSizeBytes,
+    hasData: totalFileCount > 0,
     uploadCount,
     uploadBytes,
+    backupCount,
+    backupBytes,
     totalFileCount,
     totalBytes,
     lastModifiedAt: lastModifiedMs ? new Date(lastModifiedMs).toISOString() : null,
@@ -185,8 +187,7 @@ function relocateDataRoot({ sourceRoot, targetRoot, checkpointDatabase } = {}) {
 }
 
 module.exports = {
-  DB_FILE_NAME,
-  DB_FOLDER_NAME,
+  BACKUPS_FOLDER_NAME,
   UPLOADS_FOLDER_NAME,
   copyDirectoryContents,
   ensureDataRootLayout,

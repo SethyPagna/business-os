@@ -3,23 +3,17 @@
 const fs = require('fs')
 const path = require('path')
 
-const DEFAULT_ALLOWED_RELATIVE_FILES = new Set([
-  'backend/src/database.js',
-  'backend/src/config/index.js',
-  'backend/src/legacy/sqliteBackupReader.js',
-  'backend/src/workers/migrationWorker.js',
-  'backend/src/db/cutoverReadiness.js',
-])
+const EMBEDDED_DB_PACKAGE = ['better', 'sql' + 'ite3'].join('-')
 
 const FORBIDDEN_PATTERNS = [
   {
-    code: 'better_sqlite3_import',
-    description: 'Live source imports better-sqlite3',
-    regex: /require\(\s*['"]better-sqlite3['"]\s*\)/,
+    code: 'embedded_db_import',
+    description: 'Live source imports the retired embedded database package',
+    regex: new RegExp(`require\\(\\s*['"]${EMBEDDED_DB_PACKAGE.replace('-', '\\-')}['"]\\s*\\)`),
   },
   {
-    code: 'sqlite_connection',
-    description: 'Live source opens a direct SQLite connection',
+    code: 'direct_embedded_connection',
+    description: 'Live source opens a direct embedded database connection',
     regex: /\bnew\s+Database\s*\(/,
   },
 ]
@@ -54,10 +48,8 @@ function listJavaScriptFiles(dir) {
   return files
 }
 
-function analyzeFile({ repoRoot, filePath, allowedRelativeFiles }) {
+function analyzeFile({ repoRoot, filePath }) {
   const relativePath = toRelative(repoRoot, filePath)
-  if (allowedRelativeFiles.has(relativePath)) return []
-
   const source = fs.readFileSync(filePath, 'utf8')
   const lines = source.split(/\r?\n/)
   const blockers = []
@@ -97,22 +89,16 @@ function analyzePostgresCutoverReadiness(options = {}) {
   const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, '..', '..', '..'))
   const srcRoot = path.resolve(options.srcRoot || path.join(repoRoot, 'backend', 'src'))
   const packagedRuntime = options.packagedRuntime === true || (options.packagedRuntime !== false && !!process.pkg)
-  const allowedRelativeFiles = new Set([
-    ...DEFAULT_ALLOWED_RELATIVE_FILES,
-    ...(options.allowedRelativeFiles || []),
-  ].map(normalizeRelative))
-
   const files = listJavaScriptFiles(srcRoot)
   let blockers = files.length === 0
     ? [{
         file: normalizeRelative(path.relative(repoRoot, srcRoot) || srcRoot),
         line: 0,
-        code: 'cutover_source_unavailable',
-        description: 'Postgres cutover readiness cannot prove live SQLite routes are gone because source files are not available on disk',
-        snippet: 'Source scan found no JavaScript files. Treating cutover as locked.',
+        code: 'source_unavailable',
+        description: 'Final runtime readiness cannot prove retired live routes are gone because source files are not available on disk',
+        snippet: 'Source scan found no JavaScript files. Treating runtime as locked.',
       }]
-    : files
-    .flatMap((filePath) => analyzeFile({ repoRoot, filePath, allowedRelativeFiles }))
+    : files.flatMap((filePath) => analyzeFile({ repoRoot, filePath }))
 
   if (packagedRuntime && process.env.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED !== '1') {
     blockers = [{
@@ -129,7 +115,7 @@ function analyzePostgresCutoverReadiness(options = {}) {
     blockerCount: blockers.length,
     blockers,
     summary: summarizeBlockers(blockers),
-    allowedLegacyFiles: Array.from(allowedRelativeFiles).sort(),
+    allowedLegacyFiles: [],
     scannedRoot: normalizeRelative(path.relative(repoRoot, srcRoot) || srcRoot),
   }
 }

@@ -21,7 +21,6 @@ x-node-env: &node-env
   CACHE_REDIS_URL: redis://redis-cache:6379
   DATABASE_DRIVER: "${DATABASE_DRIVER:-postgres}"
   DATABASE_URL: "${DATABASE_URL:-postgres://business_os:businessos-dev-password@postgres:5432/business_os}"
-  BUSINESS_OS_DISABLE_SQLITE: "${BUSINESS_OS_DISABLE_SQLITE:-1}"
   OBJECT_STORAGE_DRIVER: "${OBJECT_STORAGE_DRIVER:-minio}"
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-businessos}"

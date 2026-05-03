@@ -26,13 +26,9 @@ runTest('Postgres cutover readiness accepts the Postgres compatibility data laye
   assert.equal(report.blockerCount, 0)
 })
 
-runTest('migration-only SQLite files are explicitly allowed', () => {
+runTest('no retired embedded database files are allowlisted', () => {
   const report = analyzePostgresCutoverReadiness({ repoRoot })
-  assert.ok(!report.summary.byFile.some((item) => item.file === 'backend/src/database.js'), 'legacy database module should be allowed as migration input')
-  assert.ok(!report.summary.byFile.some((item) => item.file === 'backend/src/workers/migrationWorker.js'), 'migration worker should be allowed as migration-only code')
-  assert.ok(report.allowedLegacyFiles.includes('backend/src/database.js'))
-  assert.ok(report.allowedLegacyFiles.includes('backend/src/legacy/sqliteBackupReader.js'))
-  assert.ok(report.allowedLegacyFiles.includes('backend/src/workers/migrationWorker.js'))
+  assert.deepEqual(report.allowedLegacyFiles, [])
 })
 
 runTest('missing packaged source never counts as Postgres cutover ready', () => {
@@ -42,7 +38,7 @@ runTest('missing packaged source never counts as Postgres cutover ready', () => 
   })
   assert.equal(report.ready, false)
   assert.equal(report.blockerCount, 1)
-  assert.equal(report.blockers[0].code, 'cutover_source_unavailable')
+  assert.equal(report.blockers[0].code, 'source_unavailable')
 })
 
 runTest('compiled runtime requires an explicit verified cutover manifest', () => {

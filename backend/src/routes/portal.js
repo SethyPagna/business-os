@@ -363,7 +363,7 @@ function getPortalProductSignals(config) {
     SELECT id
     FROM products
     WHERE is_active = 1
-    ORDER BY datetime(COALESCE(created_at, updated_at)) DESC, id DESC
+    ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
   `).all().forEach((row, index) => {
     const productId = Number(row.id || 0)
     if (!productId) return
@@ -1252,7 +1252,7 @@ router.patch('/submissions/:id/review', authToken, requirePermission('settings')
       review_note = ?,
       reviewed_by_id = ?,
       reviewed_by_name = ?,
-      reviewed_at = datetime('now')
+      reviewed_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     status,

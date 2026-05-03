@@ -6,9 +6,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershe
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (
-  echo [DONE] Release command finished. Next: run run\docker\publish-release.bat when ready to publish private images.
+  echo [DONE] Release command finished. Next: copy or sync release\business-os\ and run Start Business OS.bat.
 ) else (
-  echo [ERROR] Release failed. Check ops\runtime\logs and fix verification failures before publishing.
+  echo [ERROR] Release failed. Check ops\runtime\logs and fix verification failures.
 )
 if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
 exit /b %EXIT_CODE%

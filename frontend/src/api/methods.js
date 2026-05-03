@@ -1151,21 +1151,6 @@ export const deleteCustomRow    = ({ tableName, id, payload })     => route('cus
 export const getAuditLogs = () => routeMirrored('audit_log:get', () => apiFetch('GET', '/api/system/audit-logs'), () => dexieDb.audit_logs.orderBy('created_at').reverse().limit(200).toArray(), mirrorTable('audit_logs'))
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
-export async function exportBackup() {
-  const url = getSyncServerUrl()
-  if (!url) throw new Error('Server required for backup export')
-  const downloadUrl = new URL(`${url}/api/system/backup/export`)
-  const authToken = getAuthSessionToken()
-  if (authToken) downloadUrl.searchParams.set('token', authToken)
-  downloadUrl.searchParams.set('bypass-tunnel-reminder', 'true')
-  const a    = document.createElement('a')
-  a.href     = downloadUrl.toString()
-  a.download = `business-os-backup-${new Date().toISOString().split('T')[0]}.json`
-  a.rel = 'noopener'
-  a.click()
-  return { success: true }
-}
-
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -1225,28 +1210,6 @@ export async function exportBackupFolder(destinationDir) {
   return waitForSystemJob(jobId, { reason: 'backup export' })
 }
 
-export function pickBackupFile() {
-  return new Promise((resolve, reject) => {
-    const input  = document.createElement('input')
-    input.type   = 'file'
-    input.accept = '.json,application/json'
-    input.onchange = async (e) => {
-      const file = e.target.files?.[0]
-      if (!file) { resolve(null); return }
-      resolve(file)
-    }
-    input.oncancel = () => resolve(null)
-    input.click()
-  })
-}
-
-export async function importBackupData(data) {
-  const result = await apiFetch('POST', '/api/system/backup/import', data)
-  await invalidateClientRuntimeState('backup-import')
-  cacheClearAll()
-  return result
-}
-
 export async function queueBackupFolderRestore(sourceDir) {
   return apiFetch('POST', '/api/backups', {
     type: 'import-folder',
@@ -1263,17 +1226,6 @@ export async function importBackupFolder(sourceDir) {
   await invalidateClientRuntimeState('backup-import-folder')
   cacheClearAll()
   return result
-}
-
-export async function importBackup() {
-  const file = await pickBackupFile()
-  if (!file) return { success: false }
-  try {
-    const data = JSON.parse(await file.text())
-    return await importBackupData(data)
-  } catch (err) {
-    return Promise.reject(err)
-  }
 }
 
 // ─── Data reset ───────────────────────────────────────────────────────────────

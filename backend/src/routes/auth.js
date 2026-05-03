@@ -860,7 +860,7 @@ router.post('/otp/setup', authToken, async (req, res) => {
   const secret = speakeasy.generateSecret({ name: `BusinessOS (${user.username})`, length: 20 })
   db.prepare(`
     UPDATE users
-    SET otp_pending_secret = ?, otp_pending_created_at = datetime('now')
+    SET otp_pending_secret = ?, otp_pending_created_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(encryptSecret(secret.base32), userId)
 

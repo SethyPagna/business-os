@@ -153,13 +153,12 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
   const payload = {
     status: 'ok',
     drivers: {
-      database: 'sqlite',
-      objectStorage: 'local',
+      database: 'postgres',
+      objectStorage: 'minio',
       queue: 'bullmq',
       cache: 'redis',
       analytics: 'duckdb',
       parquetStore: 'minio',
-      sqliteDisabled: false,
     },
     analytics: {
       engine: 'duckdb',

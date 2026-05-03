@@ -1,24 +1,11 @@
 'use strict'
 
-const path = require('path')
 const fs = require('fs')
+const path = require('path')
 const {
   trim,
   buildOrganizationFolderName,
-  extractOrganizationPublicId,
-  findOrganizationFolderByPublicId,
 } = require('../storage/organizationFolders')
-
-const RAW_DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'sqlite').toLowerCase()
-const RAW_BUSINESS_OS_DISABLE_SQLITE = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_DISABLE_SQLITE || '').toLowerCase())
-const LEGACY_SQLITE_BOOTSTRAP_ENABLED = RAW_DATABASE_DRIVER === 'sqlite' && !RAW_BUSINESS_OS_DISABLE_SQLITE
-let SqliteDatabase = null
-
-function getSqliteDatabaseConstructor() {
-  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) return null
-  if (!SqliteDatabase) SqliteDatabase = require('better-sqlite3')
-  return SqliteDatabase
-}
 
 const IS_PKG = typeof process.pkg !== 'undefined'
 const RUNTIME_DIR = trim(process.env.BUSINESS_OS_RUNTIME_DIR)
@@ -107,179 +94,21 @@ function writeDataLocation(newDir) {
   fs.writeFileSync(DATA_LOCATION_FILE, JSON.stringify(payload, null, 2), 'utf8')
 }
 
-function pathExists(targetPath) {
-  try { return !!targetPath && fs.existsSync(targetPath) } catch (_) { return false }
-}
-
-function normalizeOrganizationSeed(seed = {}) {
-  const publicId = trim(seed.publicId || seed.public_id || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId) || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
-  const name = trim(seed.name || seed.organization_name || DEFAULT_ORGANIZATION_BOOTSTRAP.name) || DEFAULT_ORGANIZATION_BOOTSTRAP.name
-  const slug = trim(seed.slug || seed.organization_slug || DEFAULT_ORGANIZATION_BOOTSTRAP.slug) || DEFAULT_ORGANIZATION_BOOTSTRAP.slug
-  return { publicId, name, slug }
-}
-
-function readPrimaryOrganizationSeed(dbPath) {
-  if (!pathExists(dbPath)) return null
-  const Database = getSqliteDatabaseConstructor()
-  if (!Database) return null
-  let sqlite = null
-  try {
-    sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
-    const table = sqlite.prepare(`
-      SELECT name
-      FROM sqlite_master
-      WHERE type = 'table' AND name = 'organizations'
-      LIMIT 1
-    `).get()
-    if (!table) return null
-    const row = sqlite.prepare(`
-      SELECT public_id, name, slug
-      FROM organizations
-      WHERE public_id IS NOT NULL AND trim(public_id) != ''
-      ORDER BY id ASC
-      LIMIT 1
-    `).get()
-    if (!row) return null
-    return normalizeOrganizationSeed({
-      publicId: row.public_id,
-      name: row.name,
-      slug: row.slug,
-    })
-  } catch (_) {
-    return null
-  } finally {
-    try { sqlite?.close?.() } catch (_) {}
-  }
-}
-
 function ensureDirectory(targetPath) {
   fs.mkdirSync(targetPath, { recursive: true })
 }
 
-function copyTree(sourcePath, targetPath) {
-  if (!pathExists(sourcePath)) return
-  const stats = fs.statSync(sourcePath)
-  if (stats.isDirectory()) {
-    ensureDirectory(targetPath)
-    for (const entry of fs.readdirSync(sourcePath, { withFileTypes: true })) {
-      copyTree(path.join(sourcePath, entry.name), path.join(targetPath, entry.name))
-    }
-    return
-  }
-  if (!stats.isFile()) return
-  ensureDirectory(path.dirname(targetPath))
-  fs.copyFileSync(sourcePath, targetPath)
-}
-
-function normalizePathForCompare(value) {
-  return path.resolve(String(value || '')).replace(/[\\/]+$/, '').toLowerCase()
-}
-
-function isSamePath(a, b) {
-  return normalizePathForCompare(a) === normalizePathForCompare(b)
-}
-
-function getOrganizationDbPath(runtimeRoot) {
-  return path.join(runtimeRoot, 'db', 'business.db')
-}
-
-function isHealthySqliteDatabase(dbPath) {
-  if (!pathExists(dbPath)) return false
-  const Database = getSqliteDatabaseConstructor()
-  if (!Database) return false
-  let sqlite = null
-  try {
-    sqlite = new Database(dbPath, { readonly: true, fileMustExist: true })
-    return sqlite.pragma('integrity_check', { simple: true }) === 'ok'
-  } catch (_) {
-    return false
-  } finally {
-    try { sqlite?.close?.() } catch (_) {}
-  }
-}
-
-function isOrganizationRuntimeRoot(root) {
-  const resolved = path.resolve(String(root || ''))
-  return path.basename(path.dirname(resolved)).toLowerCase() === 'organizations'
-}
-
 function ensureOrganizationRuntimeLayout(runtimeRoot) {
-  ;['db', 'uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta'].forEach((folder) => {
+  ;['uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta', 'snapshots'].forEach((folder) => {
     ensureDirectory(path.join(runtimeRoot, folder))
   })
 }
 
-function writeMigrationMarker(targetRoot, payload = {}) {
-  try {
-    ensureDirectory(path.join(targetRoot, 'meta'))
-    fs.writeFileSync(path.join(targetRoot, 'meta', 'bootstrap-migration.json'), JSON.stringify({
-      migratedAt: new Date().toISOString(),
-      ...payload,
-    }, null, 2), 'utf8')
-  } catch (_) {}
-}
-
-function moveOrganizationRootPreservingSource(sourceRoot, targetRoot, reason) {
-  ensureOrganizationRuntimeLayout(targetRoot)
-  if (isSamePath(sourceRoot, targetRoot)) return targetRoot
-  if (!pathExists(sourceRoot)) return targetRoot
-
-  try {
-    if (!pathExists(targetRoot)) {
-      ensureDirectory(path.dirname(targetRoot))
-      fs.renameSync(sourceRoot, targetRoot)
-      writeMigrationMarker(targetRoot, {
-        sourceRoot,
-        targetRoot,
-        reason,
-        note: 'Organization runtime folder renamed into the canonical public_id (name) format.',
-      })
-      return targetRoot
-    }
-  } catch (_) {}
-
-  for (const name of ['db', 'uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta']) {
-    copyTree(path.join(sourceRoot, name), path.join(targetRoot, name))
-  }
-  writeMigrationMarker(targetRoot, {
-    sourceRoot,
-    targetRoot,
-    reason,
-    note: 'Organization runtime files were copied into the canonical public_id (name) folder. The source folder was left untouched for safety.',
-  })
-  return targetRoot
-}
-
-function migrateLegacySharedRootToOrganization(storageRoot, targetRoot) {
-  const sourceRoot = path.resolve(storageRoot)
-  const targetDbPath = path.join(targetRoot, 'db', 'business.db')
-  const sourceDbPath = path.join(sourceRoot, 'db', 'business.db')
-
-  ensureOrganizationRuntimeLayout(targetRoot)
-  if (!pathExists(sourceDbPath) || pathExists(targetDbPath)) return targetRoot
-
-  for (const name of ['db', 'uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta']) {
-    copyTree(path.join(sourceRoot, name), path.join(targetRoot, name))
-  }
-  writeMigrationMarker(targetRoot, {
-    sourceRoot,
-    targetRoot,
-    reason: 'legacy-shared-root',
-    note: 'Legacy shared runtime data was copied into the canonical organization runtime root. The source folder was left untouched for safety.',
-  })
-  return targetRoot
-}
-
-function detectExistingOrganizationRuntimeRoot(storageRoot, publicId = '') {
-  const organizationsRoot = path.join(storageRoot, 'organizations')
-  const byPublicId = findOrganizationFolderByPublicId(organizationsRoot, publicId)
-  if (byPublicId && pathExists(path.join(byPublicId, 'db', 'business.db'))) return byPublicId
-  if (!pathExists(organizationsRoot)) return null
-  const candidates = fs.readdirSync(organizationsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(organizationsRoot, entry.name))
-    .filter((candidate) => pathExists(path.join(candidate, 'db', 'business.db')))
-  return candidates[0] || null
+function normalizeOrganizationSeed(seed = {}) {
+  const publicId = trim(seed.publicId || seed.public_id || process.env.BUSINESS_OS_ORGANIZATION_PUBLIC_ID || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId) || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
+  const name = trim(seed.name || seed.organization_name || process.env.BUSINESS_OS_ORGANIZATION_NAME || DEFAULT_ORGANIZATION_BOOTSTRAP.name) || DEFAULT_ORGANIZATION_BOOTSTRAP.name
+  const slug = trim(seed.slug || seed.organization_slug || process.env.BUSINESS_OS_ORGANIZATION_SLUG || DEFAULT_ORGANIZATION_BOOTSTRAP.slug) || DEFAULT_ORGANIZATION_BOOTSTRAP.slug
+  return { publicId, name, slug }
 }
 
 const STORAGE_ROOT = (() => {
@@ -289,89 +118,14 @@ const STORAGE_ROOT = (() => {
   return DEFAULT_STORAGE_ROOT
 })()
 
-const LEGACY_DB_PATH = path.join(STORAGE_ROOT, 'db', 'business.db')
-const PRIMARY_ORGANIZATION_SEED = (() => {
-  if (isOrganizationRuntimeRoot(STORAGE_ROOT)) {
-    const folderName = path.basename(path.resolve(STORAGE_ROOT))
-    const publicId = folderName.split(' (')[0] || DEFAULT_ORGANIZATION_BOOTSTRAP.publicId
-    return normalizeOrganizationSeed({
-      publicId,
-      name: folderName.includes(' (')
-        ? folderName.slice(folderName.indexOf(' (') + 2, folderName.lastIndexOf(')'))
-        : DEFAULT_ORGANIZATION_BOOTSTRAP.name,
-      slug: DEFAULT_ORGANIZATION_BOOTSTRAP.slug,
-    })
-  }
-  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) {
-    return normalizeOrganizationSeed({
-      publicId: extractOrganizationPublicId(path.basename(detectExistingOrganizationRuntimeRoot(STORAGE_ROOT) || '')),
-      name: process.env.BUSINESS_OS_ORGANIZATION_NAME || DEFAULT_ORGANIZATION_BOOTSTRAP.name,
-      slug: process.env.BUSINESS_OS_ORGANIZATION_SLUG || DEFAULT_ORGANIZATION_BOOTSTRAP.slug,
-    })
-  }
-  return readPrimaryOrganizationSeed(LEGACY_DB_PATH)
-    || normalizeOrganizationSeed({ publicId: extractOrganizationPublicId(path.basename(detectExistingOrganizationRuntimeRoot(STORAGE_ROOT) || '')) })
-    || normalizeOrganizationSeed(DEFAULT_ORGANIZATION_BOOTSTRAP)
-})()
-
+const PRIMARY_ORGANIZATION_SEED = normalizeOrganizationSeed()
 const ORGANIZATION_PUBLIC_ID = PRIMARY_ORGANIZATION_SEED.publicId
 const ORGANIZATION_DISPLAY_NAME = PRIMARY_ORGANIZATION_SEED.name || PRIMARY_ORGANIZATION_SEED.slug
 const ORGANIZATION_FOLDER_NAME = buildOrganizationFolderName(ORGANIZATION_PUBLIC_ID, ORGANIZATION_DISPLAY_NAME)
-const ORGANIZATIONS_ROOT = isOrganizationRuntimeRoot(STORAGE_ROOT)
-  ? path.dirname(path.resolve(STORAGE_ROOT))
-  : path.join(STORAGE_ROOT, 'organizations')
+const ORGANIZATIONS_ROOT = path.join(STORAGE_ROOT, 'organizations')
+const DATA_ROOT = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_FOLDER_NAME)
 
-const DATA_ROOT = (() => {
-  if (isOrganizationRuntimeRoot(STORAGE_ROOT)) {
-    ensureOrganizationRuntimeLayout(STORAGE_ROOT)
-    return STORAGE_ROOT
-  }
-
-  const canonicalRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_FOLDER_NAME)
-  const legacyExactRoot = path.join(ORGANIZATIONS_ROOT, ORGANIZATION_PUBLIC_ID)
-  const existingRoot = detectExistingOrganizationRuntimeRoot(STORAGE_ROOT, ORGANIZATION_PUBLIC_ID)
-
-  if (!LEGACY_SQLITE_BOOTSTRAP_ENABLED) {
-    const runtimeRoot = existingRoot || canonicalRoot
-    ensureOrganizationRuntimeLayout(runtimeRoot)
-    return runtimeRoot
-  }
-
-  const canonicalDbPath = getOrganizationDbPath(canonicalRoot)
-  const legacyExactDbPath = getOrganizationDbPath(legacyExactRoot)
-
-  if (pathExists(canonicalDbPath) && isHealthySqliteDatabase(canonicalDbPath)) {
-    ensureOrganizationRuntimeLayout(canonicalRoot)
-    return canonicalRoot
-  }
-
-  if (pathExists(canonicalDbPath) && !isHealthySqliteDatabase(canonicalDbPath)) {
-    if (pathExists(legacyExactDbPath) && isHealthySqliteDatabase(legacyExactDbPath)) {
-      ensureOrganizationRuntimeLayout(legacyExactRoot)
-      writeMigrationMarker(legacyExactRoot, {
-        sourceRoot: canonicalRoot,
-        targetRoot: legacyExactRoot,
-        reason: 'canonical-db-corrupt-fallback',
-        note: 'Canonical organization DB failed integrity check, so runtime fell back to the healthy legacy organization folder.',
-      })
-      return legacyExactRoot
-    }
-  }
-
-  if (existingRoot && !isSamePath(existingRoot, canonicalRoot)) {
-    return moveOrganizationRootPreservingSource(existingRoot, canonicalRoot, 'canonical-folder-name')
-  }
-  if (existingRoot) {
-    ensureOrganizationRuntimeLayout(existingRoot)
-    return existingRoot
-  }
-
-  return migrateLegacySharedRootToOrganization(STORAGE_ROOT, canonicalRoot)
-})()
-
-const DB_PATH = trim(process.env.DB_PATH)
-  ? path.resolve(process.env.DB_PATH.trim())
-  : path.join(DATA_ROOT, 'db', 'business.db')
+ensureOrganizationRuntimeLayout(DATA_ROOT)
 
 const UPLOADS_PATH = trim(process.env.UPLOADS_PATH)
   ? path.resolve(process.env.UPLOADS_PATH.trim())
@@ -381,38 +135,42 @@ const IMPORTS_PATH = trim(process.env.IMPORTS_PATH)
   ? path.resolve(process.env.IMPORTS_PATH.trim())
   : path.join(DATA_ROOT, 'imports')
 
-const BUSINESS_OS_REQUIRE_SCALE_SERVICES = ['1', 'true', 'yes', 'required'].includes(trim(process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES || '').toLowerCase())
-const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'auto').toLowerCase()
+ensureDirectory(UPLOADS_PATH)
+ensureDirectory(IMPORTS_PATH)
+
+const DATABASE_DRIVER = trim(process.env.DATABASE_DRIVER || 'postgres').toLowerCase()
+const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'minio').toLowerCase()
+const JOB_QUEUE_DRIVER = trim(process.env.JOB_QUEUE_DRIVER || 'bullmq').toLowerCase()
+const ANALYTICS_ENGINE = trim(process.env.ANALYTICS_ENGINE || 'duckdb').toLowerCase()
+const PARQUET_STORE = trim(process.env.PARQUET_STORE || 'minio').toLowerCase()
+
+if (DATABASE_DRIVER !== 'postgres') {
+  throw new Error(`Unsupported database driver "${DATABASE_DRIVER}". Business OS final release requires Postgres.`)
+}
+if (OBJECT_STORAGE_DRIVER !== 'minio') {
+  throw new Error(`Unsupported object storage driver "${OBJECT_STORAGE_DRIVER}". Business OS final release requires MinIO.`)
+}
+
+const DATABASE_URL = trim(process.env.DATABASE_URL)
+const DB_PATH = DATABASE_URL || 'postgres://business_os@postgres:5432/business_os'
+const BUSINESS_OS_REQUIRE_SCALE_SERVICES = true
 const WORKER_RUNTIME = trim(process.env.WORKER_RUNTIME || 'auto').toLowerCase()
 const REDIS_URL = trim(process.env.REDIS_URL || 'redis://127.0.0.1:6379')
 const CACHE_REDIS_URL = trim(process.env.CACHE_REDIS_URL || 'redis://127.0.0.1:6380')
 const RUNTIME_CACHE_ENABLED = !['0', 'false', 'no', 'off', 'disabled'].includes(
-  trim(process.env.RUNTIME_CACHE_ENABLED || (BUSINESS_OS_REQUIRE_SCALE_SERVICES ? '1' : '0')).toLowerCase()
+  trim(process.env.RUNTIME_CACHE_ENABLED || '1').toLowerCase()
 )
-const DATABASE_DRIVER = RAW_DATABASE_DRIVER
-const DATABASE_URL = trim(process.env.DATABASE_URL)
-const OBJECT_STORAGE_DRIVER = trim(process.env.OBJECT_STORAGE_DRIVER || 'local').toLowerCase()
 const S3_ENDPOINT = trim(process.env.S3_ENDPOINT || 'http://127.0.0.1:9000')
 const S3_ACCESS_KEY_ID = trim(process.env.S3_ACCESS_KEY_ID || process.env.MINIO_ROOT_USER)
 const S3_SECRET_ACCESS_KEY = trim(process.env.S3_SECRET_ACCESS_KEY || process.env.MINIO_ROOT_PASSWORD)
 const S3_BUCKET = trim(process.env.S3_BUCKET || 'business-os-assets')
-const ANALYTICS_ENGINE = trim(process.env.ANALYTICS_ENGINE || 'none').toLowerCase()
-const PARQUET_STORE = trim(process.env.PARQUET_STORE || 'none').toLowerCase()
-const BUSINESS_OS_DISABLE_SQLITE = RAW_BUSINESS_OS_DISABLE_SQLITE
 const MINIO_LICENSE_FILE = trim(process.env.MINIO_LICENSE_FILE || path.join(RUNTIME_DIR, 'minio.license'))
-const SQLITE_BUSY_TIMEOUT_MS = Math.min(60000, Math.max(1000, parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '30000', 10) || 30000))
-const SQLITE_CACHE_SIZE_KB = Math.min(262144, Math.max(16000, parseInt(process.env.SQLITE_CACHE_SIZE_KB || '196608', 10) || 196608))
-const SQLITE_MMAP_SIZE_MB = Math.min(1024, Math.max(0, parseInt(process.env.SQLITE_MMAP_SIZE_MB || '1024', 10) || 1024))
-const SQLITE_WAL_AUTOCHECKPOINT = Math.min(10000, Math.max(500, parseInt(process.env.SQLITE_WAL_AUTOCHECKPOINT || '4000', 10) || 4000))
-const SQLITE_JOURNAL_SIZE_LIMIT_MB = Math.min(512, Math.max(16, parseInt(process.env.SQLITE_JOURNAL_SIZE_LIMIT_MB || '128', 10) || 128))
-const SQLITE_SYNCHRONOUS = ['off', 'normal', 'full', 'extra'].includes(trim(process.env.SQLITE_SYNCHRONOUS || '').toLowerCase())
-  ? trim(process.env.SQLITE_SYNCHRONOUS).toUpperCase()
-  : 'NORMAL'
+
 const IMPORT_ROW_BATCH_SIZE = Math.min(500, Math.max(50, parseInt(process.env.IMPORT_ROW_BATCH_SIZE || '400', 10) || 400))
 const IMPORT_IMAGE_CONCURRENCY = Math.min(8, Math.max(1, parseInt(process.env.IMPORT_IMAGE_CONCURRENCY || '3', 10) || 3))
 const IMPORT_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.IMPORT_QUEUE_CONCURRENCY || '2', 10) || 2))
 const MEDIA_QUEUE_CONCURRENCY = Math.min(4, Math.max(1, parseInt(process.env.MEDIA_QUEUE_CONCURRENCY || '3', 10) || 3))
-const IMPORT_BATCH_PAUSE_MS = Math.min(1000, Math.max(0, parseInt(process.env.IMPORT_BATCH_PAUSE_MS || process.env.IMPORT_WORKER_PAUSE_MS || '20', 10) || 0))
+const IMPORT_BATCH_PAUSE_MS = Math.min(1000, Math.max(0, parseInt(process.env.IMPORT_BATCH_PAUSE_MS || process.env.IMPORT_WORKER_PAUSE_MS || '0', 10) || 0))
 const MEDIA_IMAGE_MAX_WIDTH = Math.min(4096, Math.max(320, parseInt(process.env.MEDIA_IMAGE_MAX_WIDTH || '1600', 10) || 1600))
 const MEDIA_IMAGE_QUALITY = Math.min(92, Math.max(45, parseInt(process.env.MEDIA_IMAGE_QUALITY || '72', 10) || 72))
 const UPLOAD_CHUNK_MB = Math.min(64, Math.max(1, parseInt(process.env.UPLOAD_CHUNK_MB || '12', 10) || 12))
@@ -441,7 +199,7 @@ if (!process.env._BOS_CONFIG_LOGGED) {
   console.log(`[config] RUNTIME_DIR  : ${RUNTIME_DIR}`)
   console.log(`[config] STORAGE_ROOT : ${STORAGE_ROOT}`)
   console.log(`[config] DATA_ROOT    : ${DATA_ROOT}`)
-  console.log(`[config] DB_PATH      : ${DB_PATH}`)
+  console.log(`[config] DB           : Postgres`)
   console.log(`[config] UPLOADS_PATH : ${UPLOADS_PATH}`)
   console.log(`[config] IMPORTS_PATH : ${IMPORTS_PATH}`)
   console.log(`[config] FRONTEND_DIST: ${FRONTEND_DIST}`)
@@ -487,14 +245,7 @@ module.exports = {
   S3_BUCKET,
   ANALYTICS_ENGINE,
   PARQUET_STORE,
-  BUSINESS_OS_DISABLE_SQLITE,
   MINIO_LICENSE_FILE,
-  SQLITE_BUSY_TIMEOUT_MS,
-  SQLITE_CACHE_SIZE_KB,
-  SQLITE_MMAP_SIZE_MB,
-  SQLITE_WAL_AUTOCHECKPOINT,
-  SQLITE_JOURNAL_SIZE_LIMIT_MB,
-  SQLITE_SYNCHRONOUS,
   IMPORT_ROW_BATCH_SIZE,
   IMPORT_IMAGE_CONCURRENCY,
   IMPORT_QUEUE_CONCURRENCY,

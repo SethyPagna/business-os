@@ -20,7 +20,6 @@ temp-*/
 temp-vite-build.mjs
 /package.json
 *.db
-*.sqlite
 
 # Environment and secrets
 backend/.env

@@ -89,20 +89,20 @@ function cleanupExpiredCodes() {
   db.prepare(`
     DELETE FROM verification_codes
     WHERE consumed_at IS NOT NULL
-       OR datetime(expires_at) < datetime('now', '-1 day')
+       OR expires_at < 'now', '-1 day'
   `).run()
 }
 
 function invalidateActiveCodes({ userId, purpose, channel, destination }) {
   db.prepare(`
     UPDATE verification_codes
-    SET consumed_at = datetime('now')
+    SET consumed_at = CURRENT_TIMESTAMP
     WHERE user_id IS ?
       AND purpose = ?
       AND channel = ?
       AND destination = ?
       AND consumed_at IS NULL
-      AND datetime(expires_at) >= datetime('now')
+      AND expires_at >= CURRENT_TIMESTAMP
   `).run(userId || null, purpose, channel, destination)
 }
 
@@ -142,14 +142,14 @@ function findActiveCode({ userId, purpose, channel, destination }) {
       AND channel = ?
       AND destination = ?
       AND consumed_at IS NULL
-      AND datetime(expires_at) >= datetime('now')
+      AND expires_at >= CURRENT_TIMESTAMP
     ORDER BY created_at DESC, id DESC
     LIMIT 1
   `).get(userId, purpose, channel, destination)
 }
 
 function consumeCode(id) {
-  db.prepare(`UPDATE verification_codes SET consumed_at = datetime('now') WHERE id = ?`).run(id)
+  db.prepare(`UPDATE verification_codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id)
 }
 
 function verifyCode({ userId, purpose, channel, destination, code, consume = true }) {

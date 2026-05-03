@@ -1,7 +1,6 @@
 'use strict'
 
 const crypto = require('crypto')
-const { db } = require('./database')
 
 const SESSION_COOKIE_NAME = 'bos_session'
 const DEFAULT_SESSION_MS = Math.max(5 * 60 * 1000, Number(process.env.AUTH_SESSION_DEFAULT_MS || 24 * 60 * 60 * 1000))
@@ -11,6 +10,10 @@ const SESSION_14D_MS = Math.max(SESSION_3D_MS, Number(process.env.AUTH_SESSION_1
 const SESSION_7D_MS = Math.max(DEFAULT_SESSION_MS, Number(process.env.AUTH_SESSION_7D_MS || 7 * 24 * 60 * 60 * 1000))
 const SESSION_30D_MS = Math.max(SESSION_14D_MS, Number(process.env.AUTH_SESSION_30D_MS || 30 * 24 * 60 * 60 * 1000))
 const SESSION_ROTATION_GRACE_MS = Math.max(0, Number(process.env.AUTH_SESSION_ROTATION_GRACE_MS || 20 * 1000))
+
+function getDb() {
+  return require('./database').db
+}
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex')
@@ -36,7 +39,7 @@ function createAuthSession(userId, options = {}) {
   const token = crypto.randomBytes(32).toString('base64url')
   const tokenHash = hashToken(token)
   const expiresAt = buildSessionExpiry(options.sessionDuration)
-  db.prepare(`
+  getDb().prepare(`
     INSERT INTO user_sessions (
       user_id, token_hash, device_name, device_tz, client_time, user_agent, last_ip, expires_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -88,7 +91,7 @@ function getSessionUser(req) {
   if (!token) return null
   const tokenHash = hashToken(token)
   const nowIso = new Date().toISOString()
-  const row = db.prepare(`
+  const row = getDb().prepare(`
     SELECT
       s.id AS session_id,
       s.user_id,
@@ -131,9 +134,9 @@ function getSessionUser(req) {
   `).get(tokenHash, nowIso, nowIso)
   if (!row) return null
 
-  db.prepare(`
+  getDb().prepare(`
     UPDATE user_sessions
-    SET last_seen_at = datetime('now'),
+    SET last_seen_at = CURRENT_TIMESTAMP,
         last_ip = ?,
         user_agent = COALESCE(?, user_agent)
     WHERE id = ?
@@ -150,7 +153,7 @@ function revokeAuthSession(token, options = {}) {
   const value = String(token || '').trim()
   if (!value) return
   const revokedAt = buildRevocationTimestamp(options.graceMs)
-  db.prepare(`
+  getDb().prepare(`
     UPDATE user_sessions
     SET revoked_at = ?
     WHERE token_hash = ?
@@ -164,7 +167,7 @@ function revokeUserSessions(userId, options = {}) {
   const revokedAt = buildRevocationTimestamp(options.graceMs)
   const exceptToken = String(options.exceptToken || '').trim()
   const exceptTokenHash = exceptToken ? hashToken(exceptToken) : ''
-  const result = db.prepare(`
+  const result = getDb().prepare(`
     UPDATE user_sessions
     SET revoked_at = ?
     WHERE user_id = ?

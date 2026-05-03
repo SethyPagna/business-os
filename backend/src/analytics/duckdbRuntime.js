@@ -1,5 +1,7 @@
 'use strict'
 
+const path = require('path')
+
 const {
   ANALYTICS_ENGINE,
   PARQUET_STORE,
@@ -9,6 +11,19 @@ const {
 
 let cachedProbe = null
 
+function tryRequireDuckDbPackage(packageName) {
+  try {
+    return require(packageName)
+  } catch (error) {
+    if (!process.pkg) throw error
+    try {
+      return require(path.join(path.dirname(process.execPath), 'node_modules', packageName))
+    } catch (_) {
+      throw error
+    }
+  }
+}
+
 function probeDuckDbPackage() {
   if (cachedProbe) return cachedProbe
   const candidates = ['@duckdb/node-api', 'duckdb']
@@ -16,7 +31,7 @@ function probeDuckDbPackage() {
     try {
       // Optional runtime dependency: only load when diagnostics need to know if
       // the DuckDB bridge is installed in this specific release image.
-      require(packageName)
+      tryRequireDuckDbPackage(packageName)
       cachedProbe = { available: true, packageName, reason: 'available' }
       return cachedProbe
     } catch (error) {

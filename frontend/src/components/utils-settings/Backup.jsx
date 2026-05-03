@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, Download, FileArchive, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
+import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { cacheClearAll } from '../../api/http'
@@ -15,21 +15,6 @@ import {
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 
-const BACKUP_SECTION_CONFIG = [
-  { key: 'products', labelKey: 'products', label: 'Products' },
-  { key: 'sales', labelKey: 'sales', label: 'Sales' },
-  { key: 'returns', labelKey: 'returns', label: 'Returns' },
-  { key: 'customers', labelKey: 'customers', label: 'Customers' },
-  { key: 'suppliers', labelKey: 'suppliers', label: 'Suppliers' },
-  { key: 'delivery_contacts', labelKey: 'delivery', label: 'Delivery' },
-  { key: 'users', labelKey: 'users', label: 'Users' },
-  { key: 'roles', labelKey: 'roles', label: 'Roles' },
-  { key: 'settings', labelKey: 'settings', label: 'Settings' },
-  { key: 'customer_share_submissions', labelKey: 'portal_submissions', label: 'Portal submissions' },
-  { key: 'audit_logs', labelKey: 'audit_log', label: 'Audit log' },
-  { key: 'file_assets', labelKey: 'library', label: 'Files library' },
-]
-
 const QUICK_BACKUP_SECTIONS = [
   'Products + inventory',
   'Sales + returns',
@@ -40,21 +25,18 @@ const QUICK_BACKUP_SECTIONS = [
 const BACKUP_LOCAL_COPY = {
   km: {
     backup: 'បម្រុងទុក',
-    export_backup_desc: 'នាំចេញបម្រុងទុកពេញលេញ ឬទាញយក JSON ចាស់នៅពេលចាំបាច់។',
+    export_backup_desc: 'នាំចេញបម្រុងទុក Docker ពេញលេញសម្រាប់ Postgres, MinIO និង Drive sync។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
     folder_backup_placeholder: 'ជ្រើសថតមេ សម្រាប់ចម្លង backup',
     browse_folder: 'ជ្រើសថត',
     browse: 'ថតនៅម៉ាស៊ីនមេ',
     hide_advanced_browser: 'លាក់',
     export_backup_btn: 'នាំចេញ',
-    download_json_backup: 'JSON',
     exporting: 'កំពុងនាំចេញ...',
     import_backup_title: 'ស្តារបម្រុងទុក',
-    import_backup_desc: 'ស្តារបម្រុងទុកជាថតទាំងមូល ឬជ្រើសឯកសារ JSON ចាស់បើចាំបាច់។',
+    import_backup_desc: 'ស្តារបម្រុងទុក Docker ពេញលេញតែប៉ុណ្ណោះ។',
     folder_restore_placeholder: 'ជ្រើសថត backup ឬថត business-os-data',
     restore_backup_btn: 'ស្តារ',
-    legacy_json_backup: 'JSON ចាស់',
-    import_backup_btn: 'នាំចូល JSON',
     importing_backup: 'កំពុងនាំចូល...',
     folder_restore_note: 'ការស្តារជាថតនឹងជំនួសទិន្នន័យបច្ចុប្បន្នដោយមាតិកា backup ដែលបានជ្រើស។',
     rows: 'ជួរ',
@@ -191,58 +173,6 @@ function formatBytes(value) {
   return `${(amount / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-function countBackupRows(backup, tableName) {
-  if (backup?.summary?.tables && Number.isFinite(Number(backup.summary.tables[tableName]))) {
-    return Number(backup.summary.tables[tableName]) || 0
-  }
-  if (backup?.tables && typeof backup.tables === 'object') {
-    return Array.isArray(backup.tables[tableName]) ? backup.tables[tableName].length : 0
-  }
-  return Array.isArray(backup?.[tableName]) ? backup[tableName].length : 0
-}
-
-function buildBackupPreview(backup, fileName, copy = (_key, fallback) => fallback) {
-  const counts = Object.fromEntries(
-    BACKUP_SECTION_CONFIG.map((section) => [section.key, countBackupRows(backup, section.key)]),
-  )
-  const uploadsCount = Number(backup?.summary?.totals?.uploadCount)
-    || (Array.isArray(backup?.uploads) ? backup.uploads.length : 0)
-  const totalRows = Number(backup?.summary?.totals?.tableRowCount)
-    || Object.values(counts).reduce((sum, value) => sum + value, 0)
-  const customTableCount = Number(backup?.summary?.totals?.customTableCount)
-    || (backup?.custom_table_rows && typeof backup.custom_table_rows === 'object' ? Object.keys(backup.custom_table_rows).length : 0)
-  const customTableRowCount = Number(backup?.summary?.totals?.customTableRowCount)
-    || Object.values(backup?.custom_table_rows || {}).reduce((sum, value) => sum + (Array.isArray(value) ? value.length : 0), 0)
-  const populatedSections = BACKUP_SECTION_CONFIG
-    .filter((section) => counts[section.key] > 0)
-    .map((section) => ({
-      ...section,
-      count: counts[section.key],
-      label: copy(section.labelKey, section.label),
-    }))
-
-  const warnings = []
-  if (!countBackupRows(backup, 'file_assets') && uploadsCount > 0) {
-    warnings.push('This backup has uploads but no file-library metadata. Restore still works, but Files entries may need to be rebuilt.')
-  }
-  if (Number(backup?.version || 0) > 0 && Number(backup.version) < 10) {
-    warnings.push('This is an older backup format. Business data should restore, but newer file coverage is more limited.')
-  }
-
-  return {
-    fileName,
-    version: Number(backup?.version || 0) || null,
-    exportedAt: backup?.exported_at || '',
-    uploadsCount,
-    totalRows,
-    customTableCount,
-    customTableRowCount,
-    populatedSections,
-    warnings,
-    counts,
-  }
-}
-
 function yieldToBrowser() {
   if (typeof window === 'undefined') return Promise.resolve()
   if (typeof window.requestAnimationFrame === 'function') {
@@ -259,48 +189,6 @@ function normalizeFolderBrowserResult(result, maxDirs = 200) {
     ...result,
     dirs: dirs.slice(0, maxDirs),
     truncatedCount: dirs.length - maxDirs,
-  }
-}
-
-async function parseBackupJsonFile(file) {
-  const text = await file.text()
-  await yieldToBrowser()
-  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') {
-    return JSON.parse(text)
-  }
-  const workerSource = `
-    self.onmessage = function(event) {
-      try {
-        var parsed = JSON.parse(event.data || '{}');
-        self.postMessage({ ok: true, parsed: parsed });
-      } catch (error) {
-        self.postMessage({ ok: false, message: error && error.message ? error.message : 'Invalid JSON' });
-      }
-    };
-  `
-  const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }))
-  try {
-    return await new Promise((resolve, reject) => {
-      const worker = new Worker(workerUrl)
-      const timer = window.setTimeout(() => {
-        worker.terminate()
-        reject(new Error('Backup preview took too long to parse.'))
-      }, 45000)
-      worker.onmessage = (event) => {
-        window.clearTimeout(timer)
-        worker.terminate()
-        if (event.data?.ok) resolve(event.data.parsed)
-        else reject(new Error(event.data?.message || 'Invalid backup JSON'))
-      }
-      worker.onerror = (error) => {
-        window.clearTimeout(timer)
-        worker.terminate()
-        reject(new Error(error?.message || 'Invalid backup JSON'))
-      }
-      worker.postMessage(text)
-    })
-  } finally {
-    URL.revokeObjectURL(workerUrl)
   }
 }
 
@@ -646,7 +534,7 @@ function DataFolderLocation({ t, notify, active = true, actionHistory = null }) 
           <div className="grid gap-3 lg:grid-cols-2">
             <SectionChip
               label={copy('organization_runtime_alignment', 'Organization runtime alignment')}
-              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('legacy_shared_runtime', 'Legacy shared runtime')}
+              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('docker_runtime_pending', 'Docker runtime pending')}
               tone={orgStorageStatus.fullyAligned ? 'blue' : 'amber'}
             />
             <SectionChip
@@ -1220,10 +1108,10 @@ function ScaleMigrationSection({ t, notify, active = true }) {
   const driveSafety = automation.driveSync || {}
   const driveSafetyOk = driveSafety.status === 'ok'
   const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
-  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'sqlite').toLowerCase()
+  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'postgres').toLowerCase()
   const activeStorageLabel = activeDatabaseDriver === 'postgres'
     ? copy('postgres_minio_storage', 'Postgres / MinIO')
-    : copy('sqlite_local_files', 'SQLite / Local files')
+    : copy('unsupported_storage_mode', 'Unsupported storage mode')
 
   return (
     <div className="card p-5 sm:p-6">
@@ -1319,128 +1207,18 @@ export default function Backup() {
   const isActive = useIsPageActive('backup')
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' })
   const [loading, setLoading] = useState('')
-  const [pendingImport, setPendingImport] = useState(null)
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
-  const [hostUiAvailable, setHostUiAvailable] = useState(false)
-  const [exportBrowser, setExportBrowser] = useState(null)
-  const [restoreBrowser, setRestoreBrowser] = useState(null)
-  const [browserBusy, setBrowserBusy] = useState('')
   const [activeJob, setActiveJob] = useState(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
-  const hostConfigRequestRef = useRef(0)
-  const exportBrowseRequestRef = useRef(0)
-  const restoreBrowseRequestRef = useRef(0)
   const aliveRef = useRef(true)
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
-      invalidateTrackedRequest(hostConfigRequestRef)
-      invalidateTrackedRequest(exportBrowseRequestRef)
-      invalidateTrackedRequest(restoreBrowseRequestRef)
     }
   }, [])
-
-  useEffect(() => {
-    if (!isActive) {
-      invalidateTrackedRequest(hostConfigRequestRef)
-      return
-    }
-    async function loadHostConfig() {
-      const requestId = beginTrackedRequest(hostConfigRequestRef)
-      try {
-        const config = await withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup host UI config')
-        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(!!config?.hostUiAvailable)
-      } catch {
-        if (!aliveRef.current || !isTrackedRequestCurrent(hostConfigRequestRef, requestId)) return
-        setHostUiAvailable(false)
-      }
-    }
-    loadHostConfig()
-  }, [isActive])
-
-  const browseServerFolders = async (target, dir) => {
-    const requestedDir = String(dir || '').trim()
-    if (!hostUiAvailable && (!requestedDir || requestedDir === '__ROOTS__')) {
-      notify(copy('server_browser_remote_requires_path', 'Remote browsers cannot browse the server device from the root. Type a specific server/container backup path first, then open that path.'), 'info')
-      return
-    }
-    const requestRef = target === 'export' ? exportBrowseRequestRef : restoreBrowseRequestRef
-    const requestId = beginTrackedRequest(requestRef)
-    try {
-      setBrowserBusy(target)
-      await yieldToBrowser()
-      const result = await withLoaderTimeout(
-        () => window.api.browseDir(requestedDir || '__ROOTS__'),
-        target === 'export' ? 'Backup export folders' : 'Backup restore folders',
-      )
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      const normalized = normalizeFolderBrowserResult(result)
-      if (target === 'export') setExportBrowser(normalized)
-      if (target === 'restore') setRestoreBrowser(normalized)
-    } catch (error) {
-      if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      if (aliveRef.current && isTrackedRequestCurrent(requestRef, requestId)) {
-        setBrowserBusy((current) => (current === target ? '' : current))
-      }
-    }
-  }
-
-  const toggleServerBrowser = async (target, currentPath = '') => {
-    const isExport = target === 'export'
-    const requestRef = isExport ? exportBrowseRequestRef : restoreBrowseRequestRef
-    const visible = isExport ? !!exportBrowser : !!restoreBrowser
-    if (visible) {
-      invalidateTrackedRequest(requestRef)
-      setBrowserBusy((current) => (current === target ? '' : current))
-      if (isExport) setExportBrowser(null)
-      else setRestoreBrowser(null)
-      return
-    }
-    await browseServerFolders(target, currentPath || '__ROOTS__')
-  }
-
-  const handleExport = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    if (!confirm(copy('legacy_json_large_warning', 'Legacy JSON export is only for small older backups and can take a long time with large catalogs. For normal Docker backup, use Create full backup. Continue with legacy JSON?'))) return
-    setLoading('export')
-    try {
-      await yieldToBrowser()
-      const result = await window.api.exportBackup()
-      if (result?.success) {
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('export_backup_success', 'Backup exported successfully'),
-        })
-        notify(copy('export_backup_success', 'Backup exported successfully'), 'success')
-      }
-      else notify(copy('export_failed', 'Export failed'), 'error')
-    } catch (error) {
-      notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
-    }
-    setLoading('')
-  }
-
-  const pickFolder = async (setter, hintPath = '') => {
-    if (!hostUiAvailable) {
-      notify(copy('host_ui_local_only', 'This action only works on the server machine. Type a server/container path manually when connected remotely.'), 'info')
-      return
-    }
-    try {
-      await yieldToBrowser()
-      const folder = await window.api.openFolderDialog?.(hintPath)
-      if (folder && typeof folder === 'string') setter(folder)
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    }
-  }
 
   const handleFolderExport = async () => {
     if (loading) return
@@ -1543,57 +1321,6 @@ export default function Backup() {
     }
   }
 
-  const handleChooseImportFile = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    try {
-      const file = await window.api.pickBackupFile?.()
-      if (!file) return
-      setLoading('preview-import')
-      await yieldToBrowser()
-      const parsed = await parseBackupJsonFile(file)
-      setPendingImport({
-        data: parsed,
-        preview: buildBackupPreview(parsed, file.name || 'business-os-backup.json', copy),
-      })
-      notify(copy('backup_file_ready', 'Backup file loaded. Review it, then confirm restore.'), 'success')
-    } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setLoading((current) => (current === 'preview-import' ? '' : current))
-    }
-  }
-
-  const handleConfirmImport = async () => {
-    if (loading) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
-    if (!pendingImport?.data) return
-    if (!confirm(`${copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
-
-    setLoading('import')
-    try {
-      await yieldToBrowser()
-      const result = await window.api.importBackupData(pendingImport.data)
-      if (result?.success) {
-        cacheClearAll()
-        setPendingImport(null)
-        actionHistory.pushAction({
-          scope: 'backup',
-          entity: 'backup',
-          label: copy('import_backup_success', 'Backup imported successfully'),
-          undo_payload: { fileName: pendingImport.preview?.fileName || '' },
-        })
-        notify(copy('import_backup_success', 'Backup imported successfully'), 'success')
-        setTimeout(() => refreshAppData(), 200)
-      } else {
-        notify(`${copy('import_failed', 'Import failed')}: ${result?.error || copy('unknown_error', 'Unknown error')}`, 'error')
-      }
-    } catch (error) {
-      notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
-    }
-    setLoading('')
-  }
-
   return (
     <div className="page-scroll p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -1601,7 +1328,7 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
+          subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, MinIO assets, settings, users, portal files, and restore metadata.')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
@@ -1611,7 +1338,7 @@ export default function Backup() {
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Create a full server-side backup folder with database data, uploads, settings, users, portal files, and restore metadata. Legacy JSON remains available only for small older backups.')}
+            {copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, MinIO assets, settings, users, portal files, and restore metadata.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (
@@ -1639,18 +1366,6 @@ export default function Backup() {
                 {copy('advanced', 'Advanced')}
               </summary>
               <div className="mt-3 grid gap-3">
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-                  <div className="font-semibold">{copy('legacy_json_backup', 'Legacy JSON')}</div>
-                  <p className="mt-1">
-                    {copy('legacy_json_large_warning', 'Legacy JSON export is only for small older backups and can take a long time with large catalogs. For normal Docker backup, use Create full backup.')}
-                  </p>
-                  <div className="mt-2">
-                    <PathActionButton onClick={handleExport} disabled={!!loading}>
-                      <Download className="h-4 w-4" />
-                      {loading === 'export' ? copy('exporting', 'Exporting...') : copy('download_json_backup', 'Download legacy JSON')}
-                    </PathActionButton>
-                  </div>
-                </div>
                 <div className="flex flex-col gap-2 lg:flex-row">
                   <input
                     id="backup-folder-export-path"
@@ -1660,41 +1375,10 @@ export default function Backup() {
                     onChange={(event) => setFolderExportPath(event.target.value)}
                     placeholder={copy('folder_backup_placeholder', 'Optional server folder for full backups')}
                   />
-                  {hostUiAvailable ? (
-                    <PathActionButton onClick={() => pickFolder(setFolderExportPath, folderExportPath)}>
-                      <FolderOutput className="h-4 w-4" />
-                      {copy('browse_folder', 'Choose Folder')}
-                    </PathActionButton>
-                  ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('export', folderExportPath)} disabled={browserBusy === 'export' || (!hostUiAvailable && !String(folderExportPath || '').trim())}>
-                    <FolderOutput className="h-4 w-4" />
-                    {exportBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-                  </PathActionButton>
                 </div>
                 <p className="text-xs text-blue-700 dark:text-blue-300">
-                  {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. When you are connected remotely through Cloudflare, choose or paste a path that exists on the server machine, not your phone or browser device.')}
+                  {copy('server_folder_note', 'Folder actions use paths on the Business OS server/container. Type a path that exists on the server machine, not your phone or browser device.')}
                 </p>
-
-                {exportBrowser ? (
-                  <FolderBrowserPanel
-                    browseState={exportBrowser}
-                    busy={browserBusy === 'export'}
-                    copy={copy}
-                    onBrowse={(dir) => browseServerFolders('export', dir)}
-                    onBrowseDrives={() => browseServerFolders('export', '__ROOTS__')}
-                    onClose={() => {
-                      invalidateTrackedRequest(exportBrowseRequestRef)
-                      setBrowserBusy((current) => (current === 'export' ? '' : current))
-                      setExportBrowser(null)
-                    }}
-                    onSelect={(fullPath) => {
-                      invalidateTrackedRequest(exportBrowseRequestRef)
-                      setFolderExportPath(fullPath)
-                      setExportBrowser(null)
-                    }}
-                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-                  />
-                ) : null}
               </div>
             </details>
           </div>
@@ -1715,16 +1399,6 @@ export default function Backup() {
                 <Upload className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>
-              <PathActionButton onClick={handleChooseImportFile} disabled={!!loading}>
-                <FileArchive className="h-4 w-4" />
-                {loading === 'preview-import' ? copy('loading', 'Loading...') : copy('legacy_json_backup', 'Legacy JSON')}
-              </PathActionButton>
-              {pendingImport ? (
-                <PathActionButton onClick={handleConfirmImport} disabled={!!loading}>
-                  <Upload className="h-4 w-4" />
-                  {loading === 'import' ? copy('importing_backup', 'Importing...') : copy('import_backup_btn', 'Restore JSON backup')}
-                </PathActionButton>
-              ) : null}
             </div>
 
             <p className="text-xs text-amber-700 dark:text-amber-300">
@@ -1745,89 +1419,14 @@ export default function Backup() {
                     onChange={(event) => setFolderImportPath(event.target.value)}
                     placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
                   />
-                  {hostUiAvailable ? (
-                    <PathActionButton onClick={() => pickFolder(setFolderImportPath, folderImportPath)}>
-                      <FolderInput className="h-4 w-4" />
-                      {copy('browse_folder', 'Choose Folder')}
-                    </PathActionButton>
-                  ) : null}
-                  <PathActionButton onClick={() => toggleServerBrowser('restore', folderImportPath)} disabled={browserBusy === 'restore' || (!hostUiAvailable && !String(folderImportPath || '').trim())}>
-                    <FolderInput className="h-4 w-4" />
-                    {restoreBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-                  </PathActionButton>
                 </div>
                 <p className="text-xs text-amber-700 dark:text-amber-300">
-                  {copy('server_restore_note', 'Restore uses a folder from the Business OS server/container. Remote browsers cannot browse their own local disk into the server runtime.')}
+                  {copy('server_restore_note', 'Restore uses a final backup folder from the Business OS server/container. Type a server path or restore from a Google Drive datasync version.')}
                 </p>
-
-                {restoreBrowser ? (
-                  <FolderBrowserPanel
-                    browseState={restoreBrowser}
-                    busy={browserBusy === 'restore'}
-                    copy={copy}
-                    onBrowse={(dir) => browseServerFolders('restore', dir)}
-                    onBrowseDrives={() => browseServerFolders('restore', '__ROOTS__')}
-                    onClose={() => {
-                      invalidateTrackedRequest(restoreBrowseRequestRef)
-                      setBrowserBusy((current) => (current === 'restore' ? '' : current))
-                      setRestoreBrowser(null)
-                    }}
-                    onSelect={(fullPath) => {
-                      invalidateTrackedRequest(restoreBrowseRequestRef)
-                      setFolderImportPath(fullPath)
-                      setRestoreBrowser(null)
-                    }}
-                    currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-                  />
-                ) : null}
               </div>
             </details>
           </div>
 
-          {pendingImport ? (
-            <div className="mt-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{pendingImport.preview.fileName}</div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {copy('exported', 'Exported')} {formatDateTime(pendingImport.preview.exportedAt)}{pendingImport.preview.version ? ` | v${pendingImport.preview.version}` : ''}
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[360px]">
-                  <SectionChip label={copy('rows', 'Rows')} value={pendingImport.preview.totalRows} />
-                  <SectionChip label={copy('uploads', 'Uploads')} value={pendingImport.preview.uploadsCount} />
-                  <SectionChip label={copy('custom_tables', 'Custom tables')} value={`${pendingImport.preview.customTableCount} (${pendingImport.preview.customTableRowCount} ${copy('rows', 'rows')})`} />
-                </div>
-              </div>
-
-              {pendingImport.preview.populatedSections.length ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {pendingImport.preview.populatedSections.map((section) => (
-                    <span key={section.key} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-200">
-                      {section.label}: {section.count}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-
-              {pendingImport.preview.warnings.length ? (
-                <div className="mt-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-                  {pendingImport.preview.warnings.map((warning, index) => (
-                    <div key={`${warning}-${index}`}>{warning}</div>
-                  ))}
-                </div>
-              ) : null}
-
-              <p className="mt-4 text-xs text-amber-600 dark:text-amber-400">
-                {copy('import_backup_warning', 'This overwrites existing data. Export a fresh backup first if you want to keep current data.')}
-              </p>
-              <div className="mt-3">
-                <PathActionButton onClick={() => setPendingImport(null)} disabled={loading === 'import'}>
-                  {copy('clear', 'Clear')}
-                </PathActionButton>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
@@ -1836,15 +1435,13 @@ export default function Backup() {
           onToggle={(event) => setAdvancedMaintenanceOpen(event.currentTarget.open)}
         >
           <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100">
-            {copy('advanced_maintenance', 'Advanced maintenance, reset, and data-location tools')}
+            {copy('advanced_maintenance', 'Advanced maintenance and reset tools')}
           </summary>
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
             {copy('advanced_maintenance_desc', 'These tools are loaded only when opened so backup, restore, and Drive actions stay responsive.')}
           </p>
           {advancedMaintenanceOpen ? (
             <div className="mt-4 space-y-4">
-              {isActive ? <ScaleMigrationSection t={t} notify={notify} active={isActive} /> : null}
-              {isActive ? <DataFolderLocation t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
               <ResetData actionHistory={actionHistory} />
               <FactoryReset actionHistory={actionHistory} />
             </div>

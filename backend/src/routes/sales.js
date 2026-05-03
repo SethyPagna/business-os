@@ -192,7 +192,7 @@ function refreshProductStockQuantity(productId) {
       FROM branch_stock
       WHERE product_id = ?
     ),
-    updated_at = datetime('now')
+    updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -294,7 +294,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
       ).lastInsertRowid
 
       if (saleCreatedAt) {
-        db.prepare('UPDATE sales SET created_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        db.prepare('UPDATE sales SET created_at = ?, updated_at = \'now\' WHERE id = ?')
           .run(saleCreatedAt, sid)
       }
 
@@ -409,7 +409,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   ok(res, { id: saleId, receiptNumber })
 })
 
-// PATCH /api/sales/:id/status  — update sale status
+// PATCH /api/sales/:id/status  â€” update sale status
 router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const payload = req.body || {}
@@ -436,7 +436,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
   try {
     db.transaction(() => {
       // Build update query
-      const updates = ['sale_status = ?', "updated_at = datetime('now')"]
+      const updates = ['sale_status = ?', "updated_at = CURRENT_TIMESTAMP"]
       const params = [sale_status]
       if (notes !== undefined) { updates.push('notes = ?'); params.push(notes) }
       params.push(id)
@@ -451,7 +451,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
 
       // Handle stock adjustments based on transition
       if (oldStatus === 'awaiting_payment' && willStockBeDeducted) {
-        // Transition: awaiting_payment → {completed, awaiting_delivery}
+        // Transition: awaiting_payment â†’ {completed, awaiting_delivery}
         // Stock needs to be deducted now (it was held, not deducted)
         assertSaleStockAvailable(items, sale.branch_id || null)
 
@@ -489,7 +489,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
         }
         refreshProductStockQuantities(touchedProductIds)
       } else if (wasStockDeducted && !willStockBeDeducted && sale_status !== 'partial_return' && sale_status !== 'returned') {
-        // Transition: {completed, awaiting_delivery} → awaiting_payment / cancelled / other
+        // Transition: {completed, awaiting_delivery} â†’ awaiting_payment / cancelled / other
         // Stock was deducted, now needs to be restored
         const touchedProductIds = new Set()
         for (const item of items) {
@@ -578,7 +578,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
       db.prepare(`
       UPDATE sales
-      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = datetime('now')
+      SET customer_id = ?, customer_name = ?, customer_phone = ?, customer_address = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
       `).run(
       customer?.id || null,
@@ -590,7 +590,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 
       db.prepare(`
       UPDATE returns
-      SET customer_id = ?, customer_name = ?, updated_at = datetime('now')
+      SET customer_id = ?, customer_name = ?, updated_at = CURRENT_TIMESTAMP
       WHERE sale_id = ?
       `).run(
       customer?.id || null,
@@ -709,7 +709,7 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   })))
 })
 
-// GET /api/sales/export  — enriched export with accounting summary
+// GET /api/sales/export  â€” enriched export with accounting summary
 router.get('/sales/export', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, period, format = 'json' } = req.query
 
@@ -906,7 +906,7 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
       AND COALESCE(r.return_scope,'customer') = 'customer'
   `).get()
 
-  // Returns stats — all-time and today
+  // Returns stats â€” all-time and today
   const allReturns = db.prepare(`
     SELECT COUNT(*) AS return_count,
       COALESCE(SUM(total_refund_usd), 0) AS total_refund_usd,

@@ -52,7 +52,6 @@ const TEXT_NUMERIC_EXCEPTIONS = new Set([
 const INSERT_TABLES_WITHOUT_ID_RETURNING = new Set([
   'branch_stock',
   'settings',
-  'sqlite_sequence',
 ])
 
 function countPositionalPlaceholders(sql = '') {
@@ -82,28 +81,6 @@ function countPositionalPlaceholders(sql = '') {
 
 function stripTrailingSemicolon(sql = '') {
   return String(sql || '').trim().replace(/;\s*$/, '')
-}
-
-function translatePragmaTableInfo(sql = '') {
-  const match = String(sql || '').trim().match(/^PRAGMA\s+table_info\s*\(\s*["']?([^"')]+)["']?\s*\)\s*;?$/i)
-  if (!match) return null
-  return {
-    sql: `
-      SELECT
-        ordinal_position - 1 AS cid,
-        column_name AS name,
-        data_type AS type,
-        CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull,
-        column_default AS dflt_value,
-        CASE WHEN column_name = 'id' THEN 1 ELSE 0 END AS pk
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = $1
-      ORDER BY ordinal_position
-    `,
-    values: [match[1]],
-    returnsRows: true,
-  }
 }
 
 function replacePositionalParams(sql, values, startIndex = 1) {
@@ -140,7 +117,7 @@ function replacePositionalParams(sql, values, startIndex = 1) {
   return { sql: output, nextIndex: paramIndex, values }
 }
 
-function normalizeSqliteFunctions(sql = '') {
+function normalizePortableSqlFunctions(sql = '') {
   return String(sql || '')
     .replace(/\bdatetime\s*\(\s*'now'\s*\)/gi, 'CURRENT_TIMESTAMP')
     .replace(/\bdatetime\s*\(\s*([^)]+?)\s*\)/gi, '$1')
@@ -197,10 +174,7 @@ function getInsertTableName(sql = '') {
 }
 
 function translateSql(sql, params = [], options = {}) {
-  const pragma = translatePragmaTableInfo(sql)
-  if (pragma) return pragma
-
-  let normalized = normalizeSqliteFunctions(stripTrailingSemicolon(sql))
+  let normalized = normalizePortableSqlFunctions(stripTrailingSemicolon(sql))
   let isInsertOrIgnore = /\bINSERT\s+OR\s+IGNORE\s+INTO\b/i.test(normalized)
   normalized = translateInsertOrIgnore(normalized)
   if (isInsertOrIgnore && !/\bON\s+CONFLICT\b/i.test(normalized)) {

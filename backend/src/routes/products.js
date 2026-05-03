@@ -1,4 +1,4 @@
-﻿'use strict'
+'use strict'
 const path    = require('path')
 const fs      = require('fs')
 const express = require('express')
@@ -42,7 +42,7 @@ function recalcProductStock(productId) {
   db.prepare(`
     UPDATE products SET
       stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -58,7 +58,7 @@ function syncProductImageGallery(productId, gallery) {
   const normalized = normalizeImageGallery(gallery)
   db.prepare('DELETE FROM product_images WHERE product_id = ?').run(productId)
   if (!normalized.length) {
-    db.prepare("UPDATE products SET image_path = NULL, updated_at = datetime('now') WHERE id = ?").run(productId)
+    db.prepare("UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(productId)
     return []
   }
   const insert = db.prepare(`
@@ -68,7 +68,7 @@ function syncProductImageGallery(productId, gallery) {
   normalized.forEach((imagePath, index) => {
     insert.run(productId, imagePath, index)
   })
-  db.prepare("UPDATE products SET image_path = ?, updated_at = datetime('now') WHERE id = ?").run(normalized[0], productId)
+  db.prepare("UPDATE products SET image_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized[0], productId)
   return normalized
 }
 
@@ -159,7 +159,7 @@ function ensureParentProductExists(parentId, { childId = null } = {}) {
 
 function markParentProductAsGroup(parentId) {
   if (!parentId) return
-  db.prepare("UPDATE products SET is_group = 1, updated_at = datetime('now') WHERE id = ?").run(parentId)
+  db.prepare("UPDATE products SET is_group = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(parentId)
 }
 
 function normalizeImportLookup(value) {
@@ -402,9 +402,9 @@ router.get('/search', authToken, (req, res) => {
     const joinSql = joins.join('\n')
     const sort = String(req.query.sort || 'name_asc').toLowerCase()
     const orderSql = sort === 'created_desc'
-      ? 'datetime(p.created_at) DESC, p.id DESC'
+      ? 'p.created_at DESC, p.id DESC'
       : sort === 'created_asc'
-        ? 'datetime(p.created_at) ASC, p.id ASC'
+        ? 'p.created_at ASC, p.id ASC'
         : sort === 'stock_desc'
           ? `${stockExpr} DESC, p.name COLLATE NOCASE ASC, p.id ASC`
           : 'p.name COLLATE NOCASE ASC, p.id ASC'
@@ -693,7 +693,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           purchase_price_usd=?, purchase_price_khr=?,
           cost_price_usd=?, cost_price_khr=?,
           stock_quantity=?, low_stock_threshold=?, out_of_stock_threshold=?,
-          image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=datetime('now')
+          image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
         String(merged.name || '').trim(),
@@ -905,7 +905,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 
     db.transaction(() => {
       for (const { id, path: imgPath } of resolved) {
-        db.prepare("UPDATE products SET image_path=?, updated_at=datetime('now') WHERE id=?")
+        db.prepare("UPDATE products SET image_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
           .run(imgPath, id)
         syncProductImageGallery(id, [imgPath])
         images_matched++
@@ -932,12 +932,18 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     db.prepare('SELECT id, name FROM units ORDER BY name COLLATE NOCASE ASC').all()
       .map((row) => [normalizeLookup(row.name), row])
   )
-  const settingsSupportsUpdatedAt = db.prepare('PRAGMA table_info(settings)').all()
-    .some((column) => String(column?.name || '').toLowerCase() === 'updated_at')
+  const settingsSupportsUpdatedAt = db.prepare(`
+    SELECT 1 AS exists
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ?
+      AND column_name = ?
+    LIMIT 1
+  `).get('settings', 'updated_at')?.exists === 1
   const upsertSetting = settingsSupportsUpdatedAt
     ? db.prepare(`
-      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `)
     : db.prepare(`
       INSERT INTO settings (key, value) VALUES (?, ?)
@@ -1383,7 +1389,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                   purchase_price_usd=?, purchase_price_khr=?,
                   cost_price_usd=?, cost_price_khr=?,
                   low_stock_threshold=?, is_group=?, parent_id=?,
-                  updated_at=datetime('now')
+                  updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
               `).run(
                 resolvedCategory,
@@ -1436,7 +1442,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 purchase_price_usd=?, purchase_price_khr=?,
                 cost_price_usd=?, cost_price_khr=?,
                 low_stock_threshold=?, is_group=?, parent_id=?,
-                updated_at=datetime('now') WHERE id=?
+                updated_at=CURRENT_TIMESTAMP WHERE id=?
             `).run(
               resolvedCategory,
               resolvedUnit,

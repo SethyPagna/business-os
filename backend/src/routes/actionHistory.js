@@ -78,14 +78,14 @@ router.get('/', authToken, (req, res) => {
         SELECT *
         FROM action_history
         WHERE scope = ?
-        ORDER BY datetime(updated_at) DESC, id DESC
+        ORDER BY updated_at DESC, id DESC
         LIMIT ?
       `).all(scope, limit)
       : db.prepare(`
         SELECT *
         FROM action_history
         WHERE scope = ? AND created_by_id = ?
-        ORDER BY datetime(updated_at) DESC, id DESC
+        ORDER BY updated_at DESC, id DESC
         LIMIT ?
       `).all(scope, req.user?.id || 0, limit)
     ok(res, { items: rows.map(mapRow) })
@@ -135,7 +135,7 @@ router.patch('/:id', authToken, (req, res) => {
     if (!existing) return err(res, 'Action history item not found', 404)
     db.prepare(`
       UPDATE action_history
-      SET status = ?, last_error = ?, updated_at = datetime('now')
+      SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, body.last_error ? String(body.last_error) : null, req.params.id)
     if (existing && (status === 'redoable' || status === 'undoable')) {
@@ -173,7 +173,7 @@ function completeServerHistoryTransition(req, res, direction) {
     }
     db.prepare(`
       UPDATE action_history
-      SET status = ?, last_error = NULL, updated_at = datetime('now')
+      SET status = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(nextStatus, existing.id)
     audit(

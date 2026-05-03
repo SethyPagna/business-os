@@ -9,7 +9,6 @@ const {
   ACTIVE_ENV_FILE,
   DATA_ROOT,
   DATA_FOLDER_NAME,
-  DB_PATH,
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
   ORGANIZATION_FOLDER_NAME,
@@ -209,7 +208,7 @@ function deleteDriveSyncEntriesUnder(relativePrefix) {
 
 function inferMimeType(filePath) {
   const ext = String(path.extname(filePath || '').toLowerCase())
-  if (ext === '.db') return 'application/x-sqlite3'
+  if (ext === '.sql') return 'application/sql'
   if (ext === '.json') return 'application/json'
   if (ext === '.csv') return 'text/csv'
   if (ext === '.txt' || ext === '.log') return 'text/plain'
@@ -506,13 +505,12 @@ function buildManagedSnapshotRoot(snapshotRoot) {
 
 function ensureSnapshotLayout(snapshotRoot) {
   const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
-  fs.mkdirSync(path.join(managedRoot, 'db'), { recursive: true })
   fs.mkdirSync(path.join(managedRoot, 'uploads'), { recursive: true })
+  fs.mkdirSync(path.join(managedRoot, 'backups'), { recursive: true })
 }
 
 function shouldSkipSnapshotFile(relativePath) {
-  const normalized = String(relativePath || '').replace(/\\/g, '/').toLowerCase()
-  return normalized === 'db/business.db'
+  return !String(relativePath || '').trim()
 }
 
 function createDataRootSnapshot() {
@@ -522,8 +520,6 @@ function createDataRootSnapshot() {
   ensureSnapshotLayout(snapshotRoot)
 
   try {
-    try { db.pragma('wal_checkpoint(TRUNCATE)') } catch (_) {}
-
     walkFiles(DATA_ROOT, (absolutePath) => {
       const relativePath = path.relative(DATA_ROOT, absolutePath)
       if (!relativePath || shouldSkipSnapshotFile(relativePath)) return
@@ -532,11 +528,11 @@ function createDataRootSnapshot() {
       fs.copyFileSync(absolutePath, targetPath)
     })
 
-    if (fs.existsSync(DB_PATH)) {
-      const snapshotDbPath = path.join(managedRoot, 'db', 'business.db')
-      fs.mkdirSync(path.dirname(snapshotDbPath), { recursive: true })
-      fs.copyFileSync(DB_PATH, snapshotDbPath)
-    }
+    fs.writeFileSync(path.join(managedRoot, 'manifest.json'), JSON.stringify({
+      format: 'business-os-drive-snapshot-v3',
+      createdAt: new Date().toISOString(),
+      note: 'Live database and object storage are backed up through Docker final backup packages. This Drive snapshot mirrors runtime backup artifacts and metadata.',
+    }, null, 2), 'utf8')
 
     return { tempDir, snapshotRoot, managedRoot }
   } catch (error) {

@@ -12,7 +12,6 @@ x-app-env: &app-env
   BUSINESS_OS_RUNTIME: docker
   BUSINESS_OS_DOCKER_RELEASE: "1"
   BUSINESS_OS_DOCKER_DATA_MODE: "${BUSINESS_OS_DOCKER_DATA_MODE:-postgres}"
-  BUSINESS_OS_DISABLE_SQLITE: "${BUSINESS_OS_DISABLE_SQLITE:-1}"
   BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED: "${BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED:-1}"
   BUSINESS_OS_BACKUP_DIR: "${BUSINESS_OS_BACKUP_DIR:-/runtime/backups}"
   BUSINESS_OS_REQUIRE_SCALE_SERVICES: "1"
@@ -131,29 +130,8 @@ services:
     cpus: "${MINIO_CPUS:-1.5}"
     logging: *log-policy
 
-  migrator:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
-    restart: "no"
-    environment:
-      <<: *app-env
-      BUSINESS_OS_WORKER_ROLE: migrator
-      BUSINESS_OS_LEGACY_ROOT_IN_CONTAINER: /legacy
-    volumes:
-      - type: bind
-        source: ${BUSINESS_OS_LEGACY_ROOT:-../..}
-        target: /legacy
-        read_only: true
-    networks: [business_os_internal]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    profiles: ["postgres-migrate"]
-    logging: *log-policy
-
   app:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -178,7 +156,7 @@ services:
     logging: *log-policy
 
   import-worker:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -194,7 +172,7 @@ services:
     logging: *log-policy
 
   media-worker:
-    image: "${BUSINESS_OS_IMAGE:-ghcr.io/leangcosmetics/business-os:latest}"
+    image: "${BUSINESS_OS_IMAGE:-business-os:latest}"
     restart: unless-stopped
     environment:
       <<: *app-env

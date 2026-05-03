@@ -66,17 +66,23 @@ function normalizeCustomTableSchema(schema = []) {
 }
 
 function tableHasColumn(tableName, columnName) {
-  const columns = db.prepare(`PRAGMA table_info("${escapeIdentifier(tableName)}")`).all()
+  const columns = db.prepare(`
+    SELECT column_name AS name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ?
+    ORDER BY ordinal_position
+  `).all(tableName)
   return columns.some((column) => String(column?.name || '').trim().toLowerCase() === String(columnName || '').trim().toLowerCase())
 }
 
 function ensureCustomTableRowVersioning(tableName) {
   const safeTableName = escapeIdentifier(tableName)
   if (!tableHasColumn(tableName, 'updated_at')) {
-    db.exec(`ALTER TABLE "${safeTableName}" ADD COLUMN "updated_at" TEXT`)
+    db.exec(`ALTER TABLE "${safeTableName}" ADD COLUMN "updated_at" TIMESTAMPTZ`)
     db.exec(`
       UPDATE "${safeTableName}"
-      SET updated_at = COALESCE(updated_at, created_at, datetime('now'))
+      SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
       WHERE updated_at IS NULL OR trim(updated_at) = ''
     `)
   }
@@ -118,7 +124,7 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     .join(', ')
 
   try {
-    db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (id INTEGER PRIMARY KEY AUTOINCREMENT, ${columns}, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))` )
+    db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (id SERIAL PRIMARY KEY, ${columns}, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)` )
     const now = new Date().toISOString()
     const r = db.prepare('INSERT INTO custom_tables (name, columns, updated_at) VALUES (?,?,?)')
       .run(tableName, JSON.stringify(normalizedSchema), now)

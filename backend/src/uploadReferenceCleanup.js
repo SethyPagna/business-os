@@ -28,7 +28,7 @@ function repairMissingUploadReferences(db) {
 
   const updateSetting = db.prepare(`
     UPDATE settings
-    SET value = ?, updated_at = datetime('now')
+    SET value = ?, updated_at = CURRENT_TIMESTAMP
     WHERE key = ?
   `)
   db.prepare('SELECT key, value FROM settings').all().forEach((row) => {
@@ -62,7 +62,7 @@ function repairMissingUploadReferences(db) {
   `)
   const updateProduct = db.prepare(`
     UPDATE products
-    SET image_path = ?, updated_at = datetime('now')
+    SET image_path = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
   db.prepare('SELECT id, image_path FROM products').all().forEach((row) => {
@@ -89,7 +89,7 @@ function repairMissingUploadReferences(db) {
   const deleteFileAsset = db.prepare('DELETE FROM file_assets WHERE id = ?')
   const updateFileAsset = db.prepare(`
     UPDATE file_assets
-    SET public_path = ?, updated_at = datetime('now')
+    SET public_path = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
   db.prepare('SELECT id, public_path FROM file_assets').all().forEach((row) => {

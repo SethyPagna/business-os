@@ -6,7 +6,7 @@ REM ========================================================================
 REM  Business OS | Final Release Builder
 REM
 REM  The legacy Windows EXE/NSIS release has been retired. The final supported
-REM  release is the private Docker release kit built by run\docker\release.bat.
+REM  release is the local Docker release kit built by run\docker\release.bat.
 REM ========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
@@ -42,8 +42,8 @@ set "BUSINESS_OS_NO_PAUSE=%OLD_BUSINESS_OS_NO_PAUSE%"
 echo.
 if "%EXIT_CODE%"=="0" (
   echo [DONE] Final Docker release built.
-  echo        Next: run run\docker\publish-release.bat when ready to publish private images.
-  echo        New laptop folder: release\business-os\
+  echo        Next: copy or sync release\business-os\ to the laptop.
+  echo        On that laptop, double-click Start Business OS.bat.
 ) else (
   echo [ERROR] Final Docker release failed.
   echo         Check ops\runtime\logs and run run\docker\doctor.bat.

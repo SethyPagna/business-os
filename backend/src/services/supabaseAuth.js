@@ -5,7 +5,7 @@
  *
  * Purpose:
  * - keep Supabase Auth as an external identity provider only
- * - let the local SQLite `users` table remain the business authority
+ * - let the Business OS Postgres `users` table remain the business authority
  * - provision, update, ban, and inspect auth identities from the server
  * - validate email/password and OAuth sessions without exposing service keys
  */

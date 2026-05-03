@@ -254,7 +254,7 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo.
     echo # SMS verification is disabled in this build.
     echo.
-    echo # Optional: Supabase Auth provider ^(Auth only - keep local SQLite data^)
+    echo # Optional: Supabase Auth provider ^(Auth only - Business OS Postgres remains authoritative^)
     echo SUPABASE_AUTH_ENABLED=!EXISTING_SUPABASE_AUTH_ENABLED!
     echo SUPABASE_URL=!EXISTING_SUPABASE_URL!
     echo SUPABASE_ANON_KEY=!EXISTING_SUPABASE_ANON_KEY!
@@ -281,19 +281,12 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo CACHE_REDIS_URL=redis://127.0.0.1:6380
     echo DATABASE_DRIVER=postgres
     echo DATABASE_URL=postgres://business_os:business_os_dev@127.0.0.1:55432/business_os
-    echo BUSINESS_OS_DISABLE_SQLITE=1
     echo OBJECT_STORAGE_DRIVER=minio
     echo S3_ENDPOINT=http://127.0.0.1:9000
     echo S3_ACCESS_KEY_ID=
     echo S3_SECRET_ACCESS_KEY=
     echo S3_BUCKET=business-os-assets
     echo MINIO_LICENSE_FILE=
-    echo SQLITE_BUSY_TIMEOUT_MS=30000
-    echo SQLITE_CACHE_SIZE_KB=196608
-    echo SQLITE_MMAP_SIZE_MB=1024
-    echo SQLITE_WAL_AUTOCHECKPOINT=4000
-    echo SQLITE_JOURNAL_SIZE_LIMIT_MB=128
-    echo SQLITE_SYNCHRONOUS=NORMAL
     echo IMPORT_QUEUE_CONCURRENCY=1
     echo MEDIA_QUEUE_CONCURRENCY=4
     echo IMPORT_WORKER_REPLICAS=2

@@ -13,7 +13,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 COPY backend/package*.json ./
-RUN npm ci --no-audit --loglevel=warn
+RUN npm ci --no-audit --loglevel=warn \
+  && npm install pg-native@3.7.0 --no-save --no-audit --loglevel=warn \
+  && npm ls pg-native libpq
 COPY backend/ ./
 COPY --from=frontend-build /build/frontend/dist ./frontend-dist
 ENV PKG_CACHE_PATH=/root/.pkg-cache
@@ -33,6 +35,18 @@ WORKDIR /app
 COPY --from=backend-build /build/dist-bin/business-os-server-linux /app/business-os-server
 COPY --from=backend-build /build/backend/node_modules/sharp /app/sharp
 COPY --from=backend-build /build/backend/node_modules/@img /app/@img
+COPY --from=backend-build /build/backend/node_modules/pg-native /app/node_modules/pg-native
+COPY --from=backend-build /build/backend/node_modules/libpq /app/node_modules/libpq
+COPY --from=backend-build /build/backend/node_modules/pg-types /app/node_modules/pg-types
+COPY --from=backend-build /build/backend/node_modules/@duckdb /app/node_modules/@duckdb
+COPY --from=backend-build /build/backend/node_modules/pg-int8 /app/node_modules/pg-int8
+COPY --from=backend-build /build/backend/node_modules/postgres-array /app/node_modules/postgres-array
+COPY --from=backend-build /build/backend/node_modules/postgres-bytea /app/node_modules/postgres-bytea
+COPY --from=backend-build /build/backend/node_modules/postgres-date /app/node_modules/postgres-date
+COPY --from=backend-build /build/backend/node_modules/postgres-interval /app/node_modules/postgres-interval
+COPY --from=backend-build /build/backend/node_modules/nan /app/node_modules/nan
+COPY --from=backend-build /build/backend/node_modules/bindings /app/node_modules/bindings
+COPY --from=backend-build /build/backend/node_modules/file-uri-to-path /app/node_modules/file-uri-to-path
 RUN chmod 0555 /app/business-os-server \
   && mkdir -p /runtime \
   && chown -R businessos:businessos /runtime /app
@@ -43,7 +57,6 @@ ENV NODE_ENV=production \
     BUSINESS_OS_RUNTIME=docker \
     BUSINESS_OS_DOCKER_RELEASE=1 \
     BUSINESS_OS_DOCKER_DATA_MODE=postgres \
-    BUSINESS_OS_DISABLE_SQLITE=1 \
     BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED=1 \
     BUSINESS_OS_REQUIRE_SCALE_SERVICES=1 \
     DATABASE_DRIVER=postgres \

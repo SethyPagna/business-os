@@ -25,14 +25,13 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   console.log('PASS backup UI polls queued jobs with visible progress')
 })()
 
-await (async function legacyJsonDownloadShouldNotBufferBlobOnMainThread() {
+await (async function finalBackupRemovesInlineJsonDownloadPath() {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
-  const exportBackupBody = source.match(/export async function exportBackup\(\) \{[\s\S]*?\n\}/)?.[0] || ''
-  assert.match(exportBackupBody, /new URL/)
-  assert.match(exportBackupBody, /searchParams\.set\('token'/)
-  assert.doesNotMatch(exportBackupBody, /\.blob\(/)
-  assert.doesNotMatch(exportBackupBody, /URL\.createObjectURL/)
-  console.log('PASS legacy JSON download avoids buffering the backup blob in React')
+  assert.doesNotMatch(source, /export\s+async\s+function\s+exportBackup\(/)
+  assert.doesNotMatch(source, /export\s+async\s+function\s+importBackup\(/)
+  assert.doesNotMatch(source, /pickBackupFile/)
+  assert.doesNotMatch(source, /\/api\/system\/backup\/import/)
+  console.log('PASS final backup API removes inline JSON backup paths')
 })()
 
 await (async function notificationsShouldRenderThroughPortal() {

@@ -6,7 +6,6 @@ const crypto = require('crypto')
 const { spawnSync } = require('child_process')
 let sharp = null
 try { sharp = require('sharp') } catch (_) {}
-const { db } = require('./database')
 const { UPLOADS_PATH } = require('./config')
 const { deleteObject, isMinioEnabled, putObject } = require('./objectStore')
 const { validateUploadedBuffer } = require('./uploadSecurity')
@@ -41,6 +40,10 @@ const MIME_TO_EXT = {
 
 const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
 let cachedFfmpegPath = undefined
+
+function getDb() {
+  return require('./database').db
+}
 
 const ASSET_EXT_TO_MIME = Object.entries(MIME_TO_EXT).reduce((map, [mime, ext]) => {
   map[ext] = mime
@@ -237,7 +240,7 @@ function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
 }
 
 function createFileAssetRecord(payload = {}) {
-  const statement = db.prepare(`
+  const statement = getDb().prepare(`
     INSERT INTO file_assets (
       original_name,
       stored_name,
@@ -274,8 +277,8 @@ function createFileAssetRecord(payload = {}) {
       @source,
       @created_by_id,
       @created_by_name,
-      datetime('now'),
-      datetime('now')
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
     )
     ON CONFLICT(public_path) DO UPDATE SET
       original_name = excluded.original_name,
@@ -293,7 +296,7 @@ function createFileAssetRecord(payload = {}) {
       source = excluded.source,
       created_by_id = COALESCE(excluded.created_by_id, file_assets.created_by_id),
       created_by_name = COALESCE(excluded.created_by_name, file_assets.created_by_name),
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
   `)
   statement.run({
     original_name: payload.original_name,
@@ -317,7 +320,7 @@ function createFileAssetRecord(payload = {}) {
 }
 
 function getFileAssetByPublicPath(publicPath) {
-  return db.prepare(`
+  return getDb().prepare(`
     SELECT *
     FROM file_assets
     WHERE public_path = ?
@@ -330,7 +333,7 @@ function listAssetRows(search = '', mediaType = 'all') {
     search: `%${String(search || '').trim().toLowerCase()}%`,
     mediaType: String(mediaType || 'all').trim().toLowerCase(),
   }
-  return db.prepare(`
+  return getDb().prepare(`
     SELECT *
     FROM file_assets
     WHERE (
@@ -343,7 +346,7 @@ function listAssetRows(search = '', mediaType = 'all') {
       @mediaType = 'all'
       OR media_type = @mediaType
     )
-    ORDER BY datetime(created_at) DESC, id DESC
+    ORDER BY created_at DESC, id DESC
   `).all(params)
 }
 
@@ -354,17 +357,17 @@ function getUploadFilePath(publicPath = '') {
 
 function collectUsage(publicPath) {
   const usages = []
-  const settingsRows = db.prepare(`
+  const settingsRows = getDb().prepare(`
     SELECT key
     FROM settings
     WHERE value = ? OR value LIKE '%' || ? || '%'
   `).all(publicPath, publicPath)
   settingsRows.forEach((row) => usages.push({ type: 'settings', label: row.key }))
 
-  const productRows = db.prepare(`SELECT id, name FROM products WHERE image_path = ?`).all(publicPath)
+  const productRows = getDb().prepare(`SELECT id, name FROM products WHERE image_path = ?`).all(publicPath)
   productRows.forEach((row) => usages.push({ type: 'product', label: row.name || `Product #${row.id}` }))
 
-  const galleryRows = db.prepare(`
+  const galleryRows = getDb().prepare(`
     SELECT p.id, p.name
     FROM product_images pi
     LEFT JOIN products p ON p.id = pi.product_id
@@ -372,10 +375,10 @@ function collectUsage(publicPath) {
   `).all(publicPath)
   galleryRows.forEach((row) => usages.push({ type: 'product_gallery', label: row.name || `Product #${row.id}` }))
 
-  const userRows = db.prepare(`SELECT id, name, username FROM users WHERE avatar_path = ?`).all(publicPath)
+  const userRows = getDb().prepare(`SELECT id, name, username FROM users WHERE avatar_path = ?`).all(publicPath)
   userRows.forEach((row) => usages.push({ type: 'user_avatar', label: row.name || row.username || `User #${row.id}` }))
 
-  const submissionRows = db.prepare(`SELECT id FROM customer_share_submissions WHERE screenshots_json LIKE '%' || ? || '%'`).all(publicPath)
+  const submissionRows = getDb().prepare(`SELECT id FROM customer_share_submissions WHERE screenshots_json LIKE '%' || ? || '%'`).all(publicPath)
   submissionRows.forEach((row) => usages.push({ type: 'submission', label: `Submission #${row.id}` }))
 
   return usages
@@ -499,7 +502,7 @@ async function backfillUploadAssets() {
     .map((entry) => entry.name)
   for (const storedName of files) {
     const publicPath = `/uploads/${storedName}`
-    const exists = db.prepare('SELECT id FROM file_assets WHERE public_path = ? LIMIT 1').get(publicPath)
+    const exists = getDb().prepare('SELECT id FROM file_assets WHERE public_path = ? LIMIT 1').get(publicPath)
     if (exists) continue
     await registerStoredAsset({
       storedName,
@@ -517,7 +520,7 @@ async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
 }
 
 function getFileAssetById(id) {
-  const row = db.prepare('SELECT * FROM file_assets WHERE id = ? LIMIT 1').get(id)
+  const row = getDb().prepare('SELECT * FROM file_assets WHERE id = ? LIMIT 1').get(id)
   return row ? serializeAssetRow(row) : null
 }
 
@@ -530,7 +533,7 @@ async function deleteFileAsset(id) {
   const absPath = getUploadFilePath(asset.public_path)
   if (fs.existsSync(absPath)) fs.unlinkSync(absPath)
   if (isMinioEnabled()) await deleteObject(String(asset.public_path || '').replace(/^\/+/, ''))
-  db.prepare('DELETE FROM file_assets WHERE id = ?').run(id)
+  getDb().prepare('DELETE FROM file_assets WHERE id = ?').run(id)
   return asset
 }
 

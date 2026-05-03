@@ -1,12 +1,22 @@
 'use strict'
 
+const fs = require('fs')
+const path = require('path')
 const { DATABASE_URL } = require('./config')
-const { coerceRow, translateSql } = require('./db/postgresSqliteCompat')
+const { coerceRow, translateSql } = require('./db/postgresQueryCompat')
 
 function loadPgNative() {
   try {
     return require('pg-native')
   } catch (error) {
+    const externalModuleRoot = process.pkg
+      ? path.join(path.dirname(process.execPath), 'node_modules')
+      : ''
+    if (externalModuleRoot) {
+      try {
+        return require(path.join(externalModuleRoot, 'pg-native'))
+      } catch (_) {}
+    }
     const message = error?.message || String(error)
     throw new Error(`Postgres runtime requires pg-native/libpq for the synchronous cutover bridge. ${message}`)
   }
@@ -90,16 +100,6 @@ class PostgresCompatDatabase {
     })
   }
 
-  pragma(statement, options = {}) {
-    const normalized = String(statement || '').trim().toLowerCase()
-    if (normalized === 'integrity_check') return options.simple ? 'ok' : [{ integrity_check: 'ok' }]
-    if (normalized.startsWith('table_info')) {
-      const sql = `PRAGMA ${statement}`
-      return this.prepare(sql).all()
-    }
-    return null
-  }
-
   transaction(fn) {
     if (typeof fn !== 'function') throw new Error('transaction requires a function')
     return (...args) => {
@@ -126,6 +126,24 @@ class PostgresCompatDatabase {
   }
 
   ensureRuntimeSchema() {
+    try {
+      const hasCoreTables = this.queryRows(`
+        SELECT (
+          to_regclass('public.products') IS NOT NULL
+          AND to_regclass('public.settings') IS NOT NULL
+          AND to_regclass('public.users') IS NOT NULL
+        )::int AS ready
+      `)[0]?.ready === 1
+      if (!hasCoreTables) {
+        const schemaPath = path.join(__dirname, 'db', 'postgresSchema.sql')
+        const schemaSql = fs.readFileSync(schemaPath, 'utf8')
+        this.client.querySync(schemaSql)
+      }
+    } catch (error) {
+      console.warn(`[postgres] final schema bootstrap failed: ${error?.message || error}`)
+      throw error
+    }
+
     const statements = [
       'CREATE EXTENSION IF NOT EXISTS pg_trgm',
       'CREATE EXTENSION IF NOT EXISTS unaccent',
@@ -168,10 +186,6 @@ function runDatabaseMaintenance() {
   return null
 }
 
-function applyDatabasePragmas() {
-  return null
-}
-
 function ensureCoreDataInvariants() {
   return null
 }
@@ -191,16 +205,39 @@ function getDb() {
   return dbInstance
 }
 
+const db = new Proxy({}, {
+  get(_target, prop) {
+    const database = getDb()
+    const value = database[prop]
+    return typeof value === 'function' ? value.bind(database) : value
+  },
+  set(_target, prop, value) {
+    const database = getDb()
+    database[prop] = value
+    return true
+  },
+  has(_target, prop) {
+    return prop in getDb()
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getDb())
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const descriptor = Object.getOwnPropertyDescriptor(getDb(), prop)
+    return descriptor || { configurable: true, enumerable: false, writable: true, value: undefined }
+  },
+})
+
 function closeDatabase() {
   if (dbInstance) dbInstance.close()
+  dbInstance = null
 }
 
 module.exports = {
   PostgresCompatDatabase,
-  applyDatabasePragmas,
   closeDatabase,
   createPostgresDatabase,
-  get db() { return getDb() },
+  db,
   ensureCoreDataInvariants,
   ensureDefaultOrganizationAndGroup,
   ensurePrimaryAdminRoleAndUser,

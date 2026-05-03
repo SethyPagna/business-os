@@ -237,8 +237,8 @@ $dockerEnvMap = Read-EnvFile $DockerEnv
 $importWorkerReplicas = if ($dockerEnvMap.IMPORT_WORKER_REPLICAS) { [int]$dockerEnvMap.IMPORT_WORKER_REPLICAS } else { 2 }
 $mediaWorkerReplicas = if ($dockerEnvMap.MEDIA_WORKER_REPLICAS) { [int]$dockerEnvMap.MEDIA_WORKER_REPLICAS } else { 2 }
 $databaseDriver = if ($dockerEnvMap.DATABASE_DRIVER) { [string]$dockerEnvMap.DATABASE_DRIVER } else { 'postgres' }
-if ($databaseDriver.Trim().ToLowerInvariant() -eq 'sqlite') {
-  Fail 'SQLite/local runtime is retired. Use Start Business OS.bat or run\docker\start.bat for the Docker/Postgres/MinIO runtime.'
+if ($databaseDriver.Trim().ToLowerInvariant() -ne 'postgres') {
+  Fail 'Postgres/MinIO is the only supported runtime. Use Start Business OS.bat or run\docker\start.bat.'
 }
 $importWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $importWorkerReplicas))
 $mediaWorkerReplicas = [Math]::Max(1, [Math]::Min(6, $mediaWorkerReplicas))
@@ -250,7 +250,6 @@ $env:MINIO_LICENSE_HOST_FILE = Join-Path $Root 'ops\runtime\secrets\minio.licens
 $env:CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $tokenFile
 $env:DATABASE_DRIVER = 'postgres'
 $env:OBJECT_STORAGE_DRIVER = 'minio'
-$env:BUSINESS_OS_DISABLE_SQLITE = '1'
 $env:BUSINESS_OS_REMOTE_PROVIDER = 'cloudflare'
 $env:PUBLIC_BASE_URL = $publicUrl
 $env:CLOUDFLARE_PUBLIC_URL = $publicUrl

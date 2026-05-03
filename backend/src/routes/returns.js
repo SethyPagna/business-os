@@ -18,7 +18,7 @@ function refreshProductStockQuantity(productId) {
       FROM branch_stock
       WHERE product_id = ?
     ),
-    updated_at = datetime('now')
+    updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
 }
@@ -96,7 +96,7 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
           `).get(saleId, item.sale_item_id)?.qty || 0
 
       const remaining = Math.max(0, (saleItem.quantity || 0) - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
+      if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} â€” only ${remaining} remaining`)
       continue
     }
 
@@ -124,7 +124,7 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
           `).get(saleId, item.product_id)?.qty || 0
 
       const remaining = Math.max(0, soldQty - returned)
-      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product — only ${remaining} remaining`)
+      if (qty > remaining) throw new Error(`Cannot return ${qty} of this product â€” only ${remaining} remaining`)
     }
   }
 }
@@ -342,7 +342,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       })
 
       const newStatus = fullyReturned ? 'returned' : 'partial_return'
-      db.prepare("UPDATE sales SET sale_status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, d.sale_id)
+      db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, d.sale_id)
     }
 
     audit(actor.userId, actor.userName, 'create', 'return', rid,
@@ -578,7 +578,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
   }
 })
 
-// PATCH /api/returns/:id  — update a return (e.g. customer changed mind)
+// PATCH /api/returns/:id  â€” update a return (e.g. customer changed mind)
 router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const d = req.body || {}
@@ -631,7 +631,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
           'return_reversal', item.quantity,
           item.cost_price_usd || 0, item.cost_price_khr || 0,
           (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
-          `Return #${existing.return_number} updated — reversing previous restock`,
+          `Return #${existing.return_number} updated â€” reversing previous restock`,
           parseInt(id), actor.userId, actor.userName,
         )
       }
@@ -700,7 +700,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
       UPDATE returns SET
         reason = ?, return_type = ?, notes = ?,
         total_refund_usd = ?, total_refund_khr = ?,
-        branch_id = ?, branch_name = ?, updated_at = datetime('now')
+        branch_id = ?, branch_name = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       d.reason || existing.reason,
@@ -729,7 +729,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
       const fullyReturned = saleItems.every(si => (map[si.product_id] || 0) >= si.quantity)
       const hasAny = allReturned.length > 0
       const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
-      db.prepare("UPDATE sales SET sale_status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, existing.sale_id)
+      db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, existing.sale_id)
     }
 
     audit(actor.userId, actor.userName, 'update', 'return', parseInt(id),

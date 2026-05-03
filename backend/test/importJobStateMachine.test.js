@@ -7,7 +7,7 @@ const path = require('path')
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-import-state-'))
 process.env.BUSINESS_OS_RUNTIME_DIR = tempRoot
-process.env.JOB_QUEUE_DRIVER = 'sqlite'
+process.env.JOB_QUEUE_DRIVER = 'bullmq'
 process.env.BUSINESS_OS_REQUIRE_SCALE_SERVICES = '0'
 process.env.IMPORT_MEDIA_WAIT_TIMEOUT_MS = '1000'
 
