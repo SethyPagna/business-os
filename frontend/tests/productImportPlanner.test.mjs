@@ -214,11 +214,27 @@ await runTest('bulk import modal explains specific review errors before apply', 
 
   assert.match(source, /getProductImportRowIssueDetails/)
   assert.match(source, /reviewIssueSummary/)
+  assert.match(source, /reviewIssueIndexSet/)
   assert.match(source, /Errors and review blockers/)
   assert.match(source, /Product name is required/)
   assert.match(source, /Barcode looks like scientific notation/)
   assert.match(source, /Duplicate SKU\/barcode/)
   assert.match(source, /Price\/cost needs review/)
+  assert.match(source, /conflictFilter === 'errors'[\s\S]*reviewIssueIndexSet\.has/)
+  assert.match(source, /Errors \(\{reviewIssueRows\.length/)
+  assert.match(source, /Same identifier appears in CSV rows/)
+})
+
+await runTest('bulk import modal has collapsible inline details and cancelled job recovery', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+
+  assert.match(source, /collapsedDetailRows/)
+  assert.match(source, /toggleInlineDetails/)
+  assert.match(source, /Inline details/)
+  assert.match(source, /Retry import/)
+  assert.match(source, /Delete import/)
+  assert.match(source, /Back to upload/)
+  assert.match(source, /cancelledImportRecovery/)
 })
 
 if (failed > 0) {

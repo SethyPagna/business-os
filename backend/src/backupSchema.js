@@ -1,6 +1,6 @@
 'use strict'
 
-const BACKUP_VERSION = 11
+const BACKUP_VERSION = 12
 
 const BACKUP_TABLES = [
   'categories',
@@ -31,6 +31,10 @@ const BACKUP_TABLES = [
   'import_job_files',
   'import_job_batches',
   'import_job_errors',
+  'rfid_tags',
+  'rfid_scan_sessions',
+  'rfid_events',
+  'rfid_session_items',
 ]
 
 const BACKUP_CLEAR_ORDER = [
@@ -57,6 +61,10 @@ const BACKUP_CLEAR_ORDER = [
   'settings',
   'file_assets',
   'action_history',
+  'rfid_events',
+  'rfid_session_items',
+  'rfid_tags',
+  'rfid_scan_sessions',
   'import_job_errors',
   'import_job_batches',
   'import_job_files',

@@ -12,12 +12,23 @@ import {
 } from '../../utils/loaders.mjs'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import SectionSwitcher from '../shared/SectionSwitcher.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 
 const QUICK_BACKUP_SECTIONS = [
   'Products + inventory',
   'Sales + returns',
   'Contacts + users',
   'Portal + files',
+]
+
+const BACKUP_SECTION_OPTIONS = [
+  { value: 'all', label: 'All', hint: 'Show doctor, export, restore, Google Drive, and maintenance tools.' },
+  { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Supabase Auth, and backup package readiness.' },
+  { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
+  { value: 'restore', label: 'Restore', hint: 'Restore a verified Business OS backup folder.' },
+  { value: 'drive', label: 'Google Drive', hint: 'Connect and manage Drive sync for backup mirrors.' },
+  { value: 'maintenance', label: 'Maintenance', hint: 'Advanced maintenance and reset tools.' },
 ]
 
 const BACKUP_LOCAL_COPY = {
@@ -1439,8 +1450,11 @@ export default function Backup() {
   const [folderImportPath, setFolderImportPath] = useState('')
   const [activeJob, setActiveJob] = useState(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
+  const [backupSection, setBackupSection] = useState('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
+  const sectionStorageKey = 'business-os:backup:section'
+  const showBackupSection = (sectionId) => backupSection === 'all' || backupSection === sectionId
 
   useEffect(() => {
     aliveRef.current = true
@@ -1562,9 +1576,26 @@ export default function Backup() {
           title={copy('backup', 'Backup')}
           subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
         />
+        <SectionSwitcher
+          label="Backup"
+          options={BACKUP_SECTION_OPTIONS}
+          value={backupSection}
+          onChange={setBackupSection}
+          storageKey={sectionStorageKey}
+        />
+        <LoadingWatchdog
+          loading={!!loading}
+          timeoutMs={9000}
+          label={copy('checking', 'Checking...')}
+          details={loading ? `Backup operation: ${loading}` : ''}
+          onRetry={() => setLoading('')}
+        />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+        {showBackupSection('doctor') ? (
         <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
+        ) : null}
+        {showBackupSection('export') ? (
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -1616,7 +1647,9 @@ export default function Backup() {
             </details>
           </div>
         </div>
+        ) : null}
 
+        {showBackupSection('restore') ? (
         <div className="card p-5 sm:p-6">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderInput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -1661,8 +1694,10 @@ export default function Backup() {
           </div>
 
         </div>
+        ) : null}
 
-        {isActive ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {isActive && showBackupSection('drive') ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {showBackupSection('maintenance') ? (
         <details
           className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
           onToggle={(event) => setAdvancedMaintenanceOpen(event.currentTarget.open)}
@@ -1680,6 +1715,7 @@ export default function Backup() {
             </div>
           ) : null}
         </details>
+        ) : null}
       </div>
     </div>
   )

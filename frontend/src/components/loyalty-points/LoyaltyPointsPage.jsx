@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BadgeDollarSign, Gift, Save, Search, Ticket } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { useIsPageActive } from '../shared/pageActivity'
+import SectionSwitcher from '../shared/SectionSwitcher.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -105,6 +107,14 @@ const COPY = {
   },
 }
 
+const LOYALTY_SECTION_OPTIONS = [
+  { value: 'all', label: 'All', hint: 'Show point rules, behavior, preview, lookup, and top balances.' },
+  { value: 'rules', label: 'Rules', hint: 'Edit earning basis, redemption values, and portal display settings.' },
+  { value: 'behavior', label: 'Behavior', hint: 'Review how points move through sales, returns, and manual customer attachment.' },
+  { value: 'lookup', label: 'Lookup', hint: 'Check a customer membership number and current balance.' },
+  { value: 'leaders', label: 'Top Points', hint: 'Show customers with the highest current point balances.' },
+]
+
 function sanitizeInteger(value, fallback, min = 0) {
   const num = Math.floor(Number(value))
   return Number.isFinite(num) ? Math.max(min, num) : fallback
@@ -140,9 +150,12 @@ export default function LoyaltyPointsPage() {
   const [lookupData, setLookupData] = useState(null)
   const [customerPoints, setCustomerPoints] = useState([])
   const [customerPointsLoading, setCustomerPointsLoading] = useState(true)
+  const [loyaltySection, setLoyaltySection] = useState('all')
   const lookupRequestRef = useRef(0)
   const customerPointsRequestRef = useRef(0)
   const saveInFlightRef = useRef(false)
+  const sectionStorageKey = 'business-os:loyalty:section'
+  const showLoyaltySection = (sectionId) => loyaltySection === 'all' || loyaltySection === sectionId
 
   useEffect(() => {
     setForm({
@@ -276,8 +289,26 @@ export default function LoyaltyPointsPage() {
   return (
     <div className="page-scroll p-4 sm:p-6">
       <div className="mx-auto max-w-7xl space-y-5">
+        <SectionSwitcher
+          label="Loyalty"
+          options={LOYALTY_SECTION_OPTIONS}
+          value={loyaltySection}
+          onChange={setLoyaltySection}
+          storageKey={sectionStorageKey}
+        />
+        <LoadingWatchdog
+          loading={customerPointsLoading || lookupLoading}
+          timeoutMs={8000}
+          label={t('loading') || 'Loading...'}
+          details={lookupLoading ? 'Checking the selected membership number.' : 'Loading customer point balances.'}
+          onRetry={() => {
+            void loadCustomerPoints('Retry loyalty customer points')
+            if (membershipNumber.trim()) void handleLookup()
+          }}
+        />
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_380px] 2xl:grid-cols-[minmax(0,1.55fr)_420px]">
           <div className="space-y-5">
+            {showLoyaltySection('rules') ? (
             <section className="card p-4 sm:p-5">
               <div className="flex flex-col gap-4 border-b border-gray-100 pb-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-3">
@@ -436,7 +467,9 @@ export default function LoyaltyPointsPage() {
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the customer portal membership panel under the point summary and redemption rules.')}</p>
               </div>
             </section>
+            ) : null}
 
+            {showLoyaltySection('behavior') ? (
             <section className="card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <div className="rounded-2xl bg-sky-100 p-3 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
@@ -454,9 +487,11 @@ export default function LoyaltyPointsPage() {
                 </div>
               </div>
             </section>
+            ) : null}
           </div>
 
           <aside className="space-y-5 xl:sticky xl:top-6">
+            {showLoyaltySection('rules') ? (
             <section className="card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
@@ -473,7 +508,9 @@ export default function LoyaltyPointsPage() {
                 </div>
               </div>
             </section>
+            ) : null}
 
+            {showLoyaltySection('lookup') ? (
             <section className="card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <div className="rounded-2xl bg-violet-100 p-3 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
@@ -545,7 +582,9 @@ export default function LoyaltyPointsPage() {
                 </div>
               ) : null}
             </section>
+            ) : null}
 
+            {showLoyaltySection('leaders') ? (
             <section className="card p-4 sm:p-5">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('customerTitle', 'Top customer points')}</h2>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('pointsLeaderboardHint', 'Top customer balances from current membership points.')}</p>
@@ -571,6 +610,7 @@ export default function LoyaltyPointsPage() {
                 )}
               </div>
             </section>
+            ) : null}
           </aside>
         </div>
       </div>

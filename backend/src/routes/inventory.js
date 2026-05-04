@@ -515,6 +515,352 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
   }
 })
 
+function normalizeRfidId(value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function getRfidSession(sessionId) {
+  return db.prepare('SELECT * FROM rfid_scan_sessions WHERE id = ?').get(sessionId)
+}
+
+function getBranchLedgerQty(branchId) {
+  return Number(db.prepare('SELECT COALESCE(SUM(quantity), 0) AS total FROM branch_stock WHERE branch_id = ?').get(branchId)?.total || 0)
+}
+
+function refreshRfidSessionCounts(sessionId) {
+  const session = getRfidSession(sessionId)
+  if (!session) return null
+  const counts = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END), 0) AS confirmed_qty,
+      COALESCE(SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END), 0) AS missing_count,
+      COALESCE(SUM(CASE WHEN status = 'extra' THEN 1 ELSE 0 END), 0) AS extra_count,
+      COALESCE(SUM(CASE WHEN status = 'wrong_location' THEN 1 ELSE 0 END), 0) AS wrong_location_count,
+      COALESCE(SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_count
+    FROM rfid_session_items
+    WHERE session_id = ?
+  `).get(sessionId) || {}
+  const ledgerQty = getBranchLedgerQty(session.branch_id)
+  db.prepare(`
+    UPDATE rfid_scan_sessions
+    SET ledger_qty = ?,
+        confirmed_qty = ?,
+        missing_count = ?,
+        extra_count = ?,
+        wrong_location_count = ?,
+        unknown_count = ?
+    WHERE id = ?
+  `).run(
+    ledgerQty,
+    Number(counts.confirmed_qty || 0),
+    Number(counts.missing_count || 0),
+    Number(counts.extra_count || 0),
+    Number(counts.wrong_location_count || 0),
+    Number(counts.unknown_count || 0),
+    sessionId,
+  )
+  return getRfidSession(sessionId)
+}
+
+function upsertRfidSessionItem({ sessionId, epcId, tid = '', productId = null, expectedBranchId = null, seenBranchId = null, status, reviewNote = '' }) {
+  const existing = db.prepare('SELECT * FROM rfid_session_items WHERE session_id = ? AND epc_id = ?').get(sessionId, epcId)
+  if (existing) {
+    db.prepare(`
+      UPDATE rfid_session_items
+      SET tid = COALESCE(NULLIF(?, ''), tid),
+          product_id = COALESCE(?, product_id),
+          expected_branch_id = COALESCE(?, expected_branch_id),
+          seen_branch_id = COALESCE(?, seen_branch_id),
+          status = ?,
+          review_note = ?,
+          last_seen = CURRENT_TIMESTAMP,
+          read_count = COALESCE(read_count, 0) + 1
+      WHERE id = ?
+    `).run(tid, productId, expectedBranchId, seenBranchId, status, reviewNote, existing.id)
+    return db.prepare('SELECT * FROM rfid_session_items WHERE id = ?').get(existing.id)
+  }
+  const inserted = db.prepare(`
+    INSERT INTO rfid_session_items
+      (session_id, epc_id, tid, product_id, expected_branch_id, seen_branch_id, status, review_note)
+    VALUES (?,?,?,?,?,?,?,?)
+  `).run(sessionId, epcId, tid, productId, expectedBranchId, seenBranchId, status, reviewNote)
+  return db.prepare('SELECT * FROM rfid_session_items WHERE id = ?').get(inserted.lastInsertRowid)
+}
+
+function recordRfidEvent(session, event = {}) {
+  const epcId = normalizeRfidId(event.epcId || event.epc_id || event.epc)
+  if (!epcId) return null
+  const tid = normalizeRfidId(event.tid || event.tid_id)
+  const tag = db.prepare('SELECT * FROM rfid_tags WHERE epc_id = ?').get(epcId)
+  let eventType = 'unknown'
+  let reviewNote = 'Unknown RFID tag. Link it to a product before applying.'
+  let productId = null
+  let seenBranchId = Number(session.branch_id)
+  let expectedBranchId = Number(session.branch_id)
+
+  if (tag) {
+    productId = Number(tag.product_id)
+    expectedBranchId = Number(tag.branch_id)
+    seenBranchId = Number(session.branch_id)
+    if (Number(tag.branch_id) !== Number(session.branch_id)) {
+      eventType = 'wrong_location'
+      reviewNote = `Wrong location: tag belongs to branch ${tag.branch_id}, scanned in branch ${session.branch_id}.`
+    } else {
+      eventType = 'present'
+      reviewNote = ''
+      db.prepare('UPDATE rfid_tags SET last_seen = CURRENT_TIMESTAMP, last_seen_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(session.id, tag.id)
+    }
+  }
+
+  const dedupeKey = `${session.id}:${epcId}:${eventType}`
+  db.prepare(`
+    INSERT INTO rfid_events
+      (session_id, epc_id, tid, product_id, branch_id, event_type, antenna, rssi, raw_json, dedupe_key)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    session.id,
+    epcId,
+    tid,
+    productId,
+    seenBranchId,
+    eventType,
+    event.antenna || '',
+    Number(event.rssi || 0),
+    JSON.stringify(event || {}),
+    dedupeKey,
+  )
+  return upsertRfidSessionItem({
+    sessionId: session.id,
+    epcId,
+    tid,
+    productId,
+    expectedBranchId,
+    seenBranchId,
+    status: eventType,
+    reviewNote,
+  })
+}
+
+router.get('/rfid/status', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const branchId = Number.parseInt(req.query.branchId || req.query.branch_id || '', 10)
+    const where = Number.isFinite(branchId) && branchId > 0 ? 'WHERE branch_id = ?' : ''
+    const params = where ? [branchId] : []
+    const tagCount = db.prepare(`SELECT COUNT(*) AS count FROM rfid_tags ${where}`).get(...params)?.count || 0
+    const activeSession = db.prepare(`SELECT * FROM rfid_scan_sessions ${where ? `${where} AND` : 'WHERE'} status = 'active' ORDER BY started_at DESC, id DESC LIMIT 1`).get(...params) || null
+    const exceptions = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM rfid_session_items item
+      JOIN rfid_scan_sessions session ON session.id = item.session_id
+      ${where ? 'WHERE session.branch_id = ? AND' : 'WHERE'} item.status IN ('wrong_location', 'unknown', 'missing', 'extra')
+    `).get(...params)?.count || 0
+    ok(res, {
+      item: {
+        connected: false,
+        readerCount: 0,
+        tagCount: Number(tagCount || 0),
+        activeSession,
+        exceptionCount: Number(exceptions || 0),
+      },
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load RFID status', 500)
+  }
+})
+
+router.post('/rfid/tags', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const actor = getAuditActor(req, req.body || {})
+    const epcId = normalizeRfidId(req.body?.epcId || req.body?.epc_id || req.body?.epc)
+    const tid = normalizeRfidId(req.body?.tid || req.body?.tid_id)
+    const productId = Number.parseInt(req.body?.productId || req.body?.product_id, 10)
+    const branchId = Number.parseInt(req.body?.branchId || req.body?.branch_id, 10)
+    if (!epcId) return err(res, 'EPC/TID is required')
+    if (!Number.isFinite(productId) || productId <= 0) return err(res, 'Product is required')
+    if (!Number.isFinite(branchId) || branchId <= 0) return err(res, 'Branch is required')
+    const product = db.prepare('SELECT id, name FROM products WHERE id = ?').get(productId)
+    const branch = db.prepare('SELECT id, name FROM branches WHERE id = ?').get(branchId)
+    if (!product) return err(res, 'Product not found', 404)
+    if (!branch) return err(res, 'Branch not found', 404)
+    const existing = db.prepare('SELECT * FROM rfid_tags WHERE epc_id = ?').get(epcId)
+    if (existing && (Number(existing.product_id) !== productId || Number(existing.branch_id) !== branchId)) {
+      return err(res, 'Duplicate EPC already linked to another product or branch.', 409)
+    }
+    let tag
+    if (existing) {
+      db.prepare('UPDATE rfid_tags SET tid = ?, status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(tid, req.body?.status || existing.status || 'active', actor.userId, existing.id)
+      tag = db.prepare('SELECT * FROM rfid_tags WHERE id = ?').get(existing.id)
+    } else {
+      const inserted = db.prepare(`
+        INSERT INTO rfid_tags (epc_id, tid, product_id, branch_id, status, created_by, updated_by)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(epcId, tid, productId, branchId, req.body?.status || 'active', actor.userId, actor.userId)
+      tag = db.prepare('SELECT * FROM rfid_tags WHERE id = ?').get(inserted.lastInsertRowid)
+    }
+    audit(actor.userId, actor.userName, 'rfid_tag_link', 'rfid_tag', tag.id, { epcId, productId, branchId })
+    ok(res, { item: tag })
+  } catch (error) {
+    err(res, error?.message || 'Failed to save RFID tag', 500)
+  }
+})
+
+router.get('/rfid/tags/search', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const query = `%${String(req.query.q || req.query.query || '').trim().toLowerCase()}%`
+    const branchId = Number.parseInt(req.query.branchId || req.query.branch_id || '', 10)
+    const where = ['1=1']
+    const params = []
+    if (query !== '%%') {
+      where.push('(lower(t.epc_id) LIKE ? OR lower(COALESCE(t.tid, \'\')) LIKE ? OR lower(COALESCE(p.name, \'\')) LIKE ? OR lower(COALESCE(p.sku, \'\')) LIKE ? OR lower(COALESCE(p.barcode, \'\')) LIKE ?)')
+      params.push(query, query, query, query, query)
+    }
+    if (Number.isFinite(branchId) && branchId > 0) {
+      where.push('t.branch_id = ?')
+      params.push(branchId)
+    }
+    const items = db.prepare(`
+      SELECT t.*, p.name AS product_name, p.sku, p.barcode, b.name AS branch_name
+      FROM rfid_tags t
+      LEFT JOIN products p ON p.id = t.product_id
+      LEFT JOIN branches b ON b.id = t.branch_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.updated_at DESC, t.id DESC
+      LIMIT 100
+    `).all(...params)
+    ok(res, { items })
+  } catch (error) {
+    err(res, error?.message || 'Failed to search RFID tags', 500)
+  }
+})
+
+router.post('/rfid/sessions', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const actor = getAuditActor(req, req.body || {})
+    const branchId = Number.parseInt(req.body?.branchId || req.body?.branch_id, 10)
+    if (!Number.isFinite(branchId) || branchId <= 0) return err(res, 'Branch is required')
+    const branch = db.prepare('SELECT id, name FROM branches WHERE id = ?').get(branchId)
+    if (!branch) return err(res, 'Branch not found', 404)
+    const ledgerQty = getBranchLedgerQty(branchId)
+    const inserted = db.prepare(`
+      INSERT INTO rfid_scan_sessions
+        (branch_id, area, reader_id, status, ledger_qty, created_by, created_by_name)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(branchId, req.body?.area || '', req.body?.readerId || req.body?.reader_id || '', 'active', ledgerQty, actor.userId, actor.userName)
+    const session = db.prepare('SELECT * FROM rfid_scan_sessions WHERE id = ?').get(inserted.lastInsertRowid)
+    audit(actor.userId, actor.userName, 'rfid_session_start', 'rfid_scan_session', session.id, { branchId, area: req.body?.area || '', readerId: req.body?.readerId || req.body?.reader_id || '' })
+    ok(res, { item: session })
+  } catch (error) {
+    err(res, error?.message || 'Failed to start RFID session', 500)
+  }
+})
+
+router.post('/rfid/sessions/:id/events', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const sessionId = Number.parseInt(req.params.id, 10)
+    const session = getRfidSession(sessionId)
+    if (!session) return err(res, 'RFID session not found', 404)
+    if (String(session.status || '').toLowerCase() !== 'active') return err(res, 'RFID session is not active', 409)
+    const events = Array.isArray(req.body?.events) ? req.body.events : [req.body || {}]
+    const items = db.transaction(() => events.map((event) => recordRfidEvent(session, event)).filter(Boolean))()
+    const updated = refreshRfidSessionCounts(sessionId)
+    ok(res, { items, session: updated })
+  } catch (error) {
+    err(res, error?.message || 'Failed to record RFID events', 500)
+  }
+})
+
+router.get('/rfid/sessions/:id/review', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const sessionId = Number.parseInt(req.params.id, 10)
+    const session = refreshRfidSessionCounts(sessionId)
+    if (!session) return err(res, 'RFID session not found', 404)
+    const items = db.prepare(`
+      SELECT item.*, p.name AS product_name, p.sku, p.barcode, expected.name AS expected_branch_name, seen.name AS seen_branch_name
+      FROM rfid_session_items item
+      LEFT JOIN products p ON p.id = item.product_id
+      LEFT JOIN branches expected ON expected.id = item.expected_branch_id
+      LEFT JOIN branches seen ON seen.id = item.seen_branch_id
+      WHERE item.session_id = ?
+      ORDER BY CASE item.status WHEN 'wrong_location' THEN 0 WHEN 'unknown' THEN 1 WHEN 'missing' THEN 2 WHEN 'extra' THEN 3 ELSE 4 END, item.last_seen DESC
+    `).all(sessionId)
+    ok(res, { item: session, items })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load RFID review', 500)
+  }
+})
+
+router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const actor = getAuditActor(req, req.body || {})
+    const sessionId = Number.parseInt(req.params.id, 10)
+    const session = refreshRfidSessionCounts(sessionId)
+    if (!session) return err(res, 'RFID session not found', 404)
+    const branchId = Number.parseInt(req.body?.branchId || req.body?.branch_id || session.branch_id, 10)
+    if (Number(branchId) !== Number(session.branch_id)) return err(res, 'Branch mismatch: this RFID scan cannot update another branch.', 409)
+    const presentRows = db.prepare(`
+      SELECT product_id, COUNT(*) AS confirmed_qty
+      FROM rfid_session_items
+      WHERE session_id = ? AND status = 'present' AND product_id IS NOT NULL
+      GROUP BY product_id
+    `).all(sessionId)
+    const applyMaster = req.body?.applyMaster !== false && req.body?.updateMasterStock !== false
+    const movements = []
+    db.transaction(() => {
+      presentRows.forEach((row) => {
+        const productId = Number(row.product_id)
+        const confirmedQty = Number(row.confirmed_qty || 0)
+        const product = db.prepare('SELECT id, name, purchase_price_usd, purchase_price_khr FROM products WHERE id = ?').get(productId)
+        if (!product) return
+        db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(productId, branchId)
+        const branchStock = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, branchId) || { quantity: 0 }
+        db.prepare('UPDATE branch_stock SET rfid_confirmed_qty = ? WHERE product_id = ? AND branch_id = ?').run(confirmedQty, productId, branchId)
+        if (applyMaster) {
+          const previousQty = Number(branchStock.quantity || 0)
+          const delta = confirmedQty - previousQty
+          db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(confirmedQty, productId, branchId)
+          if (delta !== 0) {
+            const movement_type = 'rfid_count_adjustment'
+            db.prepare(`
+              INSERT INTO inventory_movements
+                (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+                 unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            `).run(
+              productId,
+              product.name,
+              branchId,
+              db.prepare('SELECT name FROM branches WHERE id = ?').get(branchId)?.name || '',
+              movement_type,
+              delta,
+              Number(product.purchase_price_usd || 0),
+              Number(product.purchase_price_khr || 0),
+              Math.abs(delta) * Number(product.purchase_price_usd || 0),
+              Math.abs(delta) * Number(product.purchase_price_khr || 0),
+              'RFID manual stock count apply',
+              `rfid-session:${sessionId}`,
+              actor.userId,
+              actor.userName,
+            )
+            movements.push({ productId, delta, movement_type })
+          }
+          recalcProductStock(productId)
+        }
+        db.prepare('UPDATE products SET rfid_confirmed_qty = (SELECT COALESCE(SUM(rfid_confirmed_qty), 0) FROM branch_stock WHERE product_id = ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(productId, productId)
+      })
+      db.prepare("UPDATE rfid_scan_sessions SET status = 'applied', applied_at = CURRENT_TIMESTAMP, finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP) WHERE id = ?").run(sessionId)
+      audit(actor.userId, actor.userName, 'rfid_stock_apply', 'rfid_scan_session', sessionId, {
+        branchId,
+        applyMaster,
+        movements,
+      })
+    })()
+    ok(res, { item: refreshRfidSessionCounts(sessionId), movements })
+  } catch (error) {
+    err(res, error?.message || 'Failed to apply RFID session', 500)
+  }
+})
+
 // GET /api/inventory/summary
 router.get('/summary', authToken, requirePermission('inventory'), (req, res) => {
   try {

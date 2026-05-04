@@ -1054,6 +1054,25 @@ export const getInventoryMovements = ({ branchId, userId } = {}, limit) => {
   return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
 }
 
+export const getRfidStatus = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:rfid:status:${q}`, () => apiFetch('GET', `/api/inventory/rfid/status${q ? `?${q}` : ''}`), () => ({ item: { connected: false, readerCount: 0, tagCount: 0, exceptionCount: 0 } }))
+}
+export const createRfidTag = payload =>
+  route('inventory:rfid:tags:create', () => apiFetch('POST', '/api/inventory/rfid/tags', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+export const searchRfidTags = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:rfid:tags:search:${q}`, () => apiFetch('GET', `/api/inventory/rfid/tags/search${q ? `?${q}` : ''}`), () => ({ items: [] }))
+}
+export const createRfidSession = payload =>
+  route('inventory:rfid:sessions:create', () => apiFetch('POST', '/api/inventory/rfid/sessions', { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+export const recordRfidSessionEvents = (id, payload) =>
+  route(`inventory:rfid:sessions:${id}:events`, () => apiFetch('POST', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/events`, { ...getDeviceInfo(), ...(payload || {}) }), null, true)
+export const getRfidSessionReview = id =>
+  route(`inventory:rfid:sessions:${id}:review`, () => apiFetch('GET', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/review`), null)
+export const applyRfidSession = (id, payload = {}) =>
+  route(`inventory:rfid:sessions:${id}:apply`, () => apiFetch('POST', `/api/inventory/rfid/sessions/${encodeURIComponent(id)}/apply`, { ...getDeviceInfo(), ...payload }), null, true)
+
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
