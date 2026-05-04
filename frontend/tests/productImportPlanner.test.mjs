@@ -194,6 +194,21 @@ await runTest('bulk import modal stops the async start sequence after cancel is 
   }
 })
 
+await runTest('bulk import modal surfaces grouped families, filter hints, inline edits, undo, and target clarity', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+
+  assert.match(source, /CONFLICT_FILTER_OPTIONS/)
+  assert.match(source, /title=\{item\.hint\}/)
+  assert.match(source, /reviewGroups/)
+  assert.match(source, /collapsedFamilyKeys/)
+  assert.match(source, /visibleConflictSections/)
+  assert.match(source, /subgroups/)
+  assert.match(source, /reviewUndoStack/)
+  assert.match(source, /Undo2/)
+  assert.match(source, /InlineImportDetailGrid/)
+  assert.match(source, /getImportActionTargetSummary/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
