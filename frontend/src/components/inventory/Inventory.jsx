@@ -44,6 +44,20 @@ function priceCsv(value) {
   return formatPriceNumber(value || 0)
 }
 
+const RFID_INVENTORY_WORKFLOWS = [
+  { id: 'receiving', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
+  { id: 'stock-count', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
+  { id: 'transfer', label: 'Branch transfer', description: 'Scan tags out of one branch and into another so transfer movements keep item identity.' },
+  { id: 'pos-verify', label: 'POS verify', description: 'Use doorway or counter reads to confirm sold items before bagging and reduce missed scans.' },
+  { id: 'returns', label: 'Returns', description: 'Validate returned tags against the original sale before restock, write-off, or supplier return.' },
+]
+
+const RFID_READER_REQUIREMENTS = [
+  'RFID reader gateway must post reads with EPC / TID, antenna, branch, RSSI, and timestamp.',
+  'Each tag must be mapped to a product, variant, lot, carton, or serial-level unit before stock can change.',
+  'Barcode fallback remains available for products that are not tagged or when the reader is offline.',
+]
+
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
   const { syncChannel } = useSync()
@@ -115,6 +129,22 @@ export default function Inventory() {
     }
     return username === 'admin' || roleCode === 'admin' || !!permissions.all
   }, [user])
+
+  const rfidGatewayStatus = useMemo(() => {
+    const branchName = branchFilter === 'all'
+      ? (t('all_branches') || 'All branches')
+      : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || `Branch ${branchFilter}`)
+    return {
+      connected: false,
+      label: 'Not connected',
+      branchName,
+      readerCount: 0,
+      activeSession: 'No active RFID session',
+      queuedReads: 0,
+      unknownTags: 0,
+      lastHeartbeat: 'No reader heartbeat yet',
+    }
+  }, [branchFilter, branches, t])
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -1352,6 +1382,24 @@ export default function Inventory() {
   ])
 
   const inventoryFilterSections = useMemo(() => {
+    if (tab === 'rfid') {
+      return [
+        branches.length > 1 ? {
+          id: 'branch',
+          label: t('branch') || 'Branch',
+          options: [
+            { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+            ...branches.map((branch) => ({
+              id: `branch-${branch.id}`,
+              label: branch.name,
+              active: branchFilter === String(branch.id),
+              onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+            })),
+          ],
+        } : null,
+      ].filter(Boolean)
+    }
+
     if (tab === 'movements') {
       return [
         branches.length > 1 ? {
@@ -1525,6 +1573,12 @@ export default function Inventory() {
   ])
 
   const activeInventoryFilterCount = useMemo(() => {
+    if (tab === 'rfid') {
+      return [
+        branchFilter !== 'all',
+      ].filter(Boolean).length
+    }
+
     if (tab === 'movements') {
       return [
         branchFilter !== 'all',
@@ -1766,7 +1820,7 @@ export default function Inventory() {
       </>
       )}
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {[['products', t('products')], ['movements', t('movements')]].map(([id,label]) => (
+        {[['products', t('products')], ['movements', t('movements')], ['rfid', 'RFID']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab===id ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
             {label}
@@ -1784,7 +1838,9 @@ export default function Inventory() {
             className={`input min-w-0 flex-1 text-sm ${tab === 'products' ? 'rounded-r-none' : ''}`}
             placeholder={tab === 'products'
               ? `${t('search') || 'Search'} - separate terms with commas, then choose match mode`
-              : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
+              : tab === 'rfid'
+                ? 'Search RFID sessions, EPC / TID, reader, or product mapping'
+                : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1844,7 +1900,9 @@ export default function Inventory() {
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
-          : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${t('tap_for_details')||'click a row for details'}`}
+          : tab === 'rfid'
+            ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
+            : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${t('tap_for_details')||'click a row for details'}`}
       </p>
 
       {/* ????????????????????????????????????????
@@ -2341,6 +2399,93 @@ export default function Inventory() {
             </div>
           </div>
         </>
+      )}
+
+      {tab === 'rfid' && (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white">
+                  <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  RFID inventory
+                </div>
+                <p className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
+                  Manage reader readiness, EPC / TID mapping, stock counts, receiving, transfers, POS checks, and exceptions from one Inventory section.
+                </p>
+              </div>
+              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${rfidGatewayStatus.connected ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
+                Reader gateway: {rfidGatewayStatus.label}
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ['Reader gateway', `${rfidGatewayStatus.readerCount} online`, rfidGatewayStatus.lastHeartbeat],
+                ['Active session', rfidGatewayStatus.activeSession, rfidGatewayStatus.branchName],
+                ['Queued reads', rfidGatewayStatus.queuedReads, 'Awaiting sync/apply'],
+                ['Unknown tags', rfidGatewayStatus.unknownTags, 'Need product mapping'],
+              ].map(([label, value, note]) => (
+                <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+                  <div className="mt-1 text-sm font-bold text-gray-900 dark:text-white">{value}</div>
+                  <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{note}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900 dark:text-white">RFID workflows</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Choose a session type before readers start changing stock.</div>
+                </div>
+                <button type="button" className="btn-primary px-3 py-1.5 text-xs" disabled title="Enable after a reader gateway is connected.">
+                  Start RFID stock count
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                {RFID_INVENTORY_WORKFLOWS.map((workflow) => (
+                  <div key={workflow.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                    <div className="font-semibold text-gray-900 dark:text-white">{workflow.label}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{workflow.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
+              <div className="text-sm font-semibold text-gray-900 dark:text-white">Tag lookup and mapping</div>
+              <div className="mt-2 grid gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">EPC / TID</span>
+                  <input className="input text-sm" placeholder="Paste or scan tag id" disabled title="Reader integration is not connected yet." />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Map to product or variant</span>
+                  <input className="input text-sm" placeholder="Search product, SKU, barcode, or variant" disabled title="Mapping turns reader scans into stock movements." />
+                </label>
+                <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                  Barcode fallback stays available for untagged products, offline readers, and emergency receiving.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Implementation checklist</div>
+            <div className="grid gap-2 md:grid-cols-3">
+              {RFID_READER_REQUIREMENTS.map((item, index) => (
+                <div key={item} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
+                  <span className="mr-1 font-bold text-blue-600 dark:text-blue-300">{index + 1}.</span>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ?? Adjust stock modal ?? */}

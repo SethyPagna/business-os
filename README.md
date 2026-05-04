@@ -97,7 +97,7 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 - Imports wait for review before applying large changes.
 - Cancel, retry, failed-row download, remove, undo, and redo are available where supported. Cancelling during upload/start stops the start sequence, and retry resets cancelled jobs before queueing analysis again.
 - Import create, upload, start, cancel, retry, approve, and delete actions are recorded in the audit log with actor, job type, status changes, and cancellation source.
-- Product import review groups same-name families with collapse/expand sections, parent/variant scenario chips, inline editable details, action target labels, filter hover hints, and undo for accidental conflict-resolution changes.
+- Product import review groups same-name families with collapse/expand sections, parent/variant scenario chips, inline editable details, action target labels, filter hover hints, exact row-level error summaries, and undo for accidental conflict-resolution changes.
 
 ## RFID Inventory Roadmap
 
@@ -110,6 +110,8 @@ Recommended rollout:
 3. Map tag events to inventory movements: receiving, stock count, transfer, POS verification, return verification, and shrinkage review.
 4. Require a review queue for unknown tags, duplicate tags, cross-branch reads, and tags attached to disabled products.
 5. Keep barcode fallback on every RFID screen so staff can resolve unreadable or damaged tags without leaving the workflow.
+
+The Inventory page includes an RFID section for reader gateway status, EPC/TID lookup, product mapping, receiving, stock count, branch transfer, POS verification, returns, unknown tags, and barcode fallback readiness. The reader gateway remains disconnected until hardware/API credentials are configured.
 
 ## Audit, Activity, And Receipts
 
@@ -126,6 +128,11 @@ Recommended rollout:
 - Backup: `run\docker\backup.bat`
 - Restore: `run\docker\restore.bat`
 - Update Docker release: `run\docker\update.bat`
+
+After any source-code change that should be visible in the running Docker app, rebuild and restart the release image from the updated source:
+
+- Build current source into Docker release image: `powershell -ExecutionPolicy Bypass -File ops\scripts\powershell\docker-release.ps1 -Action Release`
+- Recreate the running release stack: `powershell -ExecutionPolicy Bypass -File ops\scripts\powershell\docker-release.ps1 -Action Start`
 
 Every user-facing command window stays open and prints what to do next.
 The Backup page Integration Doctor is read-only and must not show a write-failed banner for GET/health checks.

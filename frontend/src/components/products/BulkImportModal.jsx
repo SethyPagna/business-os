@@ -212,6 +212,61 @@ function getProductImportIssueHint(issueType) {
   return 'Review this row before importing.'
 }
 
+function getProductImportRowIssueDetails(entry = {}, editedRow = {}) {
+  const details = []
+  const conflictFields = Array.isArray(entry.conflictFields) ? entry.conflictFields : []
+  const duplicateRows = entry.importDuplicateRows || {}
+  const barcodeIssue = getProductImportBarcodeIssue(editedRow.barcode)
+
+  if (!normalizeImportProductName(editedRow.name)) {
+    details.push({
+      title: 'Product name is required',
+      detail: 'Add a product name or skip this row. Rows without a name cannot create, update, or receive stock.',
+    })
+  }
+
+  if (barcodeIssue) {
+    details.push({
+      title: barcodeIssue === 'barcode_scientific_notation' ? 'Barcode looks like scientific notation' : getProductImportIssueLabel(barcodeIssue),
+      detail: getProductImportIssueHint(barcodeIssue),
+      blocking: isBlockingProductImportIssue(barcodeIssue),
+    })
+  }
+
+  if (conflictFields.includes('sku') || conflictFields.includes('barcode')) {
+    const csvRows = [
+      ...(Array.isArray(duplicateRows.sku) ? duplicateRows.sku : []),
+      ...(Array.isArray(duplicateRows.barcode) ? duplicateRows.barcode : []),
+    ]
+    details.push({
+      title: 'Duplicate SKU/barcode',
+      detail: csvRows.length
+        ? `Same identifier appears in CSV rows ${summarizeRowNumbers(csvRows.map((rowIndex) => Number(rowIndex) + 2))}. Clear, edit, or intentionally keep the duplicate.`
+        : `Imported ${conflictFields.join(' and ')} matches ${entry.existing?.name || 'another product'}. Choose clear, edit, or keep duplicate before applying.`,
+    })
+  }
+
+  if (hasPriceReviewIssue(editedRow, entry.existing, entry.samePricing)) {
+    details.push({
+      title: 'Price/cost needs review',
+      detail: entry.existing && entry.samePricing === false
+        ? 'Imported price or cost differs from the matched product. Choose whether to keep existing details, fill blanks only, or use imported values.'
+        : 'All price/cost columns are blank or zero. Confirm that is intentional before applying this row.',
+    })
+  }
+
+  ;(entry.issueTypes || []).forEach((issueType) => {
+    if (issueType === 'missing_name' || issueType === barcodeIssue) return
+    details.push({
+      title: getProductImportIssueLabel(issueType),
+      detail: getProductImportIssueHint(issueType),
+      blocking: isBlockingProductImportIssue(issueType),
+    })
+  })
+
+  return details
+}
+
 function valuesDiffer(left, right) {
   return String(left ?? '').trim().normalize('NFC') !== String(right ?? '').trim().normalize('NFC')
 }
@@ -788,6 +843,23 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     }
   }).filter((entry) => isBlockingProductImportIssue(entry.issue)), [conflicts, identifierOverrides, rowOverrides])
   const blockingIssueCount = blockingIssueEntries.length
+  const reviewIssueRows = useMemo(() => conflicts.map((entry) => {
+    const index = Number(entry.index ?? entry.row?._import_row_index ?? 0)
+    const editedRow = {
+      ...(entry.row || {}),
+      ...(rowOverrides[index] || {}),
+      sku: identifierOverrides[index]?.sku ?? rowOverrides[index]?.sku ?? entry.row?.sku ?? '',
+      barcode: identifierOverrides[index]?.barcode ?? rowOverrides[index]?.barcode ?? entry.row?.barcode ?? '',
+    }
+    const details = getProductImportRowIssueDetails(entry, editedRow)
+    return {
+      index,
+      rowNumber: editedRow._rowNumber || index + 2,
+      name: editedRow.name || 'Unnamed row',
+      details,
+    }
+  }).filter((entry) => entry.details.length), [conflicts, identifierOverrides, rowOverrides])
+  const reviewIssueSummary = reviewIssueRows.slice(0, 8)
   const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
@@ -1210,6 +1282,39 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <div className="text-blue-600 dark:text-blue-500">{T('variant_rows_count', 'Variant rows')}</div>
             </div>
           </div>
+
+          {reviewIssueSummary.length ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold">Errors and review blockers</div>
+                  <div className="mt-0.5 text-red-600 dark:text-red-300">Fix these row-level issues before applying. Hover row badges for quick meanings, then edit inline fields directly.</div>
+                </div>
+                <button type="button" className="rounded-lg bg-white px-2 py-1 font-semibold text-red-700 shadow-sm dark:bg-slate-900 dark:text-red-200" onClick={() => setConflictFilter('errors')}>
+                  Show error rows
+                </button>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {reviewIssueSummary.map((entry) => (
+                  <div key={entry.index} className="rounded-lg border border-red-100 bg-white/75 p-2 dark:border-red-900/50 dark:bg-slate-950/40">
+                    <div className="font-semibold">Row {entry.rowNumber}: {entry.name}</div>
+                    <div className="mt-1 space-y-1">
+                      {entry.details.map((detail) => (
+                        <div key={detail.title} className={detail.blocking ? 'font-medium' : ''}>
+                          <span className="font-semibold">{detail.title}:</span> {detail.detail}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {reviewIssueRows.length > reviewIssueSummary.length ? (
+                <div className="mt-2 text-red-600 dark:text-red-300">
+                  Showing first {reviewIssueSummary.length} of {reviewIssueRows.length} issue rows. Use the Errors filter to continue reviewing.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {conflicts.length ? (
             <div className="space-y-3">
