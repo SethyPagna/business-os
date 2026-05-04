@@ -293,11 +293,12 @@ export default function POS() {
         sort: 'name_asc',
         include: 'branch_stock,images,family',
       }
-      const [productPayload, cats, brs] = await withLoaderTimeout(
+      const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
         () => Promise.all([
           window.api.searchProducts(productQuery),
           window.api.getCategories(),
           window.api.getBranches(),
+          window.api.getProductFilters({}),
         ]),
         label,
       )
@@ -307,7 +308,7 @@ export default function POS() {
         : (Array.isArray(productPayload) ? productPayload : [])
       applyCatalogData(prods, cats, brs)
       setProductTotal(Number(productPayload?.total ?? prods.length) || 0)
-      const filters = productPayload?.filters || {}
+      const filters = filterPayload || productPayload?.filters || {}
       setProductFilterMeta({
         brands: Array.isArray(filters?.brands) ? filters.brands : [],
         suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
@@ -1328,13 +1329,6 @@ export default function POS() {
                       <p className="text-[11px] text-gray-400">{groupMeta.stockTotal} {posCopy('total in stock', 'total in stock')}</p>
                     ) : null}
                     {!inStock ? <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span> : null}
-                    <p className="mt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                      {groupProduct
-                        ? posCopy('Tap to view choices', 'Tap to view choices')
-                        : inStock
-                          ? posCopy('Tap to add instantly', 'Tap to add instantly')
-                          : posCopy('Tap to view details', 'Tap to view details')}
-                    </p>
                   </div>
                 )
               })}

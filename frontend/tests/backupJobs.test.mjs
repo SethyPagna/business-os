@@ -71,6 +71,7 @@ await (async function notificationsUseIconsAndKeepUnavailableAlerts() {
   assert.match(source, /function\s+NotificationSeverityIcon/)
   assert.match(source, /data-notification-severity-icon/)
   assert.match(source, /title=\{label\}/)
+  assert.match(source, /NOTIFICATION_FILTER_OPTIONS\.map[\s\S]*\{label\}[\s\S]*section\.items\.map/)
   assert.match(source, /section\.totalPages > 1/)
   assert.match(source, /setSectionPages/)
   assert.match(source, /notificationSearch/)

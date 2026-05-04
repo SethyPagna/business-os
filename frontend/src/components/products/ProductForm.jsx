@@ -664,7 +664,7 @@ export default function ProductForm({
           <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950/20">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Promotion / Discount', 'ប្រូម៉ូសិន / បញ្ចុះតម្លៃ')}</p>
+                <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}</p>
                 <p className="text-xs text-rose-600 dark:text-rose-300">{tr('product_discount_hint', 'Customer-facing promotion price shown in POS and the public portal.', 'តម្លៃប្រូម៉ូសិនសម្រាប់អតិថិជន ដែលបង្ហាញក្នុង POS និងផតថលសាធារណៈ។')}</p>
               </div>
               <label className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm dark:bg-rose-950/50 dark:text-rose-200">

@@ -396,7 +396,6 @@ function getProductSearchMetadata(query = {}) {
     ${whereSql}
       AND COALESCE(trim(p.${field}), '') != ''
     ORDER BY p.${field} COLLATE NOCASE ASC
-    LIMIT 500
   `).all(params).map((row) => row.value)
   const initials = aggregateInitialRows(db.prepare(`
     SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count

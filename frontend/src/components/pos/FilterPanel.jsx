@@ -92,7 +92,7 @@ export default function POSFilterPanel({
       </div>
 
       <div>
-        <SectionLabel icon={Package}>{T('product_group', 'Product group')}</SectionLabel>
+        <SectionLabel icon={Package}>{T('groups', 'Groups')}</SectionLabel>
         <div className="flex flex-wrap gap-1">
           {[
             ['all', T('all', 'All')],

@@ -474,7 +474,6 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
               <div className="flex flex-wrap gap-1.5">
                 {NOTIFICATION_FILTER_OPTIONS.map((tone) => {
                   const label = tone === 'all' ? tr('all', 'All', 'ទាំងអស់') : (TONE_LABEL_KEYS[tone] ? tr(...TONE_LABEL_KEYS[tone]) : tone)
-                  const ToneIcon = TONE_ICON_COMPONENT[tone] || Info
                   return (
                     <button
                       key={tone}
@@ -484,7 +483,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
                       title={label}
                       aria-label={label}
                     >
-                      {tone === 'all' ? label : <ToneIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+                      {label}
                     </button>
                   )
                 })}

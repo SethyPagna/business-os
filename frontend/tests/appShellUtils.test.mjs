@@ -41,6 +41,12 @@ runTest('app shell does not render floating page info help', () => {
   assert.doesNotMatch(source, /PageHelpButton/)
 })
 
+runTest('Khmer buttons use a stronger but not extra-bold weight', () => {
+  const source = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+  assert.match(source, /body\.lang-km:not\(\[data-public-portal='true'\]\) button/)
+  assert.match(source, /font-weight:\s*600 !important/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

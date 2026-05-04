@@ -51,6 +51,14 @@ body.lang-km td {
   font-weight: 500;
 }
 
+body.lang-km:not([data-public-portal='true']) button,
+body.lang-km:not([data-public-portal='true']) [role='button'],
+body.lang-km:not([data-public-portal='true']) .btn,
+body.lang-km:not([data-public-portal='true']) .btn-primary,
+body.lang-km:not([data-public-portal='true']) .btn-secondary {
+  font-weight: 600 !important;
+}
+
 body.lang-km:not([data-public-portal='true']) h1,
 body.lang-km:not([data-public-portal='true']) h2,
 body.lang-km:not([data-public-portal='true']) h3,

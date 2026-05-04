@@ -2841,7 +2841,7 @@ export default function Inventory() {
                   </label>
                   <label className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-200">
                     <input type="checkbox" checked={!!moveForm.discount_enabled} onChange={(event) => setMoveForm((current) => ({ ...current, discount_enabled: event.target.checked }))} />
-                    {tr('product_discount', 'Promotion / Discount', 'ប្រូម៉ូសិន / បញ្ចុះតម្លៃ')}
+                    {tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}
                   </label>
                   {moveForm.discount_enabled ? (
                     <label className="block">

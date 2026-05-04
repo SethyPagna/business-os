@@ -32,7 +32,7 @@ export function buildVisibleProductCards(filteredProducts = [], productsById = n
       __displayName: group.name || leadProduct?.name || '',
       __groupKey: group.key,
       __groupMeta: group,
-      __groupChoices: group.hasMultipleItems ? group.sellableItems : [],
+      __groupChoices: group.hasMultipleItems ? group.items : [],
     }
   }).filter(Boolean)
 }

@@ -223,7 +223,7 @@ export default function Products() {
         }
         const result = await settleLoaderMap({
           products: () => window.api.searchProducts(productQuery),
-          filters: () => window.api.getProductFilters(productQuery),
+          filters: () => window.api.getProductFilters({}),
           categories: () => window.api.getCategories(),
           units: () => window.api.getUnits(),
           branches: () => window.api.getBranches(),
@@ -232,7 +232,7 @@ export default function Products() {
         const prods = Array.isArray(productPayload?.items)
           ? productPayload.items
           : (Array.isArray(productPayload) ? productPayload : [])
-        const filters = productPayload?.filters || result.values.filters || {}
+        const filters = result.values.filters || productPayload?.filters || {}
         const cats = result.values.categories
         const unitList = result.values.units
         const brs = result.values.branches
@@ -629,11 +629,6 @@ export default function Products() {
     } catch (_) {}
     return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
   }, [productFilterMeta.brands, settings?.product_brand_options])
-  const compactBrandOptions = useMemo(() => {
-    if (brandOptions.length <= 40) return brandOptions
-    const selected = brandFilter !== 'all' && brandOptions.includes(brandFilter) ? [brandFilter] : []
-    return Array.from(new Set([...selected, ...brandOptions])).slice(0, 40)
-  }, [brandFilter, brandOptions])
   const brandColorMap = useMemo(
     () => parseBrandColorMap(settings?.product_brand_color_map),
     [settings?.product_brand_color_map],
@@ -1408,7 +1403,7 @@ export default function Products() {
   const productFilterSections = useMemo(() => ([
     {
       id: 'group',
-      label: t('product_group') || 'Product group',
+      label: t('groups') || 'Groups',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
         { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
@@ -1445,7 +1440,7 @@ export default function Products() {
       label: t('brand') || 'Brand',
       options: [
         { id: 'brand-all', label: t('all_brands') || 'All Brands', active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-        ...compactBrandOptions.map((brand) => ({
+        ...brandOptions.map((brand) => ({
           id: `brand-${brand}`,
           label: brand,
           active: brandFilter === brand,
@@ -1517,7 +1512,7 @@ export default function Products() {
         { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
       ],
     },
-  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions.length, catFilter, compactBrandOptions, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
+  ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0

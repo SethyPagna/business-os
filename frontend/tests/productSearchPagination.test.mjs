@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const productsPage = readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.jsx', import.meta.url), 'utf8')
+const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.jsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
 
 assert.ok(
@@ -48,6 +49,16 @@ assert.match(
 )
 assert.match(
   productsPage,
+  /getProductFilters\(\{\}\)/,
+  'Products page should load global product filter options instead of shrinking options by the active filters',
+)
+assert.doesNotMatch(
+  productsPage,
+  /compactBrandOptions|slice\(0,\s*40\)/,
+  'Products page should not cap the visible brand filter list',
+)
+assert.match(
+  productsPage,
   /p\.brand[\s\S]*getBrandColor\(p\.brand\)[\s\S]*pl-\[5\.35rem\]/,
   'Mobile product cards should show brand and let the lower metadata row span under the action button',
 )
@@ -63,8 +74,28 @@ assert.match(
 )
 assert.match(
   posPage,
+  /getProductFilters\(\{\}\)/,
+  'POS filter panel should receive global filter metadata',
+)
+assert.match(
+  posFilterPanel,
+  /T\('groups', 'Groups'\)/,
+  'POS filter panel should name the grouping filter Groups',
+)
+assert.match(
+  productsPage,
+  /label:\s*t\('groups'\) \|\| 'Groups'/,
+  'Products filter menu should name the grouping filter Groups',
+)
+assert.match(
+  posPage,
   /groupFilter === 'grouped'[\s\S]*isParentGroup \|\| isVariantGroup/,
   'POS group filter should show grouped parent and variant families under Groups',
+)
+assert.doesNotMatch(
+  posPage,
+  /Tap to view choices|Tap to add instantly/,
+  'POS product cards should not show instructional tap copy',
 )
 assert.doesNotMatch(
   posPage,

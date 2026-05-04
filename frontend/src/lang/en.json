@@ -2331,7 +2331,7 @@
   "variants": "Variants",
   "standalone": "Standalone",
   "custom": "Custom",
-  "product_discount": "Promotion / Discount",
+  "product_discount": "Discounts",
   "product_discount_hint": "Customer-facing promotion price shown in POS and the public portal.",
   "promotion": "Promotion",
   "promotion_price": "Promotion price",
