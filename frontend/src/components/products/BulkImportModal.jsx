@@ -434,6 +434,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [conflictQuery, setConflictQuery] = useState('')
   const [selectedConflictIds, setSelectedConflictIds] = useState(() => new Set())
   const [collapsedFamilyKeys, setCollapsedFamilyKeys] = useState(() => new Set())
+  const [collapsedDetailRows, setCollapsedDetailRows] = useState(() => new Set())
   const [reviewUndoStack, setReviewUndoStack] = useState([])
   const [fieldRules, setFieldRules] = useState({})
   const [result, setResult] = useState(null)
@@ -496,6 +497,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
   const beginInlineEdit = (rowIndex, field, label = 'Edited row details') => {
     const key = `${rowIndex}:${field}`
+    setCollapsedDetailRows((current) => {
+      if (!current.has(rowIndex)) return current
+      const next = new Set(current)
+      next.delete(rowIndex)
+      return next
+    })
     if (editSessionRef.current.has(key)) return
     editSessionRef.current.add(key)
     pushReviewUndoSnapshot(label)
@@ -518,6 +525,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setConflictQuery('')
     setSelectedConflictIds(new Set())
     setCollapsedFamilyKeys(new Set())
+    setCollapsedDetailRows(new Set())
     setReviewUndoStack([])
     setFieldRules({})
     setZipFile(null)
@@ -630,6 +638,46 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     } catch (error) {
       setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to cancel import job'] })
       setStep(3)
+      setLoading(false)
+    }
+  }
+
+  const handleRetryCurrentJob = async () => {
+    if (!currentJob?.id) return
+    setLoading(true)
+    setAnalysisProgress({ progress: 0, label: T('retry_import', 'Retry import') })
+    try {
+      const payload = await window.api.retryImportJob(currentJob.id, { source: 'products_modal' })
+      const job = payload?.job || payload || currentJob
+      setCurrentJob(job)
+      setResult(null)
+      cancelRequestedRef.current = false
+      setStep(2)
+    } catch (error) {
+      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to retry import job'] })
+      setStep(3)
+    } finally {
+      setLoading(false)
+      setAnalysisProgress(null)
+    }
+  }
+
+  const handleDeleteCurrentJob = async () => {
+    if (!currentJob?.id) return
+    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
+      ? true
+      : window.confirm(T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'))
+    if (!confirmed) return
+    setLoading(true)
+    try {
+      await window.api.deleteImportJob(currentJob.id, { force: true, source: 'products_modal' })
+      setCurrentJob(null)
+      setResult(null)
+      resetCsvState()
+    } catch (error) {
+      setResult({ imported: 0, updated: 0, errors: [error?.message || 'Failed to delete import job'] })
+      setStep(3)
+    } finally {
       setLoading(false)
     }
   }
@@ -859,6 +907,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       details,
     }
   }).filter((entry) => entry.details.length), [conflicts, identifierOverrides, rowOverrides])
+  const reviewIssueIndexSet = useMemo(() => new Set(reviewIssueRows.map((entry) => Number(entry.index))), [reviewIssueRows])
   const reviewIssueSummary = reviewIssueRows.slice(0, 8)
   const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
@@ -874,8 +923,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     variant: conflicts.filter((entry) => ['create_variant', 'link_variant'].includes(String(decisions[entry.index] || entry.plannedAction || ''))).length,
     merge: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '') === 'merge_stock').length,
     override: conflicts.filter((entry) => String(decisions[entry.index] || entry.plannedAction || '').startsWith('override')).length,
-    errors: conflicts.filter((entry) => String(entry.conflictType || '').includes('missing_name') || (entry.issueTypes || []).length || (entry.conflictFields || []).includes('errors')).length,
-  }), [conflicts, decisions, rowOverrides])
+    errors: reviewIssueRows.length,
+  }), [conflicts, decisions, reviewIssueRows.length, rowOverrides])
   const visibleConflicts = useMemo(() => {
     const query = conflictQuery.trim().toLowerCase()
     return conflicts.filter((entry) => {
@@ -892,7 +941,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (conflictFilter === 'variant' && !['create_variant', 'link_variant'].includes(planned)) return false
       if (conflictFilter === 'merge' && planned !== 'merge_stock') return false
       if (conflictFilter === 'override' && !planned.startsWith('override')) return false
-      if (conflictFilter === 'errors' && !type.includes('missing_name') && !(entry.issueTypes || []).length && !fields.includes('errors')) return false
+      if (conflictFilter === 'errors' && !reviewIssueIndexSet.has(Number(entry.index))) return false
       if (!CONFLICT_FILTER_OPTIONS.some((item) => item.value === conflictFilter)) return false
       if (!query) return true
       const existing = entry.existing || {}
@@ -903,7 +952,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       ].join(' ').toLowerCase()
       return hay.includes(query)
     }).slice(0, 75)
-  }, [conflictFilter, conflictQuery, conflicts, decisions, rowOverrides])
+  }, [conflictFilter, conflictQuery, conflicts, decisions, reviewIssueIndexSet, rowOverrides])
 
   const visibleConflictSections = useMemo(() => {
     const groupByRowIndex = new Map()
@@ -945,6 +994,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       const next = new Set(current)
       if (next.has(familyKey)) next.delete(familyKey)
       else next.add(familyKey)
+      return next
+    })
+  }
+
+  const toggleInlineDetails = (rowIndex) => {
+    setCollapsedDetailRows((current) => {
+      const next = new Set(current)
+      if (next.has(rowIndex)) next.delete(rowIndex)
+      else next.add(rowIndex)
       return next
     })
   }
@@ -1040,6 +1098,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     const liveBarcodeIssue = getProductImportBarcodeIssue(editedRow.barcode)
     const liveBarcodeBlocking = isBlockingProductImportIssue(liveBarcodeIssue)
     const targetSummary = getImportActionTargetSummary(entry, decisionValue, editedRow)
+    const detailsCollapsed = collapsedDetailRows.has(index)
 
     return (
       <div key={index} className={`rounded-xl border p-2 text-sm ${liveBarcodeBlocking ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
@@ -1110,17 +1169,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
 
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 p-2 text-xs dark:border-slate-700 dark:bg-slate-900/60">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-200">
-            <span className="font-semibold">Inline details</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 font-semibold text-slate-700 hover:text-slate-950 dark:text-slate-100 dark:hover:text-white"
+              onClick={() => toggleInlineDetails(index)}
+              title={detailsCollapsed ? 'Expand inline details for this row.' : 'Collapse inline details for this row.'}
+            >
+              {detailsCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              Inline details
+            </button>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">{existing ? `Comparing with ${existing.name || `#${existing.id}`}` : 'No existing product match. Click fields to edit before apply.'}</span>
           </div>
-          <InlineImportDetailGrid
-            row={editedRow}
-            compareTo={existing}
-            onBeginEdit={(field) => beginInlineEdit(index, field, `Edited row ${editedRow._rowNumber || index + 2}`)}
-            onChange={updateEditedRow}
-          />
+          {!detailsCollapsed ? (
+            <InlineImportDetailGrid
+              row={editedRow}
+              compareTo={existing}
+              onBeginEdit={(field) => beginInlineEdit(index, field, `Edited row ${editedRow._rowNumber || index + 2}`)}
+              onChange={updateEditedRow}
+            />
+          ) : null}
 
-          {conflictFields.length ? (
+          {!detailsCollapsed && conflictFields.length ? (
             <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-2 text-xs text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200">
               <div className="font-semibold">Identifier conflict</div>
               <div>Imported: SKU {(identifierOverrides[index]?.sku ?? row.sku) || '-'} / Barcode {(identifierOverrides[index]?.barcode ?? row.barcode) || '-'}</div>
@@ -1134,14 +1203,14 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             </div>
           ) : null}
 
-          {liveBarcodeIssue ? (
+          {!detailsCollapsed && liveBarcodeIssue ? (
             <div className={`mt-2 rounded-lg border p-2 text-xs ${liveBarcodeBlocking ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'}`}>
               <div className="font-semibold">{getProductImportIssueLabel(liveBarcodeIssue)}</div>
               <div>{getProductImportIssueHint(liveBarcodeIssue)}</div>
             </div>
           ) : null}
 
-          {rowIncomingImages.length ? (
+          {!detailsCollapsed && rowIncomingImages.length ? (
             <div className="mt-2 rounded-lg bg-white p-2 text-xs text-gray-500 dark:bg-slate-950/50 dark:text-gray-400">
               <div>Incoming images: {rowIncomingImages.join(', ')}</div>
               <div>Current images: {existingImages.length ? existingImages.join(', ') : 'none'}</div>
@@ -1151,6 +1220,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       </div>
     )
   }
+
+  const cancelledImportRecovery = currentJob && ['cancelled', 'cancelling'].includes(String(currentJob.status || '').toLowerCase())
 
   return (
     <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide>
@@ -1192,15 +1263,29 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       {currentJob && step !== 1 ? (
         <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
           <div className="grid gap-2 sm:grid-cols-4">
+            <div><span className="font-semibold">Job:</span> {currentJob.id || currentJob.job_id || '-'}</div>
             <div><span className="font-semibold">{T('status', 'Status')}:</span> {currentJob.status || '-'}</div>
             <div><span className="font-semibold">{T('rows', 'Rows')}:</span> {Number(currentJob.processed_rows || 0)} / {Number(currentJob.total_rows || 0)}</div>
             <div><span className="font-semibold">{T('images', 'Images')}:</span> {Number(currentJob.processed_images || 0)} / {Number(currentJob.total_images || 0)}</div>
             <div><span className="font-semibold">{T('errors', 'Errors')}:</span> {Number(currentJob.failed_rows || 0) + Number(currentJob.failed_images || 0)}</div>
           </div>
+          {currentJob.last_error || currentJob.error ? (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              <span className="font-semibold">Backend error:</span> {currentJob.last_error || currentJob.error}
+            </div>
+          ) : null}
           {loading ? (
             <button type="button" className="btn-secondary mt-3 text-xs" onClick={handleCancelCurrentJob}>
               {T('cancel_import', 'Cancel import')}
             </button>
+          ) : null}
+          {cancelledImportRecovery ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+              <span className="font-semibold">Cancelled import recovery</span>
+              <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={handleRetryCurrentJob} disabled={loading}>Retry import</button>
+              <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={handleDeleteCurrentJob} disabled={loading}>Delete import</button>
+              <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={resetCsvState} disabled={loading}>Back to upload</button>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -1339,7 +1424,9 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                         aria-label={`${item.label}: ${item.hint}`}
                         onClick={() => setConflictFilter(item.value)}
                       >
-                        <span>{item.label} ({conflictGroups[item.countKey] || 0})</span>
+                        {item.value === 'errors'
+                          ? <span>Errors ({reviewIssueRows.length})</span>
+                          : <span>{item.label} ({conflictGroups[item.countKey] || 0})</span>}
                         <Info className="h-3 w-3 opacity-70" aria-hidden="true" />
                       </button>
                     ))}

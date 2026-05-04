@@ -13,6 +13,8 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls from '../shared/PaginationControls.jsx'
+import SectionSwitcher from '../shared/SectionSwitcher.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
@@ -58,6 +60,23 @@ const RFID_READER_REQUIREMENTS = [
   'Barcode fallback remains available for products that are not tagged or when the reader is offline.',
 ]
 
+const INVENTORY_SECTION_OPTIONS = [
+  { value: 'all', label: 'Stats + sections', hint: 'Show inventory statistics, products, movements, and RFID tools together.' },
+  { value: 'stats', label: 'Stats', hint: 'Show only the inventory summary cards.' },
+  { value: 'products', label: 'Products', hint: 'Show product stock, values, and item-level controls.' },
+  { value: 'movements', label: 'Movements', hint: 'Show stock movement history and grouped movement filters.' },
+  { value: 'rfid', label: 'RFID', hint: 'Show branch-locked RFID tagging, stock count, search, exception, and session tools.' },
+]
+
+const RFID_SECTION_OPTIONS = [
+  { value: 'overview', label: 'Overview', hint: 'Show RFID status, branch lock state, reader readiness, and the pilot checklist.' },
+  { value: 'tagging', label: 'Tagging', hint: 'Link EPC/TID tags to products without changing the master stock ledger.' },
+  { value: 'stock-count', label: 'Stock Count', hint: 'Run a branch-locked scan session and compare RFID presence against barcode stock.' },
+  { value: 'search', label: 'Search', hint: 'Find a product or tag with the handheld reader and browser scan box.' },
+  { value: 'exceptions', label: 'Exceptions', hint: 'Review wrong-branch, unknown, missing, and extra tag detections before applying.' },
+  { value: 'sessions', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
+]
+
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
   const { syncChannel } = useSync()
@@ -90,7 +109,10 @@ export default function Inventory() {
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
   const [inventoryInitials, setInventoryInitials] = useState([])
   const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
+  const [rfidStatus, setRfidStatus] = useState(null)
   const [tab,           setTab]           = useState('products')
+  const [inventorySection, setInventorySection] = useState('all')
+  const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState([])
@@ -138,13 +160,13 @@ export default function Inventory() {
       connected: false,
       label: 'Not connected',
       branchName,
-      readerCount: 0,
-      activeSession: 'No active RFID session',
+      readerCount: Number(rfidStatus?.readerCount || 0),
+      activeSession: rfidStatus?.activeSession?.id ? `Session #${rfidStatus.activeSession.id}` : 'No active RFID session',
       queuedReads: 0,
-      unknownTags: 0,
-      lastHeartbeat: 'No reader heartbeat yet',
+      unknownTags: Number(rfidStatus?.exceptionCount || 0),
+      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} tags linked` : 'No reader heartbeat yet',
     }
-  }, [branchFilter, branches, t])
+  }, [branchFilter, branches, rfidStatus, t])
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -181,6 +203,7 @@ export default function Inventory() {
         const result = await settleLoaderMap({
           summary: () => window.api.searchInventoryProducts(productQuery),
           movements: () => window.api.getInventoryMovements(branchOpts),
+          rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
           branches: () => window.api.getBranches(),
           returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
           dashboard: () => window.api.getDashboard().catch(() => ({})),
@@ -188,6 +211,7 @@ export default function Inventory() {
         const sumResult = result.values.summary
         const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
+        const rfid = result.values.rfid
         const brs = result.values.branches
         const rets = result.values.returns
         const dash = result.values.dashboard
@@ -213,6 +237,7 @@ export default function Inventory() {
           }
         }
         if (Array.isArray(movs)) setMovements(movs || [])
+        if (rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
         if (dash && typeof dash === 'object') {
           setTaxDelivery({
@@ -1624,6 +1649,12 @@ export default function Inventory() {
     [isMovementScopeFullySelected, selectedMovementIds],
   )
   const showMovementActionGroups = movementGroupMode === 'time+action'
+  const sectionStorageKey = 'business-os:inventory:section'
+  const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  const selectInventorySection = (nextSection) => {
+    setInventorySection(nextSection)
+    if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
+  }
 
   if (loadError && !loading && !summary.length && !movements.length) {
     return (
@@ -1667,6 +1698,24 @@ export default function Inventory() {
         </div>
       </div>
 
+      <SectionSwitcher
+        className="mb-3"
+        label="Inventory"
+        options={INVENTORY_SECTION_OPTIONS}
+        value={inventorySection}
+        onChange={selectInventorySection}
+        storageKey={sectionStorageKey}
+      />
+
+      <LoadingWatchdog
+        loading={loading}
+        timeoutMs={8000}
+        label={t('loading') || 'Loading...'}
+        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading products, stock, and movement summaries.'}
+        onRetry={() => load(false)}
+        className="mb-3"
+      />
+
       {selectedMovementGroups.length > 0 ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} movement group{selectedMovementGroups.length === 1 ? '' : 's'} selected</span>
@@ -1679,6 +1728,8 @@ export default function Inventory() {
         </div>
       ) : null}
 
+      {showInventoryStats ? (
+      <>
       {/* ?? Primary Stats bar ?? */}
       <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
@@ -1710,6 +1761,8 @@ export default function Inventory() {
           </button>
         ))}
       </div>
+      </>
+      ) : null}
 
       {false && (<>
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-2">
@@ -2403,6 +2456,14 @@ export default function Inventory() {
 
       {tab === 'rfid' && (
         <div className="space-y-3">
+          <SectionSwitcher
+            label="RFID"
+            options={RFID_SECTION_OPTIONS}
+            value={rfidSection}
+            onChange={setRfidSection}
+            storageKey="business-os:inventory:rfid-section"
+          />
+          {(rfidSection === 'all' || rfidSection === 'overview') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
@@ -2434,7 +2495,9 @@ export default function Inventory() {
               ))}
             </div>
           </div>
+          ) : null}
 
+          {(rfidSection === 'all' || rfidSection === 'tagging' || rfidSection === 'stock-count' || rfidSection === 'search') ? (
           <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -2473,7 +2536,23 @@ export default function Inventory() {
               </div>
             </div>
           </div>
+          ) : null}
 
+          {(rfidSection === 'all' || rfidSection === 'exceptions') ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
+            <div className="font-semibold">RFID exceptions</div>
+            <div className="mt-1 text-xs">Wrong-location, unknown, missing, and extra tags stay in review until an authorized user applies or dismisses them.</div>
+          </div>
+          ) : null}
+
+          {(rfidSection === 'all' || rfidSection === 'sessions') ? (
+          <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="text-sm font-semibold text-gray-900 dark:text-white">RFID sessions</div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Branch, area, reader, ledger totals, confirmed tag presence, and manual apply results are audited per session.</div>
+          </div>
+          ) : null}
+
+          {(rfidSection === 'all' || rfidSection === 'overview') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
             <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Implementation checklist</div>
             <div className="grid gap-2 md:grid-cols-3">
@@ -2485,6 +2564,7 @@ export default function Inventory() {
               ))}
             </div>
           </div>
+          ) : null}
         </div>
       )}
 

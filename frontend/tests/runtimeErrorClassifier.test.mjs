@@ -36,6 +36,11 @@ assert.equal(shouldSuppressRuntimeError({
 }), true)
 
 assert.equal(shouldSuppressRuntimeError({
+  message: 'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received',
+  stack: 'Error\n at chrome-extension://abc/content.js:1:1',
+}), true)
+
+assert.equal(shouldSuppressRuntimeError({
   message: 'Real first-party crash',
   filename: 'https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js',
 }), false)

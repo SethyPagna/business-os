@@ -51,6 +51,8 @@ export function isKnownBridgeMessage(value) {
     || /tabs:outgoing\.message\.ready/i.test(message)
     || /Receiving end does not exist/i.test(message)
     || /Could not establish connection/i.test(message)
+    || /message channel closed before a response was received/i.test(message)
+    || /listener indicated an asynchronous response/i.test(message)
     || /plugin_not_implemented/i.test(message)
 }
 

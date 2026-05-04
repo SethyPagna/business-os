@@ -7,6 +7,8 @@ import OtpModal from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import { createCircularFaviconDataUrl } from '../../utils/favicon'
 import PageHeader from '../shared/PageHeader'
+import SectionSwitcher from '../shared/SectionSwitcher.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
 
 const FALLBACK_COPY = {
@@ -78,6 +80,13 @@ const SIDEBAR_TEXT_COLORS = [
 ]
 
 const DEFAULT_PAYMENT_METHODS = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
+
+const SETTINGS_SECTION_OPTIONS = [
+  { value: 'all', label: 'All', hint: 'Show every settings section.' },
+  { value: 'business', label: 'Business', hint: 'Business profile, browser icon, currency, receipt, and payment settings.' },
+  { value: 'appearance', label: 'Appearance', hint: 'Theme, colors, fonts, typography, and navigation layout.' },
+  { value: 'security', label: 'Security', hint: 'Session duration, notifications, and two-factor authentication.' },
+]
 
 const THEME_OPTION_KEYS = [['light', 'themeLight', 'Light'], ['dark', 'themeDark', 'Dark']]
 const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLabel', 'Khmer']]
@@ -340,11 +349,14 @@ export default function Settings() {
   const [form, setForm] = useState({})
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState(null)
+  const [settingsSection, setSettingsSection] = useState('all')
   const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
   const uploadInFlightRef = useRef(false)
   const aliveRef = useRef(true)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const sectionStorageKey = 'business-os:settings:section'
+  const showSettingsSection = (sectionId) => settingsSection === 'all' || settingsSection === sectionId
 
   const uiLanguage = form.language || settings.language || 'en'
   const copy = useCopy(uiLanguage, t)
@@ -647,8 +659,24 @@ export default function Settings() {
         )}
       />
 
+      <SectionSwitcher
+        className="mx-auto mb-4 max-w-[96rem]"
+        label="Settings"
+        options={SETTINGS_SECTION_OPTIONS}
+        value={settingsSection}
+        onChange={setSettingsSection}
+        storageKey={sectionStorageKey}
+      />
+      <LoadingWatchdog
+        loading={uploadingImage}
+        timeoutMs={7000}
+        label={t('uploading') || 'Uploading...'}
+        details="Uploading and previewing the selected settings image."
+        className="mx-auto mb-4 max-w-[96rem]"
+      />
+
       <div className="mx-auto max-w-[96rem] space-y-4">
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('business_info')} defaultOpen>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('business_name', t('business_name'), 'text', 'My Business')}
@@ -660,7 +688,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('business') ? (
         <SettingsSection
           title="Browser tab icon"
           description="Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page."
@@ -707,7 +735,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('currency_settings')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('currency_usd_symbol', t('currency_usd_symbol'), 'text', '$')}
@@ -725,7 +753,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('receipt_settings')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('tax_rate', t('tax_rate'), 'number', '0')}
@@ -746,6 +774,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
+        {showSettingsSection('appearance') ? (
         <SettingsSection title={t('appearance')}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -781,7 +810,9 @@ export default function Settings() {
             </div>
           </div>
         </SettingsSection>
+        ) : null}
 
+        {showSettingsSection('appearance') ? (
         <SettingsSection title={t('design_typography')} description={t('customize_fonts')}>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -1028,8 +1059,9 @@ export default function Settings() {
             />
           </div>
         </SettingsSection>
+        ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('appearance') ? (
         <SettingsSection title={t('timezone')} description={t('timezone_desc')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -1059,7 +1091,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('appearance') ? (
         <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}>
 
           <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
@@ -1178,7 +1210,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('manage_payment_methods')} description={t('configure_payment_desc')}>
 
           <div className="space-y-2 mb-3 max-h-48 overflow-auto">
@@ -1228,6 +1260,7 @@ export default function Settings() {
         </SettingsSection>
         ) : null}
 
+        {showSettingsSection('security') ? (
         <SettingsSection title={t('session_duration') || 'Session duration'} description={t('session_duration_hint')}>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1251,8 +1284,9 @@ export default function Settings() {
             </div>
           </div>
         </SettingsSection>
+        ) : null}
 
-        {isAdmin ? (
+        {isAdmin && showSettingsSection('security') ? (
           <SettingsSection
             title={t('notifications') || 'Notifications'}
             description={t('notification_settings_desc') || 'Choose which business alerts appear in the top-bar notification center.'}
@@ -1336,7 +1370,7 @@ export default function Settings() {
           </SettingsSection>
         ) : null}
 
-        {user && isAdmin ? (
+        {user && isAdmin && showSettingsSection('security') ? (
           <SettingsSection title={t('two_factor_auth')} description={t('two_factor_desc')}>
             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>

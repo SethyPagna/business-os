@@ -33,6 +33,13 @@ runTest('inventory router registers required paged product search route', () => 
   const router = require('../src/routes/inventory')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/products/search'), 'missing /api/inventory/products/search')
+  assert.ok(paths.includes('/rfid/status'), 'missing /api/inventory/rfid/status')
+  assert.ok(paths.includes('/rfid/tags'), 'missing /api/inventory/rfid/tags')
+  assert.ok(paths.includes('/rfid/tags/search'), 'missing /api/inventory/rfid/tags/search')
+  assert.ok(paths.includes('/rfid/sessions'), 'missing /api/inventory/rfid/sessions')
+  assert.ok(paths.includes('/rfid/sessions/:id/events'), 'missing /api/inventory/rfid/sessions/:id/events')
+  assert.ok(paths.includes('/rfid/sessions/:id/review'), 'missing /api/inventory/rfid/sessions/:id/review')
+  assert.ok(paths.includes('/rfid/sessions/:id/apply'), 'missing /api/inventory/rfid/sessions/:id/apply')
 })
 
 runTest('portal router registers required public catalog search route', () => {
