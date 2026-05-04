@@ -209,6 +209,18 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
   assert.match(source, /getImportActionTargetSummary/)
 })
 
+await runTest('bulk import modal explains specific review errors before apply', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
+
+  assert.match(source, /getProductImportRowIssueDetails/)
+  assert.match(source, /reviewIssueSummary/)
+  assert.match(source, /Errors and review blockers/)
+  assert.match(source, /Product name is required/)
+  assert.match(source, /Barcode looks like scientific notation/)
+  assert.match(source, /Duplicate SKU\/barcode/)
+  assert.match(source, /Price\/cost needs review/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
