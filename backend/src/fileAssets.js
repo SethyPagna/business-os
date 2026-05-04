@@ -4,12 +4,13 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { spawnSync } = require('child_process')
-let sharp = null
-try { sharp = require('sharp') } catch (_) {}
 const { UPLOADS_PATH } = require('./config')
 const { deleteObject, isObjectStorageEnabled, putObject } = require('./objectStore')
+const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
+
+const sharp = loadSharp()
 
 const IMAGE_MIME_TO_EXT = {
   'image/jpeg': '.jpg',
@@ -39,6 +40,9 @@ const MIME_TO_EXT = {
 }
 
 const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
+const MAX_IMAGE_ASSET_BYTES = 40 * 1024
+const IMAGE_TARGET_DIMENSIONS = [1200, 900, 720, 540, 420, 320, 240, 180]
+const IMAGE_TARGET_QUALITIES = [82, 66, 50, 38, 30]
 let cachedFfmpegPath = undefined
 
 function getDb() {
@@ -113,35 +117,79 @@ function shouldCompressImage(fileName = '', mimeType = '') {
 }
 
 async function compressBufferForAsset(buffer, { fileName = '', mimeType = '' } = {}) {
+  const isImageAsset = getMediaType({ mimeType, fileName }) === 'image'
   const baseResult = {
     buffer,
     original_byte_size: buffer?.length || null,
     optimized_byte_size: buffer?.length || null,
     optimization_status: 'not_optimized',
     optimization_note: '',
+    over_budget: false,
   }
-  if (!sharp) return { ...baseResult, optimization_note: 'Sharp unavailable' }
-  if (!shouldCompressImage(fileName, mimeType)) return { ...baseResult, optimization_status: 'not_applicable' }
+  if (isImageAsset && Number(buffer?.length || 0) <= MAX_IMAGE_ASSET_BYTES) {
+    return { ...baseResult, optimization_status: 'already_within_budget' }
+  }
+  if (!sharp) {
+    const overBudget = isImageAsset && Number(buffer?.length || 0) > MAX_IMAGE_ASSET_BYTES
+    return {
+      ...baseResult,
+      optimization_status: overBudget ? 'over_budget' : baseResult.optimization_status,
+      optimization_note: 'Sharp unavailable',
+      over_budget: overBudget,
+    }
+  }
+  if (!shouldCompressImage(fileName, mimeType)) {
+    const overBudget = isImageAsset && Number(buffer?.length || 0) > MAX_IMAGE_ASSET_BYTES
+    return {
+      ...baseResult,
+      optimization_status: isImageAsset
+        ? (overBudget ? 'over_budget' : 'already_within_budget')
+        : 'not_applicable',
+      optimization_note: overBudget
+        ? 'Image format cannot be recompressed and is above the 40KB budget'
+        : '',
+      over_budget: overBudget,
+    }
+  }
   try {
     const ext = String(path.extname(String(fileName || '')).toLowerCase() || '.jpg')
-    const pipeline = sharp(buffer).rotate().resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
-    let compressed = null
-    if (ext === '.png') compressed = await pipeline.png({ compressionLevel: 9, palette: true, quality: 90, effort: 8 }).toBuffer()
-    else if (ext === '.webp') compressed = await pipeline.webp({ quality: 82, alphaQuality: 100, effort: 5 }).toBuffer()
-    else compressed = await pipeline.jpeg({ quality: 82, progressive: true, mozjpeg: true }).toBuffer()
-    if (!compressed || compressed.length >= buffer.length) {
+    let best = buffer
+    for (const dimension of IMAGE_TARGET_DIMENSIONS) {
+      for (const quality of IMAGE_TARGET_QUALITIES) {
+        const candidate = await encodeImageCandidate(buffer, { ext, dimension, quality })
+        if (candidate.length < best.length) best = candidate
+        if (candidate.length <= MAX_IMAGE_ASSET_BYTES) {
+          return {
+            buffer: candidate,
+            original_byte_size: buffer.length,
+            optimized_byte_size: candidate.length,
+            optimization_status: candidate.length < buffer.length ? 'optimized' : 'already_within_budget',
+            optimization_note: '',
+            over_budget: false,
+          }
+        }
+      }
+    }
+    if (!best || best.length >= buffer.length) {
       return {
         ...baseResult,
         optimization_status: 'kept_original',
-        optimization_note: 'Optimized output was not smaller',
+        optimization_note: buffer.length <= MAX_IMAGE_ASSET_BYTES
+          ? 'Original image already fits the 40KB budget'
+          : 'Optimized output was not smaller',
+        over_budget: buffer.length > MAX_IMAGE_ASSET_BYTES,
       }
     }
+    const overBudget = best.length > MAX_IMAGE_ASSET_BYTES
     return {
-      buffer: compressed,
+      buffer: best,
       original_byte_size: buffer.length,
-      optimized_byte_size: compressed.length,
-      optimization_status: 'optimized',
-      optimization_note: '',
+      optimized_byte_size: best.length,
+      optimization_status: overBudget ? 'optimized_over_budget' : 'optimized',
+      optimization_note: overBudget
+        ? `Best clear output is ${(best.length / 1024).toFixed(1)}KB; still above the 40KB budget`
+        : '',
+      over_budget: overBudget,
     }
   } catch (error) {
     return {
@@ -150,6 +198,35 @@ async function compressBufferForAsset(buffer, { fileName = '', mimeType = '' } =
       optimization_note: error?.message || 'Image optimization failed',
     }
   }
+}
+
+async function encodeImageCandidate(buffer, { ext = '.jpg', dimension = 1200, quality = 72 } = {}) {
+  const pipeline = sharp(buffer)
+    .rotate()
+    .resize(dimension, dimension, { fit: 'inside', withoutEnlargement: true })
+  if (ext === '.png') {
+    return pipeline.png({
+      compressionLevel: 9,
+      palette: true,
+      quality: Math.max(20, quality),
+      effort: 10,
+      colors: quality <= 42 ? 128 : 256,
+    }).toBuffer()
+  }
+  if (ext === '.webp') {
+    return pipeline.webp({
+      quality,
+      alphaQuality: Math.max(60, quality),
+      effort: 6,
+      smartSubsample: true,
+    }).toBuffer()
+  }
+  return pipeline.jpeg({
+    quality,
+    progressive: true,
+    mozjpeg: true,
+    chromaSubsampling: '4:2:0',
+  }).toBuffer()
 }
 
 async function readImageDimensions(filePath) {
@@ -173,6 +250,25 @@ function getFfmpegPath() {
   return cachedFfmpegPath
 }
 
+function buildVideoOptimizationArgs({ inputPath, outputPath } = {}) {
+  return [
+    '-y',
+    '-i', inputPath,
+    '-map', '0:v:0?',
+    '-map', '0:a?',
+    '-map_metadata', '-1',
+    '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'",
+    '-c:v', 'libx264',
+    '-preset', 'slow',
+    '-crf', '24',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '96k',
+    '-movflags', '+faststart',
+    outputPath,
+  ]
+}
+
 function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
   const originalSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : null
   const baseResult = {
@@ -190,19 +286,10 @@ function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
 
   const tempPath = `${filePath}.optimized-${Date.now()}.mp4`
   try {
-    const result = spawnSync(ffmpeg, [
-      '-y',
-      '-i', filePath,
-      '-map', '0:v:0?',
-      '-map', '0:a?',
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      tempPath,
-    ], { encoding: 'utf8', timeout: 120000, windowsHide: true })
+    const result = spawnSync(ffmpeg, buildVideoOptimizationArgs({
+      inputPath: filePath,
+      outputPath: tempPath,
+    }), { encoding: 'utf8', timeout: 120000, windowsHide: true })
     if (result.status !== 0 || !fs.existsSync(tempPath)) {
       try { fs.unlinkSync(tempPath) } catch (_) {}
       return {
@@ -430,6 +517,9 @@ async function registerStoredAsset({
     ? optimizeStoredVideo(absPath, { mimeType, fileName: storedName })
     : null
   const effectiveOptimization = optimization || imageOptimization || videoOptimization
+  if (mediaType === 'image' && effectiveOptimization?.over_budget && source !== 'backfill') {
+    throw new Error('Images and logos must compress to 40KB or less. Please upload a smaller or clearer source image.')
+  }
   const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
   const dimensions = mediaType === 'image' ? await readImageDimensions(absPath) : { width: null, height: null }
   if (isObjectStorageEnabled() && fs.existsSync(absPath)) {
@@ -482,6 +572,9 @@ async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, create
   const displayOriginalName = preserveOriginalDisplayName(fileName || normalizedOriginalName)
   const storedName = buildUniqueStoredName(normalizedOriginalName)
   const optimized = await compressBufferForAsset(buffer, { fileName: normalizedOriginalName, mimeType })
+  if (optimized?.over_budget) {
+    throw new Error('Images and logos must compress to 40KB or less. Please upload a smaller or clearer source image.')
+  }
   fs.writeFileSync(path.join(UPLOADS_PATH, storedName), optimized.buffer)
   return registerStoredAsset({
     storedName,
@@ -538,7 +631,10 @@ async function deleteFileAsset(id) {
 }
 
 module.exports = {
+  MAX_IMAGE_ASSET_BYTES,
+  buildVideoOptimizationArgs,
   buildUniqueStoredName,
+  compressBufferForAsset,
   getFileAssetById,
   getFileAssetByPublicPath,
   getMimeTypeFromName,
