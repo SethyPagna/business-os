@@ -117,9 +117,17 @@ function decorateImportJobRow(row) {
   if (!row) return null
   return {
     ...row,
+    cancel_requested: isCancelRequested(row.cancel_requested) ? 1 : 0,
     policy: safeJson(row.policy_json, {}),
     summary: safeJson(row.summary_json, {}),
   }
+}
+
+function isCancelRequested(value) {
+  if (value === true || value === 1) return true
+  if (value === false || value === 0 || value === null || value === undefined) return false
+  const normalized = String(value).trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
 
 function isImportJobStale(row, staleMs = 30_000) {
@@ -153,7 +161,7 @@ function markStoredImportFilesCancelled(jobId, reason = 'Import cleanup removed 
 function reconcileImportJobRow(row, { staleMs = 30_000 } = {}) {
   if (!row) return null
   const status = String(row.status || '').toLowerCase()
-  const cancelRequested = !!row.cancel_requested || status === 'cancelling'
+  const cancelRequested = isCancelRequested(row.cancel_requested) || status === 'cancelling'
   if (!cancelRequested) return row
   if (!['running', 'queued', 'cancelling', 'approved'].includes(status)) return row
   if (!isImportJobWorkDrained(row) && !isImportJobStale(row, staleMs)) return row
@@ -934,7 +942,7 @@ function markJobCancelled(jobId) {
 function isCancelled(jobId) {
   const row = db.prepare('SELECT cancel_requested, status FROM import_jobs WHERE id = ?').get(jobId)
   if (!row) return true
-  return !!row.cancel_requested || String(row.status || '').toLowerCase() === 'cancelled'
+  return isCancelRequested(row.cancel_requested) || String(row.status || '').toLowerCase() === 'cancelled'
 }
 
 async function waitForQueuedImportMedia(jobId) {

@@ -6,7 +6,7 @@ const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', '
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
 const CANCELLABLE_STATUSES = new Set(['queued', 'running', 'approved'])
-const REMOVABLE_STATUSES = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
+const REMOVABLE_STATUSES = new Set(['pending', 'queued', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
 
 function normalizeJobStatus(job) {
   return String(job?.status || '').trim().toLowerCase()
@@ -40,6 +40,13 @@ function getJobProgressDetails(job, labels = {}) {
       value: 8,
       label: labels.waitingForWorker || 'Queued - waiting for worker',
       indeterminate: true,
+    }
+  }
+  if (ACTIVE_STATUSES.has(status) && phase.includes('ready')) {
+    return {
+      value: 6,
+      label: labels.readyToAnalyze || 'Ready to analyze',
+      indeterminate: false,
     }
   }
   if (status === 'awaiting_review') {
@@ -226,6 +233,7 @@ export default function BackgroundImportTracker() {
     cancelRequested: t('import_cancel_requested') || 'Cancel requested',
     finalCleanup: t('import_final_cleanup') || 'Final cleanup',
     waitingForWorker: t('import_waiting_for_worker') || 'Queued - waiting for worker',
+    readyToAnalyze: t('import_ready_to_analyze') || 'Ready to analyze',
   }
   const resultLabels = {
     created: t('created') || 'created',
@@ -306,7 +314,9 @@ export default function BackgroundImportTracker() {
     const removedId = String(job.id)
     setBusyJobId(removedId)
     try {
-      await window.api.deleteImportJob(removedId, { force: true })
+      const status = normalizeJobStatus(job)
+      const force = !['running', 'cancelling'].includes(status)
+      await window.api.deleteImportJob(removedId, { force })
       const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== removedId)
       jobsSignatureRef.current = buildJobsSignature(filteredJobs)
       setHiddenJobIds((current) => new Set([...current, removedId]))

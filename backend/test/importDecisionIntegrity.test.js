@@ -59,6 +59,16 @@ assert.match(
 )
 assert.match(
   source,
+  /function isCancelRequested[\s\S]*normalized === '1'/,
+  'import cancellation flags from Postgres must be normalized before truth checks',
+)
+assert.match(
+  source,
+  /cancel_requested:\s*isCancelRequested\(row\.cancel_requested\) \? 1 : 0/,
+  'decorated import jobs must expose a numeric cancellation flag to routes and workers',
+)
+assert.match(
+  source,
   /resetImportJobForRetry,/,
   'retry reset helper must be exported for the import route',
 )
