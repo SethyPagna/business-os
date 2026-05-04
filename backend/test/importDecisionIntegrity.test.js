@@ -69,6 +69,11 @@ assert.match(
 )
 assert.match(
   routeSource,
+  /enqueueImportJob\(retryReady\.id,\s*\{[\s\S]*force:\s*wasCancelled/,
+  'retry route must force the requeue after resetting a cancelled job',
+)
+assert.match(
+  routeSource,
   /cancel_requested[\s\S]*409/,
   'start route must reject cancel-requested jobs with a clear conflict response',
 )

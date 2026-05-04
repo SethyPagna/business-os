@@ -420,17 +420,19 @@ router.post('/:id/retry', authToken, requireImportPermission, async (req, res) =
   try {
     const job = getJobOr404(req, res)
     if (!job) return
-    const mode = ['awaiting_review', 'approved'].includes(String(job.status || '').toLowerCase()) ? 'apply' : 'analyze'
+    const status = String(job.status || '').toLowerCase()
+    const wasCancelled = Boolean(job.cancel_requested) || status === 'cancelled' || status === 'cancelling'
+    const mode = ['awaiting_review', 'approved'].includes(status) ? 'apply' : 'analyze'
     const retryReady = mode === 'apply'
       ? job
       : resetImportJobForRetry(job.id, { mode: 'analyze' })
     const queued = mode === 'apply'
       ? await approveImportJob(job.id)
-      : await enqueueImportJob(job.id, { mode: 'analyze' })
+      : await enqueueImportJob(retryReady.id, { mode: 'analyze', force: wasCancelled })
     auditImportJobEvent(req, 'import_job_retry', job, queued, {
       source: req.body?.source || 'api',
       mode,
-      cancelSource: retryReady?.cancel_requested ? req.body?.source || 'api' : null,
+      cancelSource: wasCancelled ? req.body?.source || 'api' : null,
     })
     ok(res, { job: queued, queue: getQueueStatus() })
   } catch (error) {
