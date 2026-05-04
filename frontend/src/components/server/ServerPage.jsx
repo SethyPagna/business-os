@@ -357,6 +357,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
           { id: 'client', label: `${copy('client', 'Client', 'ឧបករណ៍')} (${clientLog.length})` },
           { id: 'server', label: `${copy('server', 'Server', 'ម៉ាស៊ីនមេ')} (${serverLog.length})`, disabled: !syncUrl },
           { id: 'queue', label: `${copy('queue', 'Queue', 'ជួរ')} (${pendingSync.total})` },
+          { id: 'sync-center', label: 'Sync Center' },
           { id: 'info', label: copy('info', 'Info', 'ព័ត៌មាន') },
         ].map(({ id, label, disabled }) => (
           <button
@@ -450,6 +451,25 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
                 {item.error ? <span className="truncate text-red-500">{item.error}</span> : null}
               </div>
             ))}
+          </div>
+        ) : null}
+
+        {tab === 'sync-center' ? (
+          <div className="space-y-3 px-3 py-3 text-xs text-gray-700 dark:text-gray-200">
+            <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              <div className="mb-2 font-semibold text-gray-900 dark:text-white">Sync Center</div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <span>Pending: <strong>{pendingSync.pending}</strong></span>
+                <span>Conflicts: <strong>{pendingSync.items.filter((item) => item.status === 'conflict').length}</strong></span>
+                <span>Failed: <strong>{pendingSync.failed}</strong></span>
+                <span>Files: encrypted chunks wait for vault unlock</span>
+                <span>Storage: persistent device storage is requested when offline mode is enabled</span>
+                <span>Security: HttpOnly cookie auth, encrypted vault, digest checks</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+              Cloudflare Access readiness is checked server-side. Add Zero Trust Access and WAF rules for admin.link before exposing admin traffic broadly.
+            </div>
           </div>
         ) : null}
 

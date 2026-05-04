@@ -99,7 +99,8 @@ function safeStorageRemove(storage, key) {
 }
 
 function getStoredAuthToken() {
-  return safeStorageGet(sessionStorage, STORAGE_KEYS.AUTH_TOKEN) || safeStorageGet(localStorage, STORAGE_KEYS.AUTH_TOKEN)
+  if (typeof window === 'undefined') return ''
+  return window.api?.getAuthSessionToken?.() || ''
 }
 
 function getStoredUserPayload() {
@@ -128,8 +129,7 @@ function persistAuthState({ user, authToken, expiryTime, sessionDuration }) {
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => safeStorageRemove(secondaryStorage, key))
 
   safeStorageSet(primaryStorage, STORAGE_KEYS.USER, JSON.stringify(user))
-  if (authToken) safeStorageSet(primaryStorage, STORAGE_KEYS.AUTH_TOKEN, authToken)
-  else safeStorageRemove(primaryStorage, STORAGE_KEYS.AUTH_TOKEN)
+  safeStorageRemove(primaryStorage, STORAGE_KEYS.AUTH_TOKEN)
   if (expiryTime) safeStorageSet(primaryStorage, STORAGE_KEYS.USER_EXPIRY, String(expiryTime))
   else safeStorageRemove(primaryStorage, STORAGE_KEYS.USER_EXPIRY)
 }
@@ -275,12 +275,6 @@ export function AppProvider({ children }) {
     try {
       const stored = getStoredUserPayload()
       const expiry = getStoredUserExpiry()
-      const authToken = getStoredAuthToken()
-      if (stored && !authToken) {
-        clearPersistedAuthState()
-        return null
-      }
-
       if (stored && expiry) {
         if (Date.now() > parseInt(expiry, 10)) {
           clearPersistedAuthState()
@@ -288,7 +282,7 @@ export function AppProvider({ children }) {
         }
         return JSON.parse(stored)
       }
-      if (stored && authToken) return JSON.parse(stored)
+      if (stored) return JSON.parse(stored)
     } catch (_) {}
     return null
   })
@@ -303,7 +297,7 @@ export function AppProvider({ children }) {
   const authEstablishedAtRef = useRef(0)
   const writeBlockedNoticeAtRef = useRef(0)
   const syncErrorLogAtRef = useRef({})
-  const [authReady, setAuthReady] = useState(() => !getStoredAuthToken())
+  const [authReady, setAuthReady] = useState(() => !getStoredUserPayload())
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
@@ -340,7 +334,7 @@ export function AppProvider({ children }) {
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async (options = {}) => {
     try {
-      const hasAuthSession = !!(window.api?.getAuthSessionToken?.() || getStoredAuthToken())
+      const hasAuthSession = !!(window.api?.getAuthSessionToken?.() || getStoredUserPayload())
       if (!hasAuthSession) {
         const fallbackSettings = mergeSettingsWithDeviceOverrides({})
         setSettings(fallbackSettings)
@@ -716,9 +710,7 @@ export function AppProvider({ children }) {
         const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
         const expiry = getStoredUserExpiry()
         const expiryTime = expiry ? Number(expiry) : null
-        const currentMode = authToken && safeStorageGet(sessionStorage, STORAGE_KEYS.AUTH_TOKEN)
-          ? 'session'
-          : (safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION) || '30d')
+        const currentMode = safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION) || '30d'
         persistAuthState({
           user: merged,
           authToken,
@@ -743,9 +735,8 @@ export function AppProvider({ children }) {
     // connection without blocking the initial render.
     const discoverSyncUrl = async () => {
       try {
-        const authToken = getStoredAuthToken()
         const storedUser = getStoredUserPayload()
-        const hasStoredSession = !!(authToken && storedUser)
+        const hasStoredSession = !!storedUser
 
         if (!hasStoredSession) {
           setAuthReady(true)
@@ -1185,7 +1176,7 @@ export function AppProvider({ children }) {
       if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
         const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
         const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
-        if (user?.id && authToken && typeof window.api?.updateSessionDuration === 'function') {
+        if (user?.id && typeof window.api?.updateSessionDuration === 'function') {
           const device = getClientDeviceInfo()
           const refreshed = await window.api.updateSessionDuration({
             sessionDuration: normalizedSessionDuration,
@@ -1196,7 +1187,7 @@ export function AppProvider({ children }) {
           if (refreshed?.success === false) {
             throw new Error(refreshed.error || 'Failed to refresh login session duration')
           }
-          const nextAuthToken = String(refreshed?.authToken || '').trim() || authToken
+          const nextAuthToken = String(refreshed?.authToken || '').trim()
           const nextExpiryTime = computeSessionExpiryMs(
             normalizedSessionDuration,
             refreshed?.sessionExpiresAt || '',

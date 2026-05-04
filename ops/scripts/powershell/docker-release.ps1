@@ -220,8 +220,19 @@ function Ensure-Env {
   Ensure-Dir $DockerConfig
 
   $existing = Read-EnvFile
-  $tag = if ($Version) { $Version } else { if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -split ':')[-1] } else { 'latest' } }
-  $imageBase = if ($Image) { $Image } else { if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -replace ':[^/:]+$', '') } else { $DefaultImage } }
+  $imageHasTag = $Image -and ([string]$Image -match ':[^/:]+$')
+  $tag = if ($Version) {
+    $Version
+  } elseif ($imageHasTag) {
+    ([string]$Image -split ':')[-1]
+  } else {
+    if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -split ':')[-1] } else { 'latest' }
+  }
+  $imageBase = if ($Image) {
+    if ($imageHasTag) { ([string]$Image -replace ':[^/:]+$', '') } else { $Image }
+  } else {
+    if ($existing.BUSINESS_OS_IMAGE) { ($existing.BUSINESS_OS_IMAGE -replace ':[^/:]+$', '') } else { $DefaultImage }
+  }
   $defaultTokenFile = Join-Path $SecretDir 'cloudflare-tunnel.token'
   $sourceTokenFile = Join-Path (Join-Path $Root 'ops\runtime\secrets') 'cloudflare-business-os-leangcosmetics.token'
   $tokenFile = if ($existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE) { $existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE } else { $defaultTokenFile }

@@ -56,6 +56,42 @@ function createAuthSession(userId, options = {}) {
   return { token, expiresAt }
 }
 
+function isSecureRequest(req) {
+  const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+  if (forwardedProto === 'https') return true
+  if (req?.secure) return true
+  return String(req?.protocol || '').toLowerCase() === 'https'
+}
+
+function buildSessionCookieOptions(req, expiresAt) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isSecureRequest(req),
+    path: '/',
+    expires: new Date(expiresAt || buildSessionExpiry()),
+  }
+}
+
+function setAuthSessionCookie(req, res, session = {}) {
+  const token = String(session?.token || '').trim()
+  if (!token || !res?.cookie) return
+  res.cookie(SESSION_COOKIE_NAME, token, buildSessionCookieOptions(req, session.expiresAt))
+}
+
+function clearAuthSessionCookie(req, res) {
+  if (!res?.clearCookie) return
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isSecureRequest(req),
+    path: '/',
+  })
+}
+
 function buildRevocationTimestamp(graceMs = 0) {
   const delay = Math.max(0, Number(graceMs || 0))
   return new Date(Date.now() + delay).toISOString()
@@ -182,6 +218,8 @@ module.exports = {
   SESSION_ROTATION_GRACE_MS,
   buildSessionExpiry,
   createAuthSession,
+  setAuthSessionCookie,
+  clearAuthSessionCookie,
   getPresentedSessionToken,
   getSessionUser,
   revokeAuthSession,

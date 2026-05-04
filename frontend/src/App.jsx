@@ -276,6 +276,9 @@ function useSyncErrorBanner() {
   const [syncError, setSyncError] = useState(null)
   const [transientOutage, setTransientOutage] = useState(null)
   const [pendingSync, setPendingSync] = useState(null)
+  const [vaultLocked, setVaultLocked] = useState(null)
+  const [appUpdate, setAppUpdate] = useState(null)
+  const [conflictsNeedReview, setConflictsNeedReview] = useState(null)
 
   useEffect(() => {
     const refreshPendingSync = () => {
@@ -304,6 +307,12 @@ function useSyncErrorBanner() {
       }
     }
     const onQueueChanged = () => refreshPendingSync()
+    const onVaultLocked = (event) => setVaultLocked(event?.detail || { reason: 'locked', ts: Date.now() })
+    const onAppUpdate = (event) => setAppUpdate(event?.detail || { message: 'New version ready', ts: Date.now() })
+    const onConflictReview = (event) => {
+      setConflictsNeedReview(event?.detail || { message: 'Conflicts need review', ts: Date.now() })
+      refreshPendingSync()
+    }
     window.addEventListener('sync:error', onSyncError)
     window.addEventListener('sync:write-blocked', onSyncError)
     window.addEventListener('sync:transient-outage', onTransientOutage)
@@ -312,6 +321,9 @@ function useSyncErrorBanner() {
     window.addEventListener('sync:queue-changed', onQueueChanged)
     window.addEventListener('sync:offline-sale-queued', onQueueChanged)
     window.addEventListener('sync:offline-sale-synced', onQueueChanged)
+    window.addEventListener('offline:vault-locked', onVaultLocked)
+    window.addEventListener('sync:app-update-available', onAppUpdate)
+    window.addEventListener('sync:write-conflict', onConflictReview)
     refreshPendingSync()
     const timer = window.setInterval(refreshPendingSync, 20_000)
     return () => {
@@ -324,6 +336,9 @@ function useSyncErrorBanner() {
       window.removeEventListener('sync:queue-changed', onQueueChanged)
       window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
       window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
+      window.removeEventListener('offline:vault-locked', onVaultLocked)
+      window.removeEventListener('sync:app-update-available', onAppUpdate)
+      window.removeEventListener('sync:write-conflict', onConflictReview)
     }
   }, [])
 
@@ -331,6 +346,12 @@ function useSyncErrorBanner() {
     syncError,
     transientOutage,
     pendingSync,
+    vaultLocked,
+    appUpdate,
+    conflictsNeedReview,
+    clearVaultLocked: () => setVaultLocked(null),
+    clearAppUpdate: () => setAppUpdate(null),
+    clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
 }
@@ -605,7 +626,7 @@ function formatSyncTimestamp(value) {
   })
 }
 
-function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl }) {
+function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }) {
   const { t } = useApp()
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
@@ -630,7 +651,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl }) {
   }, [canWriteToServer, syncUrl])
 
   const offline = !!syncUrl && !canWriteToServer
-  if (!offline && !total && !showRecovered) return null
+  if (!offline && !total && !showRecovered && !vaultLocked && !appUpdate && !conflictsNeedReview) return null
   const syncing = Number(pendingSync?.syncing || 0)
   const failed = Number(pendingSync?.failed || 0)
   const ready = !!syncUrl && canWriteToServer
@@ -640,18 +661,46 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl }) {
       ? (t('offline_mode_ready_sync') || 'Server is back online. Offline actions can sync now.')
       : (t('server_back_online') || 'Server is back online. You can keep working.'))
     : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
+  const priority = appUpdate
+    ? { title: 'New version ready', message: 'Update available', tone: 'info' }
+    : conflictsNeedReview
+      ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
+      : vaultLocked
+        ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
+        : null
+  const toneClass = priority?.tone === 'danger'
+    ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200'
+    : priority?.tone === 'info'
+      ? 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200'
+      : ready
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+        : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
   return (
-    <div className={`border-b px-4 py-2 text-xs ${ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'}`}>
+    <div className={`border-b px-4 py-2 text-xs ${toneClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="min-w-0">
-          <strong>{t('offline_mode') || 'Offline mode'}</strong>
-          <span className="ml-2">{label}</span>
+          <strong>{priority?.title || t('offline_mode') || 'Offline mode'}</strong>
+          <span className="ml-2">{priority?.message || label}</span>
           {total ? (
             <span className="ml-2 opacity-75">
               {total} {t('pending') || 'pending'}{syncing ? `, ${syncing} ${t('syncing') || 'syncing'}` : ''}{failed ? `, ${failed} ${t('failed') || 'failed'}` : ''}{oldest ? `, since ${oldest}` : ''}
             </span>
           ) : null}
         </span>
+        {appUpdate ? (
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-full border border-current px-3 py-1 font-semibold"
+              onClick={onUpdateNow}
+            >
+              Update now
+            </button>
+            <button type="button" className="rounded-full px-3 py-1 opacity-75 hover:opacity-100" onClick={onDismissUpdate}>
+              Later
+            </button>
+          </span>
+        ) : null}
         {total ? (
           <button
             type="button"
@@ -758,7 +807,16 @@ export default function App() {
   } = useApp()
   const faviconRequestRef = useRef(0)
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
-  const { syncError, transientOutage, pendingSync, clearSyncError } = useSyncErrorBanner()
+  const {
+    syncError,
+    transientOutage,
+    pendingSync,
+    vaultLocked,
+    appUpdate,
+    conflictsNeedReview,
+    clearAppUpdate,
+    clearSyncError,
+  } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
 
   useVisibilityRecovery()
@@ -931,7 +989,19 @@ export default function App() {
           <div className="flex min-w-0 items-center gap-3">
           </div>
           <TransientServerBanner outage={transientOutage} />
-          <OfflineModeBanner pendingSync={pendingSync} canWriteToServer={canWriteToServer} syncUrl={syncUrl} />
+          <OfflineModeBanner
+            pendingSync={pendingSync}
+            canWriteToServer={canWriteToServer}
+            syncUrl={syncUrl}
+            vaultLocked={vaultLocked}
+            appUpdate={appUpdate}
+            conflictsNeedReview={conflictsNeedReview}
+            onDismissUpdate={clearAppUpdate}
+            onUpdateNow={() => {
+              navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
+              window.setTimeout(() => window.location.reload(), 250)
+            }}
+          />
           {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
           <BackgroundImportTracker />
           {mountedPages.map((mountedPage) => (

@@ -49,6 +49,8 @@ const {
 } = require('../services/verification')
 const {
   createAuthSession,
+  setAuthSessionCookie,
+  clearAuthSessionCookie,
   getPresentedSessionToken,
   revokeAuthSession,
   revokeUserSessions,
@@ -566,7 +568,8 @@ router.post('/login', async (req, res) => {
   })
 
   const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
-  ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
+  setAuthSessionCookie(req, res, session)
+  ok(res, { user: buildUserPayload(user), sessionExpiresAt: session.expiresAt, authMode: 'cookie' })
 })
 
 // POST /api/auth/oauth/start
@@ -740,12 +743,13 @@ router.post('/oauth/complete', async (req, res) => {
   })
 
   const session = issueAuthSession(req, localUser.id, { sessionDuration, deviceName, deviceTz, clientTime })
+  setAuthSessionCookie(req, res, session)
 
   return ok(res, {
     provider: normalizedProvider,
     user: buildUserPayload(localUser),
-    authToken: session.token,
     sessionExpiresAt: session.expiresAt,
+    authMode: 'cookie',
   })
 })
 
@@ -802,12 +806,14 @@ router.post('/otp/verify', (req, res) => {
   })
 
   const session = issueAuthSession(req, user.id, { sessionDuration, deviceName, deviceTz, clientTime })
-  ok(res, { user: buildUserPayload(user), authToken: session.token, sessionExpiresAt: session.expiresAt })
+  setAuthSessionCookie(req, res, session)
+  ok(res, { user: buildUserPayload(user), sessionExpiresAt: session.expiresAt, authMode: 'cookie' })
 })
 
 router.post('/logout', (req, res) => {
   const token = getPresentedSessionToken(req)
   if (token) revokeAuthSession(token)
+  clearAuthSessionCookie(req, res)
   ok(res, { success: true })
 })
 
@@ -824,6 +830,7 @@ router.post('/session-duration', authToken, (req, res) => {
     deviceTz,
     deviceName,
   })
+  setAuthSessionCookie(req, res, session)
 
   if (currentToken) {
     // Keep the previous session alive briefly so in-flight HTTP requests and the
@@ -843,8 +850,8 @@ router.post('/session-duration', authToken, (req, res) => {
   })
 
   ok(res, {
-    authToken: session.token,
     sessionExpiresAt: session.expiresAt,
+    authMode: 'cookie',
   })
 })
 

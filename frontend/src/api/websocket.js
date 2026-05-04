@@ -40,10 +40,9 @@ export function connectWS() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
   const authToken = getAuthSessionToken()
-  if (!authToken) return
   wsAuthToken = authToken
   const wsUrl = syncServerUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws'
-    + `?token=${encodeURIComponent(authToken)}`
+    + (authToken ? `?token=${encodeURIComponent(authToken)}` : '')
 
   try {
     logWs('debug', 'attempting connect to', wsUrl)

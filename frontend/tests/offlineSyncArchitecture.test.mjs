@@ -23,9 +23,11 @@ await runTest('service worker replays the IndexedDB outbox through secure authen
   assert.match(swSource, /self\.addEventListener\('sync'/)
   assert.match(swSource, /event\.tag === OUTBOX_SYNC_TAG/)
   assert.match(swSource, /indexedDB\.open\(DB_NAME\)/)
-  assert.match(swSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
-  assert.match(swSource, /headers\['x-auth-session'\] = authToken/)
-  assert.match(swSource, /fetch\(`\$\{base\}\/api\/sales`/)
+  assert.match(swSource, /readQueuedBusinessOutbox/)
+  assert.match(swSource, /credentials: 'include'/)
+  assert.match(swSource, /fetch\(`\$\{base\}\/api\/sync\/outbox`/)
+  assert.doesNotMatch(swSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
+  assert.doesNotMatch(swSource, /x-auth-session/)
 })
 
 await runTest('service worker preserves conflicts and auth failures instead of overwriting newer server state', () => {
@@ -36,13 +38,14 @@ await runTest('service worker preserves conflicts and auth failures instead of o
   assert.match(swSource, /reason: 'auth_required'/)
 })
 
-await runTest('browser registers background sync and only shares persistent auth with the worker', () => {
-  assert.match(webApiSource, /function syncBackgroundAuthSessionToken/)
-  assert.match(webApiSource, /localStorage\.getItem\(STORAGE_KEYS\.AUTH_TOKEN\) === clean/)
-  assert.match(webApiSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
+await runTest('browser registers background sync without sharing auth tokens with the worker', () => {
   assert.match(webApiSource, /function registerOutboxBackgroundSync/)
   assert.match(webApiSource, /registration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.match(webApiSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
+  assert.match(webApiSource, /queueBusinessOutboxOperation/)
+  assert.match(webApiSource, /encrypted_payload/)
+  assert.doesNotMatch(webApiSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
+  assert.doesNotMatch(webApiSource, /function syncBackgroundAuthSessionToken/)
 })
 
 await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {

@@ -104,6 +104,36 @@ dexieDb.version(4).stores({
   custom_tables:       '++id, name',
   custom_fields:       '++id, entity_type',
 })
+dexieDb.version(5).stores({
+  settings:            'key',
+  settings_meta:       'key',
+  sync_queue:          '++_seq, channel, status, created_at, updated_at, retry_at, entity_table, entity_id',
+  sync_outbox:         '++_seq, id, operation_id, status, created_at, updated_at, retry_at, entity_table, entity_id, payload_digest, schema_version',
+  offline_vault:       'key, status, updated_at',
+  offline_file_chunks: '++_seq, upload_id, chunk_index, status, created_at, updated_at, payload_digest',
+  users:               '++id, username',
+  roles:               '++id, name',
+  products:            '++id, name, category, sku, barcode',
+  categories:          '++id, name',
+  units:               '++id, name',
+  branches:            '++id, name',
+  branch_stock:        '++id, [product_id+branch_id]',
+  customers:           '++id, name, phone',
+  suppliers:           '++id, name',
+  delivery_contacts:   '++id, name',
+  sales:               '++id, receipt_number, created_at',
+  sale_items:          '++id, sale_id, product_id',
+  returns:             '++id, created_at, customer_id, supplier_id',
+  audit_logs:          '++id, created_at',
+  inventory_movements: '++id, product_id, created_at',
+  stock_transfers:     '++id, created_at',
+  custom_tables:       '++id, name',
+  custom_fields:       '++id, entity_type',
+})
+
+// Encrypted stores keep encrypted_payload plus payload_digest/schema_version fields
+// on each record; those fields are data columns, while the indexes above cover
+// queue inspection, retry ordering, and integrity review.
 
 // ─── Settings helpers ─────────────────────────────────────────────────────────
 export async function localGetSettings() {

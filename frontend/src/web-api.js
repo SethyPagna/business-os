@@ -25,11 +25,219 @@ import {
 } from './runtime/runtimeErrorClassifier.mjs'
 
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
-const OFFLINE_AUTH_SESSION_TOKEN_KEY = 'offline_auth_session_token'
 const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
+const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
+const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 let offlineMaintenanceStarted = false
 let lastServiceWorkerUpdateAt = 0
+let offlineVaultKey = null
+let offlineVaultUnlockedAt = 0
+let offlineVaultIdleTimer = null
+
+function bytesToBase64(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  let binary = ''
+  for (let index = 0; index < view.length; index += 1) binary += String.fromCharCode(view[index])
+  return btoa(binary)
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value || ''))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
+
+function stableStringify(value) {
+  if (value == null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+}
+
+async function sha256Hex(value) {
+  const bytes = value instanceof Uint8Array
+    ? value
+    : new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function deriveOfflineVaultKey(pin, saltBase64) {
+  const material = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(String(pin || '')),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  )
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: base64ToBytes(saltBase64), iterations: 250_000 },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+}
+
+async function encryptOfflineVaultValue(value, key = offlineVaultKey) {
+  if (!key) throw new Error('Offline vault is locked.')
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const encoded = new TextEncoder().encode(JSON.stringify(value ?? null))
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded)
+  return { iv: bytesToBase64(iv), encrypted_payload: bytesToBase64(encrypted) }
+}
+
+async function decryptOfflineVaultValue(record, key = offlineVaultKey) {
+  if (!key) throw new Error('Offline vault is locked.')
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToBytes(record?.iv || '') },
+    key,
+    base64ToBytes(record?.encrypted_payload || ''),
+  )
+  return JSON.parse(new TextDecoder().decode(decrypted))
+}
+
+async function requestOfflinePersistentStorage() {
+  if (typeof navigator === 'undefined' || !navigator.storage?.persist) return { supported: false, persistent: false }
+  const persistent = await navigator.storage.persist().catch(() => false)
+  const estimate = await navigator.storage.estimate?.().catch(() => null)
+  return { supported: true, persistent: !!persistent, estimate }
+}
+
+function dispatchVaultLocked(reason = 'idle') {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('offline:vault-locked', { detail: { reason, ts: Date.now() } }))
+}
+
+function scheduleOfflineVaultIdleLock() {
+  if (typeof window === 'undefined') return
+  window.clearTimeout(offlineVaultIdleTimer)
+  offlineVaultIdleTimer = window.setTimeout(() => lockOfflineVault('idle'), OFFLINE_VAULT_IDLE_LOCK_MS)
+}
+
+function lockOfflineVault(reason = 'manual') {
+  offlineVaultKey = null
+  offlineVaultUnlockedAt = 0
+  if (typeof window !== 'undefined') window.clearTimeout(offlineVaultIdleTimer)
+  dispatchVaultLocked(reason)
+}
+
+async function unlockOfflineVault(pin) {
+  if (!String(pin || '').trim()) throw new Error('PIN is required to unlock offline mode.')
+  let saltRow = await dexieDb.offline_vault.get('device_salt').catch(() => null)
+  if (!saltRow?.value) {
+    saltRow = {
+      key: 'device_salt',
+      value: bytesToBase64(crypto.getRandomValues(new Uint8Array(16))),
+      status: 'active',
+      updated_at: new Date().toISOString(),
+    }
+    await dexieDb.offline_vault.put(saltRow)
+  }
+  offlineVaultKey = await deriveOfflineVaultKey(pin, saltRow.value)
+  offlineVaultUnlockedAt = Date.now()
+  scheduleOfflineVaultIdleLock()
+  const storage = await requestOfflinePersistentStorage()
+  await dexieDb.offline_vault.put({
+    key: 'storage_status',
+    value: storage,
+    status: storage.persistent ? 'persistent' : 'eviction_possible',
+    updated_at: new Date().toISOString(),
+  }).catch(() => {})
+  return { success: true, unlocked: true, storage }
+}
+
+async function queueBusinessOutboxOperation(operation = {}) {
+  const operation_id = String(operation.operation_id || operation.type || '').trim()
+  if (!operation_id) throw new Error('Offline operation id is required.')
+  if (!offlineVaultKey) {
+    dispatchVaultLocked('queue_requires_unlock')
+    return { success: false, locked: true, status: 'vault_locked' }
+  }
+  scheduleOfflineVaultIdleLock()
+  const now = new Date().toISOString()
+  const payload = operation.payload || {}
+  const encrypted = await encryptOfflineVaultValue(payload)
+  const payload_digest = await sha256Hex(payload)
+  const id = operation.id || operation.client_request_id || `business_outbox_operation_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  await dexieDb.sync_outbox.put({
+    id,
+    client_request_id: operation.client_request_id || id,
+    operation_id,
+    schema_version: Number(operation.schema_version || 1),
+    base_updated_at: operation.base_updated_at || operation.updated_at || now,
+    status: 'pending',
+    created_at: now,
+    updated_at: now,
+    retry_at: null,
+    entity_table: operation.entity_table || operation.entity || '',
+    entity_id: operation.entity_id || payload.id || null,
+    entity_label: operation.entity_label || payload.name || operation_id,
+    payload_digest,
+    encrypted_payload: encrypted.encrypted_payload,
+    iv: encrypted.iv,
+    business_outbox_operation: true,
+  })
+  registerOutboxBackgroundSync()
+  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
+    detail: { reason: 'business_outbox_operation', operation_id, ts: Date.now() },
+  }))
+  return { success: true, queued: true, id, payload_digest }
+}
+
+async function queueOfflineFileChunks(file, ownerOperation = {}) {
+  if (!file?.slice) throw new Error('A file is required for offline file sync.')
+  if (!offlineVaultKey) {
+    dispatchVaultLocked('file_queue_requires_unlock')
+    return { success: false, locked: true, status: 'vault_locked' }
+  }
+  scheduleOfflineVaultIdleLock()
+  const upload_id = ownerOperation.upload_id || `offline_file_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  const chunkCount = Math.ceil(Number(file.size || 0) / OFFLINE_FILE_CHUNK_SIZE)
+  const wholeBytes = new Uint8Array(await file.arrayBuffer())
+  const fileSha256 = await sha256Hex(wholeBytes)
+  const createdAt = new Date().toISOString()
+  const manifest = {
+    upload_id,
+    file_name: file.name || 'offline-upload.bin',
+    mime: file.type || '',
+    size: Number(file.size || wholeBytes.byteLength || 0),
+    sha256: fileSha256,
+    chunk_count: chunkCount,
+    chunk_size: OFFLINE_FILE_CHUNK_SIZE,
+    owner_operation_id: ownerOperation.operation_id || '',
+    created_at: createdAt,
+  }
+  const encryptedManifest = await encryptOfflineVaultValue(manifest)
+  await dexieDb.offline_file_chunks.put({
+    upload_id,
+    chunk_index: -1,
+    status: 'manifest',
+    created_at: createdAt,
+    updated_at: createdAt,
+    payload_digest: await sha256Hex(manifest),
+    encrypted_payload: encryptedManifest.encrypted_payload,
+    iv: encryptedManifest.iv,
+  })
+  for (let index = 0; index < chunkCount; index += 1) {
+    const start = index * OFFLINE_FILE_CHUNK_SIZE
+    const chunk = wholeBytes.slice(start, start + OFFLINE_FILE_CHUNK_SIZE)
+    const encrypted = await encryptOfflineVaultValue({ chunk: bytesToBase64(chunk), chunk_index: index })
+    await dexieDb.offline_file_chunks.put({
+      upload_id,
+      chunk_index: index,
+      status: 'pending',
+      created_at: createdAt,
+      updated_at: createdAt,
+      payload_digest: await sha256Hex(chunk),
+      encrypted_payload: encrypted.encrypted_payload,
+      iv: encrypted.iv,
+    })
+  }
+  registerOutboxBackgroundSync()
+  return { success: true, upload_id, chunkCount, sha256: fileSha256 }
+}
 
 function registerOutboxBackgroundSync() {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
@@ -41,26 +249,6 @@ function registerOutboxBackgroundSync() {
       registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
     })
     .catch(() => {})
-}
-
-function syncBackgroundAuthSessionToken(token) {
-  if (typeof window === 'undefined') return
-  const clean = String(token || '').trim()
-  let persistent = false
-  try {
-    persistent = !!clean && localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) === clean
-  } catch (_) {
-    persistent = false
-  }
-  if (persistent) {
-    dexieDb.settings.put({
-      key: OFFLINE_AUTH_SESSION_TOKEN_KEY,
-      value: clean,
-      updated_at: new Date().toISOString(),
-    }).then(() => registerOutboxBackgroundSync()).catch(() => {})
-  } else {
-    dexieDb.settings.delete(OFFLINE_AUTH_SESSION_TOKEN_KEY).catch(() => {})
-  }
 }
 
 function refreshOfflineSnapshotSoon(force = false) {
@@ -144,16 +332,6 @@ function forwardServiceWorkerOutboxEvent(event) {
   }))
 }
 
-function getStoredAuthToken() {
-  try {
-    return sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
-      || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
-      || ''
-  } catch (_) {
-    return ''
-  }
-}
-
 // ?? Silence Capacitor/vendor bridge noise that fires in plain web context ??????
 // vendor.js emits "No Listener: tabs:outgoing.message.ready" as an unhandled
 // rejection when Capacitor's tab-messaging bridge can't find a native listener.
@@ -205,6 +383,14 @@ if (typeof window !== 'undefined') {
 }
 
 // ?? Synchronous window.api installation ??????????????????????????????????????
+function forwardServiceWorkerAppEvent(event) {
+  if (typeof window === 'undefined') return
+  if (event?.data?.type !== 'BUSINESS_OS_APP_UPDATE_AVAILABLE') return
+  window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+    detail: event?.data?.detail || {},
+  }))
+}
+
 window.api = {
 
   setSyncServerUrl(url) {
@@ -238,11 +424,8 @@ window.api = {
   setAuthSessionToken(token) {
     const clean = (token || '').trim()
     setAuthSessionToken(clean)
-    syncBackgroundAuthSessionToken(clean)
     disconnectWS()
-    if (clean) {
-      connectWS()
-    }
+    connectWS()
   },
 
   useSessionSyncToken(token) {
@@ -250,6 +433,18 @@ window.api = {
   },
 
   ...methods,
+  unlockOfflineVault,
+  lockOfflineVault,
+  getOfflineVaultState() {
+    return {
+      unlocked: !!offlineVaultKey,
+      unlockedAt: offlineVaultUnlockedAt,
+      idleLockMs: OFFLINE_VAULT_IDLE_LOCK_MS,
+    }
+  },
+  queueBusinessOutboxOperation,
+  queueOfflineFileChunks,
+  requestOfflinePersistentStorage,
   getAuthSessionToken,
   getCallLog,
   clearCallLog,
@@ -257,26 +452,20 @@ window.api = {
 
 if (typeof window !== 'undefined') {
   navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerOutboxEvent)
+  navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerAppEvent)
+  window.addEventListener('beforeunload', () => lockOfflineVault('tab_close'))
   window.addEventListener('online', () => {
-    if (getAuthSessionToken()) {
-      reconnectWS()
-    } else {
-      connectWS()
-    }
+    reconnectWS()
     startHealthCheck()
     runOfflineMaintenance(true)
   })
   window.addEventListener('focus', () => {
-    if (getAuthSessionToken()) {
-      connectWS()
-    }
+    connectWS()
     runOfflineMaintenance()
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    if (getAuthSessionToken()) {
-      connectWS()
-    }
+    connectWS()
     runOfflineMaintenance()
   })
   window.addEventListener('sync:reconnected', () => {
@@ -296,11 +485,9 @@ if (typeof window !== 'undefined') {
     const isViteDev = location.hostname === 'localhost' &&
       (location.port === '5173' || location.port === '5174')
 
-    // Retrieve auth token from storage
-    let authToken = getStoredAuthToken()
-    if (authToken) setAuthSessionToken(authToken)
-    syncBackgroundAuthSessionToken(authToken)
     try {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
+      sessionStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
       await dexieDb.settings.delete('sync_token')
@@ -324,7 +511,7 @@ if (typeof window !== 'undefined') {
 
     if (url) {
       setSyncServerUrl(url)
-      if (authToken) connectWS()
+      connectWS()
       startHealthCheck()  // ping every 12 s so offline?nline recovery works
       runOfflineMaintenance()
     }

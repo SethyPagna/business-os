@@ -154,7 +154,33 @@ const CORS_OPTIONS = {
     'x-device-tz',
     'x-device-name',
   ],
-  credentials: false,
+  credentials: true,
+}
+
+function getCloudflareAccessDiagnostics(req) {
+  const headers = req?.headers || {}
+  const email = String(headers['cf-access-authenticated-user-email'] || '').trim()
+  const jwtPresent = !!String(headers['cf-access-jwt-assertion'] || '').trim()
+  const ray = String(headers['cf-ray'] || '').trim()
+  const host = String(headers['x-forwarded-host'] || headers.host || '').split(',')[0].trim()
+  const configured = !!(
+    String(process.env.CLOUDFLARE_ACCESS_AUD || '').trim()
+    || String(process.env.CLOUDFLARE_ACCESS_TEAM_DOMAIN || '').trim()
+    || String(process.env.CLOUDFLARE_ACCESS_ISSUER || '').trim()
+  )
+  const detected = !!(email || jwtPresent || ray)
+  const publicRemote = detected || /https?:\/\//i.test(String(CLOUDFLARE_ADMIN_URL || CLOUDFLARE_PUBLIC_URL || PUBLIC_BASE_URL || ''))
+  return {
+    configured,
+    detected,
+    email: email || null,
+    jwtPresent,
+    ray: ray || null,
+    host: host || null,
+    warning: publicRemote && !configured
+      ? 'Cloudflare Access is not configured. Add a Zero Trust Access policy before exposing admin traffic broadly.'
+      : '',
+  }
 }
 
 function sanitizeObjectKeys(value, depth = 0, maxDepth = 20) {
@@ -361,6 +387,7 @@ module.exports = {
   sanitizeStringValue,
   sanitizeRequestPayload,
   sanitizeDeepStrings,
+  getCloudflareAccessDiagnostics,
   isConfiguredCustomerPortalHost,
   isApiOrHealthPath,
   isSpaFallbackEligible,
