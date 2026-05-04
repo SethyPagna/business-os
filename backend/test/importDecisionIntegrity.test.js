@@ -52,6 +52,11 @@ assert.match(
   /BLOCKING_BARCODE_ISSUES[\s\S]*barcode_scientific_notation/,
   'scientific-notation barcodes must be treated as blocking product import issues',
 )
+assert.doesNotMatch(
+  source,
+  /\? IS NOT NULL[\s\S]{0,80}(sku|barcode)/,
+  'product import preflight must not use standalone null parameters for SKU/barcode checks on Postgres',
+)
 assert.match(
   source,
   /function resetImportJobForRetry/,

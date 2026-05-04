@@ -1152,48 +1152,66 @@ function assertUniqueProductFields({
 }) {
   const trimmedName = normalizeText(name)
   if (!trimmedName) throw new Error('Product name required')
-  const conflict = db.prepare(`
+  const conditions = []
+  const params = []
+  if (!allowDuplicateName) {
+    conditions.push('lower(trim(name)) = lower(trim(?))')
+    params.push(trimmedName)
+  }
+  if (!allowDuplicateSku && normalizeText(sku)) {
+    conditions.push('sku = ?')
+    params.push(normalizeText(sku))
+  }
+  if (!allowDuplicateBarcode && normalizeText(barcode)) {
+    conditions.push('barcode = ?')
+    params.push(normalizeText(barcode))
+  }
+  if (!conditions.length) return
+  let sql = `
     SELECT id, name, sku, barcode
     FROM products
-    WHERE (
-      (? = 0 AND lower(trim(name)) = lower(trim(?)))
-      OR (? IS NOT NULL AND ? != '' AND sku = ?)
-      OR (? IS NOT NULL AND ? != '' AND barcode = ?)
-    )
-    AND (? IS NULL OR id != ?)
-    LIMIT 1
-  `).get(
-    allowDuplicateName ? 1 : 0,
-    trimmedName,
-    sku || null, sku || '', sku || null,
-    barcode || null, barcode || '', barcode || null,
-    excludeId, excludeId,
-  )
+    WHERE (${conditions.join(' OR ')})
+  `
+  if (excludeId != null && excludeId !== '') {
+    sql += ' AND id != ?'
+    params.push(excludeId)
+  }
+  sql += ' LIMIT 1'
+  const conflict = db.prepare(sql).get(...params)
   if (!conflict) return
-  if (!allowDuplicateSku && (sku || '') && conflict.sku === sku) throw new Error(`Duplicate SKU "${sku}" is not allowed`)
-  if (!allowDuplicateBarcode && (barcode || '') && conflict.barcode === barcode) throw new Error(`Duplicate barcode "${barcode}" is not allowed`)
-  if (!allowDuplicateName) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+  if (!allowDuplicateSku && normalizeText(sku) && conflict.sku === normalizeText(sku)) throw new Error(`Duplicate SKU "${normalizeText(sku)}" is not allowed`)
+  if (!allowDuplicateBarcode && normalizeText(barcode) && conflict.barcode === normalizeText(barcode)) throw new Error(`Duplicate barcode "${normalizeText(barcode)}" is not allowed`)
+  if (!allowDuplicateName && normalizeReviewIdentifier(conflict.name) === normalizeReviewIdentifier(trimmedName)) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
 function findProductIdentifierConflict({ sku, barcode, excludeId = null }) {
   const normalizedSku = normalizeText(sku)
   const normalizedBarcode = normalizeText(barcode)
   if (!normalizedSku && !normalizedBarcode) return null
-  return db.prepare(`
+  const conditions = []
+  const params = []
+  if (normalizedSku) {
+    conditions.push('sku = ?')
+    params.push(normalizedSku)
+  }
+  if (normalizedBarcode) {
+    conditions.push('barcode = ?')
+    params.push(normalizedBarcode)
+  }
+  let sql = `
     SELECT id, name, sku, barcode
     FROM products
-    WHERE (
-      (? IS NOT NULL AND ? != '' AND sku = ?)
-      OR (? IS NOT NULL AND ? != '' AND barcode = ?)
-    )
-    AND (? IS NULL OR id != ?)
+    WHERE (${conditions.join(' OR ')})
+  `
+  if (excludeId != null && excludeId !== '') {
+    sql += ' AND id != ?'
+    params.push(excludeId)
+  }
+  sql += `
     ORDER BY id ASC
     LIMIT 1
-  `).get(
-    normalizedSku || null, normalizedSku || '', normalizedSku || null,
-    normalizedBarcode || null, normalizedBarcode || '', normalizedBarcode || null,
-    excludeId, excludeId,
-  ) || null
+  `
+  return db.prepare(sql).get(...params) || null
 }
 
 function normalizeIdentifierConflictMode(value) {

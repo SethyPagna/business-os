@@ -116,27 +116,39 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allow
   const trimmedName = String(name || '').trim()
   if (!trimmedName) throw new Error('Product name required')
 
-  const conflicts = db.prepare(`
+  const conditions = []
+  const params = []
+  if (!allowDuplicateName) {
+    conditions.push('lower(trim(name)) = lower(trim(?))')
+    params.push(trimmedName)
+  }
+  if (String(sku || '').trim()) {
+    conditions.push('sku = ?')
+    params.push(String(sku).trim())
+  }
+  if (String(barcode || '').trim()) {
+    conditions.push('barcode = ?')
+    params.push(String(barcode).trim())
+  }
+  if (!conditions.length) return
+
+  let sql = `
     SELECT id, name, sku, barcode
     FROM products
-    WHERE (
-      (? = 0 AND lower(trim(name)) = lower(trim(?)))
-      OR (? IS NOT NULL AND ? != '' AND sku = ?)
-      OR (? IS NOT NULL AND ? != '' AND barcode = ?)
-    )
-    AND (? IS NULL OR id != ?)
-    LIMIT 1
-  `).get(
-    allowDuplicateName ? 1 : 0, trimmedName,
-    sku || null, sku || '', sku || null,
-    barcode || null, barcode || '', barcode || null,
-    excludeId, excludeId,
-  )
+    WHERE (${conditions.join(' OR ')})
+  `
+  if (excludeId != null && excludeId !== '') {
+    sql += ' AND id != ?'
+    params.push(excludeId)
+  }
+  sql += ' LIMIT 1'
+
+  const conflicts = db.prepare(sql).get(...params)
 
   if (!conflicts) return
-  if ((sku || '') && conflicts.sku === sku) throw new Error(`Duplicate SKU "${sku}" is not allowed`)
-  if ((barcode || '') && conflicts.barcode === barcode) throw new Error(`Duplicate barcode "${barcode}" is not allowed`)
-  if (!allowDuplicateName) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+  if (String(sku || '').trim() && conflicts.sku === String(sku).trim()) throw new Error(`Duplicate SKU "${String(sku).trim()}" is not allowed`)
+  if (String(barcode || '').trim() && conflicts.barcode === String(barcode).trim()) throw new Error(`Duplicate barcode "${String(barcode).trim()}" is not allowed`)
+  if (!allowDuplicateName && String(conflicts.name || '').trim().toLowerCase() === trimmedName.toLowerCase()) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
 }
 
 function hasOwnField(source, key) {

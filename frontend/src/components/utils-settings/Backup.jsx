@@ -23,7 +23,7 @@ const QUICK_BACKUP_SECTIONS = [
 ]
 
 const BACKUP_SECTION_OPTIONS = [
-  { value: 'overview', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
+  { value: 'all', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
   { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Supabase Auth, and backup package readiness.' },
   { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
   { value: 'restore', label: 'Restore', hint: 'Restore a verified Business OS backup folder.' },
@@ -900,7 +900,7 @@ export default function Backup() {
   const [folderImportPath, setFolderImportPath] = useState('')
   const [activeJob, setActiveJob] = useState(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
-  const [backupSection, setBackupSection] = useState('overview')
+  const [backupSection, setBackupSection] = useState('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
   const sectionStorageKey = 'business-os:backup:section'
@@ -1042,7 +1042,7 @@ export default function Backup() {
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
-        {backupSection === 'overview' ? <BackupOverview copy={copy} onSelect={setBackupSection} /> : null}
+        {backupSection === 'all' ? <BackupOverview copy={copy} onSelect={setBackupSection} /> : null}
         {showBackupSection('doctor') ? (
         <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
         ) : null}

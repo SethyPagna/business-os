@@ -17,7 +17,7 @@ assert.match(inventory, /inventory-history-row/, 'inventory history controls sho
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
 assert.match(inventory, /inventory-history-row[\s\S]{0,160}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
 
-assert.match(backup, /useState\('overview'\)/, 'Backup should default to a focused overview instead of mounting all tools')
+assert.match(backup, /useState\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')
 assert.doesNotMatch(backup, /function DataFolderLocation/, 'unused backup data-folder UI should not remain in the bundle')
 assert.doesNotMatch(backup, /function ScaleMigrationSection/, 'unused backup migration UI should not remain in the bundle')
