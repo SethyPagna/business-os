@@ -21,6 +21,7 @@ import {
   requireLiveServerWrite,
   isWriteBlockedError,
   isNetErr,
+  isServerOnline,
   isTransientGatewayError,
   getApiVersionMismatchCooldown,
   markApiVersionMismatch,
@@ -62,6 +63,9 @@ function getCurrentUserContext() {
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
+const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
+const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
+let offlineDeviceSnapshotPromise = null
 
 function emitSyncQueueChanged(detail = {}) {
   if (typeof window === 'undefined') return
@@ -143,6 +147,103 @@ export async function getPendingSyncState() {
 
 export async function retryPendingSyncNow() {
   return syncPendingSalesQueue({ force: true })
+}
+
+function canRefreshOfflineDeviceSnapshot(options = {}) {
+  if (!getSyncServerUrl() || !getAuthSessionToken()) return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  if (!options.force && !isServerOnline()) return false
+  return true
+}
+
+async function readOfflineDeviceSnapshotMeta() {
+  try {
+    return (await dexieDb.settings.get(OFFLINE_DEVICE_SNAPSHOT_META_KEY))?.value || ''
+  } catch (_) {
+    return ''
+  }
+}
+
+async function writeOfflineDeviceSnapshotMeta(meta = {}) {
+  const value = JSON.stringify({
+    refreshedAt: new Date().toISOString(),
+    ...meta,
+  })
+  await dexieDb.settings.put({
+    key: OFFLINE_DEVICE_SNAPSHOT_META_KEY,
+    value,
+  }).catch(() => {})
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sync:offline-snapshot-refreshed', {
+      detail: { ...meta, ts: Date.now() },
+    }))
+  }
+  return value
+}
+
+async function runOfflineSnapshotStep(label, fn, results) {
+  try {
+    await fn()
+    results.refreshed.push(label)
+  } catch (error) {
+    results.failed.push({
+      label,
+      error: error?.message || String(error || 'Failed'),
+    })
+  }
+}
+
+export async function refreshOfflineDeviceSnapshot(options = {}) {
+  if (!canRefreshOfflineDeviceSnapshot(options)) {
+    return { skipped: true, reason: 'server_or_device_offline' }
+  }
+  if (offlineDeviceSnapshotPromise) return offlineDeviceSnapshotPromise
+
+  offlineDeviceSnapshotPromise = (async () => {
+    const previousMetaRaw = await readOfflineDeviceSnapshotMeta()
+    const previousMeta = (() => {
+      try { return JSON.parse(previousMetaRaw || '{}') || {} } catch (_) { return {} }
+    })()
+    const previousMs = previousMeta?.refreshedAt ? Date.parse(previousMeta.refreshedAt) : 0
+    if (!options.force && previousMs && Date.now() - previousMs < OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS) {
+      return {
+        skipped: true,
+        reason: 'recently_refreshed',
+        refreshedAt: previousMeta.refreshedAt,
+      }
+    }
+
+    const results = { refreshed: [], failed: [] }
+    await runOfflineSnapshotStep('settings', () => getSettings({ force: true }), results)
+    await runOfflineSnapshotStep('categories', () => getCategories(), results)
+    await runOfflineSnapshotStep('units', () => getUnits(), results)
+    await runOfflineSnapshotStep('branches', () => getBranches(), results)
+    await runOfflineSnapshotStep('products', () => getProducts(), results)
+    await runOfflineSnapshotStep('customers', () => getCustomers(), results)
+    await runOfflineSnapshotStep('suppliers', () => getSuppliers(), results)
+    await runOfflineSnapshotStep('delivery_contacts', () => getDeliveryContacts(), results)
+    await runOfflineSnapshotStep('sales', () => getSales({}), results)
+    await runOfflineSnapshotStep('returns', () => getReturns({}), results)
+    await runOfflineSnapshotStep('inventory_movements', () => getInventoryMovements({}, 5000), results)
+
+    const meta = {
+      refreshed: results.refreshed,
+      failed: results.failed,
+      success: results.refreshed.length,
+      failedCount: results.failed.length,
+    }
+    await writeOfflineDeviceSnapshotMeta(meta)
+    return {
+      skipped: false,
+      ...meta,
+    }
+  })()
+
+  try {
+    return await offlineDeviceSnapshotPromise
+  } finally {
+    offlineDeviceSnapshotPromise = null
+  }
 }
 
 async function invalidateClientRuntimeState(reason = 'server-mutation') {

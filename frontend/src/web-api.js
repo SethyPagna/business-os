@@ -24,6 +24,18 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.mjs'
 
+function refreshOfflineSnapshotSoon(force = false) {
+  if (typeof window === 'undefined') return
+  const run = () => {
+    methods.refreshOfflineDeviceSnapshot?.({ force }).catch(() => {})
+  }
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(run, { timeout: 5000 })
+    return
+  }
+  window.setTimeout(run, 1500)
+}
+
 function getStoredAuthToken() {
   try {
     return sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
@@ -96,6 +108,7 @@ window.api = {
       connectWS()
       startHealthCheck()
       methods.retryPendingSyncNow?.().catch(() => {})
+      refreshOfflineSnapshotSoon()
     } else {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
       disconnectWS()
@@ -143,12 +156,14 @@ if (typeof window !== 'undefined') {
     }
     startHealthCheck()
     methods.retryPendingSyncNow?.().catch(() => {})
+    refreshOfflineSnapshotSoon()
   })
   window.addEventListener('focus', () => {
     if (getAuthSessionToken()) {
       connectWS()
     }
     methods.retryPendingSyncNow?.().catch(() => {})
+    refreshOfflineSnapshotSoon()
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
@@ -156,9 +171,11 @@ if (typeof window !== 'undefined') {
       connectWS()
     }
     methods.retryPendingSyncNow?.().catch(() => {})
+    refreshOfflineSnapshotSoon()
   })
   window.addEventListener('sync:reconnected', () => {
     methods.retryPendingSyncNow?.().catch(() => {})
+    refreshOfflineSnapshotSoon(true)
   })
 }
 
@@ -201,6 +218,7 @@ if (typeof window !== 'undefined') {
     if (url) {
       setSyncServerUrl(url)
       if (authToken) connectWS()
+      refreshOfflineSnapshotSoon()
       startHealthCheck()  // ping every 12 s so offline?nline recovery works
       methods.retryPendingSyncNow?.().catch(() => {})
     }

@@ -9,31 +9,21 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.mjs'
 
-function disableServiceWorkerCaching() {
+function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
-  const cleanup = async () => {
+  const register = async () => {
     try {
-      const registrations = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)))
-    } catch (_) {}
-
-    if (typeof caches === 'undefined') return
-    try {
-      const keys = await caches.keys()
-      await Promise.all(
-        keys
-          .filter((key) => key.startsWith('business-os-'))
-          .map((key) => caches.delete(key).catch(() => false)),
-      )
+      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      registration.update?.().catch(() => {})
     } catch (_) {}
   }
 
   if (document.readyState === 'complete') {
-    cleanup().catch(() => {})
+    register().catch(() => {})
   } else {
     window.addEventListener('load', () => {
-      cleanup().catch(() => {})
+      register().catch(() => {})
     }, { once: true })
   }
 }
@@ -174,7 +164,7 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
-disableServiceWorkerCaching()
+registerOfflineAppShell()
 installFormFieldAccessibility()
 
 ReactDOM.createRoot(document.getElementById('root')).render(

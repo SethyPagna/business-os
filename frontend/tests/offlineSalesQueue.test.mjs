@@ -39,8 +39,20 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
 await runTest('browser startup and online recovery retry queued work without clearing it', () => {
   assert.doesNotMatch(webApiSource, /discardPendingSyncQueue\?\.\(\)/)
   assert.match(webApiSource, /retryPendingSyncNow\?\.\(\)/)
+  assert.match(webApiSource, /refreshOfflineDeviceSnapshot\?\.\(/)
   assert.match(webApiSource, /sync:reconnected/)
   assert.match(webApiSource, /addEventListener\('online'/)
+})
+
+await runTest('online device snapshots refresh local mirrors for server-offline reopening', () => {
+  assert.match(methodsSource, /export async function refreshOfflineDeviceSnapshot/)
+  assert.match(methodsSource, /offline_device_snapshot_meta/)
+  assert.match(methodsSource, /getSettings\(\{ force: true \}\)/)
+  assert.match(methodsSource, /getProducts\(\)/)
+  assert.match(methodsSource, /getBranches\(\)/)
+  assert.match(methodsSource, /getSales\(\{\}\)/)
+  assert.match(methodsSource, /getReturns\(\{\}\)/)
+  assert.match(methodsSource, /getInventoryMovements\(\{\}, 5000\)/)
 })
 
 await runTest('offline mode banner stays visible while offline and announces sync timestamps', () => {

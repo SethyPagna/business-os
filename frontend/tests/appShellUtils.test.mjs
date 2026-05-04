@@ -41,6 +41,24 @@ runTest('app shell does not render floating page info help', () => {
   assert.doesNotMatch(source, /PageHelpButton/)
 })
 
+runTest('startup registers the offline app shell service worker', () => {
+  const source = readFileSync(new URL('../src/index.jsx', import.meta.url), 'utf8')
+  assert.match(source, /registerOfflineAppShell/)
+  assert.doesNotMatch(source, /disableServiceWorkerCaching/)
+  assert.doesNotMatch(source, /getRegistrations\(\)[\s\S]*unregister/)
+})
+
+runTest('service worker serves cached app shell for offline navigations only', () => {
+  const source = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
+  assert.match(source, /APP_SHELL_CACHE/)
+  assert.match(source, /APP_SHELL_URLS/)
+  assert.match(source, /request\.mode === 'navigate'/)
+  assert.match(source, /appShellFallback/)
+  assert.match(source, /isNeverCachedPath/)
+  assert.match(source, /\/api\//)
+  assert.match(source, /\/uploads\//)
+})
+
 runTest('Khmer buttons use a stronger but not extra-bold weight', () => {
   const source = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
   assert.match(source, /body\.lang-km:not\(\[data-public-portal='true'\]\) button/)
