@@ -69,16 +69,16 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
       <div className="space-y-3">
         <div>
           <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
-          <input id="supplier-form-name" name="supplier_name" className="input" value={form.name} onChange={(event) => set('name', event.target.value)} autoFocus />
+          <input id="supplier-form-name" name="supplier_name" autoComplete="organization" className="input" value={form.name} onChange={(event) => set('name', event.target.value)} autoFocus />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="supplier-form-company" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('company')}</label>
-            <input id="supplier-form-company" name="supplier_company" className="input" value={form.company || ''} onChange={(event) => set('company', event.target.value)} />
+            <input id="supplier-form-company" name="supplier_company" autoComplete="organization" className="input" value={form.company || ''} onChange={(event) => set('company', event.target.value)} />
           </div>
           <div>
             <label htmlFor="supplier-form-contact-person" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('contact_person') || 'Contact Person'}</label>
-            <input id="supplier-form-contact-person" name="supplier_contact_person" className="input" value={form.contact_person || ''} onChange={(event) => set('contact_person', event.target.value)} />
+            <input id="supplier-form-contact-person" name="supplier_contact_person" autoComplete="name" className="input" value={form.contact_person || ''} onChange={(event) => set('contact_person', event.target.value)} />
           </div>
         </div>
         <div>
@@ -96,26 +96,26 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
               <div key={`supplier-option-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
                 <div className="flex items-center gap-2">
                   <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
-                  <input className="input flex-1 text-xs py-1" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
+                  <input className="input flex-1 text-xs py-1" autoComplete="off" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
                   {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">Remove</button> : null}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
                     <label className="mb-0.5 block text-xs text-gray-400">Name</label>
-                    <input className="input text-xs py-1" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
+                    <input className="input text-xs py-1" autoComplete="name" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
                   </div>
                   <div>
                     <label className="mb-0.5 block text-xs text-gray-400">Phone</label>
-                    <input className="input text-xs py-1" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
+                    <input className="input text-xs py-1" autoComplete="tel" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
                   </div>
                 </div>
                 <div>
                   <label className="mb-0.5 block text-xs text-gray-400">Email</label>
-                  <input className="input text-xs py-1" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
+                  <input className="input text-xs py-1" autoComplete="email" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-xs text-gray-400">Address</label>
-                  <input className="input text-xs py-1" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
+                  <input className="input text-xs py-1" autoComplete="street-address" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
                 </div>
               </div>
             ))}
@@ -123,7 +123,7 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
         </div>
         <div>
           <label htmlFor="supplier-form-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('notes') || 'Notes'}</label>
-          <textarea id="supplier-form-notes" name="supplier_notes" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => set('notes', event.target.value)} />
+          <textarea id="supplier-form-notes" name="supplier_notes" autoComplete="off" className="input resize-none" rows={2} value={form.notes || ''} onChange={(event) => set('notes', event.target.value)} />
         </div>
         <div className="flex gap-3 pt-1">
           <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? (t('saving') || 'Saving...') : t('save')}</button>
@@ -518,6 +518,7 @@ function SuppliersTab({ t, notify, active = true }) {
           <input
             id="supplier-search"
             name="supplier_search"
+            autoComplete="off"
             className="input flex-1 min-w-0 max-w-xs"
             placeholder={t('search_suppliers_placeholder') || `${t('search') || 'Search'} suppliers`}
             value={search}
@@ -615,6 +616,9 @@ function SuppliersTab({ t, notify, active = true }) {
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
         totalCount={visibleSuppliers.length}
+        onRetry={() => load({ silent: false, label: 'Suppliers retry' })}
+        loadingLabel={tr('loading_suppliers', 'Loading suppliers...')}
+        loadingDetails={tr('contacts_loading_details', 'Fetching suppliers, filters, and grouped sections.')}
         t={t}
         renderRow={(supplier) => (
           supplier?.__kind === 'section' ? (

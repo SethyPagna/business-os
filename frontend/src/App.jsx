@@ -45,16 +45,10 @@ const PAGE_IMPORTERS = {
 
 const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 
-const WARMUP_PAGE_IDS = [
-  'dashboard',
-  'products',
-  'inventory',
-  'contacts',
-  'sales',
-  'returns',
-  'catalog',
-  'pos',
-]
+// Keep route chunks cold until the user asks for them. Background dynamic
+// imports were evaluating large bundles during real clicks, which showed up as
+// very high INP on Backup, Contacts, and mobile section changes.
+const WARMUP_PAGE_IDS = []
 
 const ADMIN_PAGE_SEQUENCE = [
   'users',
@@ -557,7 +551,10 @@ function PageLoader() {
   const [stalled, setStalled] = useState(false)
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setStalled(true), 8000)
+    const timer = window.setTimeout(() => {
+      setStalled(true)
+      console.warn('[PageLoader] Page bundle is still loading. If this repeats, reload to fetch the current build assets.')
+    }, 6000)
     return () => window.clearTimeout(timer)
   }, [])
 
@@ -565,7 +562,12 @@ function PageLoader() {
     <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600">
       <div className="text-center">
         <div className="text-3xl mb-2 animate-pulse">...</div>
-        <p className="text-sm">Loading...</p>
+        <p className="text-sm">{stalled ? 'Page bundle is still loading' : 'Loading...'}</p>
+        {stalled ? (
+          <p className="mt-1 max-w-xs text-xs text-gray-500 dark:text-gray-400">
+            The app is waiting for this page chunk. Reloading fetches the latest build without leaving the app shell stuck.
+          </p>
+        ) : null}
         {stalled ? (
           <button
             type="button"

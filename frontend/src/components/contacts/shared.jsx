@@ -4,6 +4,7 @@ import Modal from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
+import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { useApp } from '../../AppContext'
 
 /**
@@ -176,6 +177,9 @@ export function ContactTable({
   renderRow,
   renderCard,
   totalCount,
+  onRetry,
+  loadingLabel = 'Loading contacts...',
+  loadingDetails = 'Fetching contact records and grouped filters.',
   t,
 }) {
   const selectAllRef = useRef(null)
@@ -198,8 +202,17 @@ export function ContactTable({
 
   if (loading && !rows.length) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
-        Loading...
+      <div className="space-y-2">
+        <LoadingWatchdog
+          loading
+          timeoutMs={5000}
+          label={loadingLabel}
+          details={loadingDetails}
+          onRetry={onRetry}
+        />
+        <div className="rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
+          {typeof t === 'function' ? (t('loading') || 'Loading...') : 'Loading...'}
+        </div>
       </div>
     )
   }
