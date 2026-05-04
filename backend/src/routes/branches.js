@@ -4,6 +4,7 @@ const { db }  = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { getStockMetrics } = require('../businessMetrics')
 
 const router = express.Router()
 
@@ -63,7 +64,7 @@ function buildBranchStockWhere(req, { includeStockState = true } = {}) {
   }
   const stockState = String(req.query?.stockState || req.query?.stock_state || 'positive').toLowerCase()
   if (includeStockState) {
-    if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > 0')
+    if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)')
     if (stockState === 'zero') where.push('COALESCE(bs.quantity, 0) = 0')
     if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
@@ -74,6 +75,15 @@ function buildBranchStockWhere(req, { includeStockState = true } = {}) {
 // GET /api/branches
 router.get('/', authToken, (req, res) => {
   res.json(db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all())
+})
+
+// GET /api/branches/summary
+router.get('/summary', authToken, requirePermission('inventory'), (_req, res) => {
+  const metrics = getStockMetrics()
+  ok(res, {
+    ...metrics,
+    branch_count: Number(db.prepare('SELECT COUNT(*) AS count FROM branches WHERE is_active = 1').get()?.count || 0),
+  })
 })
 
 // GET /api/branches/stock-integrity

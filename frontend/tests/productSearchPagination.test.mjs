@@ -31,5 +31,50 @@ assert.match(
   /stockFilter === 'all' && !hasProductDiscoveryQuery/,
   'POS client-side fallback should only hide out-of-stock products while browsing without discovery filters',
 )
+assert.match(
+  productsPage,
+  /visibleProducts\.length === 0[\s\S]*refreshingProducts[\s\S]*Refreshing products/,
+  'Products page should show refreshing state instead of a false no-data search result while data is in flight',
+)
+assert.match(
+  productsPage,
+  /product_brand_color_map/,
+  'Products page should read brand color settings for product rows and details',
+)
+assert.match(
+  productsPage,
+  /renderMetaPill/,
+  'Products page should render colored metadata pills for SKU, barcode, unit, category, brand, and branches',
+)
+assert.match(
+  productsPage,
+  /p\.brand[\s\S]*getBrandColor\(p\.brand\)[\s\S]*pl-\[5\.35rem\]/,
+  'Mobile product cards should show brand and let the lower metadata row span under the action button',
+)
+assert.match(
+  posPage,
+  /visibleProductCards\.length === 0[\s\S]*catalogRefreshing[\s\S]*Refreshing/,
+  'POS product grid should show refreshing state instead of a false no-data result while data is in flight',
+)
+assert.match(
+  posPage,
+  /include: 'branch_stock,images,family'/,
+  'POS should request product families so one card can show parent, variants, and options together',
+)
+assert.match(
+  posPage,
+  /groupFilter === 'grouped'[\s\S]*isParentGroup \|\| isVariantGroup/,
+  'POS group filter should show grouped parent and variant families under Groups',
+)
+assert.doesNotMatch(
+  posPage,
+  /quickFilters|pos_quick_filters|setQuickFilter/,
+  'POS should not keep the removed quick-filter controls wired',
+)
+assert.match(
+  posPage,
+  /membership_number[\s\S]*Auto-generated if blank/,
+  'POS quick-add customer form should expose optional membership id and allow generated memberships',
+)
 
 console.log('productSearchPagination tests passed')

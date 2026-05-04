@@ -284,6 +284,17 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
   }
 
   async function handleRetryQueue() {
+    if (!window.api?.retryPendingSyncNow) return
+    setRetryingQueue(true)
+    try {
+      await window.api.retryPendingSyncNow()
+      await loadQueueState()
+    } finally {
+      setRetryingQueue(false)
+    }
+  }
+
+  async function handleDiscardQueue() {
     if (!window.api?.discardPendingSyncQueue) return
     setRetryingQueue(true)
     try {
@@ -399,21 +410,30 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
                 <span><strong>{pendingSync.syncing}</strong> syncing</span>
                 <span><strong>{pendingSync.failed}</strong> failed</span>
               </div>
-              <button
-                onClick={handleRetryQueue}
-                disabled={retryingQueue || pendingSync.total === 0}
-                className="text-blue-600 hover:underline disabled:opacity-40"
-              >
-                {retryingQueue ? 'Discarding...' : 'Discard invalid changes'}
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={handleRetryQueue}
+                  disabled={retryingQueue || pendingSync.total === 0 || !syncConnected}
+                  className="text-blue-600 hover:underline disabled:opacity-40"
+                >
+                  {retryingQueue ? 'Syncing...' : 'Sync now'}
+                </button>
+                <button
+                  onClick={handleDiscardQueue}
+                  disabled={retryingQueue || pendingSync.total === 0}
+                  className="text-red-500 hover:underline disabled:opacity-40"
+                >
+                  Clear queue
+                </button>
+              </div>
             </div>
             {pendingSync.total > 0 ? (
-              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                These pending client-side changes are invalid and will not be replayed. Discard them to return this device to server truth.
+              <p className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                Offline actions are queued by timestamp and replayed oldest first when the server is reachable. Keep them unless support asks you to clear the queue.
               </p>
             ) : null}
             {pendingSync.total === 0 ? (
-              <p className="py-4 text-center text-xs text-gray-400">No invalid pending client actions.</p>
+              <p className="py-4 text-center text-xs text-gray-400">No pending offline actions.</p>
             ) : pendingSync.items.map((item) => (
               <div key={item._seq} className="flex items-center gap-2 border-b border-gray-50 py-1 text-xs dark:border-gray-700/30">
                 <span className="w-16 flex-shrink-0 font-mono text-gray-400">{item.created_at?.slice(11, 19) || '--:--:--'}</span>
@@ -424,6 +444,8 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }) {
                   {item.channel}
                   {item.entity_name ? ` - ${item.entity_name}` : ''}
                 </span>
+                {item.updated_at ? <span className="hidden text-gray-400 sm:inline">updated {item.updated_at.slice(11, 19)}</span> : null}
+                {item.retry_at ? <span className="hidden text-amber-600 sm:inline">retry {item.retry_at.slice(11, 19)}</span> : null}
                 {item.retry_count ? <span className="text-gray-400">retry {item.retry_count}</span> : null}
                 {item.error ? <span className="truncate text-red-500">{item.error}</span> : null}
               </div>

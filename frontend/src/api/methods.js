@@ -19,6 +19,7 @@ import {
   cacheInvalidate,
   cacheClearAll,
   requireLiveServerWrite,
+  isWriteBlockedError,
   isNetErr,
   isTransientGatewayError,
   getApiVersionMismatchCooldown,
@@ -59,17 +60,20 @@ function getCurrentUserContext() {
   }
 }
 
-function emitSyncQueueChanged() {
+const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
+const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
+
+function emitSyncQueueChanged(detail = {}) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent('sync:queue-changed', {
-    detail: { ts: Date.now() },
+    detail: { ts: Date.now(), ...detail },
   }))
 }
 
-export async function discardPendingSyncQueue(reason = 'Offline changes were invalidated because Business OS now requires a live server for writes.') {
+export async function discardPendingSyncQueue(reason = 'Offline changes were cleared.') {
   const existing = await dexieDb.sync_queue.toArray().catch(() => [])
   await dexieDb.sync_queue.clear().catch(() => {})
-  emitSyncQueueChanged()
+  emitSyncQueueChanged({ reason, discarded: existing.length })
   if (typeof window !== 'undefined') {
     ;['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'].forEach((channel) => {
       window.dispatchEvent(new CustomEvent('sync:update', {
@@ -138,7 +142,7 @@ export async function getPendingSyncState() {
 }
 
 export async function retryPendingSyncNow() {
-  return discardPendingSyncQueue()
+  return syncPendingSalesQueue({ force: true })
 }
 
 async function invalidateClientRuntimeState(reason = 'server-mutation') {
@@ -495,7 +499,10 @@ export async function getCurrentOrganization() {
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-export async function getSettings() {
+export async function getSettings(options = {}) {
+  if (options?.force) {
+    cacheInvalidate('settings')
+  }
   return routeMirrored('settings:get', async () => {
     const [settings, meta] = await Promise.all([
       apiFetch('GET', '/api/settings'),
@@ -541,6 +548,7 @@ export const deleteUnit = (id, payload)  => route('units:delete', async () => ap
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))
+export const getBranchSummary = () => route('branches:summary', () => apiFetch('GET', '/api/branches/summary'), () => ({ branch_count: 0, total_products: 0, in_stock: 0, low_stock: 0, out_of_stock: 0, stock_value_usd: 0 }))
 export const createBranch   = d        => route('branches:create', () => apiFetch('POST', '/api/branches', { ...getDeviceInfo(), ...d }),           null, true)
 export const updateBranch = async (id, d) => {
   const payload = await withExpectedUpdatedAt('branches', id, { ...getDeviceInfo(), ...d })
@@ -1071,8 +1079,200 @@ export const searchInventoryProducts = (params = {}) => {
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
 export const getInventoryMovements = ({ branchId, userId } = {}, limit) => {
-  const q = new URLSearchParams(Object.entries({ limit: limit || 500, branchId, userId }).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(limit || 500).toArray())
+  const safeLimit = Math.min(Math.max(Number(limit || 50000) || 50000, 1), 50000)
+  const q = new URLSearchParams(Object.entries({ limit: safeLimit, branchId, userId }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(safeLimit).toArray())
+}
+
+function buildOfflineSaleReceiptNumber(payload = {}) {
+  const clientRequestId = String(payload.client_request_id || createClientRequestId('sale')).trim()
+  const suffix = clientRequestId.replace(/^sale_/, '').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase()
+  return `OFFLINE-${suffix || Date.now()}`
+}
+
+function isRetryableOfflineSaleError(error) {
+  if (!error) return false
+  if (isWriteBlockedError(error)) return true
+  if (isNetErr(error)) return true
+  if (isTransientGatewayError(error?.status)) return true
+  const message = String(error?.message || '').toLowerCase()
+  return message.includes('timed out') || message.includes('server is offline') || message.includes('server unavailable')
+}
+
+async function findQueuedSale(clientRequestId) {
+  const clean = String(clientRequestId || '').trim()
+  if (!clean) return null
+  const rows = await dexieDb.sync_queue.where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
+  return rows.find((row) => String(row?.payload?.client_request_id || '') === clean) || null
+}
+
+async function putOfflineSaleMirror(payload, receiptNumber) {
+  const now = new Date().toISOString()
+  const offlineId = -Math.abs(Date.now())
+  await dexieDb.sales.put({
+    id: offlineId,
+    receipt_number: receiptNumber,
+    client_request_id: payload.client_request_id,
+    cashier_id: payload.cashier_id || null,
+    cashier_name: payload.cashier_name || '',
+    customer_name: payload.customer_name || '',
+    customer_phone: payload.customer_phone || '',
+    total_usd: payload.total_usd || 0,
+    total_khr: payload.total_khr || 0,
+    subtotal_usd: payload.subtotal_usd || payload.subtotal || 0,
+    subtotal_khr: payload.subtotal_khr || 0,
+    items: JSON.stringify(payload.items || []),
+    sale_status: payload.sale_status || 'completed',
+    payment_method: payload.payment_method || 'Cash',
+    created_at: payload.created_at || now,
+    updated_at: now,
+    offline_pending: true,
+  }).catch(() => null)
+  return offlineId
+}
+
+async function queueOfflineSale(payload, reason = 'server_offline') {
+  const salePayload = ensureClientRequestId({ ...(payload || {}) }, 'sale')
+  const existing = await findQueuedSale(salePayload.client_request_id)
+  if (existing) {
+    return {
+      success: true,
+      queued: true,
+      duplicate: true,
+      id: existing.entity_id || null,
+      receiptNumber: existing.entity_name || buildOfflineSaleReceiptNumber(salePayload),
+      client_request_id: salePayload.client_request_id,
+    }
+  }
+
+  const now = new Date().toISOString()
+  const receiptNumber = buildOfflineSaleReceiptNumber(salePayload)
+  salePayload.receipt_number = salePayload.receipt_number || receiptNumber
+  const localId = await putOfflineSaleMirror(salePayload, receiptNumber)
+  const row = {
+    id: salePayload.client_request_id,
+    channel: OFFLINE_SALE_QUEUE_CHANNEL,
+    operation: 'create',
+    entity_table: 'sales',
+    entity_id: localId,
+    entity_name: receiptNumber,
+    status: 'pending',
+    payload: salePayload,
+    created_at: now,
+    updated_at: now,
+    retry_count: 0,
+    retry_at: now,
+    error: null,
+    reason,
+  }
+  await dexieDb.sync_queue.put(row)
+  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sync:offline-sale-queued', {
+      detail: {
+        channel: OFFLINE_SALE_QUEUE_CHANNEL,
+        receiptNumber,
+        client_request_id: salePayload.client_request_id,
+        ts: now,
+      },
+    }))
+  }
+  return {
+    success: true,
+    queued: true,
+    id: localId,
+    receiptNumber,
+    client_request_id: salePayload.client_request_id,
+  }
+}
+
+function queuedSaleBackoffMs(retryCount = 0) {
+  const attempts = Math.max(0, Number(retryCount || 0))
+  return Math.min(5 * 60_000, OFFLINE_SALE_RETRY_DELAY_MS * Math.max(1, attempts + 1))
+}
+
+async function updateQueuedRow(row, updates = {}) {
+  if (!row?._seq) return
+  await dexieDb.sync_queue.put({
+    ...row,
+    ...updates,
+    updated_at: new Date().toISOString(),
+  }).catch(() => {})
+}
+
+async function completeQueuedSale(row, result) {
+  await dexieDb.transaction('rw', dexieDb.sync_queue, dexieDb.sales, async () => {
+    await dexieDb.sync_queue.delete(row._seq)
+    if (Number(row.entity_id || 0) < 0) await dexieDb.sales.delete(row.entity_id)
+  }).catch(async () => {
+    await dexieDb.sync_queue.delete(row._seq).catch(() => {})
+    if (Number(row.entity_id || 0) < 0) await dexieDb.sales.delete(row.entity_id).catch(() => {})
+  })
+  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
+  if (typeof window !== 'undefined') {
+    ;['sales', 'products', 'inventory', 'dashboard'].forEach((channel) => {
+      window.dispatchEvent(new CustomEvent('sync:update', {
+        detail: { channel, reason: 'offline-sale-synced', ts: Date.now() },
+      }))
+    })
+    window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
+      detail: {
+        channel: OFFLINE_SALE_QUEUE_CHANNEL,
+        receiptNumber: result?.receiptNumber || result?.receipt_number || row.entity_name || null,
+        client_request_id: row?.payload?.client_request_id || row.id || null,
+        duplicate: !!result?.duplicate,
+        ts: Date.now(),
+      },
+    }))
+  }
+}
+
+async function failQueuedSale(row, error, { retryable = false } = {}) {
+  const retryCount = Number(row.retry_count || 0) + 1
+  const now = Date.now()
+  await updateQueuedRow(row, {
+    status: 'failed',
+    retry_count: retryCount,
+    retry_at: retryable ? new Date(now + queuedSaleBackoffMs(retryCount)).toISOString() : null,
+    error: error?.message || String(error || 'Sync failed'),
+  })
+  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
+}
+
+async function syncPendingSalesQueue({ force = false } = {}) {
+  const now = Date.now()
+  const rows = await dexieDb.sync_queue
+    .where('channel')
+    .equals(OFFLINE_SALE_QUEUE_CHANNEL)
+    .toArray()
+    .catch(() => [])
+  const eligible = rows
+    .filter((row) => row && row.payload)
+    .filter((row) => {
+      if (force) return true
+      const retryAt = row.retry_at ? Date.parse(row.retry_at) : 0
+      return !Number.isFinite(retryAt) || retryAt <= now
+    })
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+
+  const result = { success: true, attempted: 0, synced: 0, failed: 0, pending: rows.length }
+  for (const row of eligible) {
+    result.attempted += 1
+    await updateQueuedRow(row, { status: 'syncing', error: null })
+    try {
+      const payload = ensureClientRequestId({ ...(row.payload || {}) }, 'sale')
+      const response = await apiFetch('POST', '/api/sales', payload, SYNC.REQUEST_TIMEOUT_MS, { skipWriteDedupe: true })
+      await completeQueuedSale(row, response)
+      result.synced += 1
+    } catch (error) {
+      const retryable = isRetryableOfflineSaleError(error)
+      await failQueuedSale(row, error, { retryable })
+      result.failed += 1
+      if (!retryable && !force) break
+    }
+  }
+  result.pending = Math.max(0, rows.length - result.synced)
+  return result
 }
 
 export const getRfidStatus = (params = {}) => {
@@ -1097,7 +1297,14 @@ export const applyRfidSession = (id, payload = {}) =>
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
-  return route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
+  try {
+    return await route('sales:create', () => apiFetch('POST', '/api/sales', payload), null, true)
+  } catch (error) {
+    if (isRetryableOfflineSaleError(error)) {
+      return queueOfflineSale(payload, error?.reason || 'server_offline')
+    }
+    throw error
+  }
 }
 
 export const getSales   = (params) => {
@@ -1417,7 +1624,7 @@ export function downloadImportTemplate(type) {
     'discount_enabled','discount_type','discount_percent','discount_amount_usd','discount_amount_khr',
     'discount_label','discount_badge_color','discount_starts_at','discount_ends_at',
     'purchase_price_usd','purchase_price_khr',
-    'stock_quantity','low_stock_threshold',
+    'stock_quantity','low_stock_threshold','expiry_date','expiry_alert_days',
     'branch','supplier',
     'parent_id','is_group',
     'image_filename_1','image_filename_2','image_filename_3','image_filename_4','image_filename_5',

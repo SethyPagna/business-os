@@ -8,9 +8,12 @@
  */
 export function fmtTime(raw) {
   if (!raw) return '—'
-  const iso = raw.includes('T') || raw.endsWith('Z') ? raw : raw.replace(' ', 'T') + 'Z'
+  const value = String(raw).trim()
+  const iso = value.includes('T') || value.endsWith('Z') ? value : value.replace(' ', 'T') + 'Z'
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: false,
     })
@@ -25,7 +28,9 @@ export function fmtTime(raw) {
 export function fmtDate(d) {
   if (!d) return '—'
   try {
-    return new Date(d.includes('T') ? d : d + 'Z').toLocaleDateString(undefined, {
+    const date = new Date(d.includes('T') ? d : d + 'Z')
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleDateString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
     })
   } catch { return d }

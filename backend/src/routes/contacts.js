@@ -45,6 +45,12 @@ function ensureMembershipNumber(value, excludeId = null) {
   return assertUniqueMembershipNumber(normalized, excludeId)
 }
 
+function ensureOrGenerateMembershipNumber(value, row = {}, reserved = new Set(), excludeId = null) {
+  const normalized = cleanMembershipNumber(value)
+  if (normalized) return assertUniqueMembershipNumber(normalized, excludeId)
+  return generateCustomerMembershipNumber(row, reserved)
+}
+
 function generateCustomerMembershipNumber(row = {}, reserved = new Set()) {
   const source = cleanText(row?.name) || 'customer'
   const prefix = source
@@ -207,14 +213,22 @@ router.post('/customers', authToken, requirePermission('contacts'), (req, res) =
   const d = req.body || {}
   const actor = getAuditActor(req)
   if (!d.name?.trim()) return err(res, 'Name required')
-  if (!cleanMembershipNumber(d.membership_number)) return err(res, 'Membership number is required')
   try {
-    const membershipNumber = ensureMembershipNumber(d.membership_number)
+    const membershipNumber = ensureOrGenerateMembershipNumber(d.membership_number, d)
     const r = db.prepare('INSERT INTO customers (name, membership_number, phone, email, address, company, notes, updated_at) VALUES (?,?,?,?,?,?,?,\'now\')')
       .run(d.name.trim(), membershipNumber, d.phone || null, d.email || null, d.address || null, d.company || null, d.notes || null)
     audit(actor.userId, actor.userName, 'create', 'customer', r.lastInsertRowid, { name: d.name })
     broadcast('customers')
-    ok(res, { id: r.lastInsertRowid })
+    ok(res, {
+      id: r.lastInsertRowid,
+      name: d.name.trim(),
+      membership_number: membershipNumber,
+      phone: d.phone || null,
+      email: d.email || null,
+      address: d.address || null,
+      company: d.company || null,
+      notes: d.notes || null,
+    })
   } catch (e) { err(res, e.message) }
 })
 

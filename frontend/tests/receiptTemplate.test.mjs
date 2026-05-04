@@ -45,6 +45,25 @@ await runTest('receipt preview remains strict-CSP compatible and binds buttons o
   assert.match(source, /function attachPrintablePreviewActions/)
 })
 
+await runTest('print export normalizes receipt root width inside paper frame', () => {
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  assert.match(source, /function normalizeReceiptContentWidth/)
+  assert.match(source, /data-receipt-export-root="true"/)
+  assert.match(source, /node\.style\.maxWidth = '100%'/)
+  assert.match(source, /normalizeReceiptContentWidth\(cloneElementWithInlineStyles\(content\)\)/)
+})
+
+await runTest('receipt export supports PNG image download from the same rendered receipt', () => {
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.js', import.meta.url), 'utf8')
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.jsx', import.meta.url), 'utf8')
+  assert.match(utilSource, /export async function createReceiptImageBlob/)
+  assert.match(utilSource, /type:\s*'image\/png'/)
+  assert.match(utilSource, /export async function downloadReceiptImage/)
+  assert.match(utilSource, /\.png/)
+  assert.match(receiptSource, /downloadReceiptImage/)
+  assert.match(receiptSource, /download_image/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

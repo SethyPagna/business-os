@@ -5,7 +5,7 @@ const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require
 const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
-const { getLowStockProducts, getStockMetrics } = require('../businessMetrics')
+const { getExpiringProducts, getLowStockProducts, getOutOfStockProducts, getStockMetrics } = require('../businessMetrics')
 
 const router = express.Router()
 
@@ -216,6 +216,13 @@ function refreshProductStockQuantities(productIds) {
   }
 }
 
+function deductBranchStock(productId, branchId, quantity) {
+  db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)
+    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST(? AS numeric))
+  `).run(productId, branchId, quantity)
+}
+
 function fetchSaleItemsWithBranches(saleId) {
   return db.prepare(`
     SELECT si.*, b.name AS branch_name
@@ -350,10 +357,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
 
         if (shouldDeductStock) {
           if (item.branch_id) {
-            db.prepare(`
-              INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
-            `).run(productId, item.branch_id, item.quantity, item.quantity)
+            deductBranchStock(productId, item.branch_id, item.quantity)
           }
           touchedProductIds.add(productId)
 
@@ -470,10 +474,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
         const touchedProductIds = new Set()
         for (const item of items) {
           if (item.branch_id) {
-            db.prepare(`
-              INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
-            `).run(item.product_id, item.branch_id, item.quantity, item.quantity)
+            deductBranchStock(item.product_id, item.branch_id, item.quantity)
           }
           touchedProductIds.add(item.product_id)
 
@@ -897,6 +898,7 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
 router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
   const todayStr = new Date().toISOString().split('T')[0]
   const stockMetrics = getStockMetrics()
+  const expiringProducts = getExpiringProducts({ limit: 20, days: 30 })
 
   const todaySales = db.prepare(
     "SELECT COUNT(*) AS count, COALESCE(SUM(subtotal_usd),0) AS subtotal, COALESCE(SUM(subtotal_khr),0) AS subtotal_khr, COALESCE(SUM(discount_usd + COALESCE(membership_discount_usd,0)),0) AS discount_usd, COALESCE(SUM(discount_khr + COALESCE(membership_discount_khr,0)),0) AS discount_khr FROM sales WHERE date(created_at) = ? AND COALESCE(sale_status,'completed') NOT IN ('cancelled','awaiting_payment')"
@@ -991,7 +993,10 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     in_stock_count:       stockMetrics.in_stock,
     low_stock_count:      stockMetrics.low_stock,
     out_of_stock_count:   stockMetrics.out_of_stock,
-    low_stock:            getLowStockProducts({ limit: 20 }),
+    low_stock:            getLowStockProducts({ limit: 5000 }),
+    out_of_stock:         getOutOfStockProducts({ limit: 5000 }),
+    expiring_products:    expiringProducts,
+    expiring_count:       expiringProducts.length,
     recent_sales:         db.prepare('SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status FROM sales s ORDER BY s.created_at DESC LIMIT 10').all(),
   })
 })

@@ -1401,7 +1401,7 @@ function ImageField({
           <div
             className="portal-image-checker flex h-40 items-center justify-center rounded-2xl p-4"
           >
-            <img src={value} alt={label} className="max-h-full max-w-full object-contain" />
+            <img src={value} alt={label} className="max-h-full max-w-full object-contain" loading="lazy" decoding="async" />
           </div>
         </button>
       ) : null}
@@ -3981,6 +3981,8 @@ export default function CatalogPage({ publicView = false }) {
                         <img
                           src={editorDraft.customer_portal_logo_image}
                           alt={copy('logoImage', 'Logo image')}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full"
                           style={{
                             objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
@@ -4238,6 +4240,9 @@ export default function CatalogPage({ publicView = false }) {
                               <img
                                 src={versionedBusinessLogo}
                                 alt={displayConfig.businessName}
+                                loading="eager"
+                                decoding="async"
+                                fetchPriority="high"
                                 className="h-full w-full"
                                 style={{
                                   objectFit: displayConfig.logoFit === 'cover' ? 'cover' : 'contain',

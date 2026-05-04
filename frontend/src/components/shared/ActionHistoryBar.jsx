@@ -32,24 +32,27 @@ export default function ActionHistoryBar({
   const redoItems = formatHistoryList(history.redoItems)
   const recordedItems = Array.isArray(history.serverItems) ? history.serverItems.slice(0, 3) : []
   const wrapperAlign = align === 'right' ? 'justify-end' : 'justify-start'
+  const menuPosition = align === 'right'
+    ? 'right-0'
+    : 'left-0'
   const hasItems = !!((history.undoItems || []).length || (history.redoItems || []).length || recordedItems.length)
 
   return (
-    <div className={`relative flex flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
-      <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
+    <div className={`relative flex w-full min-w-0 flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
+      <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white/95 px-2 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300 sm:gap-2 sm:px-2.5">
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="inline-flex min-w-0 items-center gap-1 rounded-lg px-1.5 py-1 font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
           onClick={() => setOpen((current) => !current)}
           title={T('history', 'History')}
           aria-expanded={open}
         >
           <History className="h-3.5 w-3.5 text-slate-400" />
-          <span>{T('history', 'History')}</span>
+          <span className="hidden sm:inline">{T('history', 'History')}</span>
         </button>
         {history.isAdmin && Array.isArray(history.userOptions) && history.userOptions.length ? (
           <select
-            className="max-w-32 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            className="max-w-[7.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 sm:max-w-32"
             value={history.userFilter || 'all'}
             onChange={(event) => history.setUserFilter?.(event.target.value)}
             title={T('filter_by_user', 'Filter by user')}
@@ -74,7 +77,7 @@ export default function ActionHistoryBar({
           title={history.lastUndoLabel ? `${T('undo', 'Undo')} ${history.lastUndoLabel}` : T('undo', 'Undo')}
         >
           <CornerDownLeft className="h-3.5 w-3.5" />
-          <span>{T('undo', 'Undo')}</span>
+          <span className="hidden sm:inline">{T('undo', 'Undo')}</span>
         </button>
         <button
           type="button"
@@ -84,12 +87,12 @@ export default function ActionHistoryBar({
           title={history.lastRedoLabel ? `${T('redo', 'Redo')} ${history.lastRedoLabel}` : T('redo', 'Redo')}
         >
           <CornerDownRight className="h-3.5 w-3.5" />
-          <span>{T('redo', 'Redo')}</span>
+          <span className="hidden sm:inline">{T('redo', 'Redo')}</span>
         </button>
       </div>
 
       {open ? (
-        <div className="absolute top-full z-40 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        <div className={`absolute ${menuPosition} top-full z-40 mt-2 w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900`}>
           {!hasItems ? (
             <div className="px-3 py-2 text-slate-500 dark:text-slate-400">{T('no_recent_actions', 'No recent actions')}</div>
           ) : null}

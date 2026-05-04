@@ -307,15 +307,26 @@ function startJobWatcher(jobId, {
   let stopped = false
   let inFlight = false
   let timer = null
+  const basePollMs = Math.max(1000, Number(pollMs || 1200))
 
   const stop = () => {
     stopped = true
-    if (timer) window.clearInterval(timer)
+    if (timer) window.clearTimeout(timer)
     timer = null
   }
 
+  const scheduleTick = (delayMs = basePollMs) => {
+    if (stopped) return
+    if (timer) window.clearTimeout(timer)
+    timer = window.setTimeout(tick, Math.max(250, Number(delayMs || basePollMs)))
+  }
+
   const tick = async () => {
-    if (stopped || inFlight) return
+    if (stopped) return
+    if (inFlight) {
+      scheduleTick(basePollMs)
+      return
+    }
     inFlight = true
     try {
       const result = await window.api.getSystemJob?.(jobId)
@@ -336,11 +347,14 @@ function startJobWatcher(jobId, {
       if (typeof onError === 'function') onError(error)
     } finally {
       inFlight = false
+      if (!stopped) {
+        const hiddenDelay = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? basePollMs * 3 : basePollMs
+        scheduleTick(hiddenDelay)
+      }
     }
   }
 
-  timer = window.setInterval(tick, Math.max(750, Number(pollMs || 1200)))
-  window.setTimeout(tick, 0)
+  scheduleTick(0)
   return stop
 }
 
@@ -363,6 +377,8 @@ const DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES = 60
 const DRIVE_SYNC_MIN_INTERVAL_MINUTES = 60
 const DRIVE_SYNC_MAX_INTERVAL_MINUTES = 24 * 60
 const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
+const DRIVE_SYNC_STATUS_TIMEOUT_MS = 5000
+const DRIVE_SYNC_JOB_POLL_MS = 2000
 
 function secondsToSyncMinutes(seconds) {
   const raw = Number(seconds)
@@ -403,6 +419,16 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const loadRef = useRef(null)
   const isMountedRef = useRef(true)
   const jobStopRef = useRef(null)
+  const dirtyFieldsRef = useRef(new Set())
+
+  const updateDraftField = useCallback((field, value) => {
+    dirtyFieldsRef.current.add(field)
+    setForm((current) => ({ ...current, [field]: value }))
+  }, [])
+
+  const applyDriveIntervalPreset = useCallback((hours) => {
+    updateDraftField('syncIntervalMinutes', hours * 60)
+  }, [updateDraftField])
 
   const scheduleRetry = useCallback((delayMs) => {
     window.clearTimeout(retryTimerRef.current)
@@ -420,7 +446,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     const requestId = beginTrackedRequest(loadRequestRef)
     inFlightRef.current = true
     try {
-      const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status')
+      const result = await withLoaderTimeout(() => window.api.getGoogleDriveSyncStatus?.(), 'Drive sync status', DRIVE_SYNC_STATUS_TIMEOUT_MS)
       const item = result?.item || null
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       if (result?.unavailable) {
@@ -434,13 +460,18 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         window.clearTimeout(retryTimerRef.current)
       }
       setStatus((current) => item || current || null)
-      setForm((current) => ({
-        clientId: current.clientId || item?.clientId || '',
-        folderName: item?.folderName || current.folderName || 'Business OS Sync',
-        deleteMissing: !!item?.deleteMissing,
-        enabled: item?.enabled !== false,
-        syncIntervalMinutes: secondsToSyncMinutes(item?.syncIntervalSeconds || minutesToSyncSeconds(current.syncIntervalMinutes)),
-      }))
+      setForm((current) => {
+        const dirty = dirtyFieldsRef.current
+        return {
+          clientId: dirty.has('clientId') ? current.clientId : current.clientId || item?.clientId || '',
+          folderName: dirty.has('folderName') ? current.folderName : item?.folderName || current.folderName || 'Business OS Sync',
+          deleteMissing: dirty.has('deleteMissing') ? current.deleteMissing : !!item?.deleteMissing,
+          enabled: dirty.has('enabled') ? current.enabled : item?.enabled !== false,
+          syncIntervalMinutes: dirty.has('syncIntervalMinutes')
+            ? current.syncIntervalMinutes
+            : secondsToSyncMinutes(item?.syncIntervalSeconds || minutesToSyncSeconds(current.syncIntervalMinutes)),
+        }
+      })
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       failureCountRef.current += 1
@@ -507,7 +538,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: reason })
     jobStopRef.current = startJobWatcher(jobId, {
       reason,
-      pollMs: 1000,
+      pollMs: DRIVE_SYNC_JOB_POLL_MS,
       onUpdate: (job) => {
         if (isMountedRef.current && job) setActiveJob(job)
       },
@@ -538,6 +569,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
       })
       setStatus(result?.item || status)
+      dirtyFieldsRef.current.clear()
       actionHistory?.pushAction?.({
         scope: 'backup',
         entity: 'google_drive_sync',
@@ -584,6 +616,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         label: copy('drive_sync_connect_started', 'Google Drive connection started'),
       })
       setPendingAuthUrl(authUrl)
+      dirtyFieldsRef.current.clear()
       notify(copy('drive_sync_setup_ready', 'Google Drive setup is ready.'), 'info')
     } catch (error) {
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -699,7 +732,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             className="input"
             autoComplete="off"
             value={form.clientId}
-            onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
+            onChange={(event) => updateDraftField('clientId', event.target.value)}
             placeholder="xxxxxxxx.apps.googleusercontent.com"
           />
         </label>
@@ -722,7 +755,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             className="input"
             autoComplete="off"
             value={form.folderName}
-            onChange={(event) => setForm((current) => ({ ...current, folderName: event.target.value }))}
+            onChange={(event) => updateDraftField('folderName', event.target.value)}
             placeholder="Business OS Sync"
           />
         </label>
@@ -739,7 +772,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             autoComplete="off"
             aria-labelledby="drive-sync-interval-label"
             value={form.syncIntervalMinutes}
-            onChange={(event) => setForm((current) => ({ ...current, syncIntervalMinutes: event.target.value }))}
+            onChange={(event) => updateDraftField('syncIntervalMinutes', event.target.value)}
           />
           <div className="flex flex-wrap gap-1.5">
             {DRIVE_SYNC_PRESET_HOURS.map((hours) => (
@@ -751,7 +784,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
                     ? 'border-blue-500 bg-blue-600 text-white'
                     : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300'
                 }`}
-                onClick={() => setForm((current) => ({ ...current, syncIntervalMinutes: hours * 60 }))}
+                onClick={() => applyDriveIntervalPreset(hours)}
               >
                 {hours}h
               </button>
@@ -768,7 +801,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <input
             type="checkbox"
             checked={!!form.enabled}
-            onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
+            onChange={(event) => updateDraftField('enabled', event.target.checked)}
           />
           <span>{copy('drive_sync_enabled', 'Enable background sync')}</span>
         </label>
@@ -776,7 +809,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <input
             type="checkbox"
             checked={!!form.deleteMissing}
-            onChange={(event) => setForm((current) => ({ ...current, deleteMissing: event.target.checked }))}
+            onChange={(event) => updateDraftField('deleteMissing', event.target.checked)}
           />
           <span>{copy('drive_sync_delete_missing', 'Delete Drive files removed locally')}</span>
         </label>
@@ -945,7 +978,6 @@ export default function Backup() {
   const [backupSection, setBackupSection] = useState('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
-  const sectionStorageKey = 'business-os:backup:section'
   const showBackupSection = (sectionId) => backupSection === sectionId
 
   useEffect(() => {
@@ -972,7 +1004,7 @@ export default function Backup() {
         window.setTimeout(() => {
           jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup export',
-            pollMs: 1000,
+            pollMs: 2000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
@@ -1025,7 +1057,7 @@ export default function Backup() {
         window.setTimeout(() => {
           jobStopRef.current = startJobWatcher(jobId, {
             reason: 'backup restore',
-            pollMs: 1000,
+            pollMs: 2000,
             onUpdate: (job) => {
               if (aliveRef.current && job) setActiveJob(job)
             },
@@ -1073,7 +1105,6 @@ export default function Backup() {
           options={BACKUP_SECTION_OPTIONS}
           value={backupSection}
           onChange={setBackupSection}
-          storageKey={sectionStorageKey}
         />
         <LoadingWatchdog
           loading={!!loading}

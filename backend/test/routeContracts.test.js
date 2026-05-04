@@ -45,6 +45,14 @@ runTest('inventory router registers required paged product search route', () => 
   assert.ok(paths.includes('/rfid/sessions/:id/apply'), 'missing /api/inventory/rfid/sessions/:id/apply')
 })
 
+runTest('inventory movement history allows large import batches', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
+  assert.match(source, /req\.query\.limit \|\| '50000'/)
+  assert.match(source, /,\s*50000\)/)
+})
+
 runTest('portal router registers required public catalog search route', () => {
   const router = require('../src/routes/portal')
   const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/portal.js'), 'utf8')

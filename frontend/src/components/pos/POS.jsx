@@ -102,16 +102,6 @@ export default function POS() {
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], suppliers: [], initials: [] })
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
-  const [quickFilters, setQuickFilters] = useState(() => {
-    const defaults = { category: true, brand: true, branch: true, stock: true, supplier: false }
-    try {
-      const parsed = JSON.parse(sessionStorage.getItem('pos_quick_filters') || '{}')
-      return { ...defaults, ...(parsed || {}) }
-    } catch {
-      return defaults
-    }
-  })
-
   // Persist filter changes
   const setPersistedCat      = v => { sessionStorage.setItem('pos_cat',      v); setCategoryFilter(v) }
   const setPersistedBrand    = v => { sessionStorage.setItem('pos_brand',    v); setBrandFilter(v) }
@@ -120,14 +110,6 @@ export default function POS() {
   const setPersistedGroup    = v => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
   const setPersistedSupplier = v => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
   const setPersistedInitial  = v => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
-  const setQuickFilter = (key, enabled) => {
-    setQuickFilters((prev) => {
-      const next = { ...prev, [key]: !!enabled }
-      try { sessionStorage.setItem('pos_quick_filters', JSON.stringify(next)) } catch (_) {}
-      return next
-    })
-  }
-
   // ?�?� Multi-order state ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   // Restore orders from sessionStorage so navigating away and back preserves
   // all open orders, carts, customer info, and delivery details.
@@ -232,7 +214,7 @@ export default function POS() {
 
   // ?�?� Inline quick-add modals ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
   const [showAddCustomer,  setShowAddCustomer]  = useState(false)
-  const [newCustomerForm,  setNewCustomerForm]  = useState({ name: '', phone: '', address: '' })
+  const [newCustomerForm,  setNewCustomerForm]  = useState({ name: '', membership_number: '', phone: '', address: '' })
   const [savingCustomer,   setSavingCustomer]   = useState(false)
 
   const [showAddDelivery,  setShowAddDelivery]  = useState(false)
@@ -309,7 +291,7 @@ export default function POS() {
         groupState: groupFilter === 'all' ? '' : groupFilter,
         initial: initialFilter === 'all' ? '' : initialFilter,
         sort: 'name_asc',
-        include: 'branch_stock,images',
+        include: 'branch_stock,images,family',
       }
       const [productPayload, cats, brs] = await withLoaderTimeout(
         () => Promise.all([
@@ -575,10 +557,22 @@ export default function POS() {
     setSavingCustomer(true)
     try {
       const created = await window.api.createCustomer(newCustomerForm)
+      const createdCustomer = {
+        ...newCustomerForm,
+        ...created,
+        id: created?.id || null,
+        name: created?.name || newCustomerForm.name,
+        membership_number: created?.membership_number || newCustomerForm.membership_number || '',
+      }
       notify(t('customer_added'))
-      selectCustomer({ ...newCustomerForm, id: created?.id || null })
+      setCustomers(prev => {
+        if (!createdCustomer.id) return prev
+        const exists = prev.some(customer => String(customer.id) === String(createdCustomer.id))
+        return exists ? prev.map(customer => String(customer.id) === String(createdCustomer.id) ? { ...customer, ...createdCustomer } : customer) : [...prev, createdCustomer]
+      })
+      selectCustomer(createdCustomer)
       setShowAddCustomer(false)
-      setNewCustomerForm({ name: '', phone: '', address: '' })
+      setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
       await loadCustomers('POS refresh customers after create')
     } catch (e) {
       notify(e.message || 'Failed', 'error')
@@ -741,6 +735,7 @@ export default function POS() {
       const meta = product.__groupMeta || {}
       const isVariantGroup = meta.groupKind === 'variant' || Boolean(product.parent_id)
       const isParentGroup = Boolean(product.is_group || meta.hasExplicitGroup || meta.hasMultipleItems)
+      if (groupFilter === 'grouped') return isParentGroup || isVariantGroup
       if (groupFilter === 'variant') return isVariantGroup
       if (groupFilter === 'parent') return isParentGroup && !isVariantGroup
       return !isParentGroup && !isVariantGroup
@@ -1011,7 +1006,7 @@ export default function POS() {
   const closeAddCustomerModal = useCallback(() => {
     if (savingCustomerRef.current) return
     setShowAddCustomer(false)
-    setNewCustomerForm({ name: '', phone: '', address: '' })
+    setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
   }, [])
 
   const closeAddDeliveryModal = useCallback(() => {
@@ -1214,8 +1209,6 @@ export default function POS() {
                   stockFilter={stockFilter}         setStockFilter={setPersistedStock}
                   groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
                   supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
-                  quickFilters={quickFilters}
-                  setQuickFilter={setQuickFilter}
                 />
               </div>
             </div>
@@ -1273,6 +1266,7 @@ export default function POS() {
                 const choiceLabel = groupMeta?.groupKind === 'variant'
                   ? posCopy('variants', 'variants')
                   : posCopy('options', 'options')
+                const groupName = t('groups') || 'Groups'
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > (variant.out_of_stock_threshold || 0))
                 const inStock = groupProduct ? variantInStock : stock > (p.out_of_stock_threshold || 0)
@@ -1309,7 +1303,7 @@ export default function POS() {
                           className="inline-flex flex-shrink-0 items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
                           aria-label={`${variants.length} ${choiceLabel}`}
                         >
-                          {variants.length}
+                          {groupName}: {variants.length}
                         </span>
                       ) : null}
                     </div>
@@ -1344,7 +1338,11 @@ export default function POS() {
                   </div>
                 )
               })}
-              {visibleProductCards.length === 0 && <div className="col-span-full text-center py-12 text-gray-400">{t('no_data')}</div>}
+              {visibleProductCards.length === 0 && (
+                <div className="col-span-full text-center py-12 text-gray-400">
+                  {catalogRefreshing ? (t('refreshing') || 'Refreshing...') : t('no_data')}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1711,6 +1709,7 @@ export default function POS() {
       {showAddCustomer && (
         <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
           <div><label htmlFor="pos-quick-customer-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input id="pos-quick-customer-name" name="pos_quick_customer_name" className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
+          <div><label htmlFor="pos-quick-customer-membership" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span></label><input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={e => setNewCustomerForm(f => ({ ...f, membership_number: e.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" /></div>
           <div className="grid grid-cols-2 gap-2">
             <div><label htmlFor="pos-quick-customer-phone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('phone')}</label><input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} autoComplete="tel" /></div>
             <div><label htmlFor="pos-quick-customer-address" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('address')}</label><input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} autoComplete="street-address" /></div>

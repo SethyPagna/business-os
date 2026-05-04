@@ -41,8 +41,9 @@ const MIME_TO_EXT = {
 
 const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
 const MAX_IMAGE_ASSET_BYTES = 40 * 1024
-const IMAGE_TARGET_DIMENSIONS = [1200, 900, 720, 540, 420, 320, 240, 180]
-const IMAGE_TARGET_QUALITIES = [82, 66, 50, 38, 30]
+const IMAGE_TARGET_DIMENSIONS = [900, 720, 540, 420, 320, 240]
+const IMAGE_TARGET_QUALITIES = [78, 58, 42, 30]
+const MAX_SYNC_VIDEO_OPTIMIZATION_BYTES = 8 * 1024 * 1024
 let cachedFfmpegPath = undefined
 
 function getDb() {
@@ -209,7 +210,7 @@ async function encodeImageCandidate(buffer, { ext = '.jpg', dimension = 1200, qu
       compressionLevel: 9,
       palette: true,
       quality: Math.max(20, quality),
-      effort: 10,
+      effort: 6,
       colors: quality <= 42 ? 128 : 256,
     }).toBuffer()
   }
@@ -217,7 +218,7 @@ async function encodeImageCandidate(buffer, { ext = '.jpg', dimension = 1200, qu
     return pipeline.webp({
       quality,
       alphaQuality: Math.max(60, quality),
-      effort: 6,
+      effort: 4,
       smartSubsample: true,
     }).toBuffer()
   }
@@ -259,7 +260,7 @@ function buildVideoOptimizationArgs({ inputPath, outputPath } = {}) {
     '-map_metadata', '-1',
     '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'",
     '-c:v', 'libx264',
-    '-preset', 'slow',
+    '-preset', 'veryfast',
     '-crf', '24',
     '-pix_fmt', 'yuv420p',
     '-c:a', 'aac',
@@ -281,6 +282,13 @@ function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
   const ext = String(path.extname(String(fileName || filePath)).toLowerCase())
   if (getMediaType({ mimeType, fileName }) !== 'video') return { ...baseResult, optimization_status: 'not_applicable' }
   if (ext !== '.mp4') return { ...baseResult, optimization_status: 'not_applicable', optimization_note: 'Video format is stored without recompression' }
+  if (Number(originalSize || 0) > MAX_SYNC_VIDEO_OPTIMIZATION_BYTES) {
+    return {
+      ...baseResult,
+      optimization_status: 'deferred',
+      optimization_note: 'Stored immediately; large video optimization is skipped during upload to keep the page responsive',
+    }
+  }
   const ffmpeg = getFfmpegPath()
   if (!ffmpeg) return { ...baseResult, optimization_note: 'ffmpeg unavailable' }
 

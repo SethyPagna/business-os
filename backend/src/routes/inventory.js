@@ -1049,7 +1049,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
 router.get('/movements', authToken, requirePermission('inventory'), (req, res) => {
   const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
   const userId = req.query.userId ? String(req.query.userId).trim() : ''
-  const limit = Math.min(Math.max(parseInt(req.query.limit || '1000', 10) || 1000, 1), 1000)
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '50000', 10) || 50000, 1), 50000)
   const where = []
   const params = []
   if (branchId) {

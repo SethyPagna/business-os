@@ -1,4 +1,4 @@
-import { Boxes, Building2, Package, Tags, ToggleLeft, Truck, X } from 'lucide-react'
+import { Boxes, Building2, Package, Tags, Truck, X } from 'lucide-react'
 
 export default function POSFilterPanel({
   open,
@@ -20,8 +20,6 @@ export default function POSFilterPanel({
   setGroupFilter,
   supplierFilter,
   setSupplierFilter,
-  quickFilters,
-  setQuickFilter,
 }) {
   if (!open) return null
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
@@ -74,35 +72,6 @@ export default function POSFilterPanel({
       </div>
 
       <div>
-        <SectionLabel icon={ToggleLeft}>{T('quick_filters', 'Quick filters')}</SectionLabel>
-        <div className="flex flex-wrap gap-1">
-          {[
-            ['category', T('category', 'Category')],
-            ['brand', T('brand', 'Brand')],
-            ['branch', T('branch', 'Branch')],
-            ['stock', T('stock_status', 'Stock status')],
-            ['supplier', T('supplier', 'Supplier')],
-          ].map(([key, label]) => {
-            const enabled = !!quickFilters?.[key]
-            return (
-              <button
-                key={`quick-${key}`}
-                type="button"
-                onClick={() => setQuickFilter?.(key, !enabled)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                  enabled
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div>
         <SectionLabel icon={Boxes}>{T('stock_status', 'Stock Status')}</SectionLabel>
         <div className="flex flex-wrap gap-1">
           {[
@@ -127,6 +96,7 @@ export default function POSFilterPanel({
         <div className="flex flex-wrap gap-1">
           {[
             ['all', T('all', 'All')],
+            ['grouped', T('groups', 'Groups')],
             ['parent', T('parents', 'Parents')],
             ['variant', T('variants', 'Variants')],
             ['standalone', T('standalone', 'Standalone')],

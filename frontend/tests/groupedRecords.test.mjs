@@ -45,6 +45,37 @@ await runTest('buildTimeActionSections builds day sections with subgroup ids', (
   assert.deepEqual(sections[0].groups[1].ids, [1])
 })
 
+await runTest('buildTimeActionSections accepts database timestamps with spaces', () => {
+  const sections = buildTimeActionSections([
+    { id: 1, created_at: '2026-05-04 22:15:57', status: 'purchase' },
+  ], {
+    getDate: (row) => row.created_at,
+    getItemId: (row) => row.id,
+    getActionKey: (row) => row.status,
+    getActionLabel: (row) => row.status,
+    timeMode: 'year',
+  })
+
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].label, '2026')
+  assert.notEqual(sections[0].label, 'Unknown year')
+})
+
+await runTest('buildTimeActionSections keeps malformed movement dates in unknown bucket', () => {
+  const sections = buildTimeActionSections([
+    { id: 1, created_at: 'not-a-date', status: 'purchase' },
+  ], {
+    getDate: (row) => row.created_at,
+    getItemId: (row) => row.id,
+    getActionKey: (row) => row.status,
+    getActionLabel: (row) => row.status,
+    timeMode: 'year',
+  })
+
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].label, 'Unknown year')
+})
+
 await runTest('buildAlphabetActionSections supports Latin and Khmer contact initials', () => {
   const rows = [
     { id: 1, name: 'Sokha' },

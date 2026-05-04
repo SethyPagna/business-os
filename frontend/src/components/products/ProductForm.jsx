@@ -67,6 +67,7 @@ export default function ProductForm({
   khrSymbol,
   exchangeRate,
   user,
+  initialTab = 'basic',
 }) {
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id?.toString()
     || branches[0]?.id?.toString()
@@ -104,6 +105,8 @@ export default function ProductForm({
       stock_quantity: 0,
       low_stock_threshold: 10,
       out_of_stock_threshold: 0,
+      expiry_date: '',
+      expiry_alert_days: 30,
       unit: units[0]?.name || 'pcs',
       supplier: '',
       image_path: '',
@@ -123,7 +126,7 @@ export default function ProductForm({
 
   const [form, setForm] = useState(initialForm)
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm))
-  const [activeTab, setActiveTab] = useState('basic')
+  const [activeTab, setActiveTab] = useState(initialTab || 'basic')
   const [supplierList, setSupplierList] = useState([])
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
@@ -159,12 +162,15 @@ export default function ProductForm({
       discount_badge_color: initialForm.discount_badge_color || '#e11d48',
       discount_starts_at: initialForm.discount_starts_at || '',
       discount_ends_at: initialForm.discount_ends_at || '',
+      expiry_date: initialForm.expiry_date || '',
+      expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
       cost_price_usd: editablePrice(initialForm.cost_price_usd),
       cost_price_khr: editablePrice(initialForm.cost_price_khr),
       parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
     })
     setImageList(normalizeGallery(initialForm))
-  }, [initialForm])
+    setActiveTab(initialTab || 'basic')
+  }, [initialForm, initialTab])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -293,6 +299,8 @@ export default function ProductForm({
       stock_quantity: parseNumericInput(form.stock_quantity),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
+      expiry_date: form.expiry_date || null,
+      expiry_alert_days: parseNumericInput(form.expiry_alert_days, 30),
       image_gallery: imageList.slice(0, 5),
       image_path: imageList[0] || '',
       is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
@@ -781,7 +789,7 @@ export default function ProductForm({
 
       {activeTab === 'stock' ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <div>
               <label htmlFor="product-stock-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
               <input
@@ -819,6 +827,34 @@ export default function ProductForm({
                 autoComplete="off"
                 value={form.out_of_stock_threshold ?? ''}
                 onChange={(event) => setNumericField('out_of_stock_threshold', event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="product-expiry-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('product_expiry_date', 'Expiry date', 'កាលបរិច្ឆេទផុតកំណត់')}
+              </label>
+              <input
+                id="product-expiry-date"
+                name="product_expiry_date"
+                className="input"
+                type="date"
+                value={form.expiry_date || ''}
+                onChange={(event) => setField('expiry_date', event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="product-expiry-alert-days" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('product_expiry_alert_days', 'Expiry alert days', 'ថ្ងៃជូនដំណឹងផុតកំណត់')}
+              </label>
+              <input
+                id="product-expiry-alert-days"
+                name="product_expiry_alert_days"
+                className="input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={form.expiry_alert_days ?? ''}
+                onChange={(event) => setNumericField('expiry_alert_days', event.target.value)}
               />
             </div>
           </div>

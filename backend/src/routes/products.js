@@ -203,6 +203,8 @@ const IMPORT_DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
+  'expiry_date',
+  'expiry_alert_days',
 ]
 const IMPORT_MONEY_FIELDS = new Set([
   'selling_price_usd',
@@ -216,7 +218,7 @@ const IMPORT_MONEY_FIELDS = new Set([
   'cost_price_usd',
   'cost_price_khr',
 ])
-const IMPORT_NUMERIC_FIELDS = new Set(['discount_percent', 'low_stock_threshold'])
+const IMPORT_NUMERIC_FIELDS = new Set(['discount_percent', 'low_stock_threshold', 'expiry_alert_days'])
 
 function getProductImportDetailSignature(source = {}) {
   return IMPORT_DETAIL_FIELDS.map((field) => {
@@ -275,6 +277,17 @@ function discountValues(source = {}, fallback = {}) {
     discount.discount_starts_at || null,
     discount.discount_ends_at || null,
   ]
+}
+
+function normalizeExpiryFields(source = {}, fallback = {}) {
+  const rawDate = hasOwnField(source, 'expiry_date') ? source.expiry_date : fallback.expiry_date
+  const cleanDate = String(rawDate || '').trim()
+  const rawAlertDays = hasOwnField(source, 'expiry_alert_days') ? source.expiry_alert_days : fallback.expiry_alert_days
+  const alertDays = Number(rawAlertDays)
+  return {
+    expiry_date: /^\d{4}-\d{2}-\d{2}$/.test(cleanDate) ? cleanDate : null,
+    expiry_alert_days: Number.isFinite(alertDays) && alertDays >= 0 ? Math.min(3650, alertDays) : 30,
+  }
 }
 
 function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
@@ -428,6 +441,63 @@ function attachBranchStock(products = []) {
   }))
 }
 
+function expandProductFamilyRows(rows = []) {
+  const source = Array.isArray(rows) ? rows.filter(Boolean) : []
+  if (!source.length) return source
+
+  const ids = new Set()
+  const rootIds = new Set()
+  const names = new Set()
+  source.forEach((product) => {
+    const id = Number(product?.id || 0)
+    const parentId = Number(product?.parent_id || 0)
+    if (id > 0) ids.add(id)
+    if (parentId > 0) rootIds.add(parentId)
+    else if (Number(product?.is_group || 0) && id > 0) rootIds.add(id)
+    const name = String(product?.name || '').trim().toLowerCase()
+    if (name) names.add(name)
+  })
+
+  const conditions = []
+  const params = {}
+  const bindList = (prefix, values) => {
+    return [...values].slice(0, 100).map((value, index) => {
+      const key = `${prefix}${index}`
+      params[key] = value
+      return `@${key}`
+    })
+  }
+
+  const idKeys = bindList('familyId', ids)
+  if (idKeys.length) conditions.push(`p.id IN (${idKeys.join(',')})`)
+
+  const rootKeys = bindList('familyRoot', rootIds)
+  if (rootKeys.length) conditions.push(`(p.id IN (${rootKeys.join(',')}) OR p.parent_id IN (${rootKeys.join(',')}))`)
+
+  const nameKeys = bindList('familyName', names)
+  if (nameKeys.length) conditions.push(`lower(trim(COALESCE(p.name, ''))) IN (${nameKeys.join(',')})`)
+
+  if (!conditions.length) return source
+  const expanded = db.prepare(`
+    SELECT p.*
+    FROM products p
+    WHERE p.is_active = 1
+      AND (${conditions.join(' OR ')})
+    ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+  `).all(params).map((product) => ({
+    ...product,
+    custom_fields: tryParse(product.custom_fields, {}),
+  }))
+
+  const seen = new Set()
+  return expanded.filter((product) => {
+    const id = Number(product?.id || 0)
+    if (!id || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
 // GET /api/products/search - paged catalog read for large datasets
 router.get('/search', authToken, (req, res) => {
   try {
@@ -464,7 +534,7 @@ router.get('/search', authToken, (req, res) => {
       ...product,
       custom_fields: tryParse(product.custom_fields, {}),
     }))
-    let items = rows
+    let items = include.has('family') ? expandProductFamilyRows(rows) : rows
     if (include.has('branch_stock')) items = attachBranchStock(items)
     if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
     const filters = getProductSearchMetadata(req.query)
@@ -554,14 +624,15 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
     const primaryImage = imageGallery[0] || null
     markParentProductAsGroup(d.parent_id)
     const productDiscountValues = discountValues(d, {})
+    const expiry = normalizeExpiryFields(d, parent)
     const r = db.prepare(`
       INSERT INTO products
         (name, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
          ${discountInsertColumns()},
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
-         stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active,
+         stock_quantity, low_stock_threshold, out_of_stock_threshold, expiry_date, expiry_alert_days, image_path, is_active,
          supplier, custom_fields, is_group, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), d.sku || null, d.barcode || null,
       d.category || parent.category || null,
@@ -575,6 +646,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
       openingStock, d.low_stock_threshold ?? parent.low_stock_threshold ?? 10,
       d.out_of_stock_threshold ?? 0,
+      expiry.expiry_date, expiry.expiry_alert_days,
       primaryImage, d.is_active ?? 1,
       d.supplier || null, JSON.stringify(d.custom_fields || {}), 0, d.parent_id,
     )
@@ -617,14 +689,15 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     if (!openingBranchId) return err(res, 'A branch is required for new products')
     assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
     const productDiscountValues = discountValues(d, {})
+    const expiry = normalizeExpiryFields(d, {})
 
     const r = db.prepare(`
       INSERT INTO products
         (name, client_request_id, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr,
          ${discountInsertColumns()},
          purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
-         stock_quantity, low_stock_threshold, out_of_stock_threshold, image_path, is_active, supplier, custom_fields, is_group, parent_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         stock_quantity, low_stock_threshold, out_of_stock_threshold, expiry_date, expiry_alert_days, image_path, is_active, supplier, custom_fields, is_group, parent_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       d.name.trim(), clientRequestId, d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
       normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
@@ -634,6 +707,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
       normalizePriceValue(d.cost_price_usd || d.purchase_price_usd || 0),
       normalizePriceValue(d.cost_price_khr || d.purchase_price_khr || 0),
       openingStock, d.low_stock_threshold ?? 10, d.out_of_stock_threshold ?? 0,
+      expiry.expiry_date, expiry.expiry_alert_days,
       primaryImage, d.is_active ?? 1,
       d.supplier || null,
       JSON.stringify(d.custom_fields || {}),
@@ -698,6 +772,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         stock_quantity: pickField(d, 'stock_quantity', prev.stock_quantity),
         low_stock_threshold: pickField(d, 'low_stock_threshold', prev.low_stock_threshold),
         out_of_stock_threshold: pickField(d, 'out_of_stock_threshold', prev.out_of_stock_threshold),
+        ...normalizeExpiryFields(d, prev),
         image_path: pickField(d, 'image_path', prev.image_path),
         is_active: pickField(d, 'is_active', prev.is_active),
         supplier: pickField(d, 'supplier', prev.supplier),
@@ -731,6 +806,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
           purchase_price_usd=?, purchase_price_khr=?,
           cost_price_usd=?, cost_price_khr=?,
           stock_quantity=?, low_stock_threshold=?, out_of_stock_threshold=?,
+          expiry_date=?, expiry_alert_days=?,
           image_path=?, is_active=?, supplier=?, custom_fields=?, is_group=?, parent_id=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(
@@ -761,6 +837,8 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         desiredQty,
         merged.low_stock_threshold ?? 10,
         merged.out_of_stock_threshold ?? 0,
+        merged.expiry_date || null,
+        merged.expiry_alert_days ?? 30,
         primaryImage, merged.is_active ?? 1,
         merged.supplier || null,
         JSON.stringify(merged.custom_fields || {}),
@@ -1220,6 +1298,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
         const buyUsd  = normalizePriceValue(parseImportNumber(p, 'purchase_price_usd', 0))
         const buyKhr  = normalizePriceValue(parseImportNumber(p, 'purchase_price_khr', 0))
         const thresh  = parseImportNumber(p, 'low_stock_threshold', 10)
+        const importExpiry = normalizeExpiryFields({
+          expiry_date: p.expiry_date,
+          expiry_alert_days: hasImportValue(p, 'expiry_alert_days') ? parseImportNumber(p, 'expiry_alert_days', 30) : 30,
+        }, {})
         const explicitParentId = parseOptionalImportId(p, 'parent_id')
         const plannedParentId = parseOptionalImportId(p, '_parent_id')
         const plannedTargetId = parseOptionalImportId(p, '_target_product_id')
@@ -1262,6 +1344,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           cost_price_usd: buyUsd,
           cost_price_khr: buyKhr,
           low_stock_threshold: thresh,
+          expiry_date: importExpiry.expiry_date,
+          expiry_alert_days: importExpiry.expiry_alert_days,
         })
         const matchingSameNameProduct = sameNameProducts.find((product) => getProductImportDetailSignature(product) === importSignature) || null
         const selectedParent = chooseImportParentProduct(candidateParents)
@@ -1307,9 +1391,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               discount_label, discount_badge_color, discount_starts_at, discount_ends_at,
               purchase_price_usd, purchase_price_khr,
               cost_price_usd, cost_price_khr,
-              stock_quantity, low_stock_threshold,
+              stock_quantity, low_stock_threshold, expiry_date, expiry_alert_days,
               is_active, supplier, image_path, is_group, parent_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).run(
             p.name.trim(), p.sku || null, p.barcode || null, normalizedCategory, normalizedUnit,
             p.description || null, normalizedBrand, sellUsd, sellKhr, specialUsd, specialKhr,
@@ -1318,6 +1402,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             importDiscount.discount_label || null, importDiscount.discount_badge_color,
             importDiscount.discount_starts_at || null, importDiscount.discount_ends_at || null,
             buyUsd, buyKhr, buyUsd, buyKhr, qty, thresh,
+            importExpiry.expiry_date, importExpiry.expiry_alert_days,
             (p.is_active !== undefined ? p.is_active : 1), normalizedSupplier, newPrimaryImage, normalizedParentId ? 0 : isGroup, normalizedParentId
           )
           const pid = r.lastInsertRowid
@@ -1372,6 +1457,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
           const resolvedBuyUsd = resolveImportValue(ep.purchase_price_usd, buyUsd, hasImportValue(p, 'purchase_price_usd'), fieldRules.purchase_price_usd, defaultFieldRule)
           const resolvedBuyKhr = resolveImportValue(ep.purchase_price_khr, buyKhr, hasImportValue(p, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultFieldRule)
           const resolvedThreshold = resolveImportValue(ep.low_stock_threshold, thresh, hasImportValue(p, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultFieldRule)
+          const resolvedExpiry = normalizeExpiryFields({
+            expiry_date: resolveImportValue(ep.expiry_date, importExpiry.expiry_date, hasImportValue(p, 'expiry_date'), fieldRules.expiry_date, defaultFieldRule),
+            expiry_alert_days: resolveImportValue(ep.expiry_alert_days, importExpiry.expiry_alert_days, hasImportValue(p, 'expiry_alert_days'), fieldRules.expiry_alert_days, defaultFieldRule),
+          }, ep)
           const resolvedIsGroup = resolveImportValue(ep.is_group, isGroup, hasImportValue(p, 'is_group'), fieldRules.is_group, defaultFieldRule)
           const resolvedParentId = resolveImportValue(ep.parent_id, parentId || null, hasImportValue(p, 'parent_id') || !!parentId, fieldRules.parent_id, defaultFieldRule)
           const resolvedParentCandidate = Number(resolvedParentId || 0) === Number(pid)
@@ -1413,6 +1502,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               || resolvedBuyUsd !== ep.purchase_price_usd
               || resolvedBuyKhr !== ep.purchase_price_khr
               || resolvedThreshold !== ep.low_stock_threshold
+              || (resolvedExpiry.expiry_date || '') !== (ep.expiry_date || '')
+              || Number(resolvedExpiry.expiry_alert_days || 30) !== Number(ep.expiry_alert_days || 30)
               || normalizedIsGroup !== ep.is_group
               || normalizedParentId !== ep.parent_id
             )
@@ -1426,7 +1517,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                   discount_label=?, discount_badge_color=?, discount_starts_at=?, discount_ends_at=?,
                   purchase_price_usd=?, purchase_price_khr=?,
                   cost_price_usd=?, cost_price_khr=?,
-                  low_stock_threshold=?, is_group=?, parent_id=?,
+                  low_stock_threshold=?, expiry_date=?, expiry_alert_days=?, is_group=?, parent_id=?,
                   updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
               `).run(
@@ -1453,6 +1544,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 normalizePriceValue(resolvedBuyUsd || 0),
                 normalizePriceValue(resolvedBuyKhr || 0),
                 resolvedThreshold || 0,
+                resolvedExpiry.expiry_date,
+                resolvedExpiry.expiry_alert_days,
                 normalizedIsGroup ? 1 : 0,
                 normalizedParentId,
                 pid,
@@ -1479,7 +1572,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 discount_label=?, discount_badge_color=?, discount_starts_at=?, discount_ends_at=?,
                 purchase_price_usd=?, purchase_price_khr=?,
                 cost_price_usd=?, cost_price_khr=?,
-                low_stock_threshold=?, is_group=?, parent_id=?,
+                low_stock_threshold=?, expiry_date=?, expiry_alert_days=?, is_group=?, parent_id=?,
                 updated_at=CURRENT_TIMESTAMP WHERE id=?
             `).run(
               resolvedCategory,
@@ -1505,6 +1598,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               normalizePriceValue(resolvedBuyUsd || 0),
               normalizePriceValue(resolvedBuyKhr || 0),
               resolvedThreshold || 0,
+              resolvedExpiry.expiry_date,
+              resolvedExpiry.expiry_alert_days,
               normalizedIsGroup ? 1 : 0,
               normalizedParentId,
               pid,

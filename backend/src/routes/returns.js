@@ -7,6 +7,13 @@ const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWrit
 const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
+
+function deductBranchStock(productId, branchId, quantity) {
+  db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)
+    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST(? AS numeric))
+  `).run(productId, branchId, quantity)
+}
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 
@@ -513,10 +520,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       )
 
       if (itemBranchId) {
-        db.prepare(`
-          INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
-          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
-        `).run(item.product_id, itemBranchId, qty, qty)
+        deductBranchStock(item.product_id, itemBranchId, qty)
       }
       touchedProductIds.add(item.product_id)
 
@@ -613,10 +617,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
       if (item.return_to_stock && item.product_id) {
         // Undo: remove from stock what was previously added back
         if (item.branch_id) {
-          db.prepare(`
-            INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,MAX(0,-?))
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity - ?)
-          `).run(item.product_id, item.branch_id, item.quantity, item.quantity)
+          deductBranchStock(item.product_id, item.branch_id, item.quantity)
         }
         touchedProductIds.add(item.product_id)
         // Log reversal

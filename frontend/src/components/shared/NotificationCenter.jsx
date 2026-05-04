@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bell, ChevronDown, ExternalLink, Settings2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Bell, CheckCircle2, ChevronDown, ExternalLink, Info, Search, Settings2, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import {
   beginTrackedRequest,
@@ -15,17 +15,32 @@ const DEFAULT_COLLAPSED = {
   loyalty: true,
   portal: false,
   system: false,
+  expiry: false,
 }
 
 const NOTIFICATION_SEEN_KEY = 'business_os_notifications_seen_at'
 const NOTIFICATION_FILTER_OPTIONS = ['all', 'danger', 'warning', 'info', 'success']
-const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50]
+const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 const TONE_CLASS = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   info: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+}
+
+const TONE_ICON_RING_CLASS = {
+  danger: 'ring-red-200 dark:ring-red-800/70',
+  warning: 'ring-amber-200 dark:ring-amber-800/70',
+  success: 'ring-emerald-200 dark:ring-emerald-800/70',
+  info: 'ring-sky-200 dark:ring-sky-800/70',
+}
+
+const TONE_ICON_COMPONENT = {
+  danger: AlertCircle,
+  warning: AlertTriangle,
+  success: CheckCircle2,
+  info: Info,
 }
 
 const SECTION_LABEL_KEYS = {
@@ -35,6 +50,8 @@ const SECTION_LABEL_KEYS = {
   portal: ['customer_portal', 'Customer portal', 'ផតថលអតិថិជន'],
   system: ['system', 'System', 'ប្រព័ន្ធ'],
 }
+
+SECTION_LABEL_KEYS.expiry = ['notification_expiry_title', 'Product expiry', 'ផុតកំណត់ផលិតផល']
 
 const TONE_LABEL_KEYS = {
   danger: ['status_danger', 'Danger', 'បន្ទាន់'],
@@ -64,6 +81,11 @@ const SECTION_SUMMARY_COPY = {
     en: () => 'Google Drive sync needs attention',
     km: () => 'Google Drive sync ត្រូវការការយកចិត្តទុកដាក់',
   },
+}
+
+SECTION_SUMMARY_COPY.notification_expiry_summary = {
+  en: ({ expiredCount, expiringCount, days }) => [expiredCount ? `${expiredCount} expired` : null, expiringCount ? `${expiringCount} expiring within ${days} days` : null].filter(Boolean).join(' • '),
+  km: ({ expiredCount, expiringCount, days }) => [expiredCount ? `${expiredCount} ផុតកំណត់` : null, expiringCount ? `${expiringCount} នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ` : null].filter(Boolean).join(' • '),
 }
 
 const ITEM_META_COPY = {
@@ -101,6 +123,15 @@ const ITEM_META_COPY = {
   },
 }
 
+ITEM_META_COPY.notification_product_expired = {
+  en: ({ days, expiryDate }) => `Expired ${days} day${Number(days) === 1 ? '' : 's'} ago • ${expiryDate}`,
+  km: ({ days, expiryDate }) => `ផុតកំណត់ ${days} ថ្ងៃមុន • ${expiryDate}`,
+}
+ITEM_META_COPY.notification_product_expiring = {
+  en: ({ days, expiryDate }) => `Expires in ${days} day${Number(days) === 1 ? '' : 's'} • ${expiryDate}`,
+  km: ({ days, expiryDate }) => `នឹងផុតកំណត់ក្នុង ${days} ថ្ងៃ • ${expiryDate}`,
+}
+
 function preferenceValue(key, settings = {}, fallback = true) {
   const raw = settings?.[key]
   if (raw === undefined || raw === null || raw === '') return fallback
@@ -119,6 +150,21 @@ function getRealertMs(settings = {}, fallbackMinutes = 10) {
   const minutes = Number(settings?.notifications_realert_minutes || fallbackMinutes)
   const safeMinutes = Number.isFinite(minutes) ? Math.max(5, Math.min(1440, minutes)) : fallbackMinutes
   return safeMinutes * 60 * 1000
+}
+
+function NotificationSeverityIcon({ tone = 'info', label }) {
+  const safeTone = TONE_ICON_COMPONENT[tone] ? tone : 'info'
+  const ToneIcon = TONE_ICON_COMPONENT[safeTone]
+  return (
+    <span
+      data-notification-severity-icon={safeTone}
+      className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${TONE_CLASS[safeTone]} ${TONE_ICON_RING_CLASS[safeTone]}`}
+      title={label}
+      aria-label={label}
+    >
+      <ToneIcon className="h-3.5 w-3.5 stroke-[2.4]" aria-hidden="true" />
+    </span>
+  )
 }
 
 export default function NotificationCenter({ compact = false, visibility = 'always' }) {
@@ -143,7 +189,9 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
   const [collapsed, setCollapsed] = useState(DEFAULT_COLLAPSED)
   const [savingKey, setSavingKey] = useState('')
   const [toneFilter, setToneFilter] = useState('all')
+  const [notificationSearch, setNotificationSearch] = useState('')
   const [itemLimit, setItemLimit] = useState(20)
+  const [sectionPages, setSectionPages] = useState({})
   const [seenAt, setSeenAt] = useState(() => {
     try { return Number(window.localStorage.getItem(NOTIFICATION_SEEN_KEY) || 0) || 0 } catch (_) { return 0 }
   })
@@ -179,11 +227,24 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
       const result = await withLoaderTimeout(() => window.api.getNotificationSummary(), 'Notifications', 8000)
       if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
       failureCountRef.current = 0
-      setSummary({
-        unreadCount: Number(result?.unreadCount || 0),
-        sections: Array.isArray(result?.sections) ? result.sections : [],
-        preferences: result?.preferences || {},
-        unavailable: !!result?.unavailable,
+      const nextSections = Array.isArray(result?.sections) ? result.sections : []
+      setSummary((current) => {
+        if (result?.unavailable && !nextSections.length && (current?.sections || []).length) {
+          return {
+            ...current,
+            unreadCount: Number(current?.unreadCount || 0),
+            preferences: result?.preferences || current?.preferences || {},
+            unavailable: true,
+            cooldownUntil: result?.cooldownUntil,
+          }
+        }
+        return {
+          unreadCount: Number(result?.unreadCount || 0),
+          sections: nextSections,
+          preferences: result?.preferences || {},
+          unavailable: !!result?.unavailable,
+          cooldownUntil: result?.cooldownUntil,
+        }
       })
       const unavailableDelay = Math.max(
         5 * 60 * 1000,
@@ -256,31 +317,63 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     return typeof renderer === 'function' ? renderer(params || {}) : (fallback || '')
   }, [isKhmer])
 
+  const normalizedNotificationSearch = notificationSearch.trim().toLowerCase()
+
   const effectiveSections = useMemo(() => (
     (summary.sections || []).map((section) => {
-      const filteredItems = Array.isArray(section.items)
-        ? section.items.filter((item) => toneFilter === 'all' || item.tone === toneFilter)
-        : []
-      return {
-      ...section,
-      displayLabel: SECTION_LABEL_KEYS[section.id]
+      const displayLabel = SECTION_LABEL_KEYS[section.id]
         ? tr(...SECTION_LABEL_KEYS[section.id])
-        : section.label,
-      displaySummary: section.summaryKey
+        : section.label
+      const displaySummary = section.summaryKey
         ? renderStructuredCopy(section.summaryKey, section.summaryParams, section.summary)
-        : section.summary,
-      items: filteredItems.map((item) => ({
+        : section.summary
+      const decoratedItems = Array.isArray(section.items)
+        ? section.items.map((item) => ({
           ...item,
           displayMeta: item.metaKey
             ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta)
             : item.meta,
-        })).slice(0, itemLimit),
-      hiddenItemCount: Math.max(0, filteredItems.length - itemLimit),
+        }))
+        : []
+      const filteredItems = decoratedItems.filter((item) => {
+        if (toneFilter !== 'all' && item.tone !== toneFilter) return false
+        if (!normalizedNotificationSearch) return true
+        const haystack = [
+          displayLabel,
+          displaySummary,
+          section.id,
+          section.label,
+          section.summary,
+          item.label,
+          item.displayMeta,
+          item.meta,
+          item.kind,
+          item.tone,
+          item.pageId,
+          ...Object.values(item.metaParams || {}),
+        ].filter((value) => value !== undefined && value !== null).join(' ').toLowerCase()
+        return haystack.includes(normalizedNotificationSearch)
+      })
+      const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemLimit))
+      const page = Math.max(1, Math.min(totalPages, Number(sectionPages[section.id] || 1)))
+      const startIndex = (page - 1) * itemLimit
+      return {
+      ...section,
+      displayLabel,
+      displaySummary,
+      items: filteredItems.slice(startIndex, startIndex + itemLimit),
+      hiddenItemCount: Math.max(0, filteredItems.length - (startIndex + itemLimit)),
       filteredItemCount: filteredItems.length,
+      page,
+      totalPages,
       enabled: preferenceValue(section.enabledKey, settings, true),
       }
-    }).filter((section) => section.filteredItemCount > 0 || toneFilter === 'all')
-  ), [itemLimit, renderStructuredCopy, settings, summary.sections, toneFilter, tr])
+    }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
+  ), [itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
+
+  useEffect(() => {
+    setSectionPages({})
+  }, [itemLimit, normalizedNotificationSearch, toneFilter])
 
   const toggleSectionPreference = useCallback(async (section) => {
     if (!section?.enabledKey || savingKey) return
@@ -356,17 +449,45 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
 
           <div className="max-h-[70vh] overflow-y-auto px-2 py-2 sm:px-3 sm:py-3">
             <div className="mb-3 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60 sm:grid-cols-[1fr_auto]">
-              <div className="flex flex-wrap gap-1.5">
-                {NOTIFICATION_FILTER_OPTIONS.map((tone) => (
+              <label className="relative sm:col-span-2">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <input
+                  type="search"
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-8 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-950/40"
+                  value={notificationSearch}
+                  onChange={(event) => setNotificationSearch(event.target.value)}
+                  placeholder={tr('search_notifications', 'Search notifications', 'Search notifications')}
+                  aria-label={tr('search_notifications', 'Search notifications', 'Search notifications')}
+                />
+                {notificationSearch ? (
                   <button
-                    key={tone}
                     type="button"
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${toneFilter === tone ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                    onClick={() => setToneFilter(tone)}
+                    className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                    onClick={() => setNotificationSearch('')}
+                    aria-label={tr('clear_search', 'Clear search', 'Clear search')}
+                    title={tr('clear_search', 'Clear search', 'Clear search')}
                   >
-                    {tone === 'all' ? tr('all', 'All', 'ទាំងអស់') : (TONE_LABEL_KEYS[tone] ? tr(...TONE_LABEL_KEYS[tone]) : tone)}
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
-                ))}
+                ) : null}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {NOTIFICATION_FILTER_OPTIONS.map((tone) => {
+                  const label = tone === 'all' ? tr('all', 'All', 'ទាំងអស់') : (TONE_LABEL_KEYS[tone] ? tr(...TONE_LABEL_KEYS[tone]) : tone)
+                  const ToneIcon = TONE_ICON_COMPONENT[tone] || Info
+                  return (
+                    <button
+                      key={tone}
+                      type="button"
+                      className={`inline-flex min-h-7 items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${toneFilter === tone ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700'}`}
+                      onClick={() => setToneFilter(tone)}
+                      title={label}
+                      aria-label={label}
+                    >
+                      {tone === 'all' ? label : <ToneIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </button>
+                  )
+                })}
               </div>
               <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-300">
                 {tr('per_page', 'Per page', 'ក្នុងមួយទំព័រ')}
@@ -434,9 +555,12 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
                               }}
                               className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
                             >
-                              <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${TONE_CLASS[item.tone] || TONE_CLASS.info}`}>
-                                {TONE_LABEL_KEYS[item.tone] ? tr(...TONE_LABEL_KEYS[item.tone]) : (item.tone || 'info')}
-                              </span>
+                              {(() => {
+                                const label = TONE_LABEL_KEYS[item.tone] ? tr(...TONE_LABEL_KEYS[item.tone]) : (item.tone || 'info')
+                                return (
+                                  <NotificationSeverityIcon tone={item.tone} label={label} />
+                                )
+                              })()}
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.label}</span>
                                 <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
@@ -445,14 +569,26 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
                             </button>
                           ))}
                         </div>
-                        {section.hiddenItemCount > 0 ? (
-                          <button
-                            type="button"
-                            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                            onClick={() => setItemLimit((value) => Math.min(50, value + 20))}
-                          >
-                            {formatCopy('show_more_records', { count: section.hiddenItemCount }, `Show ${section.hiddenItemCount} more`, `បង្ហាញបន្ថែម ${section.hiddenItemCount}`)}
-                          </button>
+                        {section.totalPages > 1 ? (
+                          <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
+                            <button
+                              type="button"
+                              className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+                              disabled={section.page <= 1}
+                              onClick={() => setSectionPages((current) => ({ ...current, [section.id]: Math.max(1, section.page - 1) }))}
+                            >
+                              {tr('previous', 'Previous', 'មុន')}
+                            </button>
+                            <span>{section.page} / {section.totalPages}</span>
+                            <button
+                              type="button"
+                              className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+                              disabled={section.page >= section.totalPages}
+                              onClick={() => setSectionPages((current) => ({ ...current, [section.id]: Math.min(section.totalPages, section.page + 1) }))}
+                            >
+                              {tr('next', 'Next', 'បន្ទាប់')}
+                            </button>
+                          </div>
                         ) : null}
                       </div>
                     ) : null}

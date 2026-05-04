@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { isPublicCatalogPath, updateMountedPages } from '../src/app/appShellUtils.mjs'
 
 let failed = 0
@@ -33,6 +34,11 @@ runTest('updateMountedPages keeps order and max size while de-duplicating', () =
 
   const overflow = updateMountedPages(withExisting, 'users', 3)
   assert.deepEqual(overflow, ['products', 'sales', 'users'])
+})
+
+runTest('app shell does not render floating page info help', () => {
+  const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /PageHelpButton/)
 })
 
 if (failed > 0) {

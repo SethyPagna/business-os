@@ -7,9 +7,13 @@ export default function ProductDetailModal({
   p,
   catMap,
   unitMap,
+  brandColorMap,
   fmtUSD,
   fmtKHR,
   onEdit,
+  onAddVariant,
+  onDiscount,
+  onAdjustStock,
   onDelete,
   onClose,
   onImageClick,
@@ -29,6 +33,9 @@ export default function ProductDetailModal({
   const primaryImage = gallery[0] || ''
   const unitColor = unitMap?.[p.unit]?.color || ''
   const categoryColor = catMap?.[p.category]?.color || '#6b7280'
+  const brandColor = brandColorMap?.[String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()] || ''
+  const expiryDate = String(p.expiry_date || '').trim()
+  const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / 86400000) : null
 
   const Row = ({ label, children }) => (
     <div className="flex gap-3">
@@ -76,7 +83,15 @@ export default function ProductDetailModal({
             </Row>
           ) : null}
           {p.barcode ? <Row label={T('label_barcode', 'Barcode')}><span className="font-mono">{p.barcode}</span></Row> : null}
-          {p.brand ? <Row label={T('brand', 'Brand')}>{p.brand}</Row> : null}
+          {p.brand ? (
+            <Row label={T('brand', 'Brand')}>
+              {brandColor ? (
+                <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: brandColor, color: getContrastingTextColor(brandColor) }}>
+                  {p.brand}
+                </span>
+              ) : p.brand}
+            </Row>
+          ) : null}
           {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
           {p.unit ? (
             <Row label={T('label_unit', 'Unit')}>
@@ -99,6 +114,20 @@ export default function ProductDetailModal({
               )
             ) : null}
           </Row>
+          {expiryDate ? (
+            <Row label={T('product_expiry_date', 'Expiry')}>
+              <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
+                {expiryDate}
+                {expiryDaysLeft != null ? (
+                  <span className="ml-2 text-xs">
+                    {expiryDaysLeft < 0
+                      ? `${T('expired', 'Expired')} ${Math.abs(expiryDaysLeft)}d`
+                      : `${expiryDaysLeft}d`}
+                  </span>
+                ) : null}
+              </span>
+            </Row>
+          ) : null}
           {p.description ? <Row label={T('label_description', 'Description')}>{p.description}</Row> : null}
 
           <div className="space-y-2 border-t border-gray-100 pt-2 dark:border-gray-700">
@@ -173,9 +202,12 @@ export default function ProductDetailModal({
           ) : null}
         </div>
 
-        <div className="flex gap-3 border-t border-gray-200 p-4 dark:border-gray-700">
-          <button className="btn-primary flex-1" onClick={onEdit}>{T('edit', 'Edit')}</button>
-          <button className="btn-danger" onClick={onDelete}>{T('delete', 'Delete')}</button>
+        <div className="flex flex-wrap gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+          {onAddVariant ? <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAddVariant}>{T('add_variant', 'Add variant')}</button> : null}
+          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onDiscount}>{T('product_discount', 'Discount')}</button>
+          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAdjustStock}>{T('adjust_stock', 'Adjust stock')}</button>
+          <button className="btn-primary flex-1 px-3 py-2 text-xs" onClick={onEdit}>{T('edit', 'Edit')}</button>
+          <button className="btn-danger px-3 py-2 text-xs" onClick={onDelete}>{T('delete', 'Delete')}</button>
         </div>
       </div>
     </div>

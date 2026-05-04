@@ -62,6 +62,19 @@ runTest('translates max floor expression to Postgres greatest', () => {
   assert.equal(translated.sql, 'UPDATE branch_stock SET quantity = GREATEST(0, quantity - $1) WHERE id = $2 RETURNING 1 AS __changed')
 })
 
+runTest('keeps explicit Postgres stock deduction casts stable', () => {
+  const translated = translateSql(
+    'INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0) ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST(? AS numeric))',
+    [1, 2, 3],
+    { mode: 'run' },
+  )
+  assert.equal(
+    translated.sql,
+    'INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES ($1,$2,0) ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST($3 AS numeric)) RETURNING 1 AS __changed',
+  )
+  assert.doesNotMatch(translated.sql, /GREATEST\(0,\s*-\$/)
+})
+
 runTest('coerces numeric database fields without damaging text identifiers', () => {
   const row = coerceRow({
     id: '42',

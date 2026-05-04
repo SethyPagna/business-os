@@ -1,5 +1,7 @@
 function minuteBucket(value) {
-  const date = new Date(value || Date.now())
+  const raw = String(value || '').trim()
+  const normalized = raw ? (raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`) : ''
+  const date = new Date(normalized || Date.now())
   if (Number.isNaN(date.getTime())) return 'unknown'
   date.setSeconds(0, 0)
   return date.toISOString()
@@ -35,6 +37,25 @@ function describeMovementType(type) {
   return key.replace(/_/g, ' ')
 }
 
+function movementSign(type) {
+  const key = String(type || '').toLowerCase()
+  if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'write_off'].includes(key)) return -1
+  return 1
+}
+
+function movementSignedValue(movement, field) {
+  const value = Number(movement?.[field] || 0)
+  if (!Number.isFinite(value)) return 0
+  return Math.abs(value) * movementSign(movement?.movement_type)
+}
+
+function parseMovementTime(value) {
+  if (!value) return null
+  const raw = String(value).trim()
+  const date = new Date(raw.includes('T') || raw.endsWith('Z') ? raw : raw.replace(' ', 'T') + 'Z')
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 export function buildMovementGroups(movements = []) {
   const groups = new Map()
 
@@ -52,24 +73,24 @@ export function buildMovementGroups(movements = []) {
         reason: normalizeText(movement.reason),
         branch_name: normalizeText(movement.branch_name),
         user_name: normalizeText(movement.user_name),
-        totalQuantity: Number(movement.quantity || 0),
-        totalCostUsd: Number(movement.total_cost_usd || 0),
-        totalCostKhr: Number(movement.total_cost_khr || 0),
+        totalQuantity: movementSignedValue(movement, 'quantity'),
+        totalCostUsd: movementSignedValue(movement, 'total_cost_usd'),
+        totalCostKhr: movementSignedValue(movement, 'total_cost_khr'),
         items: [movement],
       })
       continue
     }
 
     existing.items.push(movement)
-    existing.totalQuantity += Number(movement.quantity || 0)
-    existing.totalCostUsd += Number(movement.total_cost_usd || 0)
-    existing.totalCostKhr += Number(movement.total_cost_khr || 0)
+    existing.totalQuantity += movementSignedValue(movement, 'quantity')
+    existing.totalCostUsd += movementSignedValue(movement, 'total_cost_usd')
+    existing.totalCostKhr += movementSignedValue(movement, 'total_cost_khr')
 
-    const createdMs = new Date(movement.created_at || 0).getTime()
-    const earliestMs = new Date(existing.created_at || 0).getTime()
-    const latestMs = new Date(existing.latest_at || 0).getTime()
-    if (!Number.isNaN(createdMs) && (Number.isNaN(earliestMs) || createdMs < earliestMs)) existing.created_at = movement.created_at
-    if (!Number.isNaN(createdMs) && (Number.isNaN(latestMs) || createdMs > latestMs)) existing.latest_at = movement.created_at
+    const created = parseMovementTime(movement.created_at)
+    const earliest = parseMovementTime(existing.created_at)
+    const latest = parseMovementTime(existing.latest_at)
+    if (created && (!earliest || created < earliest)) existing.created_at = movement.created_at
+    if (created && (!latest || created > latest)) existing.latest_at = movement.created_at
 
     if (!existing.reason && movement.reason) existing.reason = normalizeText(movement.reason)
     if (!existing.branch_name && movement.branch_name) existing.branch_name = normalizeText(movement.branch_name)
@@ -85,6 +106,7 @@ export function buildMovementGroups(movements = []) {
 
       return {
         ...group,
+        recordCount: group.items.length,
         productCount: uniqueProducts.length,
         productNames: uniqueProducts,
         productSummary: uniqueProducts.length <= 2 ? uniqueProducts.join(', ') : `${uniqueProducts.slice(0, 2).join(', ')} +${uniqueProducts.length - 2}`,
@@ -93,7 +115,11 @@ export function buildMovementGroups(movements = []) {
         reasonSummary: allReasons[0] || '',
       }
     })
-    .sort((a, b) => new Date(b.latest_at || 0).getTime() - new Date(a.latest_at || 0).getTime())
+    .sort((a, b) => {
+      const left = parseMovementTime(a.latest_at)?.getTime() || 0
+      const right = parseMovementTime(b.latest_at)?.getTime() || 0
+      return right - left
+    })
 }
 
 export function movementGroupHaystack(group) {

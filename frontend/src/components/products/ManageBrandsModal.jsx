@@ -2,6 +2,8 @@
 import Modal from '../shared/Modal'
 import { useApp } from '../../AppContext'
 
+const DEFAULT_BRAND_COLOR = '#f97316'
+
 function parseBrandOptions(raw) {
   if (!raw) return []
   try {
@@ -12,6 +14,16 @@ function parseBrandOptions(raw) {
       .filter(Boolean)
   } catch (_) {
     return []
+  }
+}
+
+function parseBrandColorMap(raw) {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch (_) {
+    return {}
   }
 }
 
@@ -36,8 +48,10 @@ export default function ManageBrandsModal({
 }) {
   const { settings, notify } = useApp()
   const [newBrand, setNewBrand] = useState('')
+  const [newColor, setNewColor] = useState(DEFAULT_BRAND_COLOR)
   const [renamingBrand, setRenamingBrand] = useState('')
   const [renameValue, setRenameValue] = useState('')
+  const [renameColor, setRenameColor] = useState(DEFAULT_BRAND_COLOR)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [selectedBrands, setSelectedBrands] = useState(() => new Set())
@@ -45,6 +59,10 @@ export default function ManageBrandsModal({
   const libraryBrands = useMemo(
     () => parseBrandOptions(settings?.product_brand_options),
     [settings?.product_brand_options]
+  )
+  const brandColorMap = useMemo(
+    () => parseBrandColorMap(settings?.product_brand_color_map),
+    [settings?.product_brand_color_map]
   )
 
   const brandsWithUsage = useMemo(() => {
@@ -58,8 +76,8 @@ export default function ManageBrandsModal({
     const merged = new Set([...libraryBrands, ...usage.keys()])
     return Array.from(merged)
       .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ name, usage: usage.get(name) || 0 }))
-  }, [libraryBrands, products])
+      .map((name) => ({ name, usage: usage.get(name) || 0, color: brandColorMap[normalizeLookup(name)] || DEFAULT_BRAND_COLOR }))
+  }, [brandColorMap, libraryBrands, products])
 
   useEffect(() => {
     const available = new Set(brandsWithUsage.map((entry) => entry.name))
@@ -69,7 +87,7 @@ export default function ManageBrandsModal({
     })
   }, [brandsWithUsage])
 
-  const saveLibrary = async (brands) => {
+  const saveLibrary = async (brands, colorOverrides = {}) => {
     const normalizedMap = new Map()
     ;(brands || [])
       .map((entry) => toTitleCase(entry))
@@ -79,9 +97,15 @@ export default function ManageBrandsModal({
         if (!normalizedMap.has(key)) normalizedMap.set(key, entry)
       })
     const clean = Array.from(normalizedMap.values()).sort((a, b) => a.localeCompare(b))
+    const cleanColorMap = {}
+    clean.forEach((name) => {
+      const lookup = normalizeLookup(name)
+      cleanColorMap[lookup] = colorOverrides[lookup] || brandColorMap[lookup] || DEFAULT_BRAND_COLOR
+    })
 
     await window.api.saveSettings({
       product_brand_options: JSON.stringify(clean),
+      product_brand_color_map: JSON.stringify(cleanColorMap),
     })
   }
 
@@ -89,15 +113,16 @@ export default function ManageBrandsModal({
     const clean = toTitleCase(newBrand)
     if (!clean) return
     if (brandsWithUsage.some((entry) => normalizeLookup(entry.name) === normalizeLookup(clean))) {
-      setError('Brand already exists')
+      setError(t('brand_already_exists') || 'Brand already exists')
       return
     }
 
     setBusy(true)
     setError('')
     try {
-      await saveLibrary([...libraryBrands, clean])
+      await saveLibrary([...libraryBrands, clean], { [normalizeLookup(clean)]: newColor || DEFAULT_BRAND_COLOR })
       setNewBrand('')
+      setNewColor(DEFAULT_BRAND_COLOR)
       notify(`${t('brand') || 'Brand'} added`, 'success')
       onDone?.()
     } catch (e) {
@@ -139,7 +164,7 @@ export default function ManageBrandsModal({
           if (lookup === fromLookup || lookup === toLookup) return to
           return entry
         })
-      await saveLibrary(nextLibrary)
+      await saveLibrary(nextLibrary, { [toLookup]: renameColor || brandColorMap[fromLookup] || DEFAULT_BRAND_COLOR })
 
       notify(`Brand updated to "${to}"`, 'success')
       setRenamingBrand('')
@@ -219,7 +244,7 @@ export default function ManageBrandsModal({
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <label className="mb-1 block text-xs text-gray-500">Add brand</label>
+            <label className="mb-1 block text-xs text-gray-500">{t('add_brand') || 'Add brand'}</label>
             <input
               className="input"
               value={newBrand}
@@ -231,6 +256,17 @@ export default function ManageBrandsModal({
               }}
             />
           </div>
+          <label className="flex flex-col gap-1 text-xs text-gray-500">
+            {t('color') || 'Color'}
+            <input
+              type="color"
+              className="h-10 w-12 rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-900"
+              value={newColor}
+              onChange={(event) => setNewColor(event.target.value)}
+              disabled={busy}
+              aria-label={t('brand_color') || 'Brand color'}
+            />
+          </label>
           <button type="button" className="btn-primary" onClick={addLibraryBrand} disabled={busy}>
             {t('add') || 'Add'}
           </button>
@@ -239,7 +275,7 @@ export default function ManageBrandsModal({
         <div className="max-h-80 space-y-2 overflow-auto pr-1">
           {brandsWithUsage.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-400">
-              No brands yet
+              {t('no_brands_yet') || 'No brands yet'}
             </div>
           ) : (
             <>
@@ -250,7 +286,7 @@ export default function ManageBrandsModal({
                     checked={brandsWithUsage.length > 0 && brandsWithUsage.every((entry) => selectedBrands.has(entry.name))}
                     onChange={toggleAllVisibleBrands}
                   />
-                  <span>{selectedBrands.size ? `${selectedBrands.size} selected` : 'Select visible'}</span>
+                  <span>{selectedBrands.size ? `${selectedBrands.size} ${t('selected') || 'selected'}` : (t('select_visible') || 'Select visible')}</span>
                 </label>
                 <button
                   type="button"
@@ -258,7 +294,7 @@ export default function ManageBrandsModal({
                   onClick={() => removeBrands(Array.from(selectedBrands))}
                   disabled={!selectedBrands.size || busy}
                 >
-                  Delete selected
+                  {t('delete_selected') || 'Delete selected'}
                 </button>
               </div>
               {brandsWithUsage.map((entry) => {
@@ -267,6 +303,14 @@ export default function ManageBrandsModal({
               <div key={entry.name} className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
                 {isEditing ? (
                   <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      className="h-9 w-11 rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-900"
+                      value={renameColor}
+                      onChange={(event) => setRenameColor(event.target.value)}
+                      disabled={busy}
+                      aria-label={`${entry.name} ${t('color') || 'color'}`}
+                    />
                     <input
                       className="input flex-1 py-1"
                       value={renameValue}
@@ -300,7 +344,14 @@ export default function ManageBrandsModal({
                       aria-label={`Select ${entry.name}`}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{entry.name}</div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-3 w-3 flex-shrink-0 rounded-full border border-black/10 dark:border-white/20"
+                          style={{ backgroundColor: entry.color }}
+                          aria-hidden="true"
+                        />
+                        <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{entry.name}</div>
+                      </div>
                       <div className="text-xs text-gray-400">{entry.usage} product(s)</div>
                     </div>
                     <button
@@ -309,6 +360,7 @@ export default function ManageBrandsModal({
                       onClick={() => {
                         setRenamingBrand(entry.name)
                         setRenameValue(entry.name)
+                        setRenameColor(entry.color || DEFAULT_BRAND_COLOR)
                       }}
                       disabled={busy}
                     >

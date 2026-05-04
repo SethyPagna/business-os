@@ -57,7 +57,7 @@ function getStockMetrics({ branchId = null } = {}) {
 }
 
 function getLowStockProducts({ limit = 20 } = {}) {
-  const safeLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 20))
+  const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 20))
   const whereSql = sellableProductWhere('p').join(' AND ')
   return db.prepare(`
     SELECT p.id, p.name, p.category, p.unit, p.stock_quantity, p.low_stock_threshold, p.out_of_stock_threshold
@@ -70,9 +70,71 @@ function getLowStockProducts({ limit = 20 } = {}) {
   `).all(safeLimit)
 }
 
+function getOutOfStockProducts({ limit = 20 } = {}) {
+  const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 20))
+  const whereSql = sellableProductWhere('p').join(' AND ')
+  return db.prepare(`
+    SELECT p.id, p.name, p.category, p.unit, p.stock_quantity, p.low_stock_threshold, p.out_of_stock_threshold
+    FROM products p
+    WHERE ${whereSql}
+      AND COALESCE(p.stock_quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)
+    ORDER BY p.stock_quantity ASC, p.name ASC
+    LIMIT ?
+  `).all(safeLimit)
+}
+
+function getStockAlertProducts({ limit = 5000 } = {}) {
+  const safeLimit = Math.max(1, Math.min(5000, Number.parseInt(limit, 10) || 5000))
+  const whereSql = sellableProductWhere('p').join(' AND ')
+  const outOfStock = getOutOfStockProducts({ limit: safeLimit })
+  const lowStock = db.prepare(`
+    SELECT p.id, p.name, p.category, p.unit, p.stock_quantity, p.low_stock_threshold, p.out_of_stock_threshold
+    FROM products p
+    WHERE ${whereSql}
+      AND COALESCE(p.stock_quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)
+      AND COALESCE(p.stock_quantity, 0) <= COALESCE(p.low_stock_threshold, 10)
+    ORDER BY p.stock_quantity ASC, p.name ASC
+    LIMIT ?
+  `).all(safeLimit)
+  const counts = getStockMetrics()
+  return {
+    outOfStock,
+    lowStock,
+    countOut: counts.out_of_stock,
+    countLow: counts.low_stock,
+  }
+}
+
+function getExpiringProducts({ limit = 20, days = 30 } = {}) {
+  const safeLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 20))
+  const safeDays = Math.max(0, Math.min(3650, Number.parseInt(days, 10) || 30))
+  const whereSql = sellableProductWhere('p').join(' AND ')
+  return db.prepare(`
+    SELECT
+      p.id,
+      p.name,
+      p.category,
+      p.unit,
+      p.stock_quantity,
+      p.expiry_date,
+      COALESCE(p.expiry_alert_days, ?) AS expiry_alert_days,
+      (NULLIF(p.expiry_date, '')::date - CURRENT_DATE) AS days_until_expiry
+    FROM products p
+    WHERE ${whereSql}
+      AND NULLIF(p.expiry_date, '') IS NOT NULL
+      AND NULLIF(p.expiry_date, '') ~ '^\\d{4}-\\d{2}-\\d{2}$'
+      AND NULLIF(p.expiry_date, '')::date <= CURRENT_DATE + CAST(? AS integer)
+    ORDER BY NULLIF(p.expiry_date, '')::date ASC, p.name ASC
+    LIMIT ?
+  `).all(safeDays, safeDays, safeLimit)
+}
+
 module.exports = {
   effectiveCostExpr,
+  getExpiringProducts,
   getLowStockProducts,
+  getOutOfStockProducts,
+  getStockAlertProducts,
   getStockMetrics,
   sellableProductWhere,
   stockQuantityExpr,

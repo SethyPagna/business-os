@@ -114,6 +114,8 @@ export default function Dashboard() {
   const [showAllBranches, setShowAllBranches]   = useState(false)
   const [showAllHours, setShowAllHours]         = useState(false)
   const [showAllLowStock, setShowAllLowStock]   = useState(false)
+  const [showAllOutStock, setShowAllOutStock]   = useState(false)
+  const [showAllExpiring, setShowAllExpiring]   = useState(false)
   const [showAllRecent, setShowAllRecent]       = useState(false)
   const [kpiDetail, setKpiDetail]               = useState(null)
   const summaryRequestRef = useRef(0)
@@ -265,6 +267,8 @@ export default function Dashboard() {
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
   const aStockValue = summary?.stock_value_usd || 0
+  const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
+  const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -299,12 +303,13 @@ export default function Dashboard() {
       id: 'products',
       label: t('products_total'),
       value: summary?.product_count || 0,
-      sub: `${summary?.low_stock_count ?? summary?.low_stock?.length ?? 0} ${t('low_stock')}`,
+      sub: `${lowStockCount} ${t('low_stock')} / ${outOfStockCount} ${t('out_of_stock')}`,
       details: [
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('in_stock') || 'In stock', value: summary?.in_stock_count || 0 },
-        { label: t('low_stock') || 'Low stock', value: summary?.low_stock_count ?? summary?.low_stock?.length ?? 0 },
-        { label: t('out_of_stock') || 'Out of stock', value: summary?.out_of_stock_count || 0 },
+        { label: t('low_stock') || 'Low stock', value: lowStockCount },
+        { label: t('out_of_stock') || 'Out of stock', value: outOfStockCount },
+        { label: translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់'), value: summary?.expiring_count ?? summary?.expiring_products?.length ?? 0 },
       ],
     },
     {
@@ -316,6 +321,18 @@ export default function Dashboard() {
         { label: t('stock_value') || 'Stock value', value: fmtUSD(aStockValue) },
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('formula') || 'Formula', value: 'Stock value = quantity on hand x unit cost' },
+      ],
+    },
+    {
+      id: 'out-of-stock',
+      label: t('out_of_stock') || 'Out of stock',
+      value: outOfStockCount,
+      sub: `${lowStockCount} ${t('low_stock') || 'low stock'}`,
+      color: outOfStockCount > 0 ? 'text-red-600' : 'text-gray-500',
+      details: [
+        { label: t('out_of_stock') || 'Out of stock', value: outOfStockCount },
+        { label: t('low_stock') || 'Low stock', value: lowStockCount },
+        { label: t('in_stock') || 'In stock', value: summary?.in_stock_count || 0 },
       ],
     },
     {
@@ -423,8 +440,8 @@ export default function Dashboard() {
     { Section:'KPI', Metric:'Supplier Returns', Value: aSupplierReturns, Period: rangeLabel },
     { Section:'KPI', Metric:'Business Loss (USD)', Value: priceCsv(aSupplierLossUsd), Period: rangeLabel },
     { Section:'KPI', Metric:'In Stock', Value: summary?.in_stock_count || 0, Period:'all-time' },
-    { Section:'KPI', Metric:'Low Stock', Value: summary?.low_stock_count ?? summary?.low_stock?.length ?? 0, Period:'all-time' },
-    { Section:'KPI', Metric:'Out Of Stock', Value: summary?.out_of_stock_count || 0, Period:'all-time' },
+    { Section:'KPI', Metric:'Low Stock', Value: lowStockCount, Period:'all-time' },
+    { Section:'KPI', Metric:'Out Of Stock', Value: outOfStockCount, Period:'all-time' },
   ]), [
     aAvgOrder,
     aCost,
@@ -445,7 +462,8 @@ export default function Dashboard() {
     priceCsv,
     rangeLabel,
     summary?.product_count,
-    summary?.low_stock?.length,
+    lowStockCount,
+    outOfStockCount,
   ])
 
   const buildDashboardFormulaRows = useCallback(() => ([
@@ -481,7 +499,8 @@ export default function Dashboard() {
       { metric: 'Visible Sales Periods', value: chartData.length },
       { metric: 'Payment Methods', value: analytics?.byPayment?.length || 0 },
       { metric: 'Visible Branches', value: analytics?.byBranch?.length || 0 },
-      { metric: 'Low Stock Items', value: summary?.low_stock?.length || 0 },
+      { metric: 'Low Stock Items', value: lowStockCount },
+      { metric: 'Out Of Stock Items', value: outOfStockCount },
       { metric: 'Generated At', value: new Date().toISOString() },
     ])
   ), [
@@ -491,7 +510,8 @@ export default function Dashboard() {
     chartData.length,
     periodShort,
     rangeLabel,
-    summary?.low_stock?.length,
+    lowStockCount,
+    outOfStockCount,
     topMode,
   ])
 
@@ -556,6 +576,14 @@ export default function Dashboard() {
     }))
   ), [summary?.low_stock])
 
+  const buildDashboardOutStockRows = useCallback(() => (
+    (summary?.out_of_stock || []).map((p) => ({
+      Product: p.name || '',
+      Stock: p.stock_quantity || 0,
+      Threshold: p.out_of_stock_threshold || 0,
+    }))
+  ), [summary?.out_of_stock])
+
   const buildDashboardRecentRows = useCallback(() => (
     (summary?.recent_sales || []).map((sale) => ({
       Receipt: sale.receipt_number || '',
@@ -582,7 +610,8 @@ export default function Dashboard() {
     const pmRows       = buildDashboardPaymentRows().map((row) => ({ Section: 'Payments', ...row }))
     const branchRows   = buildDashboardBranchRows().map((row) => ({ Section: 'Branches', ...row }))
     const lowRows      = buildDashboardLowStockRows().map((row) => ({ Section: 'Low Stock', ...row }))
-    const all = [...manifestRows, ...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows]
+    const outRows      = buildDashboardOutStockRows().map((row) => ({ Section: 'Out Of Stock', ...row }))
+    const all = [...manifestRows, ...kpiRows, ...buildDashboardFormulaRows(), ...salesRows, ...topRevRows, ...topCustRows, ...pmRows, ...branchRows, ...lowRows, ...outRows]
     const keys = [...new Set(all.flatMap(r=>Object.keys(r)))]
     downloadCSV(`dashboard-full-${exportStamp}.csv`, all.map(r=>Object.fromEntries(keys.map(k=>[k,r[k]??'']))))
   }
@@ -630,6 +659,7 @@ export default function Dashboard() {
     const paymentRows = buildDashboardPaymentRows()
     const branchRows = buildDashboardBranchRows()
     const lowRows = buildDashboardLowStockRows()
+    const outRows = buildDashboardOutStockRows()
     const recentRows = buildDashboardRecentRows()
     const manifestRows = buildDashboardManifestRows()
     const reportContent = buildStandaloneReportHtml({
@@ -659,7 +689,8 @@ export default function Dashboard() {
             { label: 'Sales periods', value: chartData.length },
             { label: 'Payment methods', value: paymentRows.length },
             { label: 'Branches', value: branchRows.length },
-            { label: 'Low-stock items', value: lowRows.length },
+            { label: 'Low-stock items', value: lowStockCount },
+            { label: 'Out-of-stock items', value: outOfStockCount },
           ],
         },
       ],
@@ -714,6 +745,7 @@ export default function Dashboard() {
         { title: 'Payment methods', subtitle: 'Count and revenue by payment type', rows: paymentRows },
         { title: 'Branch performance', subtitle: 'Transaction and revenue totals', rows: branchRows },
         { title: 'Low-stock summary', subtitle: 'Current low-stock items from all-time inventory state', rows: lowRows, limit: 12 },
+        { title: 'Out-of-stock summary', subtitle: 'Current out-of-stock items from all-time inventory state', rows: outRows, limit: 12 },
         { title: 'Recent sales', subtitle: 'Latest receipts included in the dashboard summary', rows: recentRows, limit: 12 },
       ],
       notes: [
@@ -736,6 +768,7 @@ export default function Dashboard() {
         { name: `dashboard-payments-${exportStamp}.csv`, content: buildCSV(paymentRows) },
         { name: `dashboard-branches-${exportStamp}.csv`, content: buildCSV(branchRows) },
         { name: `dashboard-low-stock-${exportStamp}.csv`, content: buildCSV(lowRows) },
+        { name: `dashboard-out-of-stock-${exportStamp}.csv`, content: buildCSV(outRows) },
         { name: `dashboard-recent-sales-${exportStamp}.csv`, content: buildCSV(recentRows) },
       ],
       reportFileName: 'dashboard-report.html',
@@ -750,6 +783,7 @@ export default function Dashboard() {
     buildDashboardKpiRows,
     buildDashboardManifestRows,
     buildDashboardLowStockRows,
+    buildDashboardOutStockRows,
     buildDashboardPaymentRows,
     buildDashboardRecentRows,
     buildDashboardSalesRows,
@@ -758,6 +792,8 @@ export default function Dashboard() {
     chartData,
     collectedFormulaText,
     exportStamp,
+    lowStockCount,
+    outOfStockCount,
     periodKpis,
     periodShort,
     rangeLabel,
@@ -1001,7 +1037,7 @@ export default function Dashboard() {
       </div>
 
       {/* Branches, products, and customers */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         {/* Branch */}
         <div className="card p-3 sm:p-4">
           <h2 className="font-semibold text-gray-900 dark:text-white text-sm mb-3">{t('branch_performance')}</h2>
@@ -1205,8 +1241,8 @@ export default function Dashboard() {
         <div className="card">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('low_stock_items')}</h2>
-            {(summary?.low_stock?.length||0) > 0 && (
-              <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{summary.low_stock.length}</span>
+            {lowStockCount > 0 && (
+              <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{lowStockCount}</span>
             )}
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1226,6 +1262,68 @@ export default function Dashboard() {
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllLowStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
                 {showAllLowStock ? t('show_less') : `${t('view_all')} ${summary.low_stock.length} ${t('items')}`}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Out Of Stock */}
+        <div className="card">
+          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 dark:text-white">{t('out_of_stock') || 'Out of stock'}</h2>
+            {outOfStockCount > 0 && (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">{outOfStockCount}</span>
+            )}
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {!summary?.out_of_stock?.length
+              ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
+              : (showAllOutStock ? summary.out_of_stock : summary.out_of_stock.slice(0,5)).map(p => (
+                <div key={p.id} className="flex items-center justify-between px-3 sm:px-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
+                    {p.category && <p className="text-xs text-gray-400">{p.category}</p>}
+                  </div>
+                  <span className="badge-red">{p.stock_quantity} {p.unit}</span>
+                </div>
+              ))}
+          </div>
+          {(summary?.out_of_stock?.length||0) > 5 && (
+            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
+              <button onClick={() => setShowAllOutStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
+                {showAllOutStock ? t('show_less') : `${t('view_all')} ${summary.out_of_stock.length} ${t('items')}`}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Expiring Products */}
+        <div className="card">
+          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>
+            {(summary?.expiring_products?.length||0) > 0 && (
+              <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">{summary.expiring_products.length}</span>
+            )}
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {!summary?.expiring_products?.length
+              ? <p className="p-4 text-sm text-gray-400 text-center">{t('no_data')}</p>
+              : (showAllExpiring ? summary.expiring_products : summary.expiring_products.slice(0,5)).map(p => (
+                <div key={p.id} className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
+                    {p.category && <p className="text-xs text-gray-400">{p.category}</p>}
+                  </div>
+                  <span className={Number(p.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}>
+                    {p.expiry_date}
+                  </span>
+                </div>
+              ))}
+          </div>
+          {(summary?.expiring_products?.length||0) > 5 && (
+            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
+              <button onClick={() => setShowAllExpiring(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
+                {showAllExpiring ? t('show_less') : `${t('view_all')} ${summary.expiring_products.length} ${t('items')}`}
               </button>
             </div>
           )}

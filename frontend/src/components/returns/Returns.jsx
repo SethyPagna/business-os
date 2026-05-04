@@ -490,34 +490,6 @@ export default function Returns() {
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <label htmlFor="returns-search" className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            id="returns-search"
-            name="returns_search"
-            className="input min-w-0 w-full pl-9"
-            placeholder={tr('search_returns_placeholder', 'Search by return number, receipt, customer, supplier, reason')}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
-        <FilterMenu
-          label={tr('filters', 'Filters')}
-          activeCount={activeFilterCount}
-          sections={filterSections}
-          onClear={() => {
-            setScope(CUSTOMER_SCOPE)
-            setYearFilter('all')
-            setMonthFilter('all')
-            setTypeFilter('all')
-            setReturnGroupMode('time')
-            setReturnSortDirection('desc')
-          }}
-          compact
-        />
-      </div>
-
       {selectedReturns.length > 0 ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedReturns.length} selected</span>
@@ -563,6 +535,34 @@ export default function Returns() {
           </div>
         </div>
       )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label htmlFor="returns-search" className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            id="returns-search"
+            name="returns_search"
+            className="input min-w-0 w-full pl-9"
+            placeholder={tr('search_returns_placeholder', 'Search by return number, receipt, customer, supplier, reason')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <FilterMenu
+          label={tr('filters', 'Filters')}
+          activeCount={activeFilterCount}
+          sections={filterSections}
+          onClear={() => {
+            setScope(CUSTOMER_SCOPE)
+            setYearFilter('all')
+            setMonthFilter('all')
+            setTypeFilter('all')
+            setReturnGroupMode('time')
+            setReturnSortDirection('desc')
+          }}
+          compact
+        />
+      </div>
 
       <p className="mb-2 text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
 

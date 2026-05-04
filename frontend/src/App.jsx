@@ -6,7 +6,6 @@ import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import WriteConflictModal from './components/shared/WriteConflictModal'
-import PageHelpButton from './components/shared/PageHelpButton'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import NotificationCenter from './components/shared/NotificationCenter'
 import BackgroundImportTracker from './components/shared/BackgroundImportTracker'
@@ -276,11 +275,18 @@ function useSyncErrorBanner() {
   // Central listener for sync write/read failures that should surface globally.
   const [syncError, setSyncError] = useState(null)
   const [transientOutage, setTransientOutage] = useState(null)
+  const [pendingSync, setPendingSync] = useState(null)
 
   useEffect(() => {
+    const refreshPendingSync = () => {
+      window.api?.getPendingSyncState?.()
+        .then((state) => setPendingSync(state || null))
+        .catch(() => {})
+    }
     const onSyncError = (event) => {
       if (event?.detail?.transient) return
       setSyncError(event.detail)
+      refreshPendingSync()
     }
     const onTransientOutage = (event) => {
       const detail = event?.detail || {}
@@ -294,25 +300,37 @@ function useSyncErrorBanner() {
       if (event?.type === 'sync:reconnected' || event?.detail?.connected) {
         setSyncError(null)
         setTransientOutage(null)
+        refreshPendingSync()
       }
     }
+    const onQueueChanged = () => refreshPendingSync()
     window.addEventListener('sync:error', onSyncError)
     window.addEventListener('sync:write-blocked', onSyncError)
     window.addEventListener('sync:transient-outage', onTransientOutage)
     window.addEventListener('sync:status', onSyncRecovered)
     window.addEventListener('sync:reconnected', onSyncRecovered)
+    window.addEventListener('sync:queue-changed', onQueueChanged)
+    window.addEventListener('sync:offline-sale-queued', onQueueChanged)
+    window.addEventListener('sync:offline-sale-synced', onQueueChanged)
+    refreshPendingSync()
+    const timer = window.setInterval(refreshPendingSync, 20_000)
     return () => {
+      window.clearInterval(timer)
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
       window.removeEventListener('sync:transient-outage', onTransientOutage)
       window.removeEventListener('sync:status', onSyncRecovered)
       window.removeEventListener('sync:reconnected', onSyncRecovered)
+      window.removeEventListener('sync:queue-changed', onQueueChanged)
+      window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
+      window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
     }
   }, [])
 
   return {
     syncError,
     transientOutage,
+    pendingSync,
     clearSyncError: () => setSyncError(null),
   }
 }
@@ -575,6 +593,80 @@ function TransientServerBanner({ outage }) {
   )
 }
 
+function formatSyncTimestamp(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl }) {
+  const { t } = useApp()
+  const total = Number(pendingSync?.total || 0)
+  const [showRecovered, setShowRecovered] = useState(false)
+  const wasOfflineRef = useRef(false)
+
+  useEffect(() => {
+    if (!syncUrl) {
+      wasOfflineRef.current = false
+      setShowRecovered(false)
+      return undefined
+    }
+    if (!canWriteToServer) {
+      wasOfflineRef.current = true
+      setShowRecovered(false)
+      return undefined
+    }
+    if (!wasOfflineRef.current) return undefined
+    setShowRecovered(true)
+    const timer = window.setTimeout(() => setShowRecovered(false), 12000)
+    wasOfflineRef.current = false
+    return () => window.clearTimeout(timer)
+  }, [canWriteToServer, syncUrl])
+
+  const offline = !!syncUrl && !canWriteToServer
+  if (!offline && !total && !showRecovered) return null
+  const syncing = Number(pendingSync?.syncing || 0)
+  const failed = Number(pendingSync?.failed || 0)
+  const ready = !!syncUrl && canWriteToServer
+  const oldest = formatSyncTimestamp(pendingSync?.oldest_created_at)
+  const label = ready
+    ? (total
+      ? (t('offline_mode_ready_sync') || 'Server is back online. Offline actions can sync now.')
+      : (t('server_back_online') || 'Server is back online. You can keep working.'))
+    : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
+  return (
+    <div className={`border-b px-4 py-2 text-xs ${ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0">
+          <strong>{t('offline_mode') || 'Offline mode'}</strong>
+          <span className="ml-2">{label}</span>
+          {total ? (
+            <span className="ml-2 opacity-75">
+              {total} {t('pending') || 'pending'}{syncing ? `, ${syncing} ${t('syncing') || 'syncing'}` : ''}{failed ? `, ${failed} ${t('failed') || 'failed'}` : ''}{oldest ? `, since ${oldest}` : ''}
+            </span>
+          ) : null}
+        </span>
+        {total ? (
+          <button
+            type="button"
+            className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!ready}
+            onClick={() => window.api?.retryPendingSyncNow?.().catch(() => {})}
+          >
+            {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function PageLoader() {
   const [stalled, setStalled] = useState(false)
 
@@ -638,10 +730,7 @@ function PublicCatalogView() {
   return (
     <PageErrorBoundary pageId="catalog-public">
       <Suspense fallback={<PageLoader />}>
-        <>
-          <CatalogPage publicView />
-          <PageHelpButton pageId="catalog-public" />
-        </>
+        <CatalogPage publicView />
       </Suspense>
     </PageErrorBoundary>
   )
@@ -664,16 +753,54 @@ export default function App() {
     canWriteToServer,
     language,
     theme,
+    notify,
     t,
   } = useApp()
   const faviconRequestRef = useRef(0)
-  const { syncError, transientOutage, clearSyncError } = useSyncErrorBanner()
+  const offlineNoticeRef = useRef({ queued: '', synced: '' })
+  const { syncError, transientOutage, pendingSync, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
 
   useVisibilityRecovery()
   useChunkWarmup(authReady ? user : null)
   useDataWarmup(authReady ? user : null, canAccessPage)
   usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return undefined
+    const onQueued = (event) => {
+      const detail = event?.detail || {}
+      const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
+      if (offlineNoticeRef.current.queued === key) return
+      offlineNoticeRef.current.queued = key
+      const receipt = detail.receiptNumber ? ` ${detail.receiptNumber}` : ''
+      const messageTemplate = t('offline_sale_saved_notice') || 'Offline sale {receipt} saved at {time}. It will sync when the server is online.'
+      notify(messageTemplate
+        .replace('{receipt}', receipt.trim() || '')
+        .replace('{time}', formatSyncTimestamp(detail.ts || Date.now()))
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\./g, '.'), 'warning', 7000)
+    }
+    const onSynced = (event) => {
+      const detail = event?.detail || {}
+      const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
+      if (offlineNoticeRef.current.synced === key) return
+      offlineNoticeRef.current.synced = key
+      const receipt = detail.receiptNumber ? ` ${detail.receiptNumber}` : ''
+      const messageTemplate = t('offline_sale_synced_notice') || 'Offline sale {receipt} synced at {time}.'
+      notify(messageTemplate
+        .replace('{receipt}', receipt.trim() || '')
+        .replace('{time}', formatSyncTimestamp(detail.ts || Date.now()))
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\./g, '.'), 'success', 6000)
+    }
+    window.addEventListener('sync:offline-sale-queued', onQueued)
+    window.addEventListener('sync:offline-sale-synced', onSynced)
+    return () => {
+      window.removeEventListener('sync:offline-sale-queued', onQueued)
+      window.removeEventListener('sync:offline-sale-synced', onSynced)
+    }
+  }, [notify, t, user])
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
@@ -704,6 +831,7 @@ export default function App() {
       document.head.appendChild(iconEl)
       createdIcon = true
     }
+    iconEl.setAttribute('href', iconSource)
 
     async function loadFavicon() {
       try {
@@ -765,6 +893,9 @@ export default function App() {
               <img
                 src={settings.customer_portal_logo_image}
                 alt={settings?.business_name || 'Business OS'}
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -800,6 +931,7 @@ export default function App() {
           <div className="flex min-w-0 items-center gap-3">
           </div>
           <TransientServerBanner outage={transientOutage} />
+          <OfflineModeBanner pendingSync={pendingSync} canWriteToServer={canWriteToServer} syncUrl={syncUrl} />
           {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
           <BackgroundImportTracker />
           {mountedPages.map((mountedPage) => (
@@ -820,7 +952,6 @@ export default function App() {
         onClose={dismissWriteConflict}
         onReload={reloadWriteConflict}
       />
-      <PageHelpButton pageId={page} />
       <SyncErrorBanner
         error={syncError}
         onDismiss={clearSyncError}

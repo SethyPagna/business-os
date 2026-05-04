@@ -438,6 +438,7 @@ export default function Settings() {
       return undefined
     }
     const requestId = beginTrackedRequest(faviconPreviewRequestRef)
+    setAppFaviconPreview(source)
     async function loadFaviconPreview() {
       try {
         const preview = await withLoaderTimeout(
@@ -1303,6 +1304,7 @@ export default function Settings() {
             <div className="grid gap-3 sm:grid-cols-2">
               {[
                 ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
+                ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
                 ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
                 ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Pending public submissions and review items'],
@@ -1320,6 +1322,25 @@ export default function Settings() {
                   />
                 </label>
               ))}
+              <div className="sm:col-span-2">
+                <label htmlFor="settings-notifications-expiry-days" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t('notification_expiry_days') || 'Expiry alert window'}
+                </label>
+                <input
+                  id="settings-notifications-expiry-days"
+                  name="notifications_expiry_days"
+                  className="input max-w-xs"
+                  type="number"
+                  min="0"
+                  max="3650"
+                  step="1"
+                  value={form.notifications_expiry_days || '30'}
+                  onChange={(event) => setValue('notifications_expiry_days', event.target.value)}
+                />
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {t('notification_expiry_days_desc') || 'Notify when a product expiry date is inside this many days.'}
+                </p>
+              </div>
               <div className="sm:col-span-2">
                 <label htmlFor="settings-notifications-loyalty-threshold" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {t('notification_loyalty_threshold') || 'Loyalty points threshold'}

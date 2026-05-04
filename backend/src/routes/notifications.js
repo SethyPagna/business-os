@@ -3,6 +3,7 @@
 const express = require('express')
 const { db } = require('../database')
 const { authToken, hasPermission } = require('../middleware')
+const { getExpiringProducts, getStockAlertProducts } = require('../businessMetrics')
 const { getDriveSyncConfig } = require('../services/googleDriveSync')
 
 const router = express.Router()
@@ -13,6 +14,8 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_loyalty_enabled',
   'notifications_portal_enabled',
   'notifications_system_enabled',
+  'notifications_expiry_enabled',
+  'notifications_expiry_days',
   'notifications_loyalty_threshold',
   'notifications_realert_minutes',
 ]
@@ -49,6 +52,8 @@ function loadNotificationPreferences() {
     loyaltyEnabled: normalizeBoolean(map.notifications_loyalty_enabled, true),
     portalEnabled: normalizeBoolean(map.notifications_portal_enabled, true),
     systemEnabled: normalizeBoolean(map.notifications_system_enabled, true),
+    expiryEnabled: normalizeBoolean(map.notifications_expiry_enabled, true),
+    expiryDays: Math.max(0, Math.min(3650, Math.floor(toNumber(map.notifications_expiry_days, 30)))),
     loyaltyThreshold: Math.max(1, Math.floor(toNumber(map.notifications_loyalty_threshold, 100))),
     realertMinutes: Math.max(5, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
   }
@@ -86,39 +91,7 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
 }
 
 function buildInventorySection() {
-  const lowStock = db.prepare(`
-    SELECT id, name, stock_quantity, low_stock_threshold
-    FROM products
-    WHERE is_active = 1
-      AND stock_quantity > COALESCE(out_of_stock_threshold, 0)
-      AND stock_quantity <= COALESCE(low_stock_threshold, 10)
-    ORDER BY stock_quantity ASC, name COLLATE NOCASE ASC
-    LIMIT 50
-  `).all()
-
-  const outOfStock = db.prepare(`
-    SELECT id, name, stock_quantity
-    FROM products
-    WHERE is_active = 1
-      AND stock_quantity <= COALESCE(out_of_stock_threshold, 0)
-    ORDER BY stock_quantity ASC, name COLLATE NOCASE ASC
-    LIMIT 50
-  `).all()
-
-  const countLow = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM products
-    WHERE is_active = 1
-      AND stock_quantity > COALESCE(out_of_stock_threshold, 0)
-      AND stock_quantity <= COALESCE(low_stock_threshold, 10)
-  `).get()?.count || 0
-
-  const countOut = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM products
-    WHERE is_active = 1
-      AND stock_quantity <= COALESCE(out_of_stock_threshold, 0)
-  `).get()?.count || 0
+  const { lowStock, outOfStock, countLow, countOut } = getStockAlertProducts({ limit: 5000 })
 
   const items = [
     ...outOfStock.map((product) => ({
@@ -158,6 +131,40 @@ function buildInventorySection() {
       countLow ? `${countLow} low stock` : null,
     ].filter(Boolean).join(' • '),
     items,
+  }
+}
+
+function buildExpirySection(days = 30) {
+  const products = getExpiringProducts({ limit: 50, days })
+  if (!products.length) return null
+  const expiredCount = products.filter((product) => Number(product.days_until_expiry || 0) < 0).length
+  const expiringCount = products.length - expiredCount
+  return {
+    id: 'expiry',
+    title: 'Product expiry',
+    titleKey: 'notification_expiry_title',
+    pageId: 'products',
+    enabledKey: 'notifications_expiry_enabled',
+    count: products.length,
+    summaryKey: 'notification_expiry_summary',
+    summaryParams: { expiredCount, expiringCount, days },
+    summary: [
+      expiredCount ? `${expiredCount} expired` : null,
+      expiringCount ? `${expiringCount} expiring within ${days} days` : null,
+    ].filter(Boolean).join(' • '),
+    items: products.map((product) => {
+      const daysLeft = Number(product.days_until_expiry || 0)
+      return {
+        id: `expiry-${product.id}`,
+        label: product.name,
+        meta: daysLeft < 0 ? `Expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} ago` : `Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+        kind: daysLeft < 0 ? 'product_expired' : 'product_expiring',
+        tone: daysLeft < 0 ? 'danger' : 'warning',
+        metaKey: daysLeft < 0 ? 'notification_product_expired' : 'notification_product_expiring',
+        metaParams: { days: Math.abs(daysLeft), expiryDate: product.expiry_date || '' },
+        pageId: 'products',
+      }
+    }),
   }
 }
 
@@ -389,6 +396,11 @@ router.get('/summary', authToken, (req, res) => {
   if (preferences.inventoryEnabled && hasPermission(req.user, 'inventory')) {
     const inventorySection = buildInventorySection()
     if (inventorySection) sections.push(inventorySection)
+  }
+
+  if (preferences.expiryEnabled && hasPermission(req.user, 'products')) {
+    const expirySection = buildExpirySection(preferences.expiryDays)
+    if (expirySection) sections.push(expirySection)
   }
 
   if (preferences.salesEnabled && hasPermission(req.user, 'sales')) {

@@ -2,13 +2,20 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+const faviconDataUrlCache = new Map()
+const MAX_FAVICON_CACHE_ITEMS = 12
+
 function loadImage(source) {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.crossOrigin = 'anonymous'
+    image.decoding = 'async'
     image.onload = () => resolve(image)
     image.onerror = () => reject(new Error('Failed to load favicon source'))
     image.src = source
+    if (typeof image.decode === 'function') {
+      image.decode().then(() => resolve(image)).catch(() => {})
+    }
   })
 }
 
@@ -26,6 +33,8 @@ export async function createCircularFaviconDataUrl(source, options = {}) {
     positionX = 50,
     positionY = 50,
   } = options
+  const cacheKey = JSON.stringify({ source, size, fit, zoom, positionX, positionY })
+  if (faviconDataUrlCache.has(cacheKey)) return faviconDataUrlCache.get(cacheKey)
 
   const image = await loadImage(source)
   const canvas = document.createElement('canvas')
@@ -56,5 +65,10 @@ export async function createCircularFaviconDataUrl(source, options = {}) {
   context.drawImage(image, drawX, drawY, drawWidth, drawHeight)
   context.restore()
 
-  return canvas.toDataURL('image/png')
+  const dataUrl = canvas.toDataURL('image/png')
+  faviconDataUrlCache.set(cacheKey, dataUrl)
+  while (faviconDataUrlCache.size > MAX_FAVICON_CACHE_ITEMS) {
+    faviconDataUrlCache.delete(faviconDataUrlCache.keys().next().value)
+  }
+  return dataUrl
 }

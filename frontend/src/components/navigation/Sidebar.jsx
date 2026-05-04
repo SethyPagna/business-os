@@ -191,7 +191,7 @@ export default function Sidebar() {
           <div className="flex items-center gap-3 px-2 py-2">
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{ background: 'var(--ui-accent)22' }}>
               {user?.avatar_path ? (
-                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 rounded-full object-cover" />
+                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 rounded-full object-cover" loading="lazy" decoding="async" />
               ) : (
                 <span className="text-sm font-bold" style={{ color: 'var(--ui-accent)' }}>
                   {user?.name?.[0]?.toUpperCase()}
@@ -222,7 +222,7 @@ export default function Sidebar() {
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">
             {brandLogo ? (
-              <img src={brandLogo} alt={brandName} className="h-full w-full object-cover" />
+              <img src={brandLogo} alt={brandName} className="h-full w-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
             ) : (
               <span className="grid h-full w-full place-items-center text-base font-semibold text-white" style={{ background: 'var(--ui-accent)' }}>
                 {brandName.slice(0, 2).toUpperCase()}
@@ -242,7 +242,7 @@ export default function Sidebar() {
           <button type="button" onClick={() => setProfileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
               {user?.avatar_path ? (
-                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" />
+                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
               ) : (
                 <span className="text-base font-bold text-blue-600 dark:text-blue-400">
                   {user?.name?.[0]?.toUpperCase()}

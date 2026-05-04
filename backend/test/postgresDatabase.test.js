@@ -89,6 +89,22 @@ runTest('default role seed avoids partial-index ON CONFLICT', () => {
   assert.match(source, /UPDATE roles[\s\S]+WHERE id = \$4/)
 })
 
+runTest('startup creates read-path indexes for search and movement history', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'postgresDatabase.js'), 'utf8')
+  for (const indexName of [
+    'idx_products_active_stock_name_pg',
+    'idx_products_supplier_lower_pg',
+    'idx_branch_stock_branch_qty_product_pg',
+    'idx_inventory_movements_branch_created_pg',
+    'idx_inventory_movements_user_created_pg',
+    'idx_sales_status_created_pg',
+    'idx_sale_items_product_branch_sale_pg',
+    'idx_customers_membership_lower_pg',
+  ]) {
+    assert.match(source, new RegExp(indexName))
+  }
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

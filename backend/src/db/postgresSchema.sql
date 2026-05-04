@@ -946,7 +946,9 @@ CREATE TABLE public.products (
     discount_label text,
     discount_badge_color text DEFAULT '#e11d48'::text,
     discount_starts_at text,
-    discount_ends_at text
+    discount_ends_at text,
+    expiry_date text,
+    expiry_alert_days double precision DEFAULT 30
 );
 
 
@@ -1733,6 +1735,27 @@ CREATE UNIQUE INDEX idx_branch_stock_product_branch_unique ON public.branch_stoc
 
 
 --
+-- Name: idx_branch_stock_branch_qty_product_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_branch_stock_branch_qty_product_pg ON public.branch_stock USING btree (branch_id, quantity DESC, product_id);
+
+
+--
+-- Name: idx_customer_share_submissions_status_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_share_submissions_status_created_pg ON public.customer_share_submissions USING btree (status, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_customers_membership_lower_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customers_membership_lower_pg ON public.customers USING btree (lower(membership_number));
+
+
+--
 -- Name: idx_file_assets_public_path_unique; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1754,10 +1777,38 @@ CREATE UNIQUE INDEX idx_import_job_batches_job_batch_unique ON public.import_job
 
 
 --
+-- Name: idx_inventory_movements_branch_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_movements_branch_created_pg ON public.inventory_movements USING btree (branch_id, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_inventory_movements_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_movements_created_pg ON public.inventory_movements USING btree (created_at DESC, id DESC);
+
+
+--
 -- Name: idx_inventory_movements_product_created_pg; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_inventory_movements_product_created_pg ON public.inventory_movements USING btree (product_id, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_inventory_movements_user_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_movements_user_created_pg ON public.inventory_movements USING btree (user_id, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_products_active_stock_name_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_stock_name_pg ON public.products USING btree (is_active, stock_quantity, name);
 
 
 --
@@ -1803,6 +1854,13 @@ CREATE INDEX idx_products_sku_pg ON public.products USING btree (sku);
 
 
 --
+-- Name: idx_products_supplier_lower_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_supplier_lower_pg ON public.products USING btree (lower(supplier));
+
+
+--
 -- Name: idx_returns_created_pg; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1810,10 +1868,31 @@ CREATE INDEX idx_returns_created_pg ON public.returns USING btree (created_at DE
 
 
 --
+-- Name: idx_returns_status_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_returns_status_created_pg ON public.returns USING btree (status, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_sale_items_product_branch_sale_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sale_items_product_branch_sale_pg ON public.sale_items USING btree (product_id, branch_id, sale_id);
+
+
+--
 -- Name: idx_sales_created_pg; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_sales_created_pg ON public.sales USING btree (created_at DESC, id DESC);
+
+
+--
+-- Name: idx_sales_status_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sales_status_created_pg ON public.sales USING btree (sale_status, created_at DESC, id DESC);
 
 
 --

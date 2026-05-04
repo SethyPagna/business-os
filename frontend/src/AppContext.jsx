@@ -338,7 +338,7 @@ export function AppProvider({ children }) {
   }, [language, langRevision])
 
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
-  const loadSettings = useCallback(async () => {
+  const loadSettings = useCallback(async (options = {}) => {
     try {
       const hasAuthSession = !!(window.api?.getAuthSessionToken?.() || getStoredAuthToken())
       if (!hasAuthSession) {
@@ -351,7 +351,7 @@ export function AppProvider({ children }) {
         if (fallbackSettings.theme) setTheme(fallbackSettings.theme)
         return fallbackSettings
       }
-      const serverSettings = await window.api.getSettings()
+      const serverSettings = await window.api.getSettings({ force: options?.force === true })
       const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
       setSettings(mergedSettings)
       if (mergedSettings.login_session_duration) {
@@ -538,9 +538,9 @@ export function AppProvider({ children }) {
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
       let entityLabel = 'Item'
       if (entity === 'settings') {
-        message = 'Settings changed on another device. Latest values are loading now.'
+        message = t('settings_write_conflict') || 'Settings changed on another device. Latest values have been reloaded.'
         entityLabel = 'Settings'
-        loadSettings().catch(() => {})
+        loadSettings({ force: true }).catch(() => {})
       } else if (entity === 'sale') {
         message = 'This sale changed on another device. Latest data is loading now.'
         entityLabel = 'Sale'
@@ -584,12 +584,16 @@ export function AppProvider({ children }) {
         message = 'This file changed on another device. Latest data is loading now.'
         entityLabel = 'File'
       }
-      setNotification({ message, type: 'error', id: Date.now() })
+      const noticeId = Date.now()
+      setNotification({ message, type: 'error', id: noticeId })
+      window.setTimeout(() => {
+        setNotification((current) => (current?.id === noticeId ? null : current))
+      }, 8000)
       setWriteConflict({
         ...detail,
         entity,
         entityLabel,
-        id: Date.now(),
+        id: noticeId,
       })
     }
     const finalizeUnauthorized = async (message) => {
@@ -659,7 +663,7 @@ export function AppProvider({ children }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
-  }, [applyBootstrapPayload, clearLocalBusinessState, loadSettings, user])
+  }, [applyBootstrapPayload, clearLocalBusinessState, loadSettings, t, user])
 
   // ?? OTP login event listener ?????????????????????????????????????????????
   useEffect(() => {
@@ -1036,6 +1040,7 @@ export function AppProvider({ children }) {
 
   const dismissWriteConflict = useCallback(() => {
     setWriteConflict(null)
+    setNotification(null)
   }, [])
 
   const reloadWriteConflict = useCallback(async () => {
@@ -1044,14 +1049,15 @@ export function AppProvider({ children }) {
 
     const refreshChannels = Array.isArray(detail.refreshChannels) ? detail.refreshChannels : []
     if (detail.entity === 'settings') {
-      await loadSettings().catch(() => {})
+      await loadSettings({ force: true }).catch(() => {})
     }
     refreshChannels.forEach((channel) => {
       window.dispatchEvent(new CustomEvent('sync:update', {
-        detail: { channel, ts: Date.now() },
+        detail: { channel, reason: 'write-conflict-reload-latest', ts: Date.now() },
       }))
     })
     setWriteConflict(null)
+    setNotification(null)
   }, [loadSettings, writeConflict])
 
   useEffect(() => {

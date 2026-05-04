@@ -105,6 +105,29 @@ function cloneElementWithInlineStyles(node) {
   return cloned
 }
 
+export function normalizeReceiptContentWidth(root) {
+  if (!root || !(root instanceof HTMLElement)) return root
+  const nodes = [
+    ...(root.matches?.('[data-receipt-export-root="true"]') ? [root] : []),
+    ...root.querySelectorAll('[data-receipt-export-root="true"]'),
+  ]
+
+  nodes.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return
+    node.style.width = '100%'
+    node.style.maxWidth = '100%'
+    node.style.minWidth = '0'
+    node.style.marginLeft = 'auto'
+    node.style.marginRight = 'auto'
+    node.style.boxSizing = 'border-box'
+    node.style.overflowX = 'hidden'
+    node.style.wordBreak = 'break-word'
+    node.style.overflowWrap = 'anywhere'
+  })
+
+  return root
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -354,14 +377,15 @@ function buildTextOnlyPdf({ lines, pageWidthPt, title = 'Receipt' }) {
   return joinPdfChunks(chunks)
 }
 
-function buildReceiptFileName(title = 'receipt') {
+function buildReceiptFileName(title = 'receipt', extension = 'pdf') {
   const safeBase = String(title || 'receipt')
     .trim()
     .replace(/[<>:"/\\|?*\x00-\x1F]+/g, '-')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-  return `${safeBase || 'receipt'}.pdf`
+  const safeExtension = String(extension || 'pdf').replace(/^\./, '').replace(/[^a-z0-9]/gi, '') || 'pdf'
+  return `${safeBase || 'receipt'}.${safeExtension}`
 }
 
 async function waitForElementAssets(element) {
@@ -408,6 +432,7 @@ async function renderElementToCanvas(element) {
   const scale = Math.min(2.25, Math.max(1.5, window.devicePixelRatio || 1.75))
   const cloned = cloneElementWithInlineStyles(element)
   if (!cloned) throw new Error('Receipt preview element is unavailable')
+  normalizeReceiptContentWidth(cloned)
   cloned.style.position = 'static'
   cloned.style.left = 'auto'
   cloned.style.top = 'auto'
@@ -479,7 +504,8 @@ async function withReceiptElement(content, widthMm, action, printSettings = getP
     inner.style.width = `${100 / scaleFactor}%`
   }
   if (typeof HTMLElement !== 'undefined' && content instanceof HTMLElement) {
-    inner.innerHTML = cloneElementWithInlineStyles(content)?.outerHTML || ''
+    const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
+    inner.innerHTML = cloned?.outerHTML || ''
   } else {
     inner.innerHTML = String(content || '')
   }
@@ -504,6 +530,7 @@ async function createPrintableReceiptMarkup(content, options = {}) {
     await waitForElementAssets(host)
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
     if (!clone) throw new Error('Receipt preview element is unavailable')
+    normalizeReceiptContentWidth(clone)
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
@@ -775,6 +802,18 @@ export async function createReceiptPdfBlob(content, options = {}) {
   }
 }
 
+export async function createReceiptImageBlob(content, options = {}) {
+  const printSettings = options.printSettings || getPrintSettings()
+  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob.type === 'image/png' ? blob : new Blob([blob], { type: 'image/png' }))
+      else reject(new Error('Unable to render receipt image. Please try again after the preview finishes loading.'))
+    }, 'image/png')
+  })
+}
+
 function extractReceiptLines(content) {
   if (typeof document === 'undefined') return []
   let root = null
@@ -810,6 +849,13 @@ export async function downloadReceiptPdf(content, options = {}) {
     }
     throw error
   }
+}
+
+export async function downloadReceiptImage(content, options = {}) {
+  const blob = await createReceiptImageBlob(content, options)
+  const fileName = buildReceiptFileName(options.fileName || options.title || 'receipt', '.png')
+  const url = downloadBlob(blob, fileName)
+  return { blob, fileName, url, mode: 'image' }
 }
 
 export async function openReceiptPdf(content, options = {}) {

@@ -30,7 +30,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   }
 
   const handleSave = async () => {
-    const changes = rows.filter((row) => row.delta !== '' && parseFloat(row.delta) > 0)
+    const changes = rows.filter((row) => row.delta !== '' && parseFloat(row.delta) >= 0)
     if (!changes.length) return
 
     setSaving(true)
@@ -45,16 +45,16 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           branchId: row.branchId,
           unitCostUsd: product.purchase_price_usd || 0,
           unitCostKhr: product.purchase_price_khr || 0,
-          reason: `${T('adjust_stock', 'Adjust stock', 'កែសម្រួលស្តុក')} (${row.branchName})`,
+          reason: `${T('adjust_stock', 'Adjust stock', 'កែស្តុក')} (${row.branchName})`,
           userId: user?.id,
           userName: user?.name,
         })
       }
-      setMsg(T('stock_updated', 'Stock updated', 'ស្តុកត្រូវបានអាប់ដេត'))
+      setMsg(T('stock_updated', 'Stock updated', 'បានធ្វើបច្ចុប្បន្នភាពស្តុក'))
       setRows((current) => current.map((row) => ({ ...row, delta: '' })))
       onDone()
     } catch (error) {
-      setMsg(error?.message || T('unknown_error', 'Unknown error', 'មានកំហុសមិនស្គាល់'))
+      setMsg(error?.message || T('unknown_error', 'Unknown error', 'មានបញ្ហាមិនស្គាល់'))
     } finally {
       setSaving(false)
     }
@@ -67,7 +67,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
       </label>
       <div className="space-y-2">
         {rows.map((row, index) => (
-          <div key={row.branchId} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
+          <div key={row.branchId} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
             <span className="w-28 truncate text-sm text-gray-700 dark:text-gray-300">{row.branchName}</span>
             <span className={`w-16 text-right text-sm font-bold ${row.current > 0 ? 'text-green-600' : 'text-gray-400'}`}>
               {row.current} {product.unit}
@@ -79,6 +79,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
             >
               <option value="add">+ {T('add', 'Add', 'បន្ថែម')}</option>
               <option value="remove">- {T('remove', 'Remove', 'ដក')}</option>
+              <option value="set">= {T('set', 'Set', 'កំណត់')}</option>
             </select>
             <input
               className="input w-20 flex-shrink-0 py-1 text-xs"
@@ -92,13 +93,13 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         ))}
       </div>
       {msg ? <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">{msg}</p> : null}
-      {rows.some((row) => row.delta !== '' && parseFloat(row.delta) > 0) ? (
+      {rows.some((row) => row.delta !== '' && parseFloat(row.delta) >= 0) ? (
         <button
           className="btn-primary mt-2 w-full text-sm"
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? T('loading', 'Loading...', 'កំពុងផ្ទុក...') : T('apply_stock_changes', 'Apply Stock Changes', 'អនុវត្តការផ្លាស់ប្តូរស្តុក')}
+          {saving ? T('loading', 'Loading...', 'កំពុងរក្សាទុក...') : T('apply_stock_changes', 'Apply Stock Changes', 'អនុវត្តការផ្លាស់ប្តូរស្តុក')}
         </button>
       ) : null}
     </div>

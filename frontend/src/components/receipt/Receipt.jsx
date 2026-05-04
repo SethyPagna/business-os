@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Download, FileText, Printer } from 'lucide-react'
+import { ArrowLeft, Download, FileText, ImageDown, Printer } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { downloadReceiptPdf, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
+import { downloadReceiptImage, downloadReceiptPdf, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
 
@@ -346,6 +346,11 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
           previewFallback: true,
           previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
         })
+      } else if (mode === 'image') {
+        await downloadReceiptImage(printRef.current, {
+          title: receiptTitle,
+          fileName: receiptTitle,
+        })
       } else if (mode === 'print') {
         await printReceipt(printRef.current, {
           title: receiptTitle,
@@ -402,6 +407,12 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
           <span className="inline-flex items-center gap-2">
             <Download className="h-4 w-4" />
             {pdfBusy === 'download' ? (t?.('saving_pdf') || 'Saving PDF...') : (t?.('download_pdf') || 'Download PDF')}
+          </span>
+        </button>
+        <button type="button" className="btn-secondary px-4 py-2" onClick={() => exportReceiptPdf('image')} disabled={pdfBusy !== ''}>
+          <span className="inline-flex items-center gap-2">
+            <ImageDown className="h-4 w-4" />
+            {pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('download_image') || 'Download image')}
           </span>
         </button>
         </div>

@@ -43,8 +43,20 @@ function multiMatch(text, terms) {
   return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
 }
 
-function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant }) {
-  return <ThreeDotPortal onDetails={onDetails} onEdit={onEdit} onDelete={onDelete} onAddVariant={onAddVariant} />
+function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdjustStock, t }) {
+  const label = (key, fallback) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
+  return (
+    <ThreeDotPortal
+      onDetails={onDetails}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onAddVariant={onAddVariant}
+      extraItems={[
+        onDiscount && { label: label('product_discount', 'Discount'), onClick: onDiscount, color: 'orange' },
+        onAdjustStock && { label: label('adjust_stock', 'Adjust stock'), onClick: onAdjustStock, color: 'green' },
+      ]}
+    />
+  )
 }
 
 const CREATED_MONTH_OPTIONS = [
@@ -63,6 +75,7 @@ const CREATED_MONTH_OPTIONS = [
 ]
 
 const PRODUCT_JUMP_OFFSET = 88
+const DEFAULT_META_PILL_COLOR = '#64748b'
 
 function useDebouncedValue(value, delayMs = 180) {
   const [debounced, setDebounced] = useState(value)
@@ -97,6 +110,20 @@ function scrollNodeWithOffset(node, offset = PRODUCT_JUMP_OFFSET) {
   const nodeRect = node.getBoundingClientRect()
   const top = container.scrollTop + (nodeRect.top - containerRect.top) - offset
   container.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
+}
+
+function normalizeBrandLookup(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function parseBrandColorMap(raw) {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch (_) {
+    return {}
+  }
 }
 
 // ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -141,6 +168,7 @@ export default function Products() {
   const [supplierFilter, setSupplierFilter] = useState('all')
   const [modal,        setModal]        = useState(null)
   const [selected,     setSelected]     = useState(null)
+  const [formInitialTab, setFormInitialTab] = useState('basic')
   const [detailProduct,setDetailProduct]= useState(null)
   const [loading,      setLoading]      = useState(true)
   const [refreshingProducts, setRefreshingProducts] = useState(false)
@@ -586,8 +614,8 @@ export default function Products() {
     } catch(e) { notify(e.message || 'Failed', 'error') }
   }
 
-  const catMap = Object.fromEntries(categories.map(c => [c.name, c]))
-  const unitMap = Object.fromEntries(units.map(unit => [unit.name, unit]))
+  const catMap = useMemo(() => Object.fromEntries(categories.map(c => [c.name, c])), [categories])
+  const unitMap = useMemo(() => Object.fromEntries(units.map(unit => [unit.name, unit])), [units])
   const brandOptions = useMemo(() => {
     const fromProducts = (productFilterMeta.brands || [])
       .map((brand) => String(brand || '').trim())
@@ -606,6 +634,10 @@ export default function Products() {
     const selected = brandFilter !== 'all' && brandOptions.includes(brandFilter) ? [brandFilter] : []
     return Array.from(new Set([...selected, ...brandOptions])).slice(0, 40)
   }, [brandFilter, brandOptions])
+  const brandColorMap = useMemo(
+    () => parseBrandColorMap(settings?.product_brand_color_map),
+    [settings?.product_brand_color_map],
+  )
   const branchNameById = useMemo(
     () => new Map(branches.map((branch) => [String(branch.id), branch.name])),
     [branches],
@@ -627,6 +659,43 @@ export default function Products() {
   }
 
   const getProductGallery = (product) => normalizeGallery(product?.image_gallery, product?.image_path || null)
+  const getBrandColor = useCallback(
+    (brandName) => brandColorMap[normalizeBrandLookup(brandName)] || '',
+    [brandColorMap],
+  )
+  const getBranchSummaryLabel = useCallback((product) => {
+    const rows = (product?.branch_stock || [])
+      .filter((entry) => Number(entry?.quantity || 0) > 0)
+      .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))
+    if (!rows.length) return ''
+    const visible = rows.slice(0, 2).map((entry) => `${entry.branch_name || branchNameById.get(String(entry.branch_id)) || entry.branch_id}: ${entry.quantity}`)
+    return rows.length > 2 ? `${visible.join(', ')} +${rows.length - 2}` : visible.join(', ')
+  }, [branchNameById])
+  const renderMetaPill = useCallback((item) => {
+    if (!item?.label) return null
+    const color = item.color || DEFAULT_META_PILL_COLOR
+    if (item.color) {
+      return (
+        <span
+          key={item.key}
+          className="max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+          style={{ background: color, color: getContrastingTextColor(color) }}
+          title={item.label}
+        >
+          {item.label}
+        </span>
+      )
+    }
+    return (
+      <span
+        key={item.key}
+        className={`max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`}
+        title={item.label}
+      >
+        {item.label}
+      </span>
+    )
+  }, [])
   const renderUnitChip = (unitName) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
@@ -689,7 +758,9 @@ export default function Products() {
     const matchGroup =
       groupFilter === 'all'
         ? true
-        : groupFilter === 'parent'
+        : groupFilter === 'grouped'
+          ? isParent || isVariant
+          : groupFilter === 'parent'
           ? isParent && !isVariant
           : groupFilter === 'variant'
             ? isVariant
@@ -1131,6 +1202,12 @@ export default function Products() {
     await load(true)
   }, [fetchProductsByIds, load, pushCreatedProductHistory])
 
+  const openProductFormTab = useCallback((product, tab = 'basic') => {
+    setSelected(product)
+    setFormInitialTab(tab)
+    setModal('form')
+  }, [])
+
   const clearProductStockByIds = useCallback(async (productIds = [], reason = 'Set products out of stock') => {
     if (!productIds.length) return
     const latestProducts = await fetchProductsByIds(productIds)
@@ -1334,7 +1411,7 @@ export default function Products() {
       label: t('product_group') || 'Product group',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-        { id: 'group-grouped', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
+        { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
         { id: 'group-parent', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
         { id: 'group-variant', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1449,11 +1526,15 @@ export default function Products() {
     const marginUsd = p.selling_price_usd - purchaseUsd
     const marginPct = p.selling_price_usd > 0 ? (marginUsd / p.selling_price_usd * 100) : 0
     const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
+    const branchSummaryLabel = branchFilter === 'all' ? getBranchSummaryLabel(p) : ''
     const compactMeta = [
-      selectedBranchName ? { key: 'branch', label: selectedBranchName } : null,
-      p.barcode ? { key: 'barcode', label: p.barcode } : null,
-      p.brand ? { key: 'brand', label: p.brand } : null,
-      p.category ? { key: 'category', label: p.category } : null,
+      selectedBranchName ? { key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
+      branchSummaryLabel ? { key: 'branches', label: branchSummaryLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
+      p.sku ? { key: 'sku', label: p.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' } : null,
+      p.barcode ? { key: 'barcode', label: p.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
+      p.unit ? { key: 'unit', label: p.unit, color: unitMap[p.unit]?.color } : null,
+      p.brand ? { key: 'brand', label: p.brand, color: getBrandColor(p.brand) } : null,
+      p.category ? { key: 'category', label: p.category, color: catMap[p.category]?.color } : null,
     ].filter(Boolean)
     return (
       <tr
@@ -1473,11 +1554,7 @@ export default function Products() {
         <td className="px-3 py-2">
           {compactMeta.length ? (
             <div className="mb-1 flex max-w-[18rem] flex-wrap gap-1">
-              {compactMeta.map((item) => (
-                <span key={item.key} className="max-w-[9rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                  {item.label}
-                </span>
-              ))}
+              {compactMeta.map((item) => renderMetaPill(item))}
             </div>
           ) : null}
           <div className="flex items-center gap-1.5">
@@ -1521,14 +1598,17 @@ export default function Products() {
         <td className="px-2 py-2 text-right" onClick={(e) => e.stopPropagation()}>
           <ThreeDot
             onDetails={() => setDetailProduct(p)}
-            onEdit={() => { setSelected(p); setModal('form') }}
+            onEdit={() => openProductFormTab(p, 'basic')}
             onDelete={() => handleDelete(p)}
             onAddVariant={!p.parent_id ? () => setVariantModal(p) : undefined}
+            onDiscount={() => openProductFormTab(p, 'pricing')}
+            onAdjustStock={() => openProductFormTab(p, 'stock')}
+            t={t}
           />
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr, unitMap])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1562,26 +1642,56 @@ export default function Products() {
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className="max-w-[9.75rem] truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+                <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
               </div>
-              <span className={`flex-shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
-                {mobileStatusLabel}
-              </span>
+              <div className="flex shrink-0 items-start gap-1.5">
+                <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
+                  {mobileStatusLabel}
+                </span>
+                <span onClick={(event) => event.stopPropagation()}>
+                  <ThreeDot
+                    onDetails={() => setDetailProduct(p)}
+                    onEdit={() => openProductFormTab(p, 'basic')}
+                    onDelete={() => handleDelete(p)}
+                    onAddVariant={!p.parent_id ? () => setVariantModal(p) : undefined}
+                    onDiscount={() => openProductFormTab(p, 'pricing')}
+                    onAdjustStock={() => openProductFormTab(p, 'stock')}
+                    t={t}
+                  />
+                </span>
+              </div>
             </div>
-            {p.category && (
-              <span
-                className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[10px]"
-                style={{
-                  background: catMap[p.category]?.color || '#6b7280',
-                  color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
-                }}
-              >
-                {p.category}
-              </span>
-            )}
-            <div className="mt-1 flex flex-nowrap items-center gap-2 overflow-hidden text-[11px]">
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {p.category ? (
+                <span
+                  className="inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px]"
+                  style={{
+                    background: catMap[p.category]?.color || '#6b7280',
+                    color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
+                  }}
+                  title={p.category}
+                >
+                  {p.category}
+                </span>
+              ) : null}
+              {p.brand ? (
+                <span
+                  className={`inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getBrandColor(p.brand) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  style={getBrandColor(p.brand) ? {
+                    background: getBrandColor(p.brand),
+                    color: getContrastingTextColor(getBrandColor(p.brand)),
+                  } : undefined}
+                  title={p.brand}
+                >
+                  {p.brand}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-[5.35rem] text-[11px]">
               <span className="whitespace-nowrap text-red-600">{fmtUSD(purchaseUsd)}</span>
               <span className="text-gray-300 dark:text-gray-600">|</span>
               <span className="whitespace-nowrap text-green-700">{fmtUSD(p.selling_price_usd)}</span>
@@ -1598,21 +1708,11 @@ export default function Products() {
                 </>
               ) : null}
               <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="flex shrink-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
-            </div>
-          </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            <ThreeDot
-              onDetails={() => setDetailProduct(p)}
-              onEdit={() => { setSelected(p); setModal('form') }}
-              onDelete={() => handleDelete(p)}
-              onAddVariant={!p.parent_id ? () => setVariantModal(p) : undefined}
-            />
-          </div>
+              <span className="inline-flex min-w-0 max-w-full items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getProductGallery, handleDelete, isProductSelected, openLightbox, renderUnitChip, t])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getProductGallery, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderUnitChip, t])
 
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -1877,7 +1977,7 @@ export default function Products() {
             </thead>
             <tbody>
               {loading ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-              : visibleProducts.length === 0 ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
+              : visibleProducts.length === 0 ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</td></tr>
               : productSections.map((section) => {
                 const isCollapsed = collapsedProductSections.has(section.id)
                 return (
@@ -1992,7 +2092,7 @@ export default function Products() {
           </div>
         )}
         {loading ? <div className="text-center py-10 text-gray-400">{t('loading')}</div>
-        : visibleProducts.length===0 ? <div className="text-center py-10 text-gray-400">{t('no_data')}</div>
+        : visibleProducts.length===0 ? <div className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</div>
         : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)
           return (
@@ -2079,8 +2179,11 @@ export default function Products() {
       {/* Product detail modal */}
       {detailProduct && (
         <ProductDetailModal
-          p={detailProduct} catMap={catMap} unitMap={unitMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
-          onEdit={()=>{setSelected(detailProduct);setDetailProduct(null);setModal('form')}}
+          p={detailProduct} catMap={catMap} unitMap={unitMap} brandColorMap={brandColorMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
+          onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
+          onAddVariant={!detailProduct.parent_id ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
+          onDiscount={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'pricing') }}
+          onAdjustStock={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'stock') }}
           onDelete={()=>handleDelete(detailProduct)}
           onClose={()=>setDetailProduct(null)}
           onImageClick={(src, gallery, startIndex = 0) => {
@@ -2171,7 +2274,7 @@ export default function Products() {
           t={t}
         />
       )}
-      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null)}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
+      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} initialTab={formInitialTab} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
       {variantModal && (
         <VariantFormModal
           parent={variantModal}

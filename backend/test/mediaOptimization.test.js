@@ -99,15 +99,15 @@ runTest('image asset compression enforces the 40KB budget for photos and logos',
   assert.equal(uncompressible.over_budget, true)
 })
 
-runTest('video optimization uses slower clear transcode settings for compact mp4 output', () => {
+runTest('video optimization uses fast upload-friendly transcode settings for mp4 output', () => {
   const args = buildVideoOptimizationArgs({
     inputPath: 'input.mp4',
     outputPath: 'output.mp4',
   })
   assert.deepEqual(args.slice(0, 3), ['-y', '-i', 'input.mp4'])
   assert.equal(args.includes('libx264'), true)
-  assert.equal(args.includes('slow'), true)
-  assert.equal(args.includes('veryfast'), false)
+  assert.equal(args.includes('veryfast'), true)
+  assert.equal(args.includes('slow'), false)
   assert.equal(args.includes('24'), true)
   assert.equal(args.includes('96k'), true)
   const hasScaleLimit = args.some((value) => String(value).includes('1280'))

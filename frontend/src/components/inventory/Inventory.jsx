@@ -46,18 +46,27 @@ function priceCsv(value) {
   return formatPriceNumber(value || 0)
 }
 
+function parseInventoryTimestamp(value) {
+  if (!value) return null
+  const raw = String(value).trim()
+  if (!raw) return null
+  const normalized = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
+  const parsed = new Date(normalized)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 const RFID_INVENTORY_WORKFLOWS = [
-  { id: 'receiving', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
-  { id: 'stock-count', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
-  { id: 'transfer', label: 'Branch transfer', description: 'Scan tags out of one branch and into another so transfer movements keep item identity.' },
-  { id: 'pos-verify', label: 'POS verify', description: 'Use doorway or counter reads to confirm sold items before bagging and reduce missed scans.' },
-  { id: 'returns', label: 'Returns', description: 'Validate returned tags against the original sale before restock, write-off, or supplier return.' },
+  { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
+  { id: 'stock-count', labelKey: 'rfid_workflow_stock_count', descriptionKey: 'rfid_workflow_stock_count_desc', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
+  { id: 'transfer', labelKey: 'rfid_workflow_branch_transfer', descriptionKey: 'rfid_workflow_branch_transfer_desc', label: 'Branch transfer', description: 'Scan tags out of one branch and into another so transfer movements keep item identity.' },
+  { id: 'pos-verify', labelKey: 'rfid_workflow_pos_verify', descriptionKey: 'rfid_workflow_pos_verify_desc', label: 'POS verify', description: 'Use doorway or counter reads to confirm sold items before bagging and reduce missed scans.' },
+  { id: 'returns', labelKey: 'rfid_workflow_returns', descriptionKey: 'rfid_workflow_returns_desc', label: 'Returns', description: 'Validate returned tags against the original sale before restock, write-off, or supplier return.' },
 ]
 
 const RFID_READER_REQUIREMENTS = [
-  'RFID reader gateway must post reads with EPC / TID, antenna, branch, RSSI, and timestamp.',
-  'Each tag must be mapped to a product, variant, lot, carton, or serial-level unit before stock can change.',
-  'Barcode fallback remains available for products that are not tagged or when the reader is offline.',
+  { id: 'gateway', key: 'rfid_requirement_gateway', text: 'RFID reader gateway must post reads with EPC / TID, antenna, branch, RSSI, and timestamp.' },
+  { id: 'mapping', key: 'rfid_requirement_mapping', text: 'Each tag must be mapped to a product, variant, lot, carton, or serial-level unit before stock can change.' },
+  { id: 'fallback', key: 'rfid_requirement_barcode_fallback', text: 'Barcode fallback remains available for products that are not tagged or when the reader is offline.' },
 ]
 
 const INVENTORY_SECTION_OPTIONS = [
@@ -69,12 +78,12 @@ const INVENTORY_SECTION_OPTIONS = [
 ]
 
 const RFID_SECTION_OPTIONS = [
-  { value: 'overview', label: 'Overview', hint: 'Show RFID status, branch lock state, reader readiness, and the pilot checklist.' },
-  { value: 'tagging', label: 'Tagging', hint: 'Link EPC/TID tags to products without changing the master stock ledger.' },
-  { value: 'stock-count', label: 'Stock Count', hint: 'Run a branch-locked scan session and compare RFID presence against barcode stock.' },
-  { value: 'search', label: 'Search', hint: 'Find a product or tag with the handheld reader and browser scan box.' },
-  { value: 'exceptions', label: 'Exceptions', hint: 'Review wrong-branch, unknown, missing, and extra tag detections before applying.' },
-  { value: 'sessions', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
+  { value: 'overview', labelKey: 'rfid_section_overview', hintKey: 'rfid_section_overview_hint', label: 'Overview', hint: 'Show RFID status, branch lock state, reader readiness, and the pilot checklist.' },
+  { value: 'tagging', labelKey: 'rfid_section_tagging', hintKey: 'rfid_section_tagging_hint', label: 'Tagging', hint: 'Link EPC/TID tags to products without changing the master stock ledger.' },
+  { value: 'stock-count', labelKey: 'rfid_section_stock_count', hintKey: 'rfid_section_stock_count_hint', label: 'Stock Count', hint: 'Run a branch-locked scan session and compare RFID presence against barcode stock.' },
+  { value: 'search', labelKey: 'rfid_section_search', hintKey: 'rfid_section_search_hint', label: 'Search', hint: 'Find a product or tag with the handheld reader and browser scan box.' },
+  { value: 'exceptions', labelKey: 'rfid_section_exceptions', hintKey: 'rfid_section_exceptions_hint', label: 'Exceptions', hint: 'Review wrong-branch, unknown, missing, and extra tag detections before applying.' },
+  { value: 'sessions', labelKey: 'rfid_section_sessions', hintKey: 'rfid_section_sessions_hint', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
 ]
 
 export default function Inventory() {
@@ -159,15 +168,23 @@ export default function Inventory() {
       : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || `Branch ${branchFilter}`)
     return {
       connected: false,
-      label: 'Not connected',
+      label: tr('rfid_not_connected', 'Not connected', 'មិនបានភ្ជាប់'),
       branchName,
       readerCount: Number(rfidStatus?.readerCount || 0),
-      activeSession: rfidStatus?.activeSession?.id ? `Session #${rfidStatus.activeSession.id}` : 'No active RFID session',
+      activeSession: rfidStatus?.activeSession?.id ? `${tr('rfid_session', 'Session', 'សម័យ')} #${rfidStatus.activeSession.id}` : tr('rfid_no_active_session', 'No active RFID session', 'មិនមានសម័យ RFID កំពុងដំណើរការ'),
       queuedReads: 0,
       unknownTags: Number(rfidStatus?.exceptionCount || 0),
-      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} tags linked` : 'No reader heartbeat yet',
+      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} ${tr('rfid_tags_linked', 'tags linked', 'ស្លាកបានភ្ជាប់')}` : tr('rfid_no_reader_heartbeat', 'No reader heartbeat yet', 'មិនទាន់មាន heartbeat ពី reader'),
     }
-  }, [branchFilter, branches, rfidStatus, t])
+  }, [branchFilter, branches, rfidStatus, t, tr])
+
+  const rfidSectionOptions = useMemo(() => (
+    RFID_SECTION_OPTIONS.map((option) => ({
+      ...option,
+      label: tr(option.labelKey, option.label),
+      hint: tr(option.hintKey, option.hint),
+    }))
+  ), [tr])
 
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -435,6 +452,38 @@ export default function Inventory() {
     })
   }
 
+  const openMovementProductDetail = useCallback(async (movement) => {
+    const productId = Number(movement?.product_id || 0)
+    const current = productId ? summary.find((product) => Number(product.id) === productId) : null
+    if (current) {
+      setDetailProduct(current)
+      return
+    }
+    if (productId && window.api.getProductsByIds) {
+      try {
+        const result = await window.api.getProductsByIds([productId], { include: 'branch_stock,images' })
+        const product = Array.isArray(result?.items) ? result.items[0] : null
+        if (product) {
+          setDetailProduct(product)
+          return
+        }
+      } catch (_) {}
+    }
+    setDetailProduct({
+      id: productId || movement?.id,
+      name: movement?.product_name || t('product') || 'Product',
+      stock_quantity: Number(movement?.quantity || 0),
+      unit: movement?.unit || '',
+      purchase_price_usd: Number(movement?.unit_cost_usd || 0),
+      purchase_price_khr: Number(movement?.unit_cost_khr || 0),
+      branch_stock: movement?.branch_id ? [{
+        branch_id: movement.branch_id,
+        branch_name: movement.branch_name || '',
+        quantity: Number(movement.quantity || 0),
+      }] : [],
+    })
+  }, [summary, t])
+
   const handleMoveStock = async () => {
     if (moveSaving || !moveModal) return
     const qty = parseFloat(moveForm.quantity)
@@ -522,6 +571,7 @@ export default function Inventory() {
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
     const isVariant = Boolean(p.parent_id)
+    if (groupFilter === 'grouped' && !isParent && !isVariant) return false
     if (groupFilter === 'parent' && (!isParent || isVariant)) return false
     if (groupFilter === 'variant' && !isVariant) return false
     if (groupFilter === 'standalone' && (isParent || isVariant)) return false
@@ -847,9 +897,7 @@ export default function Inventory() {
     const timestamps = visibleMovementGroups
       .map((group) => group.latest_at || group.items?.[0]?.created_at || '')
       .map((raw) => {
-        if (!raw) return null
-        const parsed = new Date(raw.includes('T') ? raw : `${raw}Z`)
-        return Number.isNaN(parsed.getTime()) ? null : parsed
+        return parseInventoryTimestamp(raw)
       })
       .filter(Boolean)
       .sort((left, right) => left.getTime() - right.getTime())
@@ -864,6 +912,10 @@ export default function Inventory() {
 
   const visibleMovementQuantity = useMemo(
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.totalQuantity || 0), 0),
+    [visibleMovementGroups],
+  )
+  const visibleMovementRecordCount = useMemo(
+    () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.items?.length || group.recordCount || 0), 0),
     [visibleMovementGroups],
   )
   const movementActivityRows = useMemo(() => {
@@ -888,9 +940,8 @@ export default function Inventory() {
     const map = new Map()
     visibleMovementGroups.forEach((group) => {
       const raw = group.latest_at || group.items?.[0]?.created_at || ''
-      if (!raw) return
-      const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-      if (Number.isNaN(date.getTime())) return
+      const date = parseInventoryTimestamp(raw)
+      if (!date) return
       const period = movementTimeMode === 'year'
         ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
         : movementTimeMode === 'month'
@@ -962,6 +1013,8 @@ export default function Inventory() {
     { Section: 'Inventory Stats', Metric: 'Movement Group Mode', Value: movementGroupMode },
     { Section: 'Inventory Stats', Metric: 'Movement Sort Direction', Value: movementSortDirection },
     { Section: 'Inventory Stats', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
+    { Section: 'Inventory Stats', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
+    { Section: 'Inventory Stats', Metric: 'Visible Movement Quantity', Value: visibleMovementQuantity },
     { Section: 'Inventory Stats', Metric: 'Visible Products', Value: filteredSummary.length },
     { Section: 'Inventory Stats', Metric: 'Total Products', Value: totalProducts },
     { Section: 'Inventory Stats', Metric: 'Low Stock Count', Value: lowStockCount },
@@ -1006,6 +1059,8 @@ export default function Inventory() {
     totalStoreDiscounts,
     totalValue,
     visibleMovementGroups.length,
+    visibleMovementQuantity,
+    visibleMovementRecordCount,
   ])
 
   const buildInventoryFormulaRows = useCallback(() => ([
@@ -1043,7 +1098,7 @@ export default function Inventory() {
       Section: 'Calculation',
       Metric: 'Visible movement quantity',
       Formula: 'Visible movement quantity = sum(group quantities after filters/grouping)',
-      Example: `${visibleMovementQuantity} units across ${visibleMovementGroups.length} visible movement groups`,
+      Example: `${visibleMovementQuantity} units across ${visibleMovementRecordCount} records in ${visibleMovementGroups.length} visible movement groups`,
     },
   ]), [
     filteredSummary.length,
@@ -1056,6 +1111,7 @@ export default function Inventory() {
     totalRevenue,
     totalValue,
     visibleMovementGroups.length,
+    visibleMovementRecordCount,
     visibleMovementQuantity,
   ])
 
@@ -1068,6 +1124,8 @@ export default function Inventory() {
     { Section: 'Movement Filters', Metric: 'Sort Direction', Value: movementSortDirection },
     { Section: 'Movement Filters', Metric: 'Search', Value: search || '' },
     { Section: 'Movement Filters', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
+    { Section: 'Movement Filters', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
+    { Section: 'Movement Filters', Metric: 'Visible Movement Quantity', Value: visibleMovementQuantity },
   ]), [
     branchFilter,
     branches,
@@ -1078,6 +1136,8 @@ export default function Inventory() {
     movementYearFilter,
     search,
     visibleMovementGroups.length,
+    visibleMovementQuantity,
+    visibleMovementRecordCount,
   ])
 
   const buildInventoryExportContextRows = useCallback(() => ([
@@ -1094,6 +1154,7 @@ export default function Inventory() {
     { Section: 'Export Context', Metric: 'Search', Value: search || '' },
     { Section: 'Export Context', Metric: 'Visible Products', Value: filteredSummary.length },
     { Section: 'Export Context', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
+    { Section: 'Export Context', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
     { Section: 'Export Context', Metric: 'Generated At', Value: new Date().toISOString() },
   ]), [
     branchFilter,
@@ -1110,6 +1171,7 @@ export default function Inventory() {
     stockFilter,
     tab,
     visibleMovementGroups.length,
+    visibleMovementRecordCount,
   ])
 
   const buildMovementRows = useCallback((groups) => groups.map((group) => ({
@@ -1567,7 +1629,7 @@ export default function Inventory() {
         label: t('product_group') || 'Product group',
         options: [
           { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-          { id: 'parents-variants', label: tr('parents_and_variants', 'Parents + variants'), active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
+          { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
           { id: 'parents', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
           { id: 'variants', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
           { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
@@ -1713,7 +1775,7 @@ export default function Inventory() {
 
       <SectionSwitcher
         className="mb-3"
-        label="Inventory"
+        label=""
         options={INVENTORY_SECTION_OPTIONS}
         value={inventorySection}
         onChange={selectInventorySection}
@@ -1978,7 +2040,7 @@ export default function Inventory() {
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
           : tab === 'rfid'
             ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
-            : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${t('tap_for_details')||'click a row for details'}`}
+            : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${visibleMovementRecordCount} records - ${visibleMovementQuantity} quantity - ${t('tap_for_details')||'click a row for details'}`}
       </p>
       ) : null}
 
@@ -2156,7 +2218,7 @@ export default function Inventory() {
                 <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', 'ការផ្លាស់ប្តូរស្តុកដែលពាក់ព័ន្ធ ត្រូវបានដាក់ជាសកម្មភាពតែមួយ ដើម្បីងាយពិនិត្យការលក់ ការត្រឡប់ ការនាំចូល និងការផ្ទេរ។')}</div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups · {visibleMovementRecordCount} records · {visibleMovementQuantity} quantity</div>
                 <ExportMenu
                   label={tr('export', 'Export', 'នាំចេញ')}
                   items={inventoryExportItems}
@@ -2187,7 +2249,7 @@ export default function Inventory() {
                       onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
                     />
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      {section.label} · {section.ids.length} groups
+                      {section.label} · {section.ids.length} groups · {section.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records
                     </div>
                   </label>
                   <div className="flex items-center gap-1">
@@ -2209,7 +2271,7 @@ export default function Inventory() {
                           }}
                           onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
                         />
-                        <span>{actionGroup.label} · {actionGroup.items.length}</span>
+                        <span>{actionGroup.label} · {actionGroup.items.length} groups · {actionGroup.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records</span>
                       </div>
                     ) : null}
                     {actionGroup.items.map((group) => {
@@ -2281,7 +2343,13 @@ export default function Inventory() {
                                       <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">
                                           <Package className="h-4 w-4 text-gray-400" />
-                                          <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
+                                          <button
+                                            type="button"
+                                            className="truncate text-left text-sm font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
+                                            onClick={() => openMovementProductDetail(movement)}
+                                          >
+                                            {movement.product_name || 'Product'}
+                                          </button>
                                         </div>
                                         <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                                           <span>{fmtTime(movement.created_at)}</span>
@@ -2356,7 +2424,7 @@ export default function Inventory() {
                         </td>
                         <td colSpan={8} className="px-4 py-2">
                           <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            <span>{section.label} · {section.ids.length} groups</span>
+                            <span>{section.label} · {section.ids.length} groups · {section.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records</span>
                             <div className="flex items-center gap-1">
                               <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleMovementSectionCollapsed(section.id)}>
                                 {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -2382,7 +2450,7 @@ export default function Inventory() {
                                 />
                               </td>
                               <td colSpan={8} className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                {actionGroup.label} · {actionGroup.items.length} groups
+                                {actionGroup.label} · {actionGroup.items.length} groups · {actionGroup.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records
                               </td>
                             </tr>
                           ) : null}
@@ -2433,7 +2501,7 @@ export default function Inventory() {
                                           </div>
                                           <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
                                             <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('recorded_at')}</div>
-                                            <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{new Date(group.created_at).toLocaleString()}</div>
+                                            <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">{fmtTime(group.created_at)}</div>
                                           </div>
                                         </div>
                                         <div className="space-y-2">
@@ -2443,7 +2511,13 @@ export default function Inventory() {
                                                 <div className="min-w-0 flex-1">
                                                   <div className="flex items-center gap-2">
                                                     <Package className="h-4 w-4 text-gray-400" />
-                                                    <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{movement.product_name || 'Product'}</div>
+                                                    <button
+                                                      type="button"
+                                                      className="truncate text-left text-sm font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
+                                                      onClick={() => openMovementProductDetail(movement)}
+                                                    >
+                                                      {movement.product_name || 'Product'}
+                                                    </button>
                                                   </div>
                                                   <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                                                     <span>{fmtTime(movement.created_at)}</span>
@@ -2482,7 +2556,7 @@ export default function Inventory() {
         <div className="space-y-3">
           <SectionSwitcher
             label="RFID"
-            options={RFID_SECTION_OPTIONS}
+            options={rfidSectionOptions}
             value={rfidSection}
             onChange={setRfidSection}
             storageKey="business-os:inventory:rfid-section"
@@ -2493,23 +2567,23 @@ export default function Inventory() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white">
                   <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  RFID inventory
+                  {tr('rfid_inventory_title', 'RFID inventory', 'ស្តុក RFID')}
                 </div>
                 <p className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
-                  Manage reader readiness, EPC / TID mapping, stock counts, receiving, transfers, POS checks, and exceptions from one Inventory section.
+                  {tr('rfid_inventory_desc', 'Manage reader readiness, EPC / TID mapping, stock counts, receiving, transfers, POS checks, and exceptions from one Inventory section.', 'គ្រប់គ្រង reader, ការភ្ជាប់ EPC / TID, រាប់ស្តុក, ទទួលទំនិញ, ផ្ទេរ, ពិនិត្យ POS និងករណីលើកលែងក្នុងផ្នែកស្តុកតែមួយ។')}
                 </p>
               </div>
               <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${rfidGatewayStatus.connected ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
-                Reader gateway: {rfidGatewayStatus.label}
+                {tr('rfid_reader_gateway', 'Reader gateway', 'Reader gateway')}: {rfidGatewayStatus.label}
               </span>
             </div>
 
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {[
-                ['Reader gateway', `${rfidGatewayStatus.readerCount} online`, rfidGatewayStatus.lastHeartbeat],
-                ['Active session', rfidGatewayStatus.activeSession, rfidGatewayStatus.branchName],
-                ['Queued reads', rfidGatewayStatus.queuedReads, 'Awaiting sync/apply'],
-                ['Unknown tags', rfidGatewayStatus.unknownTags, 'Need product mapping'],
+                [tr('rfid_reader_gateway', 'Reader gateway', 'Reader gateway'), `${rfidGatewayStatus.readerCount} ${tr('online', 'online', 'online')}`, rfidGatewayStatus.lastHeartbeat],
+                [tr('rfid_active_session', 'Active session', 'សម័យសកម្ម'), rfidGatewayStatus.activeSession, rfidGatewayStatus.branchName],
+                [tr('rfid_queued_reads', 'Queued reads', 'ការអានកំពុងរង់ចាំ'), rfidGatewayStatus.queuedReads, tr('rfid_awaiting_sync_apply', 'Awaiting sync/apply', 'កំពុងរង់ចាំ sync/apply')],
+                [tr('rfid_unknown_tags', 'Unknown tags', 'ស្លាកមិនស្គាល់'), rfidGatewayStatus.unknownTags, tr('rfid_need_product_mapping', 'Need product mapping', 'ត្រូវការភ្ជាប់ផលិតផល')],
               ].map(([label, value, note]) => (
                 <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
@@ -2526,36 +2600,36 @@ export default function Inventory() {
             <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">RFID workflows</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Choose a session type before readers start changing stock.</div>
+                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_workflows', 'RFID workflows', 'ដំណើរការ RFID')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{tr('rfid_workflows_desc', 'Choose a session type before readers start changing stock.', 'ជ្រើសប្រភេទសម័យ មុនពេល reader ចាប់ផ្តើមផ្លាស់ប្តូរស្តុក។')}</div>
                 </div>
-                <button type="button" className="btn-primary px-3 py-1.5 text-xs" disabled title="Enable after a reader gateway is connected.">
-                  Start RFID stock count
+                <button type="button" className="btn-primary px-3 py-1.5 text-xs" disabled title={tr('rfid_reader_gateway_required', 'Enable after a reader gateway is connected.', 'បើកបានក្រោយពេលភ្ជាប់ reader gateway។')}>
+                  {tr('rfid_start_stock_count', 'Start RFID stock count', 'ចាប់ផ្តើមរាប់ស្តុក RFID')}
                 </button>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                 {RFID_INVENTORY_WORKFLOWS.map((workflow) => (
                   <div key={workflow.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-                    <div className="font-semibold text-gray-900 dark:text-white">{workflow.label}</div>
-                    <div className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{workflow.description}</div>
+                    <div className="font-semibold text-gray-900 dark:text-white">{tr(workflow.labelKey, workflow.label)}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{tr(workflow.descriptionKey, workflow.description)}</div>
                   </div>
                 ))}
               </div>
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-              <div className="text-sm font-semibold text-gray-900 dark:text-white">Tag lookup and mapping</div>
+              <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_tag_lookup_mapping', 'Tag lookup and mapping', 'ស្វែងរក និងភ្ជាប់ស្លាក')}</div>
               <div className="mt-2 grid gap-2">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">EPC / TID</span>
-                  <input className="input text-sm" placeholder="Paste or scan tag id" disabled title="Reader integration is not connected yet." />
+                  <input className="input text-sm" placeholder={tr('rfid_paste_scan_tag_id', 'Paste or scan tag id', 'បិទភ្ជាប់ ឬស្កេនលេខស្លាក')} disabled title={tr('rfid_reader_not_connected_title', 'Reader integration is not connected yet.', 'មិនទាន់ភ្ជាប់ reader integration។')} />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Map to product or variant</span>
-                  <input className="input text-sm" placeholder="Search product, SKU, barcode, or variant" disabled title="Mapping turns reader scans into stock movements." />
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('rfid_map_product_variant', 'Map to product or variant', 'ភ្ជាប់ទៅផលិតផល ឬវ៉ារ្យ៉ង់')}</span>
+                  <input className="input text-sm" placeholder={tr('rfid_search_product_tag_placeholder', 'Search product, SKU, barcode, or variant', 'ស្វែងរកផលិតផល SKU barcode ឬវ៉ារ្យ៉ង់')} disabled title={tr('rfid_mapping_title', 'Mapping turns reader scans into stock movements.', 'ការភ្ជាប់នេះបម្លែងការស្កេន reader ទៅជាចលនាស្តុក។')} />
                 </label>
                 <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                  Barcode fallback stays available for untagged products, offline readers, and emergency receiving.
+                  {tr('rfid_barcode_fallback_note', 'Barcode fallback stays available for untagged products, offline readers, and emergency receiving.', 'Barcode fallback នៅតែប្រើបានសម្រាប់ផលិតផលមិនមានស្លាក reader ក្រៅបណ្ដាញ និងការទទួលទំនិញបន្ទាន់។')}
                 </div>
               </div>
             </div>
@@ -2564,26 +2638,26 @@ export default function Inventory() {
 
           {(rfidSection === 'all' || rfidSection === 'exceptions') ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
-            <div className="font-semibold">RFID exceptions</div>
-            <div className="mt-1 text-xs">Wrong-location, unknown, missing, and extra tags stay in review until an authorized user applies or dismisses them.</div>
+            <div className="font-semibold">{tr('rfid_exceptions', 'RFID exceptions', 'ករណីលើកលែង RFID')}</div>
+            <div className="mt-1 text-xs">{tr('rfid_exceptions_desc', 'Wrong-location, unknown, missing, and extra tags stay in review until an authorized user applies or dismisses them.', 'ស្លាកខុសទីតាំង មិនស្គាល់ បាត់ ឬលើស នឹងនៅក្នុងការពិនិត្យរហូតដល់អ្នកមានសិទ្ធិអនុម័ត ឬបដិសេធ។')}</div>
           </div>
           ) : null}
 
           {(rfidSection === 'all' || rfidSection === 'sessions') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="text-sm font-semibold text-gray-900 dark:text-white">RFID sessions</div>
-            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Branch, area, reader, ledger totals, confirmed tag presence, and manual apply results are audited per session.</div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_sessions', 'RFID sessions', 'សម័យ RFID')}</div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('rfid_sessions_desc', 'Branch, area, reader, ledger totals, confirmed tag presence, and manual apply results are audited per session.', 'សាខា តំបន់ reader សរុប ledger ស្លាកដែលបានបញ្ជាក់ និងលទ្ធផល apply ដោយដៃ ត្រូវបាន audit តាមសម័យ។')}</div>
           </div>
           ) : null}
 
           {(rfidSection === 'all' || rfidSection === 'overview') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Implementation checklist</div>
+            <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_implementation_checklist', 'Implementation checklist', 'បញ្ជីពិនិត្យការអនុវត្ត')}</div>
             <div className="grid gap-2 md:grid-cols-3">
               {RFID_READER_REQUIREMENTS.map((item, index) => (
-                <div key={item} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
+                <div key={item.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
                   <span className="mr-1 font-bold text-blue-600 dark:text-blue-300">{index + 1}.</span>
-                  {item}
+                  {tr(item.key, item.text)}
                 </div>
               ))}
             </div>

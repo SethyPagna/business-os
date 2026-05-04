@@ -56,6 +56,7 @@ export default function Branches() {
    * 2.2 UI selection/expansion state.
    */
   const [branches, setBranches] = useState([])
+  const [branchSummary, setBranchSummary] = useState(null)
   const [tab, setTab] = useState('branches')
   const [modal, setModal] = useState(null)
   const [selected, setSelected] = useState(null)
@@ -93,11 +94,13 @@ export default function Branches() {
       try {
         const result = await settleLoaderMap({
           branches: () => window.api.getBranches(),
+          branchSummary: () => window.api.getBranchSummary?.().catch(() => null),
           transfers: () => window.api.getTransfers({}),
         })
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
         if (Array.isArray(result.values.branches)) setBranches(result.values.branches)
+        if (result.values.branchSummary && typeof result.values.branchSummary === 'object') setBranchSummary(result.values.branchSummary)
         if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers)
 
         if (!result.hasAnySuccess) {
@@ -152,7 +155,7 @@ export default function Branches() {
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products') void load(true)
+    if (channel === 'branches' || channel === 'products' || channel === 'inventory') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
@@ -419,6 +422,24 @@ export default function Branches() {
 
       <ActionHistoryBar history={actionHistory} className="mb-4" />
 
+      {branchSummary ? (
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          {[
+            [t('branches') || 'Branches', branchSummary.branch_count ?? activeBranches.length, 'text-blue-600 dark:text-blue-300'],
+            [t('products_total') || 'Products', branchSummary.total_products || 0, 'text-slate-700 dark:text-slate-100'],
+            [t('in_stock') || 'In stock', branchSummary.in_stock || 0, 'text-emerald-600 dark:text-emerald-300'],
+            [t('low_stock') || 'Low stock', branchSummary.low_stock || 0, 'text-amber-600 dark:text-amber-300'],
+            [t('out_of_stock') || 'Out of stock', branchSummary.out_of_stock || 0, 'text-red-600 dark:text-red-300'],
+            [t('stock_value') || 'Value', fmtUSD(Number(branchSummary.stock_value_usd || 0)), 'text-cyan-600 dark:text-cyan-300'],
+          ].map(([label, value, color]) => (
+            <div key={label} className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800/70">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{label}</div>
+              <div className={`mt-1 text-lg font-bold ${color}`}>{value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {loadError && !loading && !branches.length && !transfers.length ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
           <div className="font-semibold">{t('page_load_warning') || 'Page could not finish loading'}</div>
@@ -500,10 +521,7 @@ export default function Branches() {
             const stockCount = Number(stockSummary.in_stock_products ?? stockSummary.positive_products ?? inStock.length)
             const lowStockCount = Number(stockSummary.low_stock_products ?? 0)
             const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
-            const totalValue = inStock.reduce(
-              (sum, product) => sum + Number(product.branch_quantity || 0) * Number(product.purchase_price_usd || 0),
-              0,
-            )
+            const totalValue = Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? 0)
 
             return (
               <div key={branch.id} className={`card overflow-hidden transition-all ${selectedIds.has(branch.id) ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
@@ -561,12 +579,12 @@ export default function Branches() {
                               <span>{t('in_stock') || 'In stock'}: <span className="text-green-600">{stockCount}</span></span>
                               <span>{t('low_stock') || 'Low stock'}: <span className="text-amber-600">{lowStockCount}</span></span>
                               <span>{t('out_of_stock') || 'Out of stock'}: <span className="text-red-600">{outStockCount}</span></span>
-                              <span>{t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? totalValue))}</span></span>
+                              <span>{t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(totalValue)}</span></span>
                             </div>
                             <span className="hidden text-sm font-semibold text-gray-700 dark:text-gray-300">
                               {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(stockCount))}
                               {' · '}
-                              {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(Number(stockSummary.positive_value_usd ?? totalValue))}</span>
+                              {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
                             </span>
                             <button onClick={() => setModal('transfer')} className="text-xs text-blue-500 hover:underline">
                               {t('transfer_stock_link') || 'Transfer stock'}
@@ -584,9 +602,11 @@ export default function Branches() {
                                   <div
                                     key={product.id}
                                     className={`rounded-lg border p-2.5 text-xs ${
-                                      Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
-                                        ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
-                                        : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
+                                      Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
+                                        ? 'border-red-200 bg-red-50 dark:border-red-700 dark:bg-red-900/20'
+                                        : Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
+                                          ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
+                                          : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
                                     }`}
                                   >
                                     <div className="mb-0.5 truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>

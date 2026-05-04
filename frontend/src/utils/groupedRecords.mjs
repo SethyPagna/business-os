@@ -1,7 +1,11 @@
 import { compareInitialKeys, getInitialKey } from './initials.mjs'
 
 function toDate(value) {
-  const parsed = new Date(value || '')
+  if (!value) return null
+  const raw = String(value).trim()
+  if (!raw) return null
+  const normalized = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
+  const parsed = new Date(normalized)
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 

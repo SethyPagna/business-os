@@ -95,9 +95,9 @@ window.api = {
       cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       connectWS()
       startHealthCheck()
+      methods.retryPendingSyncNow?.().catch(() => {})
     } else {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
-      methods.discardPendingSyncQueue?.().catch(() => {})
       disconnectWS()
     }
   },
@@ -142,17 +142,23 @@ if (typeof window !== 'undefined') {
       connectWS()
     }
     startHealthCheck()
+    methods.retryPendingSyncNow?.().catch(() => {})
   })
   window.addEventListener('focus', () => {
     if (getAuthSessionToken()) {
       connectWS()
     }
+    methods.retryPendingSyncNow?.().catch(() => {})
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     if (getAuthSessionToken()) {
       connectWS()
     }
+    methods.retryPendingSyncNow?.().catch(() => {})
+  })
+  window.addEventListener('sync:reconnected', () => {
+    methods.retryPendingSyncNow?.().catch(() => {})
   })
 }
 
@@ -192,12 +198,11 @@ if (typeof window !== 'undefined') {
       } catch (_) {}
     }
 
-    methods.discardPendingSyncQueue?.().catch(() => {})
-
     if (url) {
       setSyncServerUrl(url)
       if (authToken) connectWS()
       startHealthCheck()  // ping every 12 s so offline?nline recovery works
+      methods.retryPendingSyncNow?.().catch(() => {})
     }
   } catch (e) {
     console.warn('[web-api] Bootstrap error:', e.message)

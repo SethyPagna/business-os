@@ -16,13 +16,16 @@ assert.match(sectionSwitcher, /All/)
 for (const [name, source] of [
   ['Inventory', inventory],
   ['Settings', settings],
-  ['Backup', backup],
   ['Loyalty', loyalty],
 ]) {
   assert.match(source, /SectionSwitcher/, `${name} should use the shared section switcher`)
   assert.match(source, /sectionStorageKey|storageKey/, `${name} should persist focused section state`)
   assert.match(source, /LoadingWatchdog/, `${name} should use the loading watchdog`)
 }
+
+assert.match(backup, /SectionSwitcher/, 'Backup should use the shared section switcher')
+assert.doesNotMatch(backup, /sectionStorageKey|storageKey/, 'Backup should not auto-restore heavy sections on page entry')
+assert.match(backup, /LoadingWatchdog/, 'Backup should use the loading watchdog')
 
 assert.match(inventory, /Stats \+ sections/)
 assert.match(inventory, /showInventorySections/)
