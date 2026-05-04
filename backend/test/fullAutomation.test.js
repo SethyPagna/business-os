@@ -49,6 +49,7 @@ runTest('full automation launcher and policy are present', () => {
     'npm.cmd --prefix frontend run verify:performance',
     'npm.cmd --prefix frontend run build',
     'verify-docker-release.js',
+    'verify-hardening-policy.js',
     'verify-r2-object-store.mjs',
     'docker-release.ps1',
     '/health',

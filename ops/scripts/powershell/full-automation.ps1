@@ -17,6 +17,7 @@ $PolicyPath = Join-Path $Root 'ops\automation\business-os-automation.json'
 $DockerRelease = Join-Path $Root 'ops\scripts\powershell\docker-release.ps1'
 $CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\verify-cloudflare-automation.mjs'
 $R2Verify = Join-Path $Root 'ops\scripts\runtime\verify-r2-object-store.mjs'
+$HardeningVerify = Join-Path $Root 'ops\scripts\verify-hardening-policy.js'
 
 function Write-Step($message) { Write-Host "[STEP] $message" }
 function Write-Ok($message) { Write-Host "[OK] $message" }
@@ -71,6 +72,9 @@ function Invoke-TestGate {
   }
   Invoke-Checked 'Secret hygiene verification' {
     node ops\scripts\verify-secret-hygiene.js
+  }
+  Invoke-Checked 'Hardening policy verification' {
+    node $HardeningVerify
   }
   Invoke-Checked 'Live R2 object write/read/delete verification' {
     node $R2Verify

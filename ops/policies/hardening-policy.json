@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "name": "Business OS hardening policy",
+  "purpose": "Regression gates for security, offline sync, backup performance, media handling, Cloudflare automation, and release integration.",
+  "trackedOnly": true,
+  "rules": [
+    {
+      "name": "Cookie-only session transport",
+      "files": [
+        {
+          "path": "backend/src/sessionAuth.js",
+          "mustContain": ["setAuthSessionCookie", "httpOnly: true", "sameSite: 'lax'", "secure: isSecureRequest"],
+          "mustNotContain": ["x-auth-session", "authorization", "searchParams.get('token')"]
+        },
+        {
+          "path": "frontend/src/api/http.js",
+          "mustContain": ["credentials: 'include'", "cookie credentials"],
+          "mustNotContain": ["x-auth-session", "getAuthSessionToken", "setAuthSessionToken", "AUTH_TOKEN"]
+        },
+        {
+          "path": "frontend/src/web-api.js",
+          "mustNotContain": ["getAuthSessionToken", "setAuthSessionToken", "AUTH_TOKEN"]
+        }
+      ]
+    },
+    {
+      "name": "Owned auth, no active Supabase runtime",
+      "mustNotExist": [
+        "backend/src/services/supabaseAuth.js",
+        "ops/config/supabase/001-auth-only-setup.sql",
+        "ops/readme/README-supabase-auth.md"
+      ],
+      "files": [
+        {
+          "path": "backend/src/db/postgresSchema.sql",
+          "mustContain": ["supabase_user_id text", "google_subject text", "google_email text"]
+        },
+        {
+          "path": "backend/src/routes/auth.js",
+          "mustContain": ["router.get('/oauth/callback'", "router.post('/oauth/unlink'", "setAuthSessionCookie"],
+          "mustNotContain": ["services/supabaseAuth", "isSupabaseAuthConfigured", "supabase_user_id ="]
+        }
+      ]
+    },
+    {
+      "name": "Service worker app-shell only cache",
+      "files": [
+        {
+          "path": "frontend/public/sw.js",
+          "mustContain": [
+            "APP_SHELL_URLS",
+            "OUTBOX_SYNC_TAG",
+            "credentials: 'include'",
+            "BUSINESS_OS_APP_UPDATE_AVAILABLE",
+            "pathname.startsWith('/api/')",
+            "pathname.startsWith('/uploads/')",
+            "pathname.startsWith('/files/')",
+            "pathname.startsWith('/portal/uploads/')",
+            "isCacheableStaticPath",
+            "request.method !== 'GET'"
+          ],
+          "mustNotContain": ["OFFLINE_AUTH_SESSION_TOKEN_KEY", "x-auth-session"]
+        }
+      ]
+    },
+    {
+      "name": "Encrypted offline vault and versioned sync",
+      "files": [
+        {
+          "path": "frontend/src/api/localDb.js",
+          "mustContain": ["sync_outbox", "offline_vault", "offline_file_chunks", "encrypted_payload"]
+        },
+        {
+          "path": "frontend/src/web-api.js",
+          "mustContain": [
+            "OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000",
+            "PBKDF2",
+            "iterations: 250_000",
+            "AES-GCM",
+            "navigator.storage.persist",
+            "queueBusinessOutboxOperation",
+            "syncUnlockedOfflineOutbox",
+            "syncUnlockedOfflineFileChunks",
+            "payload_digest"
+          ]
+        },
+        {
+          "path": "backend/src/routes/sync.js",
+          "mustContain": [
+            "OUTBOX_OPERATION_MAP",
+            "onlineOnly: true",
+            "client_request_id",
+            "base_updated_at",
+            "payload_digest",
+            "write_conflict",
+            "unsupported_operation",
+            "CHUNK_SIZE_BYTES = 1024 * 1024",
+            "/files/chunks/init",
+            "/files/chunks/:uploadId/chunk",
+            "/files/chunks/:uploadId/complete"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Non-blocking backup, Drive, and media work",
+      "files": [
+        {
+          "path": "backend/src/routes/system/index.js",
+          "mustContain": ["startSystemJob('google_drive_sync'", "startSystemJob('backup_export_folder'", "startSystemJob('backup_restore_folder'", "applyRouteRateLimit"],
+          "mustNotContain": ["/backup/export", "/backup/import"]
+        },
+        {
+          "path": "backend/src/routes/files.js",
+          "mustContain": ["routeRateLimit", "validateUploadedFile", "compressUpload"]
+        },
+        {
+          "path": "backend/src/routes/products.js",
+          "mustContain": ["products:upload_image", "validateUploadedFile", "compressUpload"]
+        },
+        {
+          "path": "backend/src/routes/users.js",
+          "mustContain": ["users:avatar_upload", "validateUploadedFile", "compressUpload"]
+        }
+      ]
+    },
+    {
+      "name": "Cloudflare and R2 release automation",
+      "files": [
+        {
+          "path": "ops/scripts/runtime/verify-cloudflare-automation.mjs",
+          "mustContain": ["upsertAccessApp", "http_request_firewall_custom", "http_ratelimit", "cf.colo.id", "Business OS Admin", "managed_challenge"]
+        },
+        {
+          "path": "ops/scripts/runtime/verify-r2-object-store.mjs",
+          "mustContain": ["PutObjectCommand", "GetObjectCommand", "DeleteObjectCommand", "HeadObjectCommand", "R2 disappearance confirmed"],
+          "mustNotContain": ["S3_SECRET_ACCESS_KEY="]
+        },
+        {
+          "path": "ops/scripts/powershell/full-automation.ps1",
+          "mustContain": ["verify-cloudflare-automation.mjs", "verify-r2-object-store.mjs", "/sw.js secure offline sync check passed"]
+        }
+      ]
+    },
+    {
+      "name": "Server hardening and fast static assets",
+      "files": [
+        {
+          "path": "backend/src/serverUtils.js",
+          "mustContain": [
+            "Content-Security-Policy",
+            "object-src 'none'",
+            "frame-ancestors 'self'",
+            "X-Content-Type-Options",
+            "Permissions-Policy",
+            "Cross-Origin-Opener-Policy",
+            "Cache-Control', 'public, max-age=31536000, immutable",
+            "credentials: true"
+          ],
+          "mustNotContain": ["https://*.supabase.co", "'Authorization'"]
+        }
+      ]
+    }
+  ]
+}
