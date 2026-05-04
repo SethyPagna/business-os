@@ -550,7 +550,12 @@ CREATE TABLE public.google_drive_sync_entries (
     md5_checksum text,
     byte_size bigint DEFAULT 0,
     local_modified_at text,
-    last_synced_at text DEFAULT CURRENT_TIMESTAMP
+    last_synced_at text DEFAULT CURRENT_TIMESTAMP,
+    upload_session_url text,
+    upload_offset bigint DEFAULT 0,
+    content_sha256 text,
+    last_error text,
+    retry_count bigint DEFAULT 0
 );
 
 

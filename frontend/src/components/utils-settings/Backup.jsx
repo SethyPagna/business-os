@@ -100,21 +100,48 @@ function PrimaryActionButton({ children, ...props }) {
   )
 }
 
-function JobProgressCard({ job, copy, onClear }) {
+function formatElapsed(createdAt) {
+  const started = Date.parse(createdAt || '')
+  if (!Number.isFinite(started)) return ''
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${seconds % 60}s`
+}
+
+function JobProgressCard({ job, copy, onClear, onCancel }) {
   if (!job) return null
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)))
   const status = String(job.status || '').toLowerCase()
   const failed = status === 'failed' || status === 'cancelled'
   const completed = status === 'completed'
   const result = job.result || {}
+  const metrics = job.metrics || {}
+  const elapsed = formatElapsed(job.started_at || job.created_at)
   return (
-    <div className={`mt-4 rounded-2xl border p-4 text-sm ${failed ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200' : completed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100'}`}>
+    <div data-testid="backup-job-progress" className={`mt-4 rounded-2xl border p-4 text-sm ${failed ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200' : completed ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200' : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100'}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="font-semibold">{job.message || copy('job_running', 'Working...')}</div>
-          <div className="mt-1 text-xs opacity-80">
+          <div className="mt-1 text-xs opacity-80" data-testid="backup-job-meta">
             {job.type || 'system job'} Â· {job.phase || job.status || 'queued'}
           </div>
+          {elapsed || job.updated_at ? (
+            <div className="mt-1 text-xs opacity-80">
+              {elapsed ? `${copy('job_elapsed', 'Elapsed')}: ${elapsed}` : ''}
+              {job.updated_at ? ` / ${copy('job_updated', 'Updated')}: ${new Date(job.updated_at).toLocaleTimeString()}` : ''}
+            </div>
+          ) : null}
+          {metrics.currentFile || metrics.currentTable || metrics.filesTotal || metrics.retryCount || metrics.totalBytes ? (
+            <div className="mt-2 grid gap-1 rounded-xl border border-current/20 bg-white/50 p-3 text-xs dark:bg-slate-950/30 sm:grid-cols-2">
+              {metrics.currentFile ? <div className="min-w-0 break-all"><span className="font-semibold">{copy('job_current_file', 'File')}:</span> {metrics.currentFile}</div> : null}
+              {metrics.currentTable ? <div><span className="font-semibold">{copy('job_current_table', 'Table')}:</span> {metrics.currentTable}</div> : null}
+              {metrics.filesTotal ? <div><span className="font-semibold">{copy('job_files', 'Files')}:</span> {Number(metrics.filesProcessed || 0)} / {metrics.filesTotal}</div> : null}
+              {metrics.currentTableTotal ? <div><span className="font-semibold">{copy('job_rows', 'Rows')}:</span> {Number(metrics.currentTableRows || 0)} / {metrics.currentTableTotal}</div> : null}
+              {metrics.totalBytes ? <div><span className="font-semibold">{copy('job_uploaded', 'Uploaded')}:</span> {Math.round(Number(metrics.uploadedBytes || 0) / 1024 / 1024)} / {Math.round(Number(metrics.totalBytes || 0) / 1024 / 1024)} MB</div> : null}
+              {metrics.retryCount ? <div><span className="font-semibold">{copy('job_retries', 'Retries')}:</span> {metrics.retryCount}</div> : null}
+            </div>
+          ) : null}
           {job.error ? <div className="mt-2 break-words text-xs font-medium">{job.error}</div> : null}
           {result.packageId || result.localPath || result.objectPrefix ? (
             <div className="mt-2 rounded-xl border border-current/20 bg-white/50 p-3 text-xs dark:bg-slate-950/30">
@@ -125,8 +152,12 @@ function JobProgressCard({ job, copy, onClear }) {
             </div>
           ) : null}
         </div>
-        {completed || failed ? (
-          <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onClear}>
+        {job.cancellable && !completed && !failed ? (
+          <button type="button" data-testid="backup-job-cancel" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => onCancel?.(job)}>
+            {copy('cancel_job', 'Cancel job')}
+          </button>
+        ) : completed || failed ? (
+          <button type="button" data-testid="backup-job-clear" className="btn-secondary px-3 py-1.5 text-xs" onClick={onClear}>
             {copy('clear', 'Clear')}
           </button>
         ) : null}
@@ -204,11 +235,11 @@ function IntegrationDoctorCard({ copy, notify, active }) {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <PathActionButton onClick={() => runDoctor(false)} disabled={!!busy}>
+          <PathActionButton data-testid="backup-doctor-refresh" onClick={() => runDoctor(false)} disabled={!!busy}>
             <RefreshCw className={`h-4 w-4 ${busy === 'quick' ? 'animate-spin' : ''}`} />
             {busy === 'quick' ? copy('checking', 'Checking...') : copy('refresh', 'Refresh')}
           </PathActionButton>
-          <PrimaryActionButton onClick={() => runDoctor(true)} disabled={!!busy}>
+          <PrimaryActionButton data-testid="backup-doctor-deep" onClick={() => runDoctor(true)} disabled={!!busy}>
             <RefreshCw className={`h-4 w-4 ${busy === 'deep' ? 'animate-spin' : ''}`} />
             {busy === 'deep' ? copy('checking', 'Checking...') : copy('run_deep_doctor', 'Run storage test')}
           </PrimaryActionButton>
@@ -571,6 +602,21 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     setBusy('')
   }, [])
 
+  const cancelActiveJob = useCallback(async (job) => {
+    if (!job?.id || actionLockRef.current) return
+    if (!beginAction('cancel')) return
+    try {
+      const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
+      const nextJob = result?.item || result
+      if (nextJob && isMountedRef.current) setActiveJob(nextJob)
+      notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
+    } catch (error) {
+      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      finishAction('cancel')
+    }
+  }, [beginAction, copy, finishAction, notify])
+
   const savePreferences = async () => {
     if (!beginAction('save')) return
     try {
@@ -717,7 +763,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     }
   }
 
-  const activeDriveJobRunning = ['queued', 'running'].includes(String(activeJob?.status || '').toLowerCase())
+  const activeDriveJobRunning = ['queued', 'running', 'cancelling'].includes(String(activeJob?.status || '').toLowerCase())
 
   return (
     <div className="card p-5 sm:p-6">
@@ -793,6 +839,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
               <button
                 key={hours}
                 type="button"
+                data-testid={`backup-drive-preset-${hours}h`}
                 className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
                   Number(form.syncIntervalMinutes) === hours * 60
                     ? 'border-blue-500 bg-blue-600 text-white'
@@ -888,27 +935,27 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         details={busy ? `Google Drive action: ${busy}` : ''}
       />
 
-      <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+      <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} onCancel={cancelActiveJob} />
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <PrimaryActionButton onClick={savePreferences} disabled={!!busy}>
+        <PrimaryActionButton data-testid="backup-drive-save" onClick={savePreferences} disabled={!!busy}>
           {busy === 'save' ? copy('saving', 'Saving...') : copy('save', 'Save')}
         </PrimaryActionButton>
-        <PathActionButton onClick={connectGoogleDrive} disabled={!!busy}>
+        <PathActionButton data-testid="backup-drive-connect" onClick={connectGoogleDrive} disabled={!!busy}>
           <Link2 className="h-4 w-4" />
           {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
         </PathActionButton>
-        <PathActionButton onClick={syncNow} disabled={!!busy || activeDriveJobRunning || !status?.connected}>
+        <PathActionButton data-testid="backup-drive-sync-now" onClick={syncNow} disabled={!!busy || activeDriveJobRunning || !status?.connected}>
           <RefreshCw className="h-4 w-4" />
           {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
         </PathActionButton>
         {status?.connected ? (
-          <PathActionButton onClick={disconnect} disabled={!!busy}>
+          <PathActionButton data-testid="backup-drive-disconnect" onClick={disconnect} disabled={!!busy}>
             <Link2Off className="h-4 w-4" />
             {busy === 'disconnect' ? copy('disconnecting', 'Disconnecting...') : copy('disconnect', 'Disconnect')}
           </PathActionButton>
         ) : null}
-        <PathActionButton onClick={forgetCredentials} disabled={!!busy}>
+        <PathActionButton data-testid="backup-drive-forget" onClick={forgetCredentials} disabled={!!busy}>
           <Link2Off className="h-4 w-4" />
           {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
         </PathActionButton>
@@ -959,6 +1006,7 @@ function BackupOverview({ copy, onSelect }) {
           <button
             key={entry.id}
             type="button"
+            data-testid={`backup-overview-${entry.id}`}
             className="min-h-[112px] rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
             onClick={() => onSelect(entry.id)}
           >
@@ -1119,7 +1167,22 @@ export default function Backup() {
     }
   }
 
-  const activeBackupJobRunning = ['queued', 'running'].includes(String(activeJob?.status || '').toLowerCase())
+  const activeBackupJobRunning = ['queued', 'running', 'cancelling'].includes(String(activeJob?.status || '').toLowerCase())
+
+  const cancelActiveBackupJob = useCallback(async (job) => {
+    if (!job?.id || actionLockRef.current) return
+    if (!beginBackupAction('cancel')) return
+    try {
+      const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
+      const nextJob = result?.item || result
+      if (nextJob && aliveRef.current) setActiveJob(nextJob)
+      notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
+    } catch (error) {
+      notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
+    } finally {
+      finishBackupAction('cancel')
+    }
+  }, [beginBackupAction, copy, finishBackupAction, notify])
 
   return (
     <div className="page-scroll p-4 sm:p-6">
@@ -1144,13 +1207,13 @@ export default function Backup() {
           onRetry={() => setLoading('')}
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
-        <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+        <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} onCancel={cancelActiveBackupJob} />
         {backupSection === 'all' ? <BackupOverview copy={copy} onSelect={setBackupSection} /> : null}
         {showBackupSection('doctor') ? (
         <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
         ) : null}
         {showBackupSection('export') ? (
-        <div className="card p-5 sm:p-6">
+        <div className="card p-5 sm:p-6" data-testid="backup-export-section">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderOutput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             {copy('export_backup_title', 'Export backup')}
@@ -1168,7 +1231,7 @@ export default function Backup() {
 
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderExport} disabled={!!loading || activeBackupJobRunning}>
+              <PrimaryActionButton data-testid="backup-export-create" onClick={handleFolderExport} disabled={!!loading || activeBackupJobRunning}>
                 <ArchiveRestore className="h-4 w-4" />
                 {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </PrimaryActionButton>
@@ -1205,7 +1268,7 @@ export default function Backup() {
         ) : null}
 
         {showBackupSection('restore') ? (
-        <div className="card p-5 sm:p-6">
+        <div className="card p-5 sm:p-6" data-testid="backup-restore-section">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
             <FolderInput className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             {copy('import_backup_title', 'Restore backup')}
@@ -1216,7 +1279,7 @@ export default function Backup() {
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
+              <PrimaryActionButton data-testid="backup-restore-start" onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
                 <Upload className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>

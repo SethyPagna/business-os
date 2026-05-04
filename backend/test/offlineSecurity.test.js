@@ -24,6 +24,8 @@ const syncSource = fs.existsSync(path.join(__dirname, '..', 'src/routes/sync.js'
   ? read('src/routes/sync.js')
   : ''
 const serverUtilsSource = read('src/serverUtils.js')
+const maintenanceLockSource = read('src/maintenanceLock.js')
+const systemRouteSource = read('src/routes/system/index.js')
 
 runTest('auth sessions are issued as HttpOnly cookies and cleared on logout', () => {
   assert.match(sessionSource, /function setAuthSessionCookie/)
@@ -73,4 +75,12 @@ runTest('Cloudflare Access readiness is reported without hard lockout', () => {
   assert.match(serverUtilsSource, /cf-access-authenticated-user-email/i)
   assert.match(serverUtilsSource, /cf-access-jwt-assertion/i)
   assert.match(syncSource, /cloudflareAccess/)
+})
+
+runTest('maintenance lock pauses offline replay and business writes during restore', () => {
+  assert.match(serverSource, /maintenanceWriteGuard/)
+  assert.match(maintenanceLockSource, /system_busy/)
+  assert.match(maintenanceLockSource, /status\(423\)/)
+  assert.match(maintenanceLockSource, /\/api\/system\/jobs\//)
+  assert.match(systemRouteSource, /withMaintenanceLock/)
 })

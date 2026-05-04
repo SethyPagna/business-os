@@ -311,6 +311,18 @@ async function syncUnlockedOfflineOutbox(options = {}) {
   try {
     response = await apiFetch('POST', '/api/sync/outbox', { operations })
   } catch (error) {
+    if (Number(error?.status || 0) === 423 || error?.code === 'system_busy') {
+      for (const operation of operations) {
+        await dexieDb.sync_outbox.update(operation.row_key, {
+          status: 'retry',
+          error: error?.message || 'System maintenance is running. Offline sync will retry.',
+          retry_at: new Date(Date.now() + 60_000).toISOString(),
+          updated_at: new Date().toISOString(),
+        }).catch(() => {})
+      }
+      dispatchOutboxProgress({ status: 'paused', code: 'system_busy', total: operations.length, failed: 0 })
+      return { success: false, paused: true, status: 'system_busy', synced: 0, conflicts: 0, failed: 0 }
+    }
     for (const operation of operations) {
       await dexieDb.sync_outbox.update(operation.row_key, {
         status: 'failed',
@@ -407,12 +419,13 @@ async function syncUnlockedOfflineFileChunks(options = {}) {
       dispatchOutboxFileProgress({ upload_id: uploadId, status: 'synced', completed, total: uploadIds.length })
     } catch (error) {
       failed += 1
+      const paused = Number(error?.status || 0) === 423 || error?.code === 'system_busy'
       await Promise.all(rows.map((row) => dexieDb.offline_file_chunks.update(row._seq, {
-        status: row.status === 'synced' ? 'synced' : 'failed',
-        error: error?.message || 'Offline file sync failed.',
+        status: row.status === 'synced' ? 'synced' : (paused ? 'pending' : 'failed'),
+        error: error?.message || (paused ? 'System maintenance is running. Offline file sync will retry.' : 'Offline file sync failed.'),
         updated_at: new Date().toISOString(),
       }).catch(() => {})))
-      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'failed', error: error?.message || 'Offline file sync failed.' })
+      dispatchOutboxFileProgress({ upload_id: uploadId, status: paused ? 'paused' : 'failed', error: error?.message || (paused ? 'System maintenance is running.' : 'Offline file sync failed.') })
     }
   }
   return { success: failed === 0, completed, failed }

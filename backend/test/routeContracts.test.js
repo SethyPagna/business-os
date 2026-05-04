@@ -87,6 +87,7 @@ runTest('system router registers non-blocking job and backup routes', () => {
   const router = require('../src/routes/system')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/jobs/:id'), 'missing /api/system/jobs/:id')
+  assert.ok(paths.includes('/jobs/:id/cancel'), 'missing /api/system/jobs/:id/cancel')
   assert.ok(paths.includes('/jobs'), 'missing /api/system/jobs')
   assert.ok(paths.includes('/backups'), 'missing /api/system/backups')
   assert.ok(paths.includes('/backups/:id'), 'missing /api/system/backups/:id')

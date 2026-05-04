@@ -18,6 +18,7 @@ $DockerRelease = Join-Path $Root 'ops\scripts\powershell\docker-release.ps1'
 $CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\verify-cloudflare-automation.mjs'
 $R2Verify = Join-Path $Root 'ops\scripts\runtime\verify-r2-object-store.mjs'
 $HardeningVerify = Join-Path $Root 'ops\scripts\verify-hardening-policy.js'
+$BackupReliabilityVerify = Join-Path $Root 'ops\scripts\verify-backup-reliability.js'
 
 function Write-Step($message) { Write-Host "[STEP] $message" }
 function Write-Ok($message) { Write-Host "[OK] $message" }
@@ -75,6 +76,9 @@ function Invoke-TestGate {
   }
   Invoke-Checked 'Hardening policy verification' {
     node $HardeningVerify
+  }
+  Invoke-Checked 'Backup reliability verification' {
+    node $BackupReliabilityVerify
   }
   Invoke-Checked 'Live R2 object write/read/delete verification' {
     node $R2Verify

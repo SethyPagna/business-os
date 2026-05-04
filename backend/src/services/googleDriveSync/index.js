@@ -21,6 +21,7 @@ const {
   selectExpiredDriveSyncVersions,
 } = require('./versioning')
 const { createFinalBackupPackage } = require('../backupPackages')
+const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
@@ -29,6 +30,8 @@ const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DRIVE_SYNC_MIN_INTERVAL_SECONDS = 60 * 60
 const DRIVE_SYNC_MAX_INTERVAL_SECONDS = 24 * 60 * 60
 const DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS = 60 * 60
+const DRIVE_RESUMABLE_THRESHOLD_BYTES = 5 * 1024 * 1024
+const DRIVE_RESUMABLE_CHUNK_BYTES = 8 * 1024 * 1024
 
 const SETTINGS_KEYS = {
   enabled: 'google_drive_sync_enabled',
@@ -58,6 +61,10 @@ const runtimeState = {
   lastReason: '',
   lastSummary: null,
   lastError: '',
+  currentFile: '',
+  uploadedBytes: 0,
+  totalBytes: 0,
+  retryCount: 0,
 }
 
 const pendingOauthStates = new Map()
@@ -168,7 +175,8 @@ function getDriveSyncConfig() {
 
 function getDriveSyncEntriesMap() {
   const rows = db.prepare(`
-    SELECT relative_path, item_type, remote_file_id, mime_type, md5_checksum, byte_size, local_modified_at, last_synced_at
+    SELECT relative_path, item_type, remote_file_id, mime_type, md5_checksum, byte_size, local_modified_at, last_synced_at,
+      upload_session_url, upload_offset, content_sha256, last_error, retry_count
     FROM google_drive_sync_entries
   `).all()
   return rows.reduce((acc, row) => {
@@ -181,8 +189,9 @@ function upsertDriveSyncEntry(entry) {
   db.prepare(`
     INSERT INTO google_drive_sync_entries (
       relative_path, item_type, remote_file_id, mime_type,
-      md5_checksum, byte_size, local_modified_at, last_synced_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      md5_checksum, byte_size, local_modified_at, last_synced_at,
+      upload_session_url, upload_offset, content_sha256, last_error, retry_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(relative_path) DO UPDATE SET
       item_type = excluded.item_type,
       remote_file_id = excluded.remote_file_id,
@@ -190,7 +199,12 @@ function upsertDriveSyncEntry(entry) {
       md5_checksum = excluded.md5_checksum,
       byte_size = excluded.byte_size,
       local_modified_at = excluded.local_modified_at,
-      last_synced_at = excluded.last_synced_at
+      last_synced_at = excluded.last_synced_at,
+      upload_session_url = excluded.upload_session_url,
+      upload_offset = excluded.upload_offset,
+      content_sha256 = excluded.content_sha256,
+      last_error = excluded.last_error,
+      retry_count = excluded.retry_count
   `).run(
     entry.relativePath,
     entry.itemType || 'file',
@@ -200,6 +214,11 @@ function upsertDriveSyncEntry(entry) {
     Number(entry.byteSize || 0) || 0,
     entry.localModifiedAt || null,
     entry.lastSyncedAt || nowIso(),
+    entry.uploadSessionUrl || null,
+    Number(entry.uploadOffset || 0) || 0,
+    entry.contentSha256 || null,
+    entry.lastError || null,
+    Number(entry.retryCount || 0) || 0,
   )
 }
 
@@ -229,31 +248,18 @@ function inferMimeType(filePath) {
   return 'application/octet-stream'
 }
 
-function md5File(filePath) {
-  const hash = crypto.createHash('md5')
-  hash.update(fs.readFileSync(filePath))
-  return hash.digest('hex')
+function hashFile(filePath, algorithm = 'md5') {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algorithm)
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('error', reject)
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
-}
-
-function buildMultipartBody(metadata, mediaBuffer, mimeType) {
-  const boundary = `business-os-${crypto.randomBytes(12).toString('hex')}`
-  const head = Buffer.from(
-    `--${boundary}\r\n`
-    + 'Content-Type: application/json; charset=UTF-8\r\n\r\n'
-    + `${JSON.stringify(metadata)}\r\n`
-    + `--${boundary}\r\n`
-    + `Content-Type: ${mimeType}\r\n\r\n`,
-    'utf8',
-  )
-  const tail = Buffer.from(`\r\n--${boundary}--`, 'utf8')
-  return {
-    boundary,
-    body: Buffer.concat([head, mediaBuffer, tail]),
-  }
 }
 
 async function exchangeRefreshToken(config) {
@@ -600,7 +606,8 @@ async function collectSnapshotItems(snapshotRoot, progress = null) {
       size: stats.size,
       modifiedAt: new Date(stats.mtimeMs).toISOString(),
       mimeType: inferMimeType(absolutePath),
-      md5Checksum: md5File(absolutePath),
+      md5Checksum: await hashFile(absolutePath, 'md5'),
+      contentSha256: await hashFile(absolutePath, 'sha256'),
     })
   }
   progress?.({
@@ -650,32 +657,178 @@ async function ensureRemoteDirectories(config, mappings, rootFolderId, relativeD
   return remoteDirs
 }
 
-async function uploadDriveFile(config, parentRemoteId, file) {
-  await yieldToEventLoop()
-  const buffer = fs.readFileSync(file.absolutePath)
-  const multipart = buildMultipartBody({
-    name: path.posix.basename(file.relativePath),
-    parents: [parentRemoteId],
-  }, buffer, file.mimeType)
-  return driveApiUpload(config, `${GOOGLE_DRIVE_UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true`, {
-    method: 'POST',
-    headers: {
-      'content-type': `multipart/related; boundary=${multipart.boundary}`,
-    },
-    body: multipart.body,
-  })
+function updateRuntimeUploadProgress(file, uploadedBytes = 0, retryCount = runtimeState.retryCount || 0) {
+  runtimeState.currentFile = file?.relativePath || ''
+  runtimeState.uploadedBytes = Math.max(0, Number(uploadedBytes || 0) || 0)
+  runtimeState.totalBytes = Math.max(0, Number(file?.size || 0) || 0)
+  runtimeState.retryCount = Math.max(0, Number(retryCount || 0) || 0)
 }
 
-async function updateDriveFile(config, remoteFileId, file) {
-  await yieldToEventLoop()
-  const buffer = fs.readFileSync(file.absolutePath)
-  return driveApiUpload(config, `${GOOGLE_DRIVE_UPLOAD_API}/files/${encodeURIComponent(remoteFileId)}?uploadType=media&supportsAllDrives=true`, {
-    method: 'PATCH',
+function clearRuntimeUploadProgress() {
+  runtimeState.currentFile = ''
+  runtimeState.uploadedBytes = 0
+  runtimeState.totalBytes = 0
+  runtimeState.retryCount = 0
+}
+
+async function initiateDriveResumableSession(config, { remoteFileId = '', parentRemoteId = '', file }) {
+  const accessToken = await exchangeRefreshToken(config)
+  const updating = !!trim(remoteFileId)
+  const requestUrl = updating
+    ? `${GOOGLE_DRIVE_UPLOAD_API}/files/${encodeURIComponent(remoteFileId)}?uploadType=resumable&supportsAllDrives=true`
+    : `${GOOGLE_DRIVE_UPLOAD_API}/files?uploadType=resumable&supportsAllDrives=true`
+  const metadata = updating
+    ? { name: path.posix.basename(file.relativePath) }
+    : { name: path.posix.basename(file.relativePath), parents: [parentRemoteId] }
+  const response = await fetch(requestUrl, {
+    method: updating ? 'PATCH' : 'POST',
     headers: {
-      'content-type': file.mimeType,
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json; charset=UTF-8',
+      'x-upload-content-type': file.mimeType,
+      'x-upload-content-length': String(file.size),
     },
-    body: buffer,
+    body: JSON.stringify(metadata),
   })
+  if (!response.ok) {
+    const json = await response.json().catch(() => ({}))
+    throw new Error(json?.error?.message || `Google Drive resumable upload init failed (${response.status})`)
+  }
+  const sessionUrl = response.headers.get('location')
+  if (!sessionUrl) throw new Error('Google Drive did not return a resumable upload session.')
+  return sessionUrl
+}
+
+async function queryResumableOffset(sessionUrl, fileSize) {
+  const response = await fetch(sessionUrl, {
+    method: 'PUT',
+    headers: {
+      'content-range': `bytes */${fileSize}`,
+      'content-length': '0',
+    },
+  })
+  if (response.status === 308) {
+    const range = response.headers.get('range') || ''
+    const match = range.match(/bytes=0-(\d+)/i)
+    return match ? Number(match[1]) + 1 : 0
+  }
+  if (response.status === 404 || response.status === 410) {
+    const error = new Error('Google Drive upload session expired.')
+    error.code = 'drive_session_expired'
+    throw error
+  }
+  if (response.ok) return fileSize
+  return 0
+}
+
+async function putResumableChunk(sessionUrl, file, start, end, signal = null) {
+  const size = end - start + 1
+  const response = await fetch(sessionUrl, {
+    method: 'PUT',
+    headers: {
+      'content-length': String(size),
+      'content-type': file.mimeType,
+      'content-range': `bytes ${start}-${end}/${file.size}`,
+    },
+    body: fs.createReadStream(file.absolutePath, { start, end }),
+    duplex: 'half',
+    signal,
+  })
+  const json = await response.json().catch(() => ({}))
+  if (response.status === 308) {
+    const range = response.headers.get('range') || ''
+    const match = range.match(/bytes=0-(\d+)/i)
+    return { done: false, offset: match ? Number(match[1]) + 1 : end + 1 }
+  }
+  if (response.status === 404 || response.status === 410) {
+    const error = new Error('Google Drive upload session expired.')
+    error.code = 'drive_session_expired'
+    throw error
+  }
+  if (!response.ok) {
+    throw new Error(json?.error?.message || `Google Drive resumable upload failed (${response.status})`)
+  }
+  return { done: true, offset: file.size, remote: json }
+}
+
+async function uploadDriveFileResumable(config, parentRemoteId, file, { existing = null, remoteFileId = '', progress = null, signal = null, throwIfCancelled = null } = {}) {
+  let sessionUrl = trim(existing?.upload_session_url)
+  let offset = 0
+  const sameContent = trim(existing?.content_sha256) === file.contentSha256
+    && Number(existing?.byte_size || 0) === Number(file.size || 0)
+  if (sessionUrl && sameContent) {
+    try {
+      offset = Math.max(Number(existing?.upload_offset || 0) || 0, await queryResumableOffset(sessionUrl, file.size))
+    } catch (error) {
+      if (error?.code !== 'drive_session_expired') throw error
+      sessionUrl = ''
+      offset = 0
+    }
+  }
+  if (!sessionUrl) {
+    sessionUrl = await initiateDriveResumableSession(config, { remoteFileId, parentRemoteId, file })
+    offset = 0
+  }
+
+  let retryCount = 0
+  while (offset < file.size) {
+    throwIfCancelled?.()
+    const end = Math.min(file.size - 1, offset + DRIVE_RESUMABLE_CHUNK_BYTES - 1)
+    updateRuntimeUploadProgress(file, offset, retryCount)
+    progress?.({
+      phase: 'uploading',
+      message: `Uploading ${file.relativePath}`,
+      metrics: {
+        currentFile: file.relativePath,
+        uploadedBytes: offset,
+        totalBytes: file.size,
+        retryCount,
+        resumable: true,
+      },
+    })
+    try {
+      upsertDriveSyncEntry({
+        relativePath: file.relativePath,
+        itemType: 'file',
+        remoteFileId: remoteFileId || existing?.remote_file_id || `pending:${file.contentSha256}`,
+        mimeType: file.mimeType,
+        md5Checksum: existing?.md5_checksum || '',
+        byteSize: file.size,
+        localModifiedAt: file.modifiedAt,
+        uploadSessionUrl: sessionUrl,
+        uploadOffset: offset,
+        contentSha256: file.contentSha256,
+        retryCount,
+      })
+      const result = await putResumableChunk(sessionUrl, file, offset, end, signal)
+      offset = result.offset
+      if (result.done) {
+        return result.remote
+      }
+    } catch (error) {
+      if (error?.code === 'drive_session_expired') {
+        sessionUrl = await initiateDriveResumableSession(config, { remoteFileId, parentRemoteId, file })
+        offset = 0
+        retryCount += 1
+        continue
+      }
+      retryCount += 1
+      updateRuntimeUploadProgress(file, offset, retryCount)
+      if (retryCount >= 3) throw error
+      await new Promise((resolve) => setTimeout(resolve, retryCount * 500))
+    }
+  }
+  return { id: remoteFileId || existing?.remote_file_id }
+}
+
+async function uploadDriveFile(config, parentRemoteId, file, options = {}) {
+  await yieldToEventLoop()
+  return uploadDriveFileResumable(config, parentRemoteId, file, options)
+}
+
+async function updateDriveFile(config, remoteFileId, file, options = {}) {
+  await yieldToEventLoop()
+  return uploadDriveFileResumable(config, '', file, { ...options, remoteFileId })
 }
 
 async function removeDriveFile(config, remoteFileId) {
@@ -703,6 +856,13 @@ async function runDriveSync(reason = 'manual', options = {}) {
 
 async function runDriveSyncInternal(reason = 'manual', options = {}) {
   const progress = typeof options.progress === 'function' ? options.progress : null
+  if (isMaintenanceLocked()) {
+    const error = new Error('System maintenance is running. Google Drive sync will wait until it finishes.')
+    error.code = 'system_busy'
+    error.status = 423
+    error.maintenance = getMaintenanceLock()
+    throw error
+  }
   const config = getDriveSyncConfig()
   if (!config.enabled) throw new Error('Google Drive sync is turned off.')
   if (!config.ready) throw new Error('Finish connecting Google Drive before syncing.')
@@ -720,6 +880,8 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
     destinationDir: path.join(DATA_ROOT, 'backups'),
     actor: { userName: 'Google Drive sync' },
     progress,
+    signal: options.signal,
+    throwIfCancelled: options.throwIfCancelled,
   })
   progress?.({ phase: 'snapshot', progress: 35, message: 'Creating Drive snapshot' })
   await yieldToEventLoop()
@@ -763,12 +925,21 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
     let skipped = 0
 
     for (const file of items.files) {
+      options.throwIfCancelled?.()
       const completed = uploaded + updated + skipped
       if (completed % 5 === 0) {
         progress?.({
           phase: 'uploading',
           progress: 50 + Math.round((completed / Math.max(1, items.files.length)) * 45),
           message: `Syncing file ${Math.min(completed + 1, items.files.length)} of ${items.files.length}`,
+          metrics: {
+            currentFile: file.relativePath,
+            filesProcessed: completed,
+            filesTotal: items.files.length,
+            uploadedBytes: runtimeState.uploadedBytes,
+            totalBytes: runtimeState.totalBytes,
+            retryCount: runtimeState.retryCount,
+          },
         })
         await yieldToEventLoop()
       }
@@ -789,24 +960,24 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
       const reusable = siblingMatches.find((item) => trim(item?.mimeType) !== 'application/vnd.google-apps.folder')
       if (existing?.remote_file_id) {
         try {
-          remote = await updateDriveFile(config, existing.remote_file_id, file)
+          remote = await updateDriveFile(config, existing.remote_file_id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
           updated += 1
         } catch (error) {
           const message = String(error?.message || '')
           if (!/not found|file not found|404/i.test(message)) throw error
           if (reusable?.id) {
-            remote = await updateDriveFile(config, reusable.id, file)
+            remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
             updated += 1
           } else {
-            remote = await uploadDriveFile(config, parentRemoteId, file)
+            remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
             uploaded += 1
           }
         }
       } else if (reusable?.id) {
-        remote = await updateDriveFile(config, reusable.id, file)
+        remote = await updateDriveFile(config, reusable.id, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
         updated += 1
       } else {
-        remote = await uploadDriveFile(config, parentRemoteId, file)
+        remote = await uploadDriveFile(config, parentRemoteId, file, { existing, progress, signal: options.signal, throwIfCancelled: options.throwIfCancelled })
         uploaded += 1
       }
 
@@ -825,6 +996,11 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
         byteSize: file.size,
         localModifiedAt: file.modifiedAt,
         lastSyncedAt: nowIso(),
+        uploadSessionUrl: '',
+        uploadOffset: file.size,
+        contentSha256: file.contentSha256,
+        lastError: '',
+        retryCount: runtimeState.retryCount,
       })
       mappings[file.relativePath] = {
         remote_file_id: trim(remote?.id) || existing?.remote_file_id,
@@ -876,6 +1052,7 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
       manifest,
     }
     runtimeState.lastSummary = summary
+    clearRuntimeUploadProgress()
     progress?.({ phase: 'completed', progress: 100, message: 'Google Drive sync complete' })
     writeSettingsMap({
       [SETTINGS_KEYS.lastSyncedAt]: nowIso(),
@@ -886,6 +1063,7 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
   } catch (error) {
     runtimeState.lastSummary = null
     runtimeState.lastError = error?.message || 'Google Drive sync failed'
+    clearRuntimeUploadProgress()
     writeSettingsMap({
       [SETTINGS_KEYS.lastError]: runtimeState.lastError,
       [SETTINGS_KEYS.lastStatus]: 'error',
@@ -955,6 +1133,11 @@ function getDriveSyncStatus(redirectUri = '') {
       lastReason: runtimeState.lastReason,
       lastError: runtimeState.lastError || config.lastError || reconnectMessage,
       lastSummary: runtimeState.lastSummary,
+      currentFile: runtimeState.currentFile,
+      uploadedBytes: runtimeState.uploadedBytes,
+      totalBytes: runtimeState.totalBytes,
+      retryCount: runtimeState.retryCount,
+      maintenance: getMaintenanceLock(),
     },
     lastSyncedAt: config.lastSyncedAt,
     lastError: runtimeState.lastError || config.lastError || reconnectMessage,

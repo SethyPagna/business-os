@@ -1596,6 +1596,11 @@ export async function getSystemJob(id) {
   return apiFetch('GET', `/api/system/jobs/${encodeURIComponent(id)}`)
 }
 
+export async function cancelSystemJob(id, reason = 'Cancelled by user') {
+  if (!id) throw new Error('Missing job id')
+  return apiFetch('POST', `/api/system/jobs/${encodeURIComponent(id)}/cancel`, { reason }, SYNC.REQUEST_TIMEOUT_MS)
+}
+
 export async function pollSystemJob(jobId, {
   timeoutMs = LONG_SYSTEM_ACTION_TIMEOUT_MS,
   pollMs = 1200,

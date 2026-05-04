@@ -92,14 +92,22 @@ function countCustomTableRows(customTableRows = {}) {
 
 function buildBackupSummary({ tables = {}, uploads = [], customTableRows = {} } = {}) {
   const tableCounts = countRowsByTable(tables)
-  const tableRowCount = Object.values(tableCounts).reduce((total, count) => total + count, 0)
+  return buildBackupSummaryFromCounts({ tableCounts, uploads, customTableRows })
+}
+
+function buildBackupSummaryFromCounts({ tableCounts = {}, uploads = [], customTableRows = {} } = {}) {
+  const normalizedCounts = BACKUP_TABLES.reduce((accumulator, tableName) => {
+    accumulator[tableName] = Math.max(0, Number(tableCounts?.[tableName] || 0) || 0)
+    return accumulator
+  }, {})
+  const tableRowCount = Object.values(normalizedCounts).reduce((total, count) => total + count, 0)
   const customTableCount = Object.keys(customTableRows || {}).length
   const customTableRowCount = countCustomTableRows(customTableRows)
   const uploadCount = Array.isArray(uploads) ? uploads.length : 0
 
   return {
     version: BACKUP_VERSION,
-    tables: tableCounts,
+    tables: normalizedCounts,
     totals: {
       tableRowCount,
       customTableCount,
@@ -115,4 +123,5 @@ module.exports = {
   BACKUP_CLEAR_ORDER,
   NON_BACKUP_TABLES,
   buildBackupSummary,
+  buildBackupSummaryFromCounts,
 }

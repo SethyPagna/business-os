@@ -17,6 +17,7 @@ function makeJobId(prefix = 'sys') {
 function publicJob(job) {
   if (!job) return null
   const result = job.result || safeJsonParse(job.result_json, null)
+  const metrics = job.metrics || safeJsonParse(job.metrics_json, {})
   return {
     id: job.id,
     type: job.type,
@@ -25,6 +26,10 @@ function publicJob(job) {
     progress: job.progress,
     message: job.message,
     result,
+    metrics,
+    retry_count: Number(job.retry_count || 0) || 0,
+    cancellable: !!job.cancellable && ['queued', 'running', 'cancelling'].includes(job.status),
+    cancel_requested_at: job.cancel_requested_at || null,
     error: job.error || '',
     created_at: job.created_at,
     started_at: job.started_at || null,
@@ -68,6 +73,10 @@ function ensureTable() {
       progress INTEGER DEFAULT 0,
       message TEXT,
       result_json TEXT,
+      metrics_json TEXT,
+      retry_count INTEGER DEFAULT 0,
+      cancellable INTEGER DEFAULT 0,
+      cancel_requested_at TIMESTAMPTZ,
       error TEXT,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
       started_at TIMESTAMPTZ,
@@ -77,6 +86,14 @@ function ensureTable() {
     CREATE INDEX IF NOT EXISTS idx_system_jobs_created_pg ON system_jobs(created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_system_jobs_status_pg ON system_jobs(status, updated_at DESC);
   `)
+  ;[
+    'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS metrics_json TEXT',
+    'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0',
+    'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS cancellable INTEGER DEFAULT 0',
+    'ALTER TABLE system_jobs ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ',
+  ].forEach((statement) => {
+    try { getDb().exec(statement) } catch (_) {}
+  })
   tableReady = true
 }
 
@@ -85,9 +102,11 @@ function persistJob(job) {
   getDb().prepare(`
     INSERT INTO system_jobs (
       id, type, status, phase, progress, message, result_json, error,
+      metrics_json, retry_count, cancellable, cancel_requested_at,
       created_at, started_at, finished_at, updated_at
     ) VALUES (
       @id, @type, @status, @phase, @progress, @message, @result_json, @error,
+      @metrics_json, @retry_count, @cancellable, @cancel_requested_at,
       @created_at, @started_at, @finished_at, @updated_at
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -97,6 +116,10 @@ function persistJob(job) {
       progress = excluded.progress,
       message = excluded.message,
       result_json = excluded.result_json,
+      metrics_json = excluded.metrics_json,
+      retry_count = excluded.retry_count,
+      cancellable = excluded.cancellable,
+      cancel_requested_at = excluded.cancel_requested_at,
       error = excluded.error,
       started_at = excluded.started_at,
       finished_at = excluded.finished_at,
@@ -109,6 +132,10 @@ function persistJob(job) {
     progress: job.progress,
     message: job.message,
     result_json: job.result ? JSON.stringify(job.result) : null,
+    metrics_json: job.metrics ? JSON.stringify(job.metrics) : null,
+    retry_count: Number(job.retry_count || 0) || 0,
+    cancellable: job.cancellable ? 1 : 0,
+    cancel_requested_at: job.cancel_requested_at || null,
     error: job.error,
     created_at: job.created_at,
     started_at: job.started_at,
@@ -138,9 +165,24 @@ function cleanupJobs() {
 }
 
 function updateJob(job, patch = {}) {
-  Object.assign(job, patch, { updated_at: nowIso() })
+  const nextPatch = { ...patch }
+  if (patch.metrics && typeof patch.metrics === 'object') {
+    nextPatch.metrics = {
+      ...(job.metrics || {}),
+      ...patch.metrics,
+    }
+  }
+  Object.assign(job, nextPatch, { updated_at: nowIso() })
   try { persistJob(job) } catch (_) {}
   return job
+}
+
+class SystemJobCancelledError extends Error {
+  constructor(message = 'Job cancelled') {
+    super(message)
+    this.name = 'SystemJobCancelledError'
+    this.code = 'job_cancelled'
+  }
 }
 
 function startSystemJob(type, worker, options = {}) {
@@ -158,6 +200,11 @@ function startSystemJob(type, worker, options = {}) {
     progress: 0,
     message: options.message || 'Queued',
     result: null,
+    metrics: {},
+    retry_count: 0,
+    cancellable: options.cancellable !== false,
+    cancel_requested_at: null,
+    abort_controller: new AbortController(),
     error: '',
     created_at: nowIso(),
     started_at: null,
@@ -168,6 +215,17 @@ function startSystemJob(type, worker, options = {}) {
   try { persistJob(job) } catch (_) {}
 
   const runWorker = async () => {
+    if (job.cancel_requested_at) {
+      updateJob(job, {
+        status: 'cancelled',
+        phase: 'cancelled',
+        progress: Math.max(0, Math.min(99, Number(job.progress || 0))),
+        message: 'Job cancelled before it started',
+        finished_at: nowIso(),
+      })
+      cleanupJobs()
+      return
+    }
     updateJob(job, {
       status: 'running',
       phase: options.phase || 'running',
@@ -175,9 +233,23 @@ function startSystemJob(type, worker, options = {}) {
       message: options.runningMessage || 'Running',
       started_at: nowIso(),
     })
-    const progress = (patch = {}) => updateJob(job, patch)
+    const isCancelled = () => !!job.cancel_requested_at || job.abort_controller?.signal?.aborted
+    const throwIfCancelled = () => {
+      if (isCancelled()) throw new SystemJobCancelledError()
+    }
+    const progress = (patch = {}) => {
+      throwIfCancelled()
+      return updateJob(job, patch)
+    }
     try {
-      const result = await worker({ job, progress })
+      const result = await worker({
+        job,
+        progress,
+        signal: job.abort_controller.signal,
+        isCancelled,
+        throwIfCancelled,
+      })
+      throwIfCancelled()
       updateJob(job, {
         status: 'completed',
         phase: 'completed',
@@ -187,6 +259,17 @@ function startSystemJob(type, worker, options = {}) {
         finished_at: nowIso(),
       })
     } catch (error) {
+      if (error?.code === 'job_cancelled' || error?.name === 'AbortError' || isCancelled()) {
+        updateJob(job, {
+          status: 'cancelled',
+          phase: 'cancelled',
+          progress: Math.max(0, Math.min(99, Number(job.progress || 0))),
+          message: 'Job cancelled',
+          error: '',
+          finished_at: nowIso(),
+        })
+        return
+      }
       updateJob(job, {
         status: 'failed',
         phase: 'failed',
@@ -204,6 +287,23 @@ function startSystemJob(type, worker, options = {}) {
     runWorker().catch(() => {})
   })
 
+  return publicJob(job)
+}
+
+function cancelSystemJob(id, reason = 'Cancelled by user') {
+  const safeId = String(id || '').trim()
+  const job = jobs.get(safeId)
+  if (!job) return null
+  if (!['queued', 'running', 'cancelling'].includes(job.status)) return publicJob(job)
+  const cancelledAt = nowIso()
+  updateJob(job, {
+    status: job.status === 'queued' ? 'cancelled' : 'cancelling',
+    phase: job.status === 'queued' ? 'cancelled' : 'cancelling',
+    message: reason || 'Cancellation requested',
+    cancel_requested_at: job.cancel_requested_at || cancelledAt,
+    finished_at: job.status === 'queued' ? cancelledAt : job.finished_at,
+  })
+  try { job.abort_controller?.abort?.() } catch (_) {}
   return publicJob(job)
 }
 
@@ -238,7 +338,9 @@ function listSystemJobs({ limit = 25 } = {}) {
 }
 
 module.exports = {
+  cancelSystemJob,
   startSystemJob,
   getSystemJob,
   listSystemJobs,
+  SystemJobCancelledError,
 }

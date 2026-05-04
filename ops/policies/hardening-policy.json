@@ -107,8 +107,26 @@
       "files": [
         {
           "path": "backend/src/routes/system/index.js",
-          "mustContain": ["startSystemJob('google_drive_sync'", "startSystemJob('backup_export_folder'", "startSystemJob('backup_restore_folder'", "applyRouteRateLimit"],
+          "mustContain": ["startSystemJob('google_drive_sync'", "startSystemJob('backup_export_folder'", "startSystemJob('backup_restore_folder'", "router.post('/jobs/:id/cancel'", "withMaintenanceLock", "applyRouteRateLimit"],
           "mustNotContain": ["/backup/export", "/backup/import"]
+        },
+        {
+          "path": "backend/src/services/backupPackages.js",
+          "mustContain": ["streamBackupDataFile", "LIMIT ? OFFSET ?", "buildBackupSummaryFromCounts", "copyPackageObjects", "objects-errors.json", "throwIfCancelled"],
+          "mustNotContain": ["JSON.stringify({ tables })", "const tables = {}", "fs.readFileSync(file.absolutePath)"]
+        },
+        {
+          "path": "backend/src/services/googleDriveSync/index.js",
+          "mustContain": ["uploadType=resumable", "DRIVE_RESUMABLE_CHUNK_BYTES", "upload_session_url", "content_sha256", "uploadedBytes", "retryCount"],
+          "mustNotContain": ["fs.readFileSync(file.absolutePath)", "Buffer.concat", "buildMultipartBody"]
+        },
+        {
+          "path": "backend/src/systemJobs.js",
+          "mustContain": ["cancelSystemJob", "AbortController", "cancel_requested_at", "metrics_json", "SystemJobCancelledError"]
+        },
+        {
+          "path": "backend/src/maintenanceLock.js",
+          "mustContain": ["system_busy", "maintenanceWriteGuard", "423"]
         },
         {
           "path": "backend/src/routes/files.js",

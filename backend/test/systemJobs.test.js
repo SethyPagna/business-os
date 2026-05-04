@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { startSystemJob, getSystemJob, listSystemJobs } = require('../src/systemJobs')
+const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../src/systemJobs')
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -60,6 +60,28 @@ async function main() {
   const dedupedJob = await waitForStatus(dedupedA.id, 'completed')
   assert.equal(dedupedRuns, 1)
   assert.equal(dedupedJob.result.deduped, true)
+
+  const queuedCancel = startSystemJob('test_cancel_queued', async () => {
+    await wait(20)
+    return { cancelled: false }
+  }, { prefix: 'test' })
+  const queuedCancelResult = cancelSystemJob(queuedCancel.id)
+  assert.equal(queuedCancelResult.status, 'cancelled')
+  assert.equal(queuedCancelResult.cancel_requested_at != null, true)
+
+  const runningCancel = startSystemJob('test_cancel_running', async ({ throwIfCancelled }) => {
+    for (let index = 0; index < 20; index += 1) {
+      await wait(10)
+      throwIfCancelled()
+    }
+    return { cancelled: false }
+  }, { prefix: 'test' })
+  await wait(25)
+  const runningCancelResult = cancelSystemJob(runningCancel.id)
+  assert.equal(['cancelling', 'cancelled'].includes(runningCancelResult.status), true)
+  const cancelledJob = await waitForStatus(runningCancel.id, 'cancelled')
+  assert.equal(cancelledJob.cancellable, false)
+  assert.equal(cancelledJob.cancel_requested_at != null, true)
 
   const jobs = listSystemJobs({ limit: 10 })
   assert.ok(jobs.some((job) => job.id === completed.id))

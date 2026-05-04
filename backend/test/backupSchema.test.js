@@ -9,6 +9,7 @@ const {
   BACKUP_CLEAR_ORDER,
   NON_BACKUP_TABLES,
   buildBackupSummary,
+  buildBackupSummaryFromCounts,
 } = require('../src/backupSchema')
 
 let failed = 0
@@ -65,12 +66,33 @@ runTest('buildBackupSummary returns row counts and totals', () => {
   assert.equal(summary.totals.uploadCount, 2)
 })
 
+runTest('streaming backup summary accepts counts without materializing table rows', () => {
+  const summary = buildBackupSummaryFromCounts({
+    tableCounts: {
+      products: 5000,
+      sales: 250,
+      file_assets: 12,
+    },
+    uploads: Array.from({ length: 12 }, (_, index) => ({ path: `/uploads/${index}.webp` })),
+  })
+
+  assert.equal(summary.tables.products, 5000)
+  assert.equal(summary.tables.sales, 250)
+  assert.equal(summary.tables.file_assets, 12)
+  assert.equal(summary.totals.tableRowCount >= 5262, true)
+  assert.equal(summary.totals.uploadCount, 12)
+})
+
 runTest('Docker backup API queues real final-package jobs instead of host action handoff', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
-  assert.match(source, /createFinalBackupPackage/)
-  assert.match(source, /backup_export/)
-  assert.doesNotMatch(source, /requiresHostAction:\s*true/)
-  assert.doesNotMatch(source, /minio\.tgz/)
+  const routeSource = fs.readFileSync(path.join(__dirname, '../src/routes/system/index.js'), 'utf8')
+  const packageSource = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  assert.match(routeSource, /createFinalBackupPackage/)
+  assert.match(routeSource, /backup_export/)
+  assert.match(packageSource, /streamBackupDataFile/)
+  assert.match(packageSource, /LIMIT \? OFFSET \?/)
+  assert.doesNotMatch(packageSource, /JSON\.stringify\(\{\s*tables\s*\}/)
+  assert.doesNotMatch(routeSource, /requiresHostAction:\s*true/)
+  assert.doesNotMatch(routeSource, /minio\.tgz/)
 })
 
 if (failed > 0) {

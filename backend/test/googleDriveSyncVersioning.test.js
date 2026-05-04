@@ -87,6 +87,19 @@ runTest('drive sync interval defaults to one hour and allows up to twenty four h
   assert.match(source, /Math\.max\(DRIVE_SYNC_MIN_INTERVAL_SECONDS,\s*config\.syncIntervalSeconds\)/)
 })
 
+runTest('drive sync uses resumable streaming uploads instead of whole-file buffers', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  assert.match(source, /DRIVE_RESUMABLE_THRESHOLD_BYTES\s*=\s*5\s*\*\s*1024\s*\*\s*1024/)
+  assert.match(source, /DRIVE_RESUMABLE_CHUNK_BYTES\s*=\s*8\s*\*\s*1024\s*\*\s*1024/)
+  assert.match(source, /uploadType=resumable/)
+  assert.match(source, /fs\.createReadStream\(file\.absolutePath/)
+  assert.match(source, /upload_session_url/)
+  assert.match(source, /upload_offset/)
+  assert.match(source, /content_sha256/)
+  assert.doesNotMatch(source, /fs\.readFileSync\(file\.absolutePath\)/)
+  assert.doesNotMatch(source, /Buffer\.concat/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
