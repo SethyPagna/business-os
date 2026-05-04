@@ -6,7 +6,7 @@
  * Responsibilities:
  * - Admin-managed user/role lifecycle.
  * - Self-service profile/password updates.
- * - Supabase-linked identity synchronization for provider parity.
+ * - Google-linked identity synchronization for provider parity.
  *
  * Access model:
  * - Admin-control users can manage non-admin users.
@@ -20,17 +20,7 @@ const { db } = require('../database')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest } = require('../fileAssets')
-const {
-  isSupabaseAuthConfigured,
-  getSupabaseAuthPublicConfig,
-  createOrUpdateAuthUser,
-  updateAuthPassword,
-  setAuthUserActive,
-  getAuthUserById,
-  findAuthUserByEmail,
-  verifyPasswordWithSupabase,
-  unlinkAuthIdentity,
-} = require('../services/supabaseAuth')
+const { getGoogleLoginPublicConfig } = require('../services/googleOauth')
 const { normalizeEmail, normalizePhone } = require('../services/verification')
 const {
   getDefaultOrganization,
@@ -41,6 +31,20 @@ const { assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = requir
 const { revokeUserSessions } = require('../sessionAuth')
 
 const router = express.Router()
+
+function isGoogleAuthConfigured() {
+  return false
+}
+
+function getGoogleAuthPublicConfig() {
+  const config = getGoogleLoginPublicConfig()
+  return {
+    ...config,
+    googleEnabled: config.enabled,
+    emailAuthEnabled: false,
+    mfaTotpEnabled: false,
+  }
+}
 
 /**
  * 1. Shared Utilities
@@ -68,7 +72,7 @@ function normalizePhoneLookup(value) {
   return normalizePhone(value || '')
 }
 
-function findUserIdentityConflict({ username, name, email, phoneLookup, supabaseUserId }, excludeUserId = null) {
+function findUserIdentityConflict({ username, name, email, phoneLookup, googleUserId }, excludeUserId = null) {
   const excludeId = Number(excludeUserId || 0) || 0
   const usernameLookup = normalizeLookupText(username)
   if (usernameLookup) {
@@ -117,16 +121,16 @@ function findUserIdentityConflict({ username, name, email, phoneLookup, supabase
     if (row) return { field: 'phone', message: 'Phone number already exists' }
   }
 
-  const providerUserId = String(supabaseUserId || '').trim()
+  const providerUserId = String(googleUserId || '').trim()
   if (providerUserId) {
     const row = db.prepare(`
       SELECT id
       FROM users
-      WHERE supabase_user_id = ?
+      WHERE google_subject = ?
         AND (? = 0 OR id != ?)
       LIMIT 1
     `).get(providerUserId, excludeId, excludeId)
-    if (row) return { field: 'supabase_user_id', message: 'This Google account is already linked to another user' }
+    if (row) return { field: 'google_subject', message: 'This Google account is already linked to another user' }
   }
 
   return null
@@ -211,7 +215,7 @@ function getUserSecurityContext(id) {
 function getUserWithRole(id) {
   return db.prepare(`
     SELECT u.id, u.username, u.name, u.organization_id, u.organization_group_id, u.phone, u.phone_verified, u.email, u.email_verified, u.avatar_path, u.role_id, u.permissions,
-           u.otp_enabled, u.is_active, u.supabase_user_id, u.deleted_at, u.created_at, u.updated_at, r.name AS role_name,
+           u.otp_enabled, u.is_active, u.google_subject, u.deleted_at, u.created_at, u.updated_at, r.name AS role_name,
            r.permissions AS role_permissions, r.code AS role_code, r.is_system AS role_is_system,
            o.name AS organization_name, o.slug AS organization_slug, o.public_id AS organization_public_id,
            g.name AS organization_group_name, g.slug AS organization_group_slug
@@ -225,7 +229,7 @@ function getUserWithRole(id) {
 
 function syncLocalEmailVerification(userId, authUser) {
   if (!authUser?.emailConfirmed) return
-  const existing = db.prepare('SELECT id, email, email_verified, supabase_user_id FROM users WHERE id = ?').get(userId)
+  const existing = db.prepare('SELECT id, email, email_verified, google_subject FROM users WHERE id = ?').get(userId)
   if (!existing) return
   const localEmail = normalizeEmail(existing.email || '')
   const authEmail = normalizeEmail(authUser.email || '')
@@ -243,7 +247,7 @@ function syncLocalEmailVerification(userId, authUser) {
           WHEN ? = 1 THEN 1
           ELSE email_verified
         END,
-        supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
+        google_subject = COALESCE(NULLIF(?, ''), google_subject)
     WHERE id = ?
   `).run(
     shouldReplaceEmail ? 1 : 0,
@@ -254,10 +258,10 @@ function syncLocalEmailVerification(userId, authUser) {
   )
 }
 
-async function repairSupabaseIdentityForUser(user) {
-  if (!user || !isSupabaseAuthConfigured()) return { user, authUser: null }
+async function repairGoogleIdentityForUser(user) {
+  if (!user || !isGoogleAuthConfigured()) return { user, authUser: null }
 
-  const currentId = String(user.supabase_user_id || '').trim()
+  const currentId = String(user.google_subject || '').trim()
   if (currentId) {
     const byId = await getAuthUserById(currentId)
     if (byId?.success && byId.user) {
@@ -275,7 +279,7 @@ async function repairSupabaseIdentityForUser(user) {
   const byEmail = await findAuthUserByEmail(email)
   if (!byEmail?.success || !byEmail.user?.id) return { user, authUser: null }
 
-  db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(String(byEmail.user.id).trim(), user.id)
+  db.prepare('UPDATE users SET google_subject = ? WHERE id = ?').run(String(byEmail.user.id).trim(), user.id)
   if (byEmail.user.emailConfirmed && Number(user.email_verified || 0) !== 1) {
     syncLocalEmailVerification(user.id, byEmail.user)
   }
@@ -333,21 +337,21 @@ function buildAuthMethodsPayload(user, authUser, providerConfig) {
     email_verified: Number(user.email_verified || 0) === 1,
     otp_enabled: Number(user.otp_enabled || 0) === 1,
     is_active: Number(user.is_active || 0) === 1 && !user.deleted_at,
-    supabase_connected: !!String(user.supabase_user_id || '').trim(),
-    supabase_user_id: String(user.supabase_user_id || '').trim(),
+    google_connected: !!String(user.google_subject || '').trim(),
+    google_subject: String(user.google_subject || '').trim(),
     email_login_enabled: !!String(user.email || '').trim(),
     google_ready: providerConfig.googleEnabled,
-    google_linked: !!authUser?.hasGoogle,
-    linked_providers: providerList,
+    google_linked: !!String(user.google_subject || '').trim(),
+    linked_providers: String(user.google_subject || '').trim() ? ['google'] : providerList,
     linked_identity_count: identities.length,
     email_identity_ready: hasEmailIdentity,
-    can_disconnect_google: !!authUser?.hasGoogle && identities.length > 1,
+    can_disconnect_google: !!String(user.google_subject || '').trim(),
     last_sign_in_at: authUser?.lastSignInAt || '',
     capabilities: {
-      supabase_auth: providerConfig.enabled,
+      google_auth: providerConfig.enabled,
       google_oauth: providerConfig.googleEnabled,
-      supabase_email_auth: providerConfig.emailAuthEnabled,
-      supabase_mfa_totp: providerConfig.mfaTotpEnabled,
+      google_email_auth: providerConfig.emailAuthEnabled,
+      google_mfa_totp: providerConfig.mfaTotpEnabled,
     },
   }
 }
@@ -390,7 +394,7 @@ router.get('/users/:id/profile', authToken, (req, res) => {
   let row = getUserWithRole(req.params.id)
   if (!row) return err(res, 'User not found', 404)
 
-  repairSupabaseIdentityForUser(row)
+  repairGoogleIdentityForUser(row)
     .then((result) => ok(res, sanitizeUserRow(result?.user || row)))
     .catch(() => ok(res, sanitizeUserRow(row)))
 })
@@ -407,17 +411,17 @@ router.get('/users/:id/auth-methods', authToken, async (req, res) => {
   }
 
   const user = db.prepare(`
-    SELECT id, username, email, email_verified, otp_enabled, is_active, deleted_at, supabase_user_id
+    SELECT id, username, email, email_verified, otp_enabled, is_active, deleted_at, google_subject
     FROM users
     WHERE id = ?
   `).get(targetId)
   if (!user) return err(res, 'User not found', 404)
 
-  const providerConfig = getSupabaseAuthPublicConfig()
+  const providerConfig = getGoogleAuthPublicConfig()
   let authUser = null
   let resolvedUser = user
   if (providerConfig.enabled) {
-    const repaired = await repairSupabaseIdentityForUser(user)
+    const repaired = await repairGoogleIdentityForUser(user)
     resolvedUser = repaired?.user || user
     authUser = repaired?.authUser || null
   }
@@ -444,7 +448,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   }
 
   const user = db.prepare(`
-    SELECT id, username, name, organization_id, organization_group_id, email, email_verified, otp_enabled, is_active, deleted_at, supabase_user_id, password
+    SELECT id, username, name, organization_id, organization_group_id, email, email_verified, otp_enabled, is_active, deleted_at, google_subject, password
     FROM users
     WHERE id = ? AND deleted_at IS NULL
   `).get(targetId)
@@ -453,30 +457,30 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   if (!bcrypt.compareSync(currentPassword, user.password)) {
     return err(res, 'Current password is incorrect', 401)
   }
-  if (!isSupabaseAuthConfigured()) {
-    return err(res, 'Supabase auth is not configured.', 400)
+  if (!isGoogleAuthConfigured()) {
+    return err(res, 'Google auth is not configured.', 400)
   }
-  const repaired = await repairSupabaseIdentityForUser(user)
+  const repaired = await repairGoogleIdentityForUser(user)
   const resolvedUser = repaired?.user || user
-  if (!String(resolvedUser.supabase_user_id || '').trim()) {
+  if (!String(resolvedUser.google_subject || '').trim()) {
     return err(res, 'This account is not ready for provider disconnect yet.', 400)
   }
 
-  const providerConfig = getSupabaseAuthPublicConfig()
-  if (provider === 'google' && !providerConfig.googleEnabled) return err(res, 'Google sign-in is not enabled in Supabase yet.', 400)
+  const providerConfig = getGoogleAuthPublicConfig()
+  if (provider === 'google' && !providerConfig.googleEnabled) return err(res, 'Google sign-in is not enabled in Google yet.', 400)
   const provisionResult = await createOrUpdateAuthUser(resolvedUser, currentPassword)
   if (!provisionResult.success && !provisionResult.skipped) {
-    return err(res, provisionResult.error || 'Failed to prepare the Supabase account for provider changes.')
+    return err(res, provisionResult.error || 'Failed to prepare the Google account for provider changes.')
   }
 
-  const signInResult = await verifyPasswordWithSupabase(resolvedUser, currentPassword)
+  const signInResult = await verifyPasswordWithGoogle(resolvedUser, currentPassword)
   if (!signInResult.success || !signInResult.accessToken) {
-    return err(res, signInResult.error || 'Unable to verify the Supabase account password for provider disconnect.', 400)
+    return err(res, signInResult.error || 'Unable to verify the Google account password for provider disconnect.', 400)
   }
 
-  let authResult = await getAuthUserById(resolvedUser.supabase_user_id)
+  let authResult = await getAuthUserById(resolvedUser.google_subject)
   if (!authResult?.success || !authResult.user) {
-    return err(res, authResult?.error || 'Unable to load linked sign-in providers from Supabase.', 400)
+    return err(res, authResult?.error || 'Unable to load linked sign-in providers from Google.', 400)
   }
 
   const identitiesBefore = getAuthIdentityList(authResult.user)
@@ -494,7 +498,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
     return err(res, unlinkResult.error || 'Failed to disconnect the selected sign-in provider.', 400)
   }
 
-  authResult = await getAuthUserById(resolvedUser.supabase_user_id)
+  authResult = await getAuthUserById(resolvedUser.google_subject)
   if (!authResult?.success || !authResult.user) {
     return err(res, authResult?.error || 'Provider was disconnected, but the refreshed auth state could not be loaded.', 502)
   }
@@ -502,7 +506,7 @@ router.post('/users/:id/provider-disconnect', authToken, async (req, res) => {
   audit(actor.id, actor.name, 'identity_unlinked', 'user', targetId, {
     provider,
     email: String(resolvedUser.email || '').trim().toLowerCase() || null,
-    supabase_user_id: String(resolvedUser.supabase_user_id || '').trim() || null,
+    google_subject: String(resolvedUser.google_subject || '').trim() || null,
   })
   broadcast('users')
 
@@ -554,8 +558,8 @@ router.post('/users', authToken, async (req, res) => {
   if (!actor) return
   if (!username?.trim() || !password) return err(res, 'Username and password required')
   if (!isValidEmail(email)) return err(res, 'Valid email required')
-  if (isSupabaseAuthConfigured() && String(email || '').trim() && String(password || '').length < 6) {
-    return err(res, 'Password must be at least 6 characters when Supabase auth is enabled for email login.')
+  if (isGoogleAuthConfigured() && String(email || '').trim() && String(password || '').length < 6) {
+    return err(res, 'Password must be at least 6 characters when Google auth is enabled for email login.')
   }
 
   try {
@@ -601,18 +605,18 @@ router.post('/users', authToken, async (req, res) => {
 
     const createdId = Number(result.lastInsertRowid)
     const createdUser = db.prepare(`
-      SELECT id, username, name, organization_id, organization_group_id, email, email_verified, phone, phone_verified, supabase_user_id, is_active
+      SELECT id, username, name, organization_id, organization_group_id, email, email_verified, phone, phone_verified, google_subject, is_active
       FROM users WHERE id = ?
     `).get(createdId)
 
-    if (isSupabaseAuthConfigured() && createdUser?.email) {
+    if (isGoogleAuthConfigured() && createdUser?.email) {
       const synced = await createOrUpdateAuthUser(createdUser, String(password))
       if (!synced.success && !synced.skipped) {
         db.prepare('DELETE FROM users WHERE id = ?').run(createdId)
         return err(res, synced.error || 'Failed to provision authentication account')
       }
       if (synced.success && synced.userId) {
-        db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(synced.userId, createdId)
+        db.prepare('UPDATE users SET google_subject = ? WHERE id = ?').run(synced.userId, createdId)
       }
       if (synced.success && synced.userId && !createdUser.is_active) {
         await setAuthUserActive(synced.userId, false)
@@ -627,7 +631,7 @@ router.post('/users', authToken, async (req, res) => {
     if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
     if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
     if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
-    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google account is already linked to another user', 409)
+    if (message.includes('idx_users_google_subject') || message.includes('users.google_subject')) return err(res, 'This Google account is already linked to another user', 409)
     err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to create user'))
   }
 })
@@ -653,7 +657,7 @@ router.put('/users/:id', authToken, async (req, res) => {
   if (!isValidEmail(email)) return err(res, 'Valid email required')
 
   try {
-    const existing = db.prepare('SELECT id, username, name, permissions, phone, phone_verified, email, email_verified, supabase_user_id, deleted_at, is_active, updated_at FROM users WHERE id = ?').get(req.params.id)
+    const existing = db.prepare('SELECT id, username, name, permissions, phone, phone_verified, email, email_verified, google_subject, deleted_at, is_active, updated_at FROM users WHERE id = ?').get(req.params.id)
     const existingSecurity = getUserSecurityContext(req.params.id)
     const adminRole = db.prepare(`SELECT id FROM roles WHERE lower(trim(code)) = 'admin' LIMIT 1`).get()
     if (!existing) return err(res, 'User not found', 404)
@@ -684,7 +688,7 @@ router.put('/users/:id', authToken, async (req, res) => {
       name: normalizedName,
       email: nextEmail,
       phoneLookup: nextPhoneLookup,
-      supabaseUserId: existing.supabase_user_id,
+      googleUserId: existing.google_subject,
     }, existing.id)
     if (conflict) return err(res, conflict.message, 409)
 
@@ -693,8 +697,8 @@ router.put('/users/:id', authToken, async (req, res) => {
     if (isPrimaryAdmin(existingSecurity) && (markDeleted || Number(nextIsActive) === 0)) {
       return err(res, 'Primary admin account cannot be deactivated or deleted', 400)
     }
-    if (isSupabaseAuthConfigured() && existing.supabase_user_id && !nextEmail) {
-      return err(res, 'Email is required for Supabase-linked accounts.')
+    if (isGoogleAuthConfigured() && existing.google_subject && !nextEmail) {
+      return err(res, 'Email is required for Google-linked accounts.')
     }
     db.prepare(`
       UPDATE users
@@ -717,21 +721,21 @@ router.put('/users/:id', authToken, async (req, res) => {
     )
 
     const updatedUser = db.prepare(`
-      SELECT id, username, name, email, email_verified, phone, phone_verified, supabase_user_id, is_active
+      SELECT id, username, name, email, email_verified, phone, phone_verified, google_subject, is_active
       FROM users WHERE id = ?
     `).get(req.params.id)
 
-    if (isSupabaseAuthConfigured() && (updatedUser?.supabase_user_id || updatedUser?.email)) {
+    if (isGoogleAuthConfigured() && (updatedUser?.google_subject || updatedUser?.email)) {
       const synced = await createOrUpdateAuthUser(updatedUser, '')
       if (!synced.success && !synced.skipped) {
         return err(res, synced.error || 'Failed to sync authentication account')
       }
-      if (synced.success && synced.userId && !updatedUser.supabase_user_id) {
-        db.prepare('UPDATE users SET supabase_user_id = ?, updated_at = \'now\' WHERE id = ?').run(synced.userId, updatedUser.id)
-        updatedUser.supabase_user_id = synced.userId
+      if (synced.success && synced.userId && !updatedUser.google_subject) {
+        db.prepare('UPDATE users SET google_subject = ?, updated_at = \'now\' WHERE id = ?').run(synced.userId, updatedUser.id)
+        updatedUser.google_subject = synced.userId
       }
-      if (updatedUser.supabase_user_id) {
-        await setAuthUserActive(updatedUser.supabase_user_id, !!updatedUser.is_active && !markDeleted)
+      if (updatedUser.google_subject) {
+        await setAuthUserActive(updatedUser.google_subject, !!updatedUser.is_active && !markDeleted)
       }
     }
 
@@ -744,7 +748,7 @@ router.put('/users/:id', authToken, async (req, res) => {
     if (message.includes('idx_users_name_lookup')) return err(res, 'Name already exists', 409)
     if (message.includes('idx_users_email_lookup') || message.includes('users.email')) return err(res, 'Email already exists', 409)
     if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) return err(res, 'Phone number already exists', 409)
-    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) return err(res, 'This Google account is already linked to another user', 409)
+    if (message.includes('idx_users_google_subject') || message.includes('users.google_subject')) return err(res, 'This Google account is already linked to another user', 409)
     err(res, message.includes('UNIQUE') ? 'Username already exists' : (message || 'Failed to update user'))
   }
 })
@@ -776,7 +780,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
   if (!canManageTarget(actor, targetSecurity)) return err(res, 'No permission', 403)
   if (adminOverride && !actorCanManage) return err(res, 'No permission', 403)
 
-  const user = db.prepare('SELECT id, username, name, password, phone, phone_verified, email, email_verified, supabase_user_id, is_active, deleted_at, updated_at FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.id)
+  const user = db.prepare('SELECT id, username, name, password, phone, phone_verified, email, email_verified, google_subject, is_active, deleted_at, updated_at FROM users WHERE id = ? AND deleted_at IS NULL').get(req.params.id)
   if (!user) return err(res, 'User not found', 404)
   try {
     assertUpdatedAtMatch('user', user, getExpectedUpdatedAt(req.body || {}))
@@ -809,17 +813,17 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
       name: normalizedName,
       email: nextEmail,
       phoneLookup: nextPhoneLookup,
-      supabaseUserId: user.supabase_user_id,
+      googleUserId: user.google_subject,
     }, user.id)
     if (conflict) return err(res, conflict.message, 409)
 
-    if (isSupabaseAuthConfigured() && user.supabase_user_id && !nextEmail) {
-      return err(res, 'Email is required for Supabase-linked accounts.')
+    if (isGoogleAuthConfigured() && user.google_subject && !nextEmail) {
+      return err(res, 'Email is required for Google-linked accounts.')
     }
 
-    let supabaseUserId = String(user.supabase_user_id || '').trim()
-    const providerEnabled = isSupabaseAuthConfigured()
-    if (providerEnabled && (supabaseUserId || nextEmail)) {
+    let googleUserId = String(user.google_subject || '').trim()
+    const providerEnabled = isGoogleAuthConfigured()
+    if (providerEnabled && (googleUserId || nextEmail)) {
       const syncCandidate = {
         id: user.id,
         username: username.trim(),
@@ -828,25 +832,25 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
         email_verified: nextEmailVerified,
         phone: nextPhone,
         phone_verified: nextPhoneVerified,
-        supabase_user_id: supabaseUserId,
+        google_subject: googleUserId,
         is_active: Number(user.is_active || 0),
         deleted_at: user.deleted_at || null,
       }
-      const provisioningPassword = !supabaseUserId && nextEmail && !adminOverride
+      const provisioningPassword = !googleUserId && nextEmail && !adminOverride
         ? String(currentPassword || '')
         : ''
       const syncResult = await createOrUpdateAuthUser(syncCandidate, provisioningPassword)
       if (!syncResult.success && !syncResult.skipped) {
-        return err(res, syncResult.error || 'Failed to sync profile with Supabase authentication.')
+        return err(res, syncResult.error || 'Failed to sync profile with Google authentication.')
       }
-      if (syncResult.success && syncResult.userId && !supabaseUserId) {
-        supabaseUserId = String(syncResult.userId)
+      if (syncResult.success && syncResult.userId && !googleUserId) {
+        googleUserId = String(syncResult.userId)
       }
     }
 
     db.prepare(`
       UPDATE users
-      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id), updated_at = CURRENT_TIMESTAMP
+      SET username = ?, name = ?, phone = ?, phone_lookup = ?, phone_verified = ?, email = ?, email_verified = ?, avatar_path = ?, google_subject = COALESCE(NULLIF(?, ''), google_subject), updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       normalizedUsername,
@@ -857,7 +861,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
       nextEmail,
       nextEmailVerified,
       String(avatar_path || '').trim() || null,
-      supabaseUserId,
+      googleUserId,
       req.params.id,
     )
 
@@ -886,7 +890,7 @@ router.put('/users/:id/profile', authToken, async (req, res) => {
     if (message.includes('idx_users_phone_lookup') || message.includes('users.phone_lookup')) {
       return err(res, 'Phone number already exists', 409)
     }
-    if (message.includes('idx_users_supabase_user_id') || message.includes('users.supabase_user_id')) {
+    if (message.includes('idx_users_google_subject') || message.includes('users.google_subject')) {
       return err(res, 'This Google account is already linked to another user', 409)
     }
     if (message.includes('UNIQUE')) {
@@ -907,7 +911,7 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
   if (!targetSecurity) return err(res, 'User not found', 404)
   if (!canManageTarget(actor, targetSecurity)) return err(res, 'No permission', 403)
 
-  const user = db.prepare('SELECT id, username, name, email, email_verified, phone, phone_verified, password, is_active, deleted_at, supabase_user_id FROM users WHERE id = ?').get(req.params.id)
+  const user = db.prepare('SELECT id, username, name, email, email_verified, phone, phone_verified, password, is_active, deleted_at, google_subject FROM users WHERE id = ?').get(req.params.id)
   if (!user) return err(res, 'User not found', 404)
   if (user.deleted_at || !user.is_active) return err(res, 'User account is inactive', 400)
 
@@ -917,23 +921,23 @@ router.post('/users/:id/change-password', authToken, async (req, res) => {
     if (!bcrypt.compareSync(currentPassword, user.password)) return err(res, 'Current password is incorrect', 401)
   }
 
-  let supabaseUserId = String(user.supabase_user_id || '').trim()
-  const shouldUseSupabase = isSupabaseAuthConfigured() && (supabaseUserId || user.email)
-  if (shouldUseSupabase && String(newPassword).length < 6) {
-    return err(res, 'Password must be at least 6 characters when Supabase auth is enabled.')
+  let googleUserId = String(user.google_subject || '').trim()
+  const shouldUseGoogle = isGoogleAuthConfigured() && (googleUserId || user.email)
+  if (shouldUseGoogle && String(newPassword).length < 6) {
+    return err(res, 'Password must be at least 6 characters when Google auth is enabled.')
   }
-  if (shouldUseSupabase && !supabaseUserId && user.email) {
+  if (shouldUseGoogle && !googleUserId && user.email) {
     const provision = await createOrUpdateAuthUser(user, newPassword)
-    if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Supabase authentication.')
-    if (provision.success && provision.userId) supabaseUserId = String(provision.userId)
+    if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Google authentication.')
+    if (provision.success && provision.userId) googleUserId = String(provision.userId)
   }
-  if (shouldUseSupabase && supabaseUserId) {
-    const sync = await updateAuthPassword(supabaseUserId, newPassword)
+  if (shouldUseGoogle && googleUserId) {
+    const sync = await updateAuthPassword(googleUserId, newPassword)
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = \'now\' WHERE id = ?')
-    .run(hash, supabaseUserId, req.params.id)
+  db.prepare('UPDATE users SET password = ?, google_subject = COALESCE(NULLIF(?, \'\'), google_subject), updated_at = \'now\' WHERE id = ?')
+    .run(hash, googleUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id, { mode: allowAdminOverride ? 'admin' : 'self_service' })
   ok(res, {})
@@ -945,30 +949,30 @@ router.post('/users/:id/reset-password', authToken, async (req, res) => {
   if (!actor) return
   if (!newPassword) return err(res, 'New password required')
 
-  const target = db.prepare('SELECT id, username, name, email, email_verified, phone, phone_verified, is_active, deleted_at, supabase_user_id FROM users WHERE id = ?').get(req.params.id)
+  const target = db.prepare('SELECT id, username, name, email, email_verified, phone, phone_verified, is_active, deleted_at, google_subject FROM users WHERE id = ?').get(req.params.id)
   const targetSecurity = getUserSecurityContext(req.params.id)
   if (!target) return err(res, 'User not found', 404)
   if (!targetSecurity) return err(res, 'User not found', 404)
   if (!canManageTarget(actor, targetSecurity)) return err(res, 'Cannot reset another admin account password', 403)
   if (target.deleted_at || !target.is_active) return err(res, 'User account is inactive', 400)
 
-  let supabaseUserId = String(target.supabase_user_id || '').trim()
-  const shouldUseSupabase = isSupabaseAuthConfigured() && (supabaseUserId || target.email)
-  if (shouldUseSupabase && String(newPassword).length < 6) {
-    return err(res, 'Password must be at least 6 characters when Supabase auth is enabled.')
+  let googleUserId = String(target.google_subject || '').trim()
+  const shouldUseGoogle = isGoogleAuthConfigured() && (googleUserId || target.email)
+  if (shouldUseGoogle && String(newPassword).length < 6) {
+    return err(res, 'Password must be at least 6 characters when Google auth is enabled.')
   }
-  if (shouldUseSupabase && !supabaseUserId && target.email) {
+  if (shouldUseGoogle && !googleUserId && target.email) {
     const provision = await createOrUpdateAuthUser(target, newPassword)
-    if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Supabase authentication.')
-    if (provision.success && provision.userId) supabaseUserId = String(provision.userId)
+    if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Google authentication.')
+    if (provision.success && provision.userId) googleUserId = String(provision.userId)
   }
-  if (shouldUseSupabase && supabaseUserId) {
-    const sync = await updateAuthPassword(supabaseUserId, newPassword)
+  if (shouldUseGoogle && googleUserId) {
+    const sync = await updateAuthPassword(googleUserId, newPassword)
     if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
   }
   const hash = bcrypt.hashSync(newPassword, 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id), updated_at = \'now\' WHERE id = ?')
-    .run(hash, supabaseUserId, req.params.id)
+  db.prepare('UPDATE users SET password = ?, google_subject = COALESCE(NULLIF(?, \'\'), google_subject), updated_at = \'now\' WHERE id = ?')
+    .run(hash, googleUserId, req.params.id)
   revokeUserSessions(req.params.id)
   audit(userId || actor.id, userName || actor.name, 'reset_password', 'user', req.params.id)
   ok(res, {})

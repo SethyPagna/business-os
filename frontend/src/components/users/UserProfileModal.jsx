@@ -95,7 +95,7 @@ const PROFILE_KM_FALLBACKS = {
   connected: 'បានភ្ជាប់',
   ready_on_login: 'រួចរាល់ពេលចូល',
   google_login_ready_note: 'ភ្ជាប់ Google ម្តងនៅទីនេះ បន្ទាប់មកអ្នកអាចបន្តចូលប្រើដោយគណនី Google នោះបាន។',
-  google_provider_disabled_note: 'មិនទាន់បើក Google sign-in នៅក្នុង Supabase នៅឡើយទេ។',
+  google_provider_disabled_note: 'មិនទាន់បើក Google sign-in នៅក្នុង Google login នៅឡើយទេ។',
   current_password: 'ពាក្យសម្ងាត់បច្ចុប្បន្ន',
   disconnect_google_password_hint: 'ប្រើពាក្យសម្ងាត់បច្ចុប្បន្ន មុនពេលផ្ដាច់ Google ចេញពីគណនីនេះ។',
   disconnect_google: 'ផ្ដាច់ Google',
@@ -270,8 +270,8 @@ export default function UserProfileModal({ onClose }) {
   const [disconnectingProvider, setDisconnectingProvider] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     googleOauth: false,
-    supabaseAuth: false,
-    supabaseEmailAuth: false,
+    googleLoginAuth: false,
+    googleLoginEmailAuth: false,
   })
   const [authMethods, setAuthMethods] = useState(null)
   const [currentPassword, setCurrentPassword] = useState('')
@@ -348,8 +348,8 @@ export default function UserProfileModal({ onClose }) {
       if (capsResult && capsResult.success !== false) {
         setVerificationCaps({
           googleOauth: capsResult.google_oauth === true,
-          supabaseAuth: capsResult.supabase_auth === true,
-          supabaseEmailAuth: capsResult.supabase_email_auth === true,
+          googleLoginAuth: capsResult.google_oauth === true || capsResult.google_login?.enabled === true,
+          googleLoginEmailAuth: capsResult.google_email_auth === true,
         })
       }
       if (authMethodsResult && authMethodsResult.success !== false) {
@@ -553,8 +553,8 @@ export default function UserProfileModal({ onClose }) {
     if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
-    if (!verificationCaps.supabaseAuth) {
-      notify(tr('supabase_auth_not_ready', 'Supabase auth is not ready yet.'), 'error')
+    if (!verificationCaps.googleLoginAuth) {
+      notify(tr('google_oauth_not_ready', 'Google login is not ready yet.'), 'error')
       return
     }
 
@@ -570,7 +570,7 @@ export default function UserProfileModal({ onClose }) {
         }))
       } catch (_) {}
       const redirectTo = `${window.location.origin}${window.location.pathname}?auth_mode=link&auth_provider=${encodeURIComponent(normalizedProvider)}`
-      const result = await withLoaderTimeout(() => window.api.startSupabaseOauth({
+      const result = await withLoaderTimeout(() => window.api.startGoogleOauth({
         provider: normalizedProvider,
         mode: 'link',
         redirectTo,
@@ -599,10 +599,14 @@ export default function UserProfileModal({ onClose }) {
 
     setDisconnectingProvider(normalizedProvider)
     try {
-      const result = await withLoaderTimeout(() => window.api.disconnectUserAuthProvider(user.id, {
-        provider: normalizedProvider,
-        currentPassword,
-      }), 'Disconnect sign-in provider', 20000)
+      const result = await withLoaderTimeout(() => (
+        normalizedProvider === 'google'
+          ? window.api.unlinkGoogleOauth({ currentPassword })
+          : window.api.disconnectUserAuthProvider(user.id, {
+            provider: normalizedProvider,
+            currentPassword,
+          })
+      ), 'Disconnect sign-in provider', 20000)
       if (result?.success === false) {
         notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
@@ -891,8 +895,8 @@ export default function UserProfileModal({ onClose }) {
                     {verificationCaps.googleOauth
                       ? (authMethods?.google_ready
                         ? tr('google_login_ready_note', 'Connect Google once here, then you can keep signing in with that Google account.')
-                        : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.'))
-                      : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Supabase yet.')}
+                        : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Google login yet.'))
+                      : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Google login yet.')}
                   </p>
                   {authMethods?.google_linked && needsSensitivePassword ? (
                     <div className="mt-3 space-y-2">

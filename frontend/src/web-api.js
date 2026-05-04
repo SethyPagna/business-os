@@ -13,7 +13,7 @@
  *   api/methods.js   ??all domain API methods
  */
 
-import { setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
+import { apiFetch, setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
@@ -239,6 +239,185 @@ async function queueOfflineFileChunks(file, ownerOperation = {}) {
   return { success: true, upload_id, chunkCount, sha256: fileSha256 }
 }
 
+function dispatchOutboxProgress(detail = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_PROGRESS', {
+    detail: { ts: Date.now(), ...detail },
+  }))
+}
+
+function dispatchOutboxFileProgress(detail = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_FILE_PROGRESS', {
+    detail: { ts: Date.now(), ...detail },
+  }))
+}
+
+function dispatchOutboxConflict(detail = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
+    detail: { ts: Date.now(), ...detail },
+  }))
+}
+
+function getSyncOutboxKey(row = {}) {
+  return row._seq ?? row.id
+}
+
+async function syncUnlockedOfflineOutbox(options = {}) {
+  if (!offlineVaultKey) {
+    dispatchVaultLocked('sync_requires_unlock')
+    return { success: false, locked: true, status: 'vault_locked' }
+  }
+  scheduleOfflineVaultIdleLock()
+  const rows = (await dexieDb.sync_outbox.toArray().catch(() => []))
+    .filter((row) => ['pending', 'failed', 'retry'].includes(String(row?.status || 'pending')))
+    .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
+    .slice(0, Math.max(1, Number(options.limit || 25)))
+  if (!rows.length) return { success: true, synced: 0, conflicts: 0, failed: 0 }
+
+  const operations = []
+  for (const row of rows) {
+    try {
+      const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
+      operations.push({
+        id: row.id,
+        row_key: getSyncOutboxKey(row),
+        client_request_id: row.client_request_id || row.id,
+        operation_id: row.operation_id,
+        schema_version: Number(row.schema_version || 1),
+        base_updated_at: row.base_updated_at,
+        entity_table: row.entity_table || '',
+        entity_id: row.entity_id || null,
+        payload_digest: row.payload_digest || await sha256Hex(payload),
+        payload,
+      })
+      await dexieDb.sync_outbox.update(getSyncOutboxKey(row), {
+        status: 'syncing',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    } catch (error) {
+      await dexieDb.sync_outbox.update(getSyncOutboxKey(row), {
+        status: 'integrity_failed',
+        error: error?.message || 'Encrypted offline edit could not be opened.',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    }
+  }
+  if (!operations.length) return { success: false, synced: 0, conflicts: 0, failed: rows.length }
+
+  dispatchOutboxProgress({ status: 'syncing', total: operations.length, completed: 0 })
+  let response = null
+  try {
+    response = await apiFetch('POST', '/api/sync/outbox', { operations })
+  } catch (error) {
+    for (const operation of operations) {
+      await dexieDb.sync_outbox.update(operation.row_key, {
+        status: 'failed',
+        error: error?.message || 'Offline sync failed.',
+        retry_at: new Date(Date.now() + 30_000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    }
+    dispatchOutboxProgress({ status: 'failed', total: operations.length, failed: operations.length })
+    return { success: false, synced: 0, conflicts: 0, failed: operations.length }
+  }
+
+  const results = Array.isArray(response?.results) ? response.results : []
+  let synced = 0
+  let conflicts = 0
+  let failed = 0
+  for (const result of results) {
+    const matched = operations.find((operation) => operation.client_request_id === result.client_request_id)
+    const id = matched?.row_key
+    if (id == null) continue
+    if (result.status === 'applied') {
+      synced += 1
+      await dexieDb.sync_outbox.update(id, {
+        status: 'synced',
+        server_response: result.response || null,
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    } else if (result.code === 'write_conflict' || result.status === 'conflict') {
+      conflicts += 1
+      await dexieDb.sync_outbox.update(id, {
+        status: 'conflict',
+        conflict: result,
+        error: result.error || 'Server value changed.',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+      dispatchOutboxConflict({ id, result })
+    } else {
+      failed += 1
+      await dexieDb.sync_outbox.update(id, {
+        status: 'failed',
+        error: result.error || result.code || 'Offline sync failed.',
+        retry_at: new Date(Date.now() + 30_000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+    }
+  }
+  dispatchOutboxProgress({ status: conflicts ? 'conflict' : (failed ? 'failed' : 'synced'), total: operations.length, synced, conflicts, failed })
+  return { success: failed === 0 && conflicts === 0, synced, conflicts, failed }
+}
+
+async function syncUnlockedOfflineFileChunks(options = {}) {
+  if (!offlineVaultKey) {
+    dispatchVaultLocked('file_sync_requires_unlock')
+    return { success: false, locked: true, status: 'vault_locked' }
+  }
+  scheduleOfflineVaultIdleLock()
+  const allRows = await dexieDb.offline_file_chunks.toArray().catch(() => [])
+  const uploadIds = [...new Set(allRows.filter((row) => row.status !== 'synced').map((row) => row.upload_id).filter(Boolean))]
+    .slice(0, Math.max(1, Number(options.limit || 5)))
+  let completed = 0
+  let failed = 0
+  for (const uploadId of uploadIds) {
+    const rows = allRows.filter((row) => row.upload_id === uploadId)
+    const manifestRow = rows.find((row) => Number(row.chunk_index) === -1)
+    if (!manifestRow) continue
+    try {
+      const manifest = await decryptOfflineVaultValue(manifestRow.encrypted_payload ? manifestRow : { encrypted_payload: manifestRow.encrypted_payload, iv: manifestRow.iv })
+      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'initializing', completed, total: uploadIds.length })
+      await apiFetch('POST', '/api/sync/files/chunks/init', { manifest })
+      const chunks = rows
+        .filter((row) => Number(row.chunk_index) >= 0 && row.status !== 'synced')
+        .sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index))
+      for (const row of chunks) {
+        const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
+        const chunkBytes = base64ToBytes(payload.chunk)
+        const chunkSha256 = await sha256Hex(chunkBytes)
+        await apiFetch('POST', `/api/sync/files/chunks/${encodeURIComponent(uploadId)}/chunk`, {
+          chunk_index: Number(row.chunk_index),
+          chunk_sha256: chunkSha256,
+          chunk: payload.chunk,
+        })
+        await dexieDb.offline_file_chunks.update(row._seq, {
+          status: 'synced',
+          updated_at: new Date().toISOString(),
+        }).catch(() => {})
+        dispatchOutboxFileProgress({ upload_id: uploadId, status: 'chunk', chunk_index: row.chunk_index, chunk_count: manifest.chunk_count })
+      }
+      await apiFetch('POST', `/api/sync/files/chunks/${encodeURIComponent(uploadId)}/complete`, { upload_id: uploadId })
+      await dexieDb.offline_file_chunks.update(manifestRow._seq, {
+        status: 'synced',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})
+      completed += 1
+      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'synced', completed, total: uploadIds.length })
+    } catch (error) {
+      failed += 1
+      await Promise.all(rows.map((row) => dexieDb.offline_file_chunks.update(row._seq, {
+        status: row.status === 'synced' ? 'synced' : 'failed',
+        error: error?.message || 'Offline file sync failed.',
+        updated_at: new Date().toISOString(),
+      }).catch(() => {})))
+      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'failed', error: error?.message || 'Offline file sync failed.' })
+    }
+  }
+  return { success: failed === 0, completed, failed }
+}
+
 function registerOutboxBackgroundSync() {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
   navigator.serviceWorker.ready
@@ -276,6 +455,10 @@ function refreshServiceWorkerSoon(force = false) {
 function runOfflineMaintenance(force = false) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   methods.retryPendingSyncNow?.().catch(() => {})
+  if (offlineVaultKey) {
+    syncUnlockedOfflineOutbox({ force }).catch(() => {})
+    syncUnlockedOfflineFileChunks({ force }).catch(() => {})
+  }
   refreshOfflineSnapshotSoon(force)
   registerOutboxBackgroundSync()
   refreshServiceWorkerSoon(force)
@@ -444,6 +627,8 @@ window.api = {
   },
   queueBusinessOutboxOperation,
   queueOfflineFileChunks,
+  syncUnlockedOfflineOutbox,
+  syncUnlockedOfflineFileChunks,
   requestOfflinePersistentStorage,
   getAuthSessionToken,
   getCallLog,

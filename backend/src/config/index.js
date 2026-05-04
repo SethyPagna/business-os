@@ -98,6 +98,18 @@ function ensureDirectory(targetPath) {
   fs.mkdirSync(targetPath, { recursive: true })
 }
 
+function readSecretFileValue(filePath) {
+  const value = trim(filePath)
+  if (!value) return ''
+  try {
+    const absolute = path.isAbsolute(value) ? value : path.resolve(RUNTIME_DIR, value)
+    if (!fs.existsSync(absolute)) return ''
+    return trim(fs.readFileSync(absolute, 'utf8'))
+  } catch (_) {
+    return ''
+  }
+}
+
 function ensureOrganizationRuntimeLayout(runtimeRoot) {
   ;['uploads', 'imports', 'exports', 'backups', 'logs', 'tmp', 'users', 'meta', 'snapshots'].forEach((folder) => {
     ensureDirectory(path.join(runtimeRoot, folder))
@@ -196,6 +208,12 @@ const PUBLIC_BASE_URL = trim(process.env.PUBLIC_BASE_URL) || CLOUDFLARE_PUBLIC_U
 const GOOGLE_DRIVE_CLIENT_ID = trim(process.env.GOOGLE_DRIVE_CLIENT_ID)
 const GOOGLE_DRIVE_CLIENT_SECRET = trim(process.env.GOOGLE_DRIVE_CLIENT_SECRET)
 const GOOGLE_DRIVE_OAUTH_REDIRECT_URI = trim(process.env.GOOGLE_DRIVE_OAUTH_REDIRECT_URI)
+const DEFAULT_GOOGLE_LOGIN_CLIENT_ID = '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com'
+const GOOGLE_LOGIN_CLIENT_ID = trim(process.env.GOOGLE_LOGIN_CLIENT_ID || DEFAULT_GOOGLE_LOGIN_CLIENT_ID)
+const GOOGLE_LOGIN_CLIENT_SECRET_FILE = trim(process.env.GOOGLE_LOGIN_CLIENT_SECRET_FILE)
+const GOOGLE_LOGIN_CLIENT_SECRET = trim(process.env.GOOGLE_LOGIN_CLIENT_SECRET)
+  || readSecretFileValue(GOOGLE_LOGIN_CLIENT_SECRET_FILE)
+const GOOGLE_LOGIN_REDIRECT_URI = trim(process.env.GOOGLE_LOGIN_REDIRECT_URI)
 
 if (!process.env._BOS_CONFIG_LOGGED) {
   process.env._BOS_CONFIG_LOGGED = '1'
@@ -264,6 +282,11 @@ module.exports = {
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI,
+  DEFAULT_GOOGLE_LOGIN_CLIENT_ID,
+  GOOGLE_LOGIN_CLIENT_ID,
+  GOOGLE_LOGIN_CLIENT_SECRET,
+  GOOGLE_LOGIN_CLIENT_SECRET_FILE,
+  GOOGLE_LOGIN_REDIRECT_URI,
   normalizeSelectedDataDir,
   readDataLocation,
   writeDataLocation,

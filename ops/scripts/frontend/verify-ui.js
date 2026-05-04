@@ -43,7 +43,7 @@ const INTENTIONAL_PUBLIC_TERMS = [
   /^OAuth/i,
   /^Google$/,
   /^Facebook$/,
-  /^Supabase Auth$/,
+  /^Google login$/,
   /^JPG, PNG, WEBP$/,
   /^Inter$/,
   /^Monospace$/,

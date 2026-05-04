@@ -544,11 +544,14 @@ export async function getNotificationSummary() {
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }
-export async function startSupabaseOauth(payload) {
+export async function startGoogleOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/start', payload || {})
 }
-export async function completeSupabaseOauth(payload) {
+export async function completeGoogleOauth(payload) {
   return apiFetch('POST', '/api/auth/oauth/complete', payload || {})
+}
+export async function unlinkGoogleOauth(payload) {
+  return apiFetch('POST', '/api/auth/oauth/unlink', payload || {})
 }
 export async function getAppBootstrap() {
   const buildLocalBootstrap = async () => {

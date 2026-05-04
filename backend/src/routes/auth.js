@@ -7,7 +7,7 @@
  * - Password login (username/email identifier).
  * - OTP 2FA verification and setup lifecycle.
  * - OTP-based reset flow and provider-aware account recovery.
- * - Provider-aware auth behavior (local bootstrap password + Supabase sync).
+ * - Provider-aware auth behavior (local password + owned Google login).
  *
  * Data interconnections:
  * - Reads/writes `users` (password/otp/email verification state).
@@ -33,15 +33,12 @@ const {
   clearAbuseFailure,
 } = require('../security')
 const {
-  isSupabaseAuthConfigured,
-  getSupabaseAuthPublicConfig,
-  createOrUpdateAuthUser,
-  verifyPasswordWithSupabase,
-  updateAuthPassword,
-  getAuthUserFromAccessToken,
-  buildOauthStartUrl,
-  sendSupabasePasswordRecoveryEmail,
-} = require('../services/supabaseAuth')
+  buildGoogleOauthStartUrl,
+  exchangeGoogleOauthCode,
+  getGoogleLoginPublicConfig,
+  getGoogleUserFromTokens,
+  verifyState,
+} = require('../services/googleOauth')
 const {
   getVerificationCapabilities,
   normalizeEmail,
@@ -52,6 +49,7 @@ const {
   setAuthSessionCookie,
   clearAuthSessionCookie,
   getPresentedSessionToken,
+  getSessionUser,
   revokeAuthSession,
   revokeUserSessions,
   SESSION_ROTATION_GRACE_MS,
@@ -141,7 +139,7 @@ function buildPublicBaseUrl(req) {
 function resolvePasswordResetRedirect(req, redirectTo) {
   const candidates = [
     redirectTo,
-    process.env.SUPABASE_PASSWORD_RESET_REDIRECT_TO,
+    process.env.PASSWORD_RESET_REDIRECT_TO,
     CLOUDFLARE_ADMIN_URL,
     PUBLIC_BASE_URL,
     CLOUDFLARE_PUBLIC_URL,
@@ -434,10 +432,10 @@ function issueAuthSession(req, userId, details = {}) {
   })
 }
 
-function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
-  const supabaseUserId = String(authUser?.id || '').trim() || null
-  const email = normalizeEmail(authUser?.email || '') || null
-  const emailVerified = authUser?.emailConfirmed ? 1 : 0
+function updateLocalUserGoogleIdentity(userId, googleUser = {}) {
+  const googleSubject = String(googleUser?.sub || googleUser?.id || '').trim() || null
+  const email = normalizeEmail(googleUser?.email || '') || null
+  const emailVerified = googleUser?.emailVerified ? 1 : 0
   const existing = getUserById(userId)
   const localEmail = normalizeEmail(existing?.email || '')
   const emailConflict = email
@@ -446,7 +444,10 @@ function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
   const shouldReplaceEmail = !emailConflict && (!localEmail || (email && localEmail === email))
   db.prepare(`
     UPDATE users
-    SET supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id),
+    SET google_subject = COALESCE(NULLIF(?, ''), google_subject),
+        google_email = COALESCE(?, google_email),
+        google_email_verified = CASE WHEN ? = 1 THEN 1 ELSE google_email_verified END,
+        google_linked_at = CURRENT_TIMESTAMP,
         email = CASE
           WHEN ? = 1 THEN COALESCE(?, email)
           ELSE email
@@ -456,23 +457,20 @@ function updateLocalUserSupabaseIdentity(userId, authUser = {}) {
           ELSE email_verified
         END
     WHERE id = ?
-  `).run(supabaseUserId, shouldReplaceEmail ? 1 : 0, shouldReplaceEmail ? email : null, shouldReplaceEmail ? emailVerified : 0, shouldReplaceEmail ? 1 : 0, userId)
+  `).run(googleSubject, email, emailVerified, shouldReplaceEmail ? 1 : 0, shouldReplaceEmail ? email : null, shouldReplaceEmail ? emailVerified : 0, shouldReplaceEmail ? 1 : 0, userId)
   return getUserById(userId)
 }
 
 router.get('/verification-capabilities', (_req, res) => {
-  const supabase = getSupabaseAuthPublicConfig()
+  const googleLogin = getGoogleLoginPublicConfig()
   ok(res, {
     ...getVerificationCapabilities(),
     email: false,
     sms: false,
-    supabase_auth: supabase.enabled,
-    google_oauth: supabase.googleEnabled,
+    google_oauth: googleLogin.enabled,
+    google_login: googleLogin,
     facebook_oauth: false,
-    supabase_email_auth: supabase.emailAuthEnabled,
-    supabase_magic_link: supabase.magicLinkEnabled,
-    supabase_invite: supabase.inviteEnabled,
-    supabase_mfa_totp: supabase.mfaTotpEnabled,
+    google_email_auth: false,
   })
 })
 
@@ -531,19 +529,7 @@ router.post('/login', async (req, res) => {
   }
 
   const localPasswordMatches = bcrypt.compareSync(password, user.password)
-  const useSupabasePassword = !!(
-    isSupabaseAuthConfigured()
-    && isEmailIdentifier(username)
-    && user.email
-  )
-  if (useSupabasePassword && !localPasswordMatches) {
-    const supabaseAuth = await verifyPasswordWithSupabase(user, password)
-    if (!supabaseAuth.success) {
-      const availabilityError = /unavailable|failed|timed out|request|network/i.test(String(supabaseAuth.error || ''))
-      if (availabilityError) return err(res, 'Authentication provider unavailable. Please try again shortly.', 503)
-      return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username), 'provider_invalid_credentials')
-    }
-  } else if (!localPasswordMatches) {
+  if (!localPasswordMatches) {
     return rejectLogin(res, t0, lockKey, loginIdentifierPreview(username))
   }
 
@@ -574,183 +560,151 @@ router.post('/login', async (req, res) => {
 
 // POST /api/auth/oauth/start
 router.post('/oauth/start', (req, res) => {
-  const { provider, mode, redirectTo } = req.body || {}
+  const { provider, mode, organization } = req.body || {}
+  if (String(provider || 'google').trim().toLowerCase() !== 'google') {
+    return err(res, 'Only Google login is supported.', 400)
+  }
   const oauthMode = normalizeOauthMode(mode)
-  const result = buildOauthStartUrl({
-    provider,
-    redirectTo,
-    queryParams: provider === 'google'
-      ? { access_type: 'offline', prompt: 'consent' }
-      : {},
+  let currentUserId = 0
+  if (oauthMode === 'link') {
+    const sessionUser = getSessionUser(req)
+    if (!sessionUser?.id) return err(res, 'Please sign in before linking Google.', 401)
+    currentUserId = Number(sessionUser.id || 0) || 0
+  }
+  const result = buildGoogleOauthStartUrl({
+    mode: oauthMode,
+    organization,
+    currentUserId,
   })
   if (!result.success) return err(res, result.error || 'Failed to start OAuth flow', 400)
   ok(res, { url: result.url, mode: oauthMode })
 })
 
-// POST /api/auth/oauth/complete
-router.post('/oauth/complete', async (req, res) => {
-  const {
-    accessToken,
-    provider,
-    mode,
-    currentUserId,
-    organization,
-    clientTime,
-    deviceTz,
-    deviceName,
-    sessionDuration,
-  } = req.body || {}
-
-  const oauthMode = normalizeOauthMode(mode)
-  const normalizedProvider = String(provider || '').trim().toLowerCase()
-  const organizationRecord = resolveOrganizationLookup(organization)
-  if (String(organization || '').trim() && !organizationRecord) {
+async function completeGoogleLogin(req, res, googleUser, statePayload = {}, details = {}) {
+  const oauthMode = normalizeOauthMode(statePayload.mode || details.mode)
+  const organizationRecord = resolveOrganizationLookup(statePayload.organization || details.organization)
+  if (String(statePayload.organization || details.organization || '').trim() && !organizationRecord) {
     return err(res, 'Organization not found', 404)
   }
-  const authResult = await getAuthUserFromAccessToken(accessToken)
-  if (!authResult.success || !authResult.user) {
-    return err(res, authResult.error || 'Failed to verify OAuth session with Supabase', 401)
-  }
+  const googleSubject = String(googleUser?.sub || googleUser?.id || '').trim()
+  const googleEmail = normalizeEmail(googleUser?.email || '')
+  if (!googleSubject) return err(res, 'Google identity did not include a subject.', 401)
 
-  const authUser = authResult.user
-  const authEmail = normalizeEmail(authUser.email || '')
-  const oauthIdentityConflict = db.prepare(`
-    SELECT id, username, organization_id, is_active, deleted_at
+  const linkedToOtherUser = db.prepare(`
+    SELECT id
     FROM users
-    WHERE supabase_user_id = ?
+    WHERE google_subject = ?
       AND (? = 0 OR id != ?)
+      AND deleted_at IS NULL
     LIMIT 1
-  `).get(authUser.id, Number(currentUserId || 0), Number(currentUserId || 0))
+  `).get(googleSubject, Number(statePayload.currentUserId || 0), Number(statePayload.currentUserId || 0))
 
   if (oauthMode === 'link') {
-    const actorId = Number(currentUserId || 0)
-    if (!actorId) return err(res, 'A local user session is required to link an identity.', 401)
-    if (oauthIdentityConflict) {
-      return err(res, 'This Google account is already linked to another user.', 409)
-    }
-
-    let localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
+    const actorId = Number(statePayload.currentUserId || details.currentUserId || 0)
+    if (!actorId) return err(res, 'A local user session is required to link Google.', 401)
+    if (linkedToOtherUser) return err(res, 'This Google account is already linked to another user.', 409)
+    const localUser = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(actorId)
     if (!localUser) return err(res, 'Local account is not available.', 404)
-
-    let localEmail = normalizeEmail(localUser.email)
-    if (!localEmail && authEmail) {
-      const conflictUser = db.prepare(`
-        SELECT id
-        FROM users
-        WHERE id != ?
-          AND is_active = 1
-          AND deleted_at IS NULL
-          AND lower(trim(email)) = ?
-        LIMIT 1
-      `).get(localUser.id, authEmail)
-      if (conflictUser) {
-        return err(res, 'This provider email already belongs to another active local account.', 409)
-      }
-      db.prepare(`
-        UPDATE users
-        SET email = ?,
-            email_verified = 1
-        WHERE id = ?
-      `).run(authEmail, localUser.id)
-      localUser = getUserById(localUser.id)
-      localEmail = authEmail
-    }
-
-    if (String(localUser.supabase_user_id || '').trim() && String(localUser.supabase_user_id).trim() !== authUser.id) {
-      return err(res, 'This account is already linked to a different Supabase identity.', 409)
-    }
-
-    const syncedUser = updateLocalUserSupabaseIdentity(localUser.id, authUser)
+    const syncedUser = updateLocalUserGoogleIdentity(localUser.id, googleUser)
     audit(localUser.id, localUser.username, 'identity_linked', 'user', localUser.id, {
-      provider: normalizedProvider || 'oauth',
-      email: authEmail,
-      supabase_user_id: authUser.id,
+      provider: 'google',
+      email: googleEmail,
+      google_subject: googleSubject,
     }, {
       tableName: 'users',
       recordId: localUser.id,
-      deviceName: deviceName || null,
-      deviceTz: deviceTz || null,
-      clientTime: clientTime || null,
+      deviceName: details.deviceName || null,
+      deviceTz: details.deviceTz || null,
+      clientTime: details.clientTime || null,
     })
-
-    return ok(res, {
-      mode: oauthMode,
-      provider: normalizedProvider,
-      user: buildUserPayload(syncedUser),
-    })
+    return ok(res, { mode: oauthMode, provider: 'google', user: buildUserPayload(syncedUser) })
   }
 
-  let localUser = null
-  if (oauthIdentityConflict && Number(oauthIdentityConflict.is_active || 0) === 1 && !oauthIdentityConflict.deleted_at) {
-    const conflictOrgId = Number(oauthIdentityConflict.organization_id || 0) || 0
-    const requestedOrgId = Number(organizationRecord?.id || 0) || 0
-    if (requestedOrgId && conflictOrgId && requestedOrgId !== conflictOrgId) {
-      return err(res, 'This Google account belongs to a different organization.', 409)
-    }
-    localUser = getExactActiveUserById(oauthIdentityConflict.id, requestedOrgId)
-  }
+  const requestedOrgId = Number(organizationRecord?.id || 0) || 0
+  let localUser = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE google_subject = ?
+      AND is_active = 1
+      AND deleted_at IS NULL
+      AND (? = 0 OR organization_id = ?)
+    LIMIT 1
+  `).get(googleSubject, requestedOrgId, requestedOrgId)
 
   if (!localUser) {
-    localUser = db.prepare(`
-      SELECT *
-      FROM users
-      WHERE is_active = 1
-        AND deleted_at IS NULL
-        AND (? = 0 OR organization_id = ?)
-        AND (
-          supabase_user_id = ?
-          OR (? != '' AND lower(trim(email)) = ?)
-        )
-      ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
-      LIMIT 1
-    `).get(Number(organizationRecord?.id || 0), Number(organizationRecord?.id || 0), authUser.id, authEmail, authEmail, authUser.id)
+    return err(res, 'No active local account is linked to this Google account yet. Sign in with password or OTP first, then link Google from My Profile.', 403)
   }
 
-  if (!localUser) {
-    if (!authEmail) {
-      return err(res, 'No active local account matches this sign-in method yet. Ask an admin to create your account first and link this provider from My Profile.', 403)
-    }
-    return err(res, 'No active local account matches this sign-in method yet. Ask an admin to create your account first.', 403)
-  }
-  if (String(localUser.supabase_user_id || '').trim() && String(localUser.supabase_user_id).trim() !== authUser.id) {
-    return err(res, 'This local account is already linked to a different Google identity.', 409)
-  }
-
-  localUser = updateLocalUserSupabaseIdentity(localUser.id, authUser)
-
+  localUser = updateLocalUserGoogleIdentity(localUser.id, googleUser)
   const otpSecret = getOtpSecret(localUser)
   if (localUser.otp_enabled && !otpSecret) {
     return err(res, 'Two-factor authentication is unavailable for this account. Please contact admin.', 503)
   }
   if (localUser.otp_enabled && otpSecret) {
-    return ok(res, {
-      otpRequired: true,
-      userId: localUser.id,
-      provider: normalizedProvider,
-    })
+    return ok(res, { otpRequired: true, userId: localUser.id, provider: 'google' })
   }
 
   audit(localUser.id, localUser.username, 'login', 'user', localUser.id, {
-    method: normalizedProvider || 'oauth',
-    email: authEmail,
-    supabase_user_id: authUser.id,
+    method: 'google',
+    email: googleEmail,
+    google_subject: googleSubject,
   }, {
     tableName: 'users',
     recordId: localUser.id,
-    deviceName: deviceName || null,
-    deviceTz: deviceTz || null,
-    clientTime: clientTime || null,
+    deviceName: details.deviceName || null,
+    deviceTz: details.deviceTz || null,
+    clientTime: details.clientTime || null,
   })
 
-  const session = issueAuthSession(req, localUser.id, { sessionDuration, deviceName, deviceTz, clientTime })
+  const session = issueAuthSession(req, localUser.id, details)
   setAuthSessionCookie(req, res, session)
-
   return ok(res, {
-    provider: normalizedProvider,
+    provider: 'google',
     user: buildUserPayload(localUser),
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
   })
+}
+
+router.get('/oauth/callback', async (req, res) => {
+  const { code, state } = req.query || {}
+  const stateResult = verifyState(state)
+  if (!stateResult.success) return err(res, stateResult.error, 400)
+  const tokenResult = await exchangeGoogleOauthCode(code, stateResult.payload)
+  if (!tokenResult.success) return err(res, tokenResult.error || 'Google login failed.', 401)
+  const userResult = await getGoogleUserFromTokens(tokenResult.tokens)
+  if (!userResult.success) return err(res, userResult.error || 'Google profile lookup failed.', 401)
+  return completeGoogleLogin(req, res, userResult.user, stateResult.payload, {
+    sessionDuration: 'session',
+    deviceName: 'Google OAuth',
+    userAgent: String(req.headers['user-agent'] || ''),
+  })
+})
+
+// POST /api/auth/oauth/complete
+router.post('/oauth/complete', async (req, res) => {
+  return err(res, 'Use the Google OAuth callback to complete sign-in.', 400)
+})
+
+router.post('/oauth/unlink', authToken, (req, res) => {
+  const { currentPassword } = req.body || {}
+  const actorId = Number(req.user?.id || 0)
+  if (!actorId) return err(res, 'Please sign in again to continue.', 401)
+  const user = getUserById(actorId)
+  if (!user) return err(res, 'User not found.', 404)
+  if (!currentPassword || !bcrypt.compareSync(String(currentPassword), user.password)) {
+    return err(res, 'Current password is required to unlink Google.', 403)
+  }
+  db.prepare(`
+    UPDATE users
+    SET google_subject = NULL,
+        google_email = NULL,
+        google_email_verified = 0,
+        google_linked_at = NULL
+    WHERE id = ?
+  `).run(actorId)
+  audit(actorId, user.username, 'identity_unlinked', 'user', actorId, { provider: 'google' })
+  return ok(res, { user: buildUserPayload(getUserById(actorId)) })
 })
 
 // POST /api/auth/otp/verify
@@ -986,25 +940,8 @@ router.post('/password-reset/otp', async (req, res) => {
   if (!verified) return err(res, 'Invalid OTP code', 401)
   resetRateLimit('auth:password_reset_otp', limitKey)
 
-  let supabaseUserId = String(user.supabase_user_id || '').trim()
-  const useSupabaseProvider = !!(isSupabaseAuthConfigured() && (supabaseUserId || user.email))
-  if (useSupabaseProvider && String(newPassword).length < 6) {
-    return err(res, 'New password must be at least 6 characters when Supabase auth is enabled.')
-  }
-
-  if (isSupabaseAuthConfigured() && !supabaseUserId && user.email) {
-    const provision = await createOrUpdateAuthUser(user, newPassword)
-    if (!provision.success && !provision.skipped) return err(res, provision.error || 'Failed to provision Supabase authentication.')
-    if (provision.success && provision.userId) supabaseUserId = String(provision.userId)
-  }
-  if (isSupabaseAuthConfigured() && supabaseUserId) {
-    const sync = await updateAuthPassword(supabaseUserId, newPassword)
-    if (!sync.success && !sync.skipped) return err(res, sync.error || 'Failed to sync password to auth provider')
-  }
-
   const hash = bcrypt.hashSync(String(newPassword), 10)
-  db.prepare('UPDATE users SET password = ?, supabase_user_id = COALESCE(NULLIF(?, \'\'), supabase_user_id) WHERE id = ?')
-    .run(hash, supabaseUserId, user.id)
+  db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hash, user.id)
   revokeUserSessions(user.id)
 
   audit(user.id, user.username, 'password_reset_complete', 'user', user.id, {
@@ -1016,7 +953,7 @@ router.post('/password-reset/otp', async (req, res) => {
 
 // POST /api/auth/password-reset/email
 router.post('/password-reset/email', async (req, res) => {
-  const { identifier, organization, redirectTo } = req.body || {}
+  const { identifier, organization } = req.body || {}
   if (!identifier) return err(res, 'Username, name, email, or phone is required')
 
   const limitKey = getClientKey(req, `email-reset:${identifier}`)
@@ -1037,90 +974,16 @@ router.post('/password-reset/email', async (req, res) => {
     return ok(res, { message: 'If this account can receive recovery email, reset instructions have been sent.' })
   }
 
-  let supabaseUserId = String(user.supabase_user_id || '').trim()
-  if (isSupabaseAuthConfigured() && (supabaseUserId || user.email)) {
-    if (!supabaseUserId) {
-      const provision = await createOrUpdateAuthUser(user, generateTemporaryAuthPassword())
-      if (!provision.success && !provision.skipped) {
-        return err(res, provision.error || 'Failed to prepare password recovery.', 400)
-      }
-      if (provision.success && provision.userId) {
-        supabaseUserId = String(provision.userId)
-        db.prepare('UPDATE users SET supabase_user_id = ? WHERE id = ?').run(supabaseUserId, user.id)
-      }
-    }
-
-    const recovery = await sendSupabasePasswordRecoveryEmail(user.email, {
-      redirectTo: resolvePasswordResetRedirect(req, redirectTo),
-    })
-    if (!recovery.success) {
-      const providerCode = String(recovery.providerCode || '').trim().toUpperCase()
-      if (providerCode.includes('OVER_EMAIL_SEND_RATE_LIMIT')) {
-        return ok(res, {
-          message: 'A reset email was requested recently. Please wait about a minute, then check your inbox and spam folder.',
-        })
-      }
-      return err(res, recovery.error || 'Failed to send password recovery email.', 400)
-    }
-  }
-
   audit(user.id, user.username, 'password_reset_requested', 'user', user.id, {
     method: 'email',
+    recovery_url: resolvePasswordResetRedirect(req),
   })
   return ok(res, { message: 'If this account can receive recovery email, reset instructions have been sent.' })
 })
 
 // POST /api/auth/password-reset/complete
-router.post('/password-reset/complete', async (req, res) => {
-  const { accessToken, newPassword } = req.body || {}
-  if (!accessToken) return err(res, 'Recovery access token is required')
-  if (!newPassword || String(newPassword).length < 6) {
-    return err(res, 'New password must be at least 6 characters.')
-  }
-
-  const authResult = await getAuthUserFromAccessToken(accessToken)
-  if (!authResult.success || !authResult.user) {
-    return err(res, authResult.error || 'Recovery session is no longer valid.', 401)
-  }
-
-  const authUser = authResult.user
-  const authEmail = normalizeEmail(authUser.email || '')
-  const localUser = db.prepare(`
-    SELECT *
-    FROM users
-    WHERE is_active = 1
-      AND deleted_at IS NULL
-      AND (
-        supabase_user_id = ?
-        OR (? != '' AND lower(trim(email)) = ?)
-      )
-    ORDER BY CASE WHEN supabase_user_id = ? THEN 0 ELSE 1 END, id ASC
-    LIMIT 1
-  `).get(authUser.id, authEmail, authEmail, authUser.id)
-
-  if (!localUser) {
-    return err(res, 'No active local account matches this recovery link. Ask an admin to create or repair your account first.', 404)
-  }
-
-  const sync = await updateAuthPassword(authUser.id, newPassword)
-  if (!sync.success && !sync.skipped) {
-    return err(res, sync.error || 'Failed to update password in authentication provider.', 400)
-  }
-
-  const hash = bcrypt.hashSync(String(newPassword), 10)
-  db.prepare(`
-    UPDATE users
-    SET password = ?,
-        supabase_user_id = COALESCE(NULLIF(?, ''), supabase_user_id)
-    WHERE id = ?
-  `).run(hash, String(authUser.id || '').trim(), localUser.id)
-  revokeUserSessions(localUser.id)
-
-  audit(localUser.id, localUser.username, 'password_reset_complete', 'user', localUser.id, {
-    method: 'email',
-  })
-
-  return ok(res, { message: 'Password updated successfully.' })
+router.post('/password-reset/complete', async (_req, res) => {
+  return err(res, 'Email recovery links are handled by Business OS OTP/password reset. Request a new OTP reset or ask an admin to reset the password.', 400)
 })
 
 module.exports = router

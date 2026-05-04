@@ -48,6 +48,16 @@ await runTest('browser registers background sync without sharing auth tokens wit
   assert.doesNotMatch(webApiSource, /function syncBackgroundAuthSessionToken/)
 })
 
+await runTest('vault-unlocked foreground sync decrypts outbox payloads and reports progress', () => {
+  assert.match(webApiSource, /async function syncUnlockedOfflineOutbox/)
+  assert.match(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
+  assert.match(webApiSource, /\/api\/sync\/outbox/)
+  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_PROGRESS/)
+  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_CONFLICT/)
+  assert.match(webApiSource, /async function syncUnlockedOfflineFileChunks/)
+  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_FILE_PROGRESS/)
+})
+
 await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {
   assert.match(webApiSource, /const OFFLINE_REFRESH_INTERVAL_MS = 5 \* 60_000/)
   assert.match(webApiSource, /startOfflineMaintenanceLoop/)

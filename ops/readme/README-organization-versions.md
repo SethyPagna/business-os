@@ -86,7 +86,7 @@ Business data remains local to Business OS.
 
 #### v1 centralized org path
 
-Add these to Supabase Auth URL Configuration:
+Add these to the Business OS Google login OAuth client:
 - Site URL: `https://atlas.tail47edcd.ts.net`
 - Redirect URLs:
   - `https://atlas.tail47edcd.ts.net`

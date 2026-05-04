@@ -194,15 +194,10 @@ function Write-EnvFile($values) {
     "IMPORT_BATCH_PAUSE_MS=$($values.IMPORT_BATCH_PAUSE_MS)",
     "IMPORT_WORKER_REPLICAS=$($values.IMPORT_WORKER_REPLICAS)",
     "MEDIA_WORKER_REPLICAS=$($values.MEDIA_WORKER_REPLICAS)",
-    "SUPABASE_AUTH_ENABLED=$($values.SUPABASE_AUTH_ENABLED)",
-    "SUPABASE_URL=$($values.SUPABASE_URL)",
-    "SUPABASE_ANON_KEY=$($values.SUPABASE_ANON_KEY)",
-    "SUPABASE_SERVICE_ROLE_KEY=$($values.SUPABASE_SERVICE_ROLE_KEY)",
-    "SUPABASE_EMAIL_AUTH_ENABLED=$($values.SUPABASE_EMAIL_AUTH_ENABLED)",
-    "SUPABASE_MAGIC_LINK_ENABLED=$($values.SUPABASE_MAGIC_LINK_ENABLED)",
-    "SUPABASE_INVITE_ENABLED=$($values.SUPABASE_INVITE_ENABLED)",
-    "SUPABASE_GOOGLE_OAUTH_ENABLED=$($values.SUPABASE_GOOGLE_OAUTH_ENABLED)",
-    "SUPABASE_MFA_TOTP_ENABLED=$($values.SUPABASE_MFA_TOTP_ENABLED)",
+    "GOOGLE_LOGIN_CLIENT_ID=$($values.GOOGLE_LOGIN_CLIENT_ID)",
+    "GOOGLE_LOGIN_CLIENT_SECRET=$($values.GOOGLE_LOGIN_CLIENT_SECRET)",
+    "GOOGLE_LOGIN_CLIENT_SECRET_FILE=$($values.GOOGLE_LOGIN_CLIENT_SECRET_FILE)",
+    "GOOGLE_LOGIN_REDIRECT_URI=$($values.GOOGLE_LOGIN_REDIRECT_URI)",
     "GOOGLE_DRIVE_CLIENT_ID=$($values.GOOGLE_DRIVE_CLIENT_ID)",
     "GOOGLE_DRIVE_CLIENT_SECRET=$($values.GOOGLE_DRIVE_CLIENT_SECRET)",
     "GOOGLE_DRIVE_OAUTH_REDIRECT_URI=$($values.GOOGLE_DRIVE_OAUTH_REDIRECT_URI)",
@@ -277,15 +272,10 @@ function Ensure-Env {
     IMPORT_BATCH_PAUSE_MS = '0'
     IMPORT_WORKER_REPLICAS = Get-MinIntSetting $existing.IMPORT_WORKER_REPLICAS 2
     MEDIA_WORKER_REPLICAS = Get-MinIntSetting $existing.MEDIA_WORKER_REPLICAS 2
-    SUPABASE_AUTH_ENABLED = if ($existing.SUPABASE_AUTH_ENABLED) { $existing.SUPABASE_AUTH_ENABLED } else { 'false' }
-    SUPABASE_URL = if ($existing.SUPABASE_URL) { $existing.SUPABASE_URL } else { '' }
-    SUPABASE_ANON_KEY = if ($existing.SUPABASE_ANON_KEY) { $existing.SUPABASE_ANON_KEY } else { '' }
-    SUPABASE_SERVICE_ROLE_KEY = if ($existing.SUPABASE_SERVICE_ROLE_KEY) { $existing.SUPABASE_SERVICE_ROLE_KEY } else { '' }
-    SUPABASE_EMAIL_AUTH_ENABLED = if ($existing.SUPABASE_EMAIL_AUTH_ENABLED) { $existing.SUPABASE_EMAIL_AUTH_ENABLED } else { 'true' }
-    SUPABASE_MAGIC_LINK_ENABLED = if ($existing.SUPABASE_MAGIC_LINK_ENABLED) { $existing.SUPABASE_MAGIC_LINK_ENABLED } else { 'true' }
-    SUPABASE_INVITE_ENABLED = if ($existing.SUPABASE_INVITE_ENABLED) { $existing.SUPABASE_INVITE_ENABLED } else { 'true' }
-    SUPABASE_GOOGLE_OAUTH_ENABLED = if ($existing.SUPABASE_GOOGLE_OAUTH_ENABLED) { $existing.SUPABASE_GOOGLE_OAUTH_ENABLED } else { if ($existing.SUPABASE_GOOGLE_ENABLED) { $existing.SUPABASE_GOOGLE_ENABLED } else { 'false' } }
-    SUPABASE_MFA_TOTP_ENABLED = if ($existing.SUPABASE_MFA_TOTP_ENABLED) { $existing.SUPABASE_MFA_TOTP_ENABLED } else { 'false' }
+    GOOGLE_LOGIN_CLIENT_ID = if ($existing.GOOGLE_LOGIN_CLIENT_ID) { $existing.GOOGLE_LOGIN_CLIENT_ID } else { '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com' }
+    GOOGLE_LOGIN_CLIENT_SECRET = if ($existing.GOOGLE_LOGIN_CLIENT_SECRET) { $existing.GOOGLE_LOGIN_CLIENT_SECRET } else { '' }
+    GOOGLE_LOGIN_CLIENT_SECRET_FILE = if ($existing.GOOGLE_LOGIN_CLIENT_SECRET_FILE) { $existing.GOOGLE_LOGIN_CLIENT_SECRET_FILE } else { 'ops/runtime/secrets/google-login-client-secret.txt' }
+    GOOGLE_LOGIN_REDIRECT_URI = if ($existing.GOOGLE_LOGIN_REDIRECT_URI) { $existing.GOOGLE_LOGIN_REDIRECT_URI } else { 'https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback' }
     GOOGLE_DRIVE_CLIENT_ID = if ($existing.GOOGLE_DRIVE_CLIENT_ID) { $existing.GOOGLE_DRIVE_CLIENT_ID } else { '' }
     GOOGLE_DRIVE_CLIENT_SECRET = if ($existing.GOOGLE_DRIVE_CLIENT_SECRET) { $existing.GOOGLE_DRIVE_CLIENT_SECRET } else { '' }
     GOOGLE_DRIVE_OAUTH_REDIRECT_URI = if ($existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI) { $existing.GOOGLE_DRIVE_OAUTH_REDIRECT_URI } else { '' }
@@ -521,7 +511,6 @@ function Write-DockerReleaseKit($imageName) {
     }
   }
   $sourceExisting = Read-EnvFile
-  $supabaseGoogleFallback = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_ENABLED' 'false'
   $postgresPassword = if ($kitExisting.POSTGRES_PASSWORD) { $kitExisting.POSTGRES_PASSWORD } else { New-Secret 36 }
   $databaseUrl = "postgres://business_os:$postgresPassword@postgres:5432/business_os"
   $values = [ordered]@{
@@ -552,15 +541,10 @@ function Write-DockerReleaseKit($imageName) {
     IMPORT_BATCH_PAUSE_MS = '0'
     IMPORT_WORKER_REPLICAS = '2'
     MEDIA_WORKER_REPLICAS = '2'
-    SUPABASE_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_AUTH_ENABLED' 'false'
-    SUPABASE_URL = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_URL'
-    SUPABASE_ANON_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_ANON_KEY'
-    SUPABASE_SERVICE_ROLE_KEY = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_SERVICE_ROLE_KEY'
-    SUPABASE_EMAIL_AUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_EMAIL_AUTH_ENABLED' 'true'
-    SUPABASE_MAGIC_LINK_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MAGIC_LINK_ENABLED' 'true'
-    SUPABASE_INVITE_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_INVITE_ENABLED' 'true'
-    SUPABASE_GOOGLE_OAUTH_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_GOOGLE_OAUTH_ENABLED' $supabaseGoogleFallback
-    SUPABASE_MFA_TOTP_ENABLED = Get-EnvValue $kitExisting $sourceExisting 'SUPABASE_MFA_TOTP_ENABLED' 'false'
+    GOOGLE_LOGIN_CLIENT_ID = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_ID' '784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com'
+    GOOGLE_LOGIN_CLIENT_SECRET = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_SECRET'
+    GOOGLE_LOGIN_CLIENT_SECRET_FILE = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_CLIENT_SECRET_FILE' 'ops/runtime/secrets/google-login-client-secret.txt'
+    GOOGLE_LOGIN_REDIRECT_URI = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_LOGIN_REDIRECT_URI' 'https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback'
     GOOGLE_DRIVE_CLIENT_ID = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_ID'
     GOOGLE_DRIVE_CLIENT_SECRET = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_CLIENT_SECRET'
     GOOGLE_DRIVE_OAUTH_REDIRECT_URI = Get-EnvValue $kitExisting $sourceExisting 'GOOGLE_DRIVE_OAUTH_REDIRECT_URI'

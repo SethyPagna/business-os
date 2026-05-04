@@ -60,6 +60,9 @@ await runTest('all business offline edits use operation ids and the versioned ou
 
 await runTest('chunked offline files are queued and replayed separately from JSON edits', () => {
   assert.match(webApiSource, /queueOfflineFileChunks/)
+  assert.match(webApiSource, /syncUnlockedOfflineOutbox/)
+  assert.match(webApiSource, /syncUnlockedOfflineFileChunks/)
+  assert.match(webApiSource, /BUSINESS_OS_OUTBOX_FILE_PROGRESS/)
   assert.match(webApiSource, /OFFLINE_FILE_CHUNK_SIZE = 1024 \* 1024/)
   assert.match(swSource, /\/api\/sync\/files\/chunks\/init/)
   assert.match(swSource, /\/chunk/)

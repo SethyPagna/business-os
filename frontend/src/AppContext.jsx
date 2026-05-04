@@ -1104,7 +1104,7 @@ export function AppProvider({ children }) {
           const storedOrg = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null')
           rememberedOrg = storedOrg?.public_id || storedOrg?.slug || ''
         } catch (_) {}
-        const result = await window.api.completeSupabaseOauth({
+        const result = await window.api.completeGoogleOauth({
           accessToken,
           provider,
           mode: 'link',

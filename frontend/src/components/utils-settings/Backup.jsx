@@ -24,7 +24,7 @@ const QUICK_BACKUP_SECTIONS = [
 
 const BACKUP_SECTION_OPTIONS = [
   { value: 'all', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
-  { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Supabase Auth, and backup package readiness.' },
+  { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Google login, and backup package readiness.' },
   { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
   { value: 'restore', label: 'Restore', hint: 'Restore a verified Business OS backup folder.' },
   { value: 'drive', label: 'Google Drive', hint: 'Connect and manage Drive sync for backup mirrors.' },
@@ -62,7 +62,7 @@ const BACKUP_LOCAL_COPY = {
     refresh: 'ផ្ទុកឡើងវិញ',
     save: 'រក្សាទុក',
     integration_doctor_title: 'ពិនិត្យការភ្ជាប់ប្រព័ន្ធ',
-    integration_doctor_desc: 'ពិនិត្យ Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs និង DuckDB/Parquet ដោយមិនបង្ហាញ secret។',
+    integration_doctor_desc: 'ពិនិត្យ Docker data, R2/offline storage, Google Drive, Google login, backup packages, Redis jobs និង DuckDB/Parquet ដោយមិនបង្ហាញ secret។',
     integration_doctor_complete: 'ពិនិត្យប្រព័ន្ធរួចរាល់',
     integration_doctor_failed: 'ពិនិត្យប្រព័ន្ធបរាជ័យ',
     run_deep_doctor: 'ពិនិត្យ storage',
@@ -187,7 +187,7 @@ function IntegrationDoctorCard({ copy, notify, active }) {
   const checks = doctor?.checks || {}
   const runtime = doctor?.runtime || {}
   const drive = checks.googleDrive || {}
-  const supabase = checks.supabaseAuth || {}
+  const google_login = checks.googleLogin || {}
   const storage = checks.objectStorage || {}
   const oauth = doctor?.expectedOauth || {}
 
@@ -200,7 +200,7 @@ function IntegrationDoctorCard({ copy, notify, active }) {
             {copy('integration_doctor_title', 'Integration doctor')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('integration_doctor_desc', 'Checks Docker data, R2/offline storage, Google Drive, Supabase Auth, backup packages, Redis jobs, and DuckDB/Parquet without showing secrets.')}
+            {copy('integration_doctor_desc', 'Checks Docker data, R2/offline storage, Google Drive, Google login, backup packages, Redis jobs, and DuckDB/Parquet without showing secrets.')}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -221,7 +221,7 @@ function IntegrationDoctorCard({ copy, notify, active }) {
         <DoctorStatusPill label="Redis jobs" check={checks.queue} />
         <DoctorStatusPill label="DuckDB / Parquet" check={checks.analytics} />
         <DoctorStatusPill label="Google Drive" check={drive} />
-        <DoctorStatusPill label="Supabase Auth" check={supabase} />
+        <DoctorStatusPill label="Google login" check={google_login} />
         <DoctorStatusPill label="Backup packages" check={checks.backup} />
         <DoctorStatusPill label="Secrets" check={{ ok: true, message: copy('secrets_redacted', 'Present/missing only; values are redacted.') }} />
       </div>

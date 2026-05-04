@@ -13,7 +13,7 @@ const tracked = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' 
   .filter(Boolean)
   .filter((file) => !/^(frontend|backend)\/package-lock\.json$/i.test(file))
 
-const secretAssignment = /^\s*["']?(?:set\s+"|echo\s+)?(S3_SECRET_ACCESS_KEY|GOOGLE_DRIVE_CLIENT_SECRET|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_JWT_SECRET|CLOUDFLARE_TUNNEL_TOKEN|CLOUDFLARE_API_TOKEN)\s*=\s*["']?([^"'\s#]+)["']?/i
+const secretAssignment = /^\s*["']?(?:set\s+"|echo\s+)?(S3_SECRET_ACCESS_KEY|GOOGLE_DRIVE_CLIENT_SECRET|GOOGLE_LOGIN_CLIENT_SECRET|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_JWT_SECRET|CLOUDFLARE_TUNNEL_TOKEN|CLOUDFLARE_API_TOKEN)\s*=\s*["']?([^"'\s#]+)["']?/i
 const leakedTokenPatterns = [
   { name: 'Cloudflare API token', pattern: /cfut_[A-Za-z0-9_-]{20,}/ },
   { name: 'Supabase secret key', pattern: /sb_secret_[A-Za-z0-9_-]{10,}/ },

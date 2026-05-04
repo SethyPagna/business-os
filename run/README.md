@@ -43,4 +43,4 @@ Do not add new normal-user commands unless the root launcher cannot own the work
 
 ## Runtime Secrets
 
-Put real service credentials only in ignored runtime env files such as `ops\runtime\docker-release\docker-release.env`. The verification flow includes a tracked-secret hygiene check, and the Backup page Integration Doctor reports only redacted presence/status for R2, Google Drive OAuth, Supabase Auth, Cloudflare, and app secrets.
+Put real service credentials only in ignored runtime env files such as `ops\runtime\docker-release\docker-release.env`. The verification flow includes a tracked-secret hygiene check, and the Backup page Integration Doctor reports only redacted presence/status for R2, Google Drive OAuth, Google login, Cloudflare, and app secrets.

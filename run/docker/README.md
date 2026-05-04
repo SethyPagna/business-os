@@ -35,9 +35,9 @@ Live app data uses Postgres for business records and R2 for files/images/backups
 
 - Keep real credentials in `ops\runtime\docker-release\docker-release.env`; never in tracked docs or code.
 - R2 is the normal object store. MinIO is only for explicit emergency/offline mode.
-- Google Drive sync uses the OAuth client named `Business-os Drive` with callbacks under `/api/system/drive-sync/oauth/callback` for admin, public, and localhost URLs.
-- Supabase Google/Gmail login uses the separate OAuth client named `business-os` and the Supabase callback URL.
-- The Backup page Integration Doctor verifies Postgres, Redis jobs/cache, object storage, Drive sync, Supabase Auth, DuckDB/Parquet, and backup package format with all secret values redacted.
+- Google Drive sync uses the OAuth client named `Business OS Drive` with callbacks under `/api/system/drive-sync/oauth/callback` for admin, public, and localhost URLs.
+- Google/Gmail login uses the separate owned OAuth client named `Business OS Google login` with `/api/auth/oauth/callback` for admin, public, and localhost URLs.
+- The Backup page Integration Doctor verifies Postgres, Redis jobs/cache, object storage, Drive sync, Google login, DuckDB/Parquet, and backup package format with all secret values redacted.
 - Integration Doctor is a read-only check. It should not send request bodies with GET/HEAD/OPTIONS calls and should not display write-failed banners for health checks.
 
 The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.

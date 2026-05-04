@@ -89,16 +89,10 @@ set "EXISTING_TWILIO_ACCOUNT_SID="
 set "EXISTING_TWILIO_AUTH_TOKEN="
 set "EXISTING_TWILIO_FROM_NUMBER="
 set "EXISTING_SMS_WEBHOOK_URL="
-set "EXISTING_SUPABASE_AUTH_ENABLED="
-set "EXISTING_SUPABASE_URL="
-set "EXISTING_SUPABASE_ANON_KEY="
-set "EXISTING_SUPABASE_SERVICE_ROLE_KEY="
-set "EXISTING_SUPABASE_EMAIL_AUTH_ENABLED="
-set "EXISTING_SUPABASE_MAGIC_LINK_ENABLED="
-set "EXISTING_SUPABASE_INVITE_ENABLED="
-set "EXISTING_SUPABASE_GOOGLE_OAUTH_ENABLED="
-set "EXISTING_SUPABASE_FACEBOOK_OAUTH_ENABLED="
-set "EXISTING_SUPABASE_MFA_TOTP_ENABLED="
+set "EXISTING_GOOGLE_LOGIN_CLIENT_ID="
+set "EXISTING_GOOGLE_LOGIN_CLIENT_SECRET="
+set "EXISTING_GOOGLE_LOGIN_CLIENT_SECRET_FILE="
+set "EXISTING_GOOGLE_LOGIN_REDIRECT_URI="
 set "EXISTING_GOOGLE_DRIVE_CLIENT_ID="
 set "EXISTING_GOOGLE_DRIVE_CLIENT_SECRET="
 set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI="
@@ -166,35 +160,17 @@ if exist "%ENV_FILE%" (
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SMS_WEBHOOK_URL"') do (
         set "EXISTING_SMS_WEBHOOK_URL=%%b"
     )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_AUTH_ENABLED"') do (
-        set "EXISTING_SUPABASE_AUTH_ENABLED=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^GOOGLE_LOGIN_CLIENT_ID"') do (
+        set "EXISTING_GOOGLE_LOGIN_CLIENT_ID=%%b"
     )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_URL"') do (
-        set "EXISTING_SUPABASE_URL=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^GOOGLE_LOGIN_CLIENT_SECRET"') do (
+        set "EXISTING_GOOGLE_LOGIN_CLIENT_SECRET=%%b"
     )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_ANON_KEY"') do (
-        set "EXISTING_SUPABASE_ANON_KEY=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^GOOGLE_LOGIN_CLIENT_SECRET_FILE"') do (
+        set "EXISTING_GOOGLE_LOGIN_CLIENT_SECRET_FILE=%%b"
     )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_SERVICE_ROLE_KEY"') do (
-        set "EXISTING_SUPABASE_SERVICE_ROLE_KEY=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_EMAIL_AUTH_ENABLED"') do (
-        set "EXISTING_SUPABASE_EMAIL_AUTH_ENABLED=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_MAGIC_LINK_ENABLED"') do (
-        set "EXISTING_SUPABASE_MAGIC_LINK_ENABLED=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_INVITE_ENABLED"') do (
-        set "EXISTING_SUPABASE_INVITE_ENABLED=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_GOOGLE_OAUTH_ENABLED"') do (
-        set "EXISTING_SUPABASE_GOOGLE_OAUTH_ENABLED=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_FACEBOOK_OAUTH_ENABLED"') do (
-        set "EXISTING_SUPABASE_FACEBOOK_OAUTH_ENABLED=%%b"
-    )
-    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^SUPABASE_MFA_TOTP_ENABLED"') do (
-        set "EXISTING_SUPABASE_MFA_TOTP_ENABLED=%%b"
+    for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^GOOGLE_LOGIN_REDIRECT_URI"') do (
+        set "EXISTING_GOOGLE_LOGIN_REDIRECT_URI=%%b"
     )
     for /f "tokens=1,* delims==" %%a in ('type "%ENV_FILE%" ^| findstr /i "^GOOGLE_DRIVE_CLIENT_ID"') do (
         set "EXISTING_GOOGLE_DRIVE_CLIENT_ID=%%b"
@@ -206,6 +182,9 @@ if exist "%ENV_FILE%" (
         set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=%%b"
     )
 )
+if "!EXISTING_GOOGLE_LOGIN_CLIENT_ID!"=="" set "EXISTING_GOOGLE_LOGIN_CLIENT_ID=784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
+if "!EXISTING_GOOGLE_LOGIN_CLIENT_SECRET_FILE!"=="" set "EXISTING_GOOGLE_LOGIN_CLIENT_SECRET_FILE=%ROOT%\ops\runtime\secrets\google-login-client-secret.txt"
+if "!EXISTING_GOOGLE_LOGIN_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_LOGIN_REDIRECT_URI=https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback"
 if "!EXISTING_GOOGLE_DRIVE_CLIENT_ID!"=="" set "EXISTING_GOOGLE_DRIVE_CLIENT_ID=%GOOGLE_DRIVE_CLIENT_ID%"
 if "!EXISTING_GOOGLE_DRIVE_CLIENT_SECRET!"=="" set "EXISTING_GOOGLE_DRIVE_CLIENT_SECRET=%GOOGLE_DRIVE_CLIENT_SECRET%"
 if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI=%GOOGLE_DRIVE_OAUTH_REDIRECT_URI%"
@@ -254,17 +233,11 @@ if "!EXISTING_GOOGLE_DRIVE_OAUTH_REDIRECT_URI!"=="" set "EXISTING_GOOGLE_DRIVE_O
     echo.
     echo # SMS verification is disabled in this build.
     echo.
-    echo # Optional: Supabase Auth provider ^(Auth only - Business OS Postgres remains authoritative^)
-    echo SUPABASE_AUTH_ENABLED=!EXISTING_SUPABASE_AUTH_ENABLED!
-    echo SUPABASE_URL=!EXISTING_SUPABASE_URL!
-    echo SUPABASE_ANON_KEY=!EXISTING_SUPABASE_ANON_KEY!
-    echo SUPABASE_SERVICE_ROLE_KEY=!EXISTING_SUPABASE_SERVICE_ROLE_KEY!
-    echo SUPABASE_EMAIL_AUTH_ENABLED=!EXISTING_SUPABASE_EMAIL_AUTH_ENABLED!
-    echo SUPABASE_MAGIC_LINK_ENABLED=!EXISTING_SUPABASE_MAGIC_LINK_ENABLED!
-    echo SUPABASE_INVITE_ENABLED=!EXISTING_SUPABASE_INVITE_ENABLED!
-    echo SUPABASE_GOOGLE_OAUTH_ENABLED=!EXISTING_SUPABASE_GOOGLE_OAUTH_ENABLED!
-    echo SUPABASE_FACEBOOK_OAUTH_ENABLED=!EXISTING_SUPABASE_FACEBOOK_OAUTH_ENABLED!
-    echo SUPABASE_MFA_TOTP_ENABLED=!EXISTING_SUPABASE_MFA_TOTP_ENABLED!
+    echo # Owned Google login OAuth ^(Business OS backend callback^)
+    echo GOOGLE_LOGIN_CLIENT_ID=!EXISTING_GOOGLE_LOGIN_CLIENT_ID!
+    echo GOOGLE_LOGIN_CLIENT_SECRET=!EXISTING_GOOGLE_LOGIN_CLIENT_SECRET!
+    echo GOOGLE_LOGIN_CLIENT_SECRET_FILE=!EXISTING_GOOGLE_LOGIN_CLIENT_SECRET_FILE!
+    echo GOOGLE_LOGIN_REDIRECT_URI=!EXISTING_GOOGLE_LOGIN_REDIRECT_URI!
     echo.
     echo # Google Drive sync defaults ^(preserved unless explicitly forgotten^)
     echo # Leave client ID/secret blank in source control; keep real values in your local .env or machine environment.

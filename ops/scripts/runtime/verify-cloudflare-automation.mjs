@@ -22,9 +22,10 @@ function readJson(file) {
 }
 
 function readToken(policy) {
-  if (process.env.CLOUDFLARE_API_TOKEN) return process.env.CLOUDFLARE_API_TOKEN.trim()
+  const cleanToken = (value) => String(value || '').replace(/[\r\n\t ]+/g, '').trim()
+  if (process.env.CLOUDFLARE_API_TOKEN) return cleanToken(process.env.CLOUDFLARE_API_TOKEN)
   const tokenFile = path.resolve(ROOT, policy.cloudflare?.apiTokenFile || 'ops/runtime/secrets/cloudflare-api-token.txt')
-  return fs.readFileSync(tokenFile, 'utf8').trim()
+  return cleanToken(fs.readFileSync(tokenFile, 'utf8'))
 }
 
 function readAllowedEmails(policy) {

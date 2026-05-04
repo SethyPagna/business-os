@@ -113,8 +113,8 @@ export default function Login() {
   const [resetInfo, setResetInfo] = useState('')
   const [verificationCaps, setVerificationCaps] = useState({
     googleOauth: false,
-    supabaseAuth: false,
-    supabaseEmailAuth: false,
+    googleLoginAuth: false,
+    googleLoginEmailAuth: false,
   })
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationId, setOrganizationId] = useState('')
@@ -188,8 +188,8 @@ export default function Login() {
         if (!isTrackedRequestCurrent(capabilityRequestRef, requestId) || !result || result.success === false) return
         setVerificationCaps({
           googleOauth: result.google_oauth === true,
-          supabaseAuth: result.supabase_auth === true,
-          supabaseEmailAuth: result.supabase_email_auth === true,
+          googleLoginAuth: result.google_oauth === true || result.google_login?.enabled === true,
+          googleLoginEmailAuth: result.google_email_auth === true,
         })
       } catch (_) {}
     }
@@ -320,7 +320,7 @@ export default function Login() {
             return ''
           }
         })()
-        const result = await withLoaderTimeout(() => window.api.completeSupabaseOauth({
+        const result = await withLoaderTimeout(() => window.api.completeGoogleOauth({
           accessToken,
           provider: pendingOauth?.provider || provider,
           mode: 'login',
@@ -556,7 +556,7 @@ export default function Login() {
           startedAt: Date.now(),
         }))
       } catch (_) {}
-      const result = await withLoaderTimeout(() => window.api.startSupabaseOauth({
+      const result = await withLoaderTimeout(() => window.api.startGoogleOauth({
         provider,
         mode: 'login',
         organization: resolvedOrganization,

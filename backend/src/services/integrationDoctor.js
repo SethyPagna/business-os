@@ -10,6 +10,10 @@ const {
   DATABASE_URL,
   GOOGLE_DRIVE_CLIENT_ID,
   GOOGLE_DRIVE_CLIENT_SECRET,
+  GOOGLE_LOGIN_CLIENT_ID,
+  GOOGLE_LOGIN_CLIENT_SECRET,
+  GOOGLE_LOGIN_CLIENT_SECRET_FILE,
+  GOOGLE_LOGIN_REDIRECT_URI,
   JOB_QUEUE_DRIVER,
   OBJECT_STORAGE_DRIVER,
   PARQUET_STORE,
@@ -23,8 +27,8 @@ const {
   S3_SECRET_ACCESS_KEY,
 } = require('../config')
 const { getDuckDbRuntimeStatus } = require('../analytics/duckdbRuntime')
-const { getSupabaseAuthPublicConfig } = require('./supabaseAuth')
 const { getDriveSyncStatus } = require('./googleDriveSync')
+const { getGoogleLoginPublicConfig } = require('./googleOauth')
 const { initializeBullQueue, getQueueStatus } = require('./importJobs')
 const { listBackupVersions } = require('./backupPackages')
 const { testObjectStore } = require('../objectStore')
@@ -53,7 +57,7 @@ function status(ok, message = '') {
 }
 
 function unique(values = []) {
-  return Array.from(new Set(values.map((value) => trim(value)).filter(Boolean)))
+  return Array.from(new Set(values.map((value) => trim(value).replace(/\/$/, '')).filter(Boolean)))
 }
 
 function buildExpectedOauthChecklist(driveRedirectUri = '') {
@@ -61,25 +65,23 @@ function buildExpectedOauthChecklist(driveRedirectUri = '') {
     CLOUDFLARE_ADMIN_URL,
     CLOUDFLARE_PUBLIC_URL,
     PUBLIC_BASE_URL,
+    'https://admin.leangcosmetics.dpdns.org',
+    'https://leangcosmetics.dpdns.org',
     'http://localhost:4000',
   ])
-  const supabase = getSupabaseAuthPublicConfig()
-  const supabaseProjectOrigin = supabase.url || ''
-  const supabaseCallback = supabaseProjectOrigin ? `${supabaseProjectOrigin}/auth/v1/callback` : ''
+  const loginCallbacks = unique([
+    GOOGLE_LOGIN_REDIRECT_URI,
+    ...appOrigins.map((origin) => `${origin}/api/auth/oauth/callback`),
+  ])
   return {
-    supabaseUrlConfiguration: {
-      siteUrl: CLOUDFLARE_ADMIN_URL || PUBLIC_BASE_URL || 'http://localhost:4000',
-      redirectUrls: appOrigins,
-      note: 'Supabase URL Configuration should allow these Business OS origins for login and password recovery redirects.',
-    },
     googleLoginClient: {
-      name: 'business-os',
-      authorizedJavaScriptOrigins: unique([...appOrigins, supabaseProjectOrigin]),
-      authorizedRedirectUris: unique([supabaseCallback]),
-      note: 'This Google OAuth client belongs to Supabase Auth / Google sign-in.',
+      name: 'Business OS Google login',
+      authorizedJavaScriptOrigins: appOrigins,
+      authorizedRedirectUris: loginCallbacks,
+      note: 'This owned Google OAuth client signs users into Business OS through the backend callback.',
     },
     googleDriveClient: {
-      name: 'Business-os Drive',
+      name: 'Business OS Drive',
       authorizedJavaScriptOrigins: appOrigins,
       authorizedRedirectUris: unique([
         driveRedirectUri,
@@ -143,7 +145,7 @@ async function probeBackups() {
 async function buildIntegrationDoctor(options = {}) {
   const driveRedirectUri = trim(options.driveRedirectUri)
   const runObjectStoreTest = options.runObjectStoreTest === true
-  const supabase = getSupabaseAuthPublicConfig()
+  const googleLogin = getGoogleLoginPublicConfig()
   const drive = getDriveSyncStatus(driveRedirectUri)
   const database = probeDatabase()
   const queue = await probeQueue()
@@ -181,11 +183,14 @@ async function buildIntegrationDoctor(options = {}) {
       clientSecret: { configured: !!drive.hasClientSecret || hasValue(GOOGLE_DRIVE_CLIENT_SECRET), redacted: (drive.hasClientSecret || hasValue(GOOGLE_DRIVE_CLIENT_SECRET)) ? '[redacted]' : '' },
       refreshToken: { configured: !!drive.hasRefreshToken, redacted: drive.hasRefreshToken ? '[redacted]' : '' },
     },
-    supabase: {
-      enabled: supabase.enabled,
-      url: redactPresence(supabase.url),
-      anonKey: { configured: !!supabase.hasAnonKey, redacted: supabase.hasAnonKey ? '[redacted]' : '' },
-      serviceRoleKey: { configured: !!supabase.hasServiceRoleKey, redacted: supabase.hasServiceRoleKey ? '[redacted]' : '' },
+    googleLogin: {
+      clientId: redactPresence(GOOGLE_LOGIN_CLIENT_ID),
+      clientSecret: {
+        configured: hasValue(GOOGLE_LOGIN_CLIENT_SECRET),
+        redacted: hasValue(GOOGLE_LOGIN_CLIENT_SECRET) ? '[redacted]' : '',
+      },
+      clientSecretFile: redactPresence(GOOGLE_LOGIN_CLIENT_SECRET_FILE),
+      redirectUri: redactPresence(GOOGLE_LOGIN_REDIRECT_URI),
     },
   }
 
@@ -218,13 +223,13 @@ async function buildIntegrationDoctor(options = {}) {
       lastSyncedAt: drive.lastSyncedAt || '',
       blockedReason: drive.blockedReason || '',
     },
-    supabaseAuth: {
-      ...status(!!supabase.enabled, supabase.enabled ? 'Supabase Auth is configured.' : 'Supabase Auth is disabled or missing required keys.'),
-      enabled: !!supabase.enabled,
-      googleEnabled: !!supabase.googleEnabled,
-      emailAuthEnabled: !!supabase.emailAuthEnabled,
-      magicLinkEnabled: !!supabase.magicLinkEnabled,
-      mfaTotpEnabled: !!supabase.mfaTotpEnabled,
+    googleLogin: {
+      ...status(!!googleLogin.enabled, googleLogin.enabled ? 'Google login is configured.' : 'Google login needs a client ID and client secret.'),
+      enabled: !!googleLogin.enabled,
+      clientIdConfigured: hasValue(GOOGLE_LOGIN_CLIENT_ID),
+      clientSecretConfigured: hasValue(GOOGLE_LOGIN_CLIENT_SECRET),
+      authorizedJavaScriptOrigins: googleLogin.authorizedJavaScriptOrigins,
+      authorizedRedirectUris: googleLogin.authorizedRedirectUris,
     },
     backup,
   }
