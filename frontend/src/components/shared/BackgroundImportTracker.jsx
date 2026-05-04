@@ -5,7 +5,7 @@ import { useApp } from '../../AppContext'
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
-const CANCELLABLE_STATUSES = new Set(['pending', 'queued', 'running', 'approved'])
+const CANCELLABLE_STATUSES = new Set(['queued', 'running', 'approved'])
 const REMOVABLE_STATUSES = new Set(['completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
 
 function normalizeJobStatus(job) {

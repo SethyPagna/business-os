@@ -1189,16 +1189,17 @@ export const deleteCustomRow    = ({ tableName, id, payload })     => route('cus
 // ─── Audit log ────────────────────────────────────────────────────────────────
 export const getAuditLogs = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return routeMirrored(
+  return route(
     `audit_log:get:${q}`,
-    () => apiFetch('GET', `/api/system/audit-logs${q ? `?${q}` : ''}`),
+    async () => {
+      const result = await apiFetch('GET', `/api/system/audit-logs${q ? `?${q}` : ''}`)
+      const auditRows = Array.isArray(result) ? result : (result?.items || [])
+      await mirrorTable('audit_logs')(auditRows).catch(() => {})
+      return result
+    },
     async () => {
       const rows = await dexieDb.audit_logs.orderBy('created_at').reverse().limit(params?.pageSize || 50).toArray()
       return { items: rows, total: rows.length, page: 1, pageSize: rows.length || Number(params?.pageSize || 50), totalPages: 1, filters: { users: [] } }
-    },
-    async (result) => {
-      const rows = Array.isArray(result) ? result : (result?.items || [])
-      return mirrorTable('audit_logs')(rows)
     },
   )
 }

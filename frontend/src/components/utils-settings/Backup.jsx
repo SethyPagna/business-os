@@ -543,13 +543,6 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     }
 
     setPendingAuthUrl('')
-    const popup = window.open('', 'business-os-drive-sync', 'width=640,height=760')
-    if (popup) {
-      try {
-        popup.document.title = 'Business OS Google Drive'
-        popup.document.body.innerHTML = '<div style="font-family:system-ui;padding:24px"><h2>Business OS</h2><p>Preparing Google Drive connection...</p></div>'
-      } catch (_) {}
-    }
     setBusy('connect')
     try {
       await yieldToBrowser()
@@ -569,15 +562,15 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         entity: 'google_drive_sync',
         label: copy('drive_sync_connect_started', 'Google Drive connection started'),
       })
+      const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
       if (popup && !popup.closed) {
-        popup.location.href = authUrl
+        popup.focus?.()
       } else {
         setPendingAuthUrl(authUrl)
         notify(copy('drive_sync_popup_blocked', 'Google Drive setup is ready. Use the open setup button to continue.'), 'info')
       }
       notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
     } catch (error) {
-      if (popup && !popup.closed) popup.close()
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
       setBusy('')

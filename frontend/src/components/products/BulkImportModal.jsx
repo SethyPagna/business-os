@@ -354,6 +354,42 @@ function getImportActionTargetSummary(entry = {}, decisionValue = '', editedRow 
   return `Create a new product row for ${familyName}`
 }
 
+function createFamilyContextEntry(row = {}, rowIndex = 0, group = null) {
+  const safeRow = row && typeof row === 'object' ? row : {}
+  const index = Number(rowIndex ?? safeRow._import_row_index ?? 0)
+  return {
+    row: safeRow,
+    index,
+    existing: null,
+    plannedAction: safeRow._planned_action || 'new',
+    conflictType: 'same_name_family_context',
+    conflictFields: [],
+    importDuplicateRows: {},
+    sameBasic: true,
+    samePricing: true,
+    sameImages: true,
+    incomingImages: getIncomingImageFilenames(safeRow),
+    existingImages: [],
+    familyContextOnly: true,
+    group,
+  }
+}
+
+function buildVisibleFamilyRows(group, conflictsByIndex, importRowsByIndex) {
+  const rowIndexes = Array.isArray(group?.rowIndexes) ? group.rowIndexes : []
+  return rowIndexes
+    .map((rowIndex) => {
+      const index = Number(rowIndex)
+      if (!Number.isFinite(index)) return null
+      const conflictEntry = conflictsByIndex.get(index)
+      if (conflictEntry) return conflictEntry
+      const row = importRowsByIndex.get(index)
+      return row ? createFamilyContextEntry(row, index, group) : null
+    })
+    .filter((entry) => entry?.row)
+    .sort((left, right) => Number(left?.row?._rowNumber || left?.index || 0) - Number(right?.row?._rowNumber || right?.index || 0))
+}
+
 function InlineImportDetailGrid({ row = {}, compareTo = null, onBeginEdit, onChange }) {
   return (
     <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -453,15 +489,27 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     throw error
   }
 
-  const setCancelledResult = (jobId = currentJob?.id) => {
+  const isCancelledStartError = (error) => /import was cancelled|retry before starting/i.test(String(error?.message || error || ''))
+
+  const setCancelledResult = async (jobId = currentJob?.id, error = null) => {
+    let job = currentJob
+    if (jobId && window.api.getImportJob) {
+      try {
+        const payload = await window.api.getImportJob(jobId)
+        job = payload?.job || payload || job
+        if (job) setCurrentJob(job)
+      } catch (_) {}
+    }
+    const message = error?.message || T('import_cancelled', 'Import cancelled.')
     setResult({
       imported: 0,
       updated: 0,
       queued: 0,
       jobId,
+      job,
       cancelled: true,
-      errors: [],
-      message: T('import_cancelled', 'Import cancelled.'),
+      errors: error ? [message] : [],
+      message,
     })
     setStep(3)
   }
@@ -643,12 +691,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }
 
   const handleRetryCurrentJob = async () => {
-    if (!currentJob?.id) return
+    const targetJob = currentJob || result?.job
+    if (!targetJob?.id) return
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: T('retry_import', 'Retry import') })
     try {
-      const payload = await window.api.retryImportJob(currentJob.id, { source: 'products_modal' })
-      const job = payload?.job || payload || currentJob
+      const payload = await window.api.retryImportJob(targetJob.id, { source: 'products_modal' })
+      const job = payload?.job || payload || targetJob
       setCurrentJob(job)
       setResult(null)
       cancelRequestedRef.current = false
@@ -663,14 +712,15 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   }
 
   const handleDeleteCurrentJob = async () => {
-    if (!currentJob?.id) return
+    const targetJob = currentJob || result?.job
+    if (!targetJob?.id) return
     const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
       ? true
       : window.confirm(T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'))
     if (!confirmed) return
     setLoading(true)
     try {
-      await window.api.deleteImportJob(currentJob.id, { force: true, source: 'products_modal' })
+      await window.api.deleteImportJob(targetJob.id, { force: true, source: 'products_modal' })
       setCurrentJob(null)
       setResult(null)
       resetCsvState()
@@ -734,8 +784,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      if (error?.code === 'import_cancel_requested') {
-        setCancelledResult(jobId)
+      if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
+        await setCancelledResult(jobId, error)
       } else {
         setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
         setStep(3)
@@ -796,6 +846,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setIdentifierOverrides(nextIdentifierOverrides)
       setSelectedConflictIds(new Set(nextConflicts.map((entry) => entry.index)))
       setCollapsedFamilyKeys(new Set())
+      setCollapsedDetailRows(new Set((analysis.rows || []).map((row, index) => Number(row?._import_row_index ?? index))))
       setReviewUndoStack([])
       editSessionRef.current = new Set()
       setStep(2)
@@ -861,8 +912,8 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setStep(3)
       return
     } catch (error) {
-      if (error?.code === 'import_cancel_requested') {
-        setCancelledResult(jobId)
+      if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
+        await setCancelledResult(jobId, error)
       } else {
         setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
         setStep(3)
@@ -912,6 +963,22 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const allDecided = pendingAsk.length === 0 && blockingIssueCount === 0
   const totalCount = importRows.length || cleanRows.length + conflicts.length
   const selectedConflictCount = selectedConflictIds.size
+  const importRowsByIndex = useMemo(() => {
+    const rowsByIndex = new Map()
+    ;(importRows || []).forEach((row, index) => {
+      const rowIndex = Number(row?._import_row_index ?? index)
+      if (Number.isFinite(rowIndex)) rowsByIndex.set(rowIndex, row)
+    })
+    return rowsByIndex
+  }, [importRows])
+  const conflictsByIndex = useMemo(() => {
+    const rowsByIndex = new Map()
+    ;(conflicts || []).forEach((entry) => {
+      const rowIndex = Number(entry?.index ?? entry?.row?._import_row_index ?? 0)
+      if (Number.isFinite(rowIndex)) rowsByIndex.set(rowIndex, entry)
+    })
+    return rowsByIndex
+  }, [conflicts])
   const conflictGroups = useMemo(() => ({
     total: conflicts.length,
     sameName: conflicts.filter((entry) => String(entry.conflictType || '').includes('same_name')).length,
@@ -978,16 +1045,19 @@ export default function BulkImportModal({ onClose, onDone, t }) {
           group,
           title: group?.title || row.name || 'Review row',
           rowNumbers: group?.rowNumbers || [row._rowNumber || rowIndex + 2],
-          rows: [],
+          rows: group ? buildVisibleFamilyRows(group, conflictsByIndex, importRowsByIndex) : [],
         }
         sectionByFamily.set(key, section)
         sections.push(section)
       }
-      sectionByFamily.get(key).rows.push(entry)
+      if (!group) sectionByFamily.get(key).rows.push(entry)
     })
 
     return sections
-  }, [reviewGroups, rowOverrides, visibleConflicts])
+  }, [conflictsByIndex, importRowsByIndex, reviewGroups, rowOverrides, visibleConflicts])
+
+  const visibleReviewRows = useMemo(() => visibleConflictSections.flatMap((section) => section.rows || []), [visibleConflictSections])
+  const visibleReviewRowCount = visibleReviewRows.length
 
   const toggleFamilyCollapse = (familyKey) => {
     setCollapsedFamilyKeys((current) => {
@@ -1021,7 +1091,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setSelectedConflictIds(new Set())
       return
     }
-    setSelectedConflictIds(new Set(visibleConflicts.map((entry) => entry.index)))
+    setSelectedConflictIds(new Set(visibleReviewRows.map((entry) => entry.index)))
   }
 
   const applyDecisionToSelection = (value) => {
@@ -1029,9 +1099,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     pushReviewUndoSnapshot('Changed selected import actions')
     setDecisions((current) => {
       const next = { ...current }
-      conflicts.forEach((entry) => {
-        if (selectedConflictIds.has(entry.index)) next[entry.index] = value
-      })
+      selectedConflictIds.forEach((index) => { next[index] = value })
       return next
     })
   }
@@ -1041,10 +1109,13 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     pushReviewUndoSnapshot('Changed selected image actions')
     setImageDecisions((current) => {
       const next = { ...current }
-      conflicts.forEach((entry) => {
-        const editedRow = { ...(entry.row || {}), ...(rowOverrides[entry.index] || {}) }
-        const hasImage = entry.incomingImages.length || findImageReferenceForRow(editedRow, imageFiles)
-        if (selectedConflictIds.has(entry.index) && hasImage) next[entry.index] = value
+      selectedConflictIds.forEach((index) => {
+        const entry = conflictsByIndex.get(Number(index))
+        const row = entry?.row || importRowsByIndex.get(Number(index)) || {}
+        const editedRow = { ...(row || {}), ...(rowOverrides[index] || {}) }
+        const incomingImages = Array.isArray(entry?.incomingImages) ? entry.incomingImages : getIncomingImageFilenames(editedRow)
+        const hasImage = incomingImages.length || findImageReferenceForRow(editedRow, imageFiles)
+        if (hasImage) next[index] = value
       })
       return next
     })
@@ -1368,53 +1439,20 @@ export default function BulkImportModal({ onClose, onDone, t }) {
             </div>
           </div>
 
-          {reviewIssueSummary.length ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold">Errors and review blockers</div>
-                  <div className="mt-0.5 text-red-600 dark:text-red-300">Fix these row-level issues before applying. Hover row badges for quick meanings, then edit inline fields directly.</div>
-                </div>
-                <button type="button" className="rounded-lg bg-white px-2 py-1 font-semibold text-red-700 shadow-sm dark:bg-slate-900 dark:text-red-200" onClick={() => setConflictFilter('errors')}>
-                  Show error rows
-                </button>
-              </div>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {reviewIssueSummary.map((entry) => (
-                  <div key={entry.index} className="rounded-lg border border-red-100 bg-white/75 p-2 dark:border-red-900/50 dark:bg-slate-950/40">
-                    <div className="font-semibold">Row {entry.rowNumber}: {entry.name}</div>
-                    <div className="mt-1 space-y-1">
-                      {entry.details.map((detail) => (
-                        <div key={detail.title} className={detail.blocking ? 'font-medium' : ''}>
-                          <span className="font-semibold">{detail.title}:</span> {detail.detail}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {reviewIssueRows.length > reviewIssueSummary.length ? (
-                <div className="mt-2 text-red-600 dark:text-red-300">
-                  Showing first {reviewIssueSummary.length} of {reviewIssueRows.length} issue rows. Use the Errors filter to continue reviewing.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
           {conflicts.length ? (
             <div className="space-y-3">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                <div className="mb-3 grid gap-2">
                   <label className="sr-only" htmlFor="product-import-conflict-search">Search conflicts</label>
                   <input
                     id="product-import-conflict-search"
-                    className="input text-xs"
+                    className="input h-11 text-sm"
                     value={conflictQuery}
                     onChange={(event) => setConflictQuery(event.target.value)}
                     placeholder="Search conflict rows by name, barcode, SKU, brand, category..."
                     autoComplete="off"
                   />
-                  <div className="flex flex-wrap gap-1.5 text-xs">
+                  <div className="flex flex-wrap gap-1.5 text-xs" data-testid="product-import-filter-row">
                     {CONFLICT_FILTER_OPTIONS.map((item) => (
                       <button
                         key={item.value}
@@ -1446,7 +1484,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                     <input
                       type="checkbox"
-                      checked={selectedConflictCount > 0 && selectedConflictCount === visibleConflicts.length}
+                      checked={visibleReviewRowCount > 0 && selectedConflictCount > 0 && selectedConflictCount === visibleReviewRowCount}
                       onChange={(event) => toggleSelectAllConflicts(event.target.checked)}
                     />
                     Visible matches
@@ -1549,7 +1587,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                 })}
                 {conflicts.length > visibleConflicts.length ? (
                   <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                    Showing first {visibleConflicts.length} of {conflicts.length} review rows. Search or use filters to narrow the rows before applying bulk actions.
+                    Showing first {visibleReviewRowCount} visible family/review rows from {conflicts.length} review matches. Search or use filters to narrow the rows before applying bulk actions.
                   </p>
                 ) : null}
               </div>
@@ -1610,6 +1648,23 @@ export default function BulkImportModal({ onClose, onDone, t }) {
                   {T('download_failed_rows', 'Download failed rows')}
                 </button>
               ) : null}
+            </div>
+          ) : null}
+          {result.cancelled || cancelledImportRecovery ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+              <div className="font-semibold">Cancelled import recovery</div>
+              <div className="mt-1 text-xs">Job {result.job?.id || currentJob?.id || result.jobId || '-'} is cancelled or cannot be started until it is reset.</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={handleRetryCurrentJob} disabled={loading || !(currentJob?.id || result.job?.id)}>
+                  Retry import
+                </button>
+                <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={handleDeleteCurrentJob} disabled={loading || !(currentJob?.id || result.job?.id)}>
+                  Delete import
+                </button>
+                <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={resetCsvState} disabled={loading}>
+                  Back to upload
+                </button>
+              </div>
             </div>
           ) : null}
           <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>

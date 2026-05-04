@@ -207,6 +207,9 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
   assert.match(source, /Undo2/)
   assert.match(source, /InlineImportDetailGrid/)
   assert.match(source, /getImportActionTargetSummary/)
+  assert.match(source, /buildVisibleFamilyRows/)
+  assert.match(source, /createFamilyContextEntry/)
+  assert.match(source, /visibleReviewRowCount/)
 })
 
 await runTest('bulk import modal explains specific review errors before apply', () => {
@@ -215,7 +218,8 @@ await runTest('bulk import modal explains specific review errors before apply', 
   assert.match(source, /getProductImportRowIssueDetails/)
   assert.match(source, /reviewIssueSummary/)
   assert.match(source, /reviewIssueIndexSet/)
-  assert.match(source, /Errors and review blockers/)
+  assert.doesNotMatch(source, /Errors and review blockers/)
+  assert.doesNotMatch(source, /Show error rows/)
   assert.match(source, /Product name is required/)
   assert.match(source, /Barcode looks like scientific notation/)
   assert.match(source, /Duplicate SKU\/barcode/)
@@ -231,10 +235,12 @@ await runTest('bulk import modal has collapsible inline details and cancelled jo
   assert.match(source, /collapsedDetailRows/)
   assert.match(source, /toggleInlineDetails/)
   assert.match(source, /Inline details/)
+  assert.match(source, /setCollapsedDetailRows\(new Set\(\(analysis\.rows \|\| \[\]\)/)
   assert.match(source, /Retry import/)
   assert.match(source, /Delete import/)
   assert.match(source, /Back to upload/)
   assert.match(source, /cancelledImportRecovery/)
+  assert.match(source, /isCancelledStartError/)
 })
 
 if (failed > 0) {
