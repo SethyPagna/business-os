@@ -20,6 +20,7 @@ import {
   cacheClearAll,
   requireLiveServerWrite,
   isWriteBlockedError,
+  isWriteConflictError,
   isNetErr,
   isServerOnline,
   isTransientGatewayError,
@@ -65,7 +66,20 @@ const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
+const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 let offlineDeviceSnapshotPromise = null
+
+function registerOutboxBackgroundSync() {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
+  navigator.serviceWorker.ready
+    .then((registration) => {
+      if (registration?.sync?.register) {
+        registration.sync.register(OUTBOX_SYNC_TAG).catch(() => {})
+      }
+      registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
+    })
+    .catch(() => {})
+}
 
 function emitSyncQueueChanged(detail = {}) {
   if (typeof window === 'undefined') return
@@ -119,10 +133,11 @@ export async function getPendingSyncState() {
     const status = String(item?.status || 'pending')
     acc.total += 1
     if (status === 'syncing') acc.syncing += 1
+    else if (status === 'conflict') acc.conflict += 1
     else if (status === 'failed') acc.failed += 1
     else acc.pending += 1
     return acc
-  }, { total: 0, pending: 0, syncing: 0, failed: 0 })
+  }, { total: 0, pending: 0, syncing: 0, failed: 0, conflict: 0 })
   const oldest = sorted[0]?.created_at || null
   return {
     ...counts,
@@ -1265,8 +1280,11 @@ async function queueOfflineSale(payload, reason = 'server_offline') {
     retry_at: now,
     error: null,
     reason,
+    queue_version: 1,
+    base_updated_at: salePayload.expectedUpdatedAt || salePayload.expected_updated_at || salePayload.updated_at || now,
   }
   await dexieDb.sync_queue.put(row)
+  registerOutboxBackgroundSync()
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('sync:offline-sale-queued', {
@@ -1338,6 +1356,29 @@ async function failQueuedSale(row, error, { retryable = false } = {}) {
     error: error?.message || String(error || 'Sync failed'),
   })
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
+  if (retryable) registerOutboxBackgroundSync()
+}
+
+async function markQueuedSaleConflict(row, error) {
+  await updateQueuedRow(row, {
+    status: 'conflict',
+    retry_at: null,
+    error: error?.message || String(error || 'Server has a newer version. Review before syncing.'),
+    conflict: true,
+  })
+  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, conflict: 1 })
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sync:write-conflict', {
+      detail: {
+        channel: OFFLINE_SALE_QUEUE_CHANNEL,
+        entity_table: row.entity_table || 'sales',
+        entity_id: row.entity_id ?? null,
+        entity_name: row.entity_name || null,
+        refreshChannels: ['sales', 'products', 'inventory', 'dashboard'],
+        ts: Date.now(),
+      },
+    }))
+  }
 }
 
 async function syncPendingSalesQueue({ force = false } = {}) {
@@ -1366,6 +1407,11 @@ async function syncPendingSalesQueue({ force = false } = {}) {
       await completeQueuedSale(row, response)
       result.synced += 1
     } catch (error) {
+      if (isWriteConflictError(error)) {
+        await markQueuedSaleConflict(row, error)
+        result.failed += 1
+        continue
+      }
       const retryable = isRetryableOfflineSaleError(error)
       await failQueuedSale(row, error, { retryable })
       result.failed += 1

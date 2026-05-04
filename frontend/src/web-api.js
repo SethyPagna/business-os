@@ -24,6 +24,45 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.mjs'
 
+const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
+const OFFLINE_AUTH_SESSION_TOKEN_KEY = 'offline_auth_session_token'
+const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
+const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
+let offlineMaintenanceStarted = false
+let lastServiceWorkerUpdateAt = 0
+
+function registerOutboxBackgroundSync() {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
+  navigator.serviceWorker.ready
+    .then((registration) => {
+      if (registration?.sync?.register) {
+        registration.sync.register(OUTBOX_SYNC_TAG).catch(() => {})
+      }
+      registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
+    })
+    .catch(() => {})
+}
+
+function syncBackgroundAuthSessionToken(token) {
+  if (typeof window === 'undefined') return
+  const clean = String(token || '').trim()
+  let persistent = false
+  try {
+    persistent = !!clean && localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) === clean
+  } catch (_) {
+    persistent = false
+  }
+  if (persistent) {
+    dexieDb.settings.put({
+      key: OFFLINE_AUTH_SESSION_TOKEN_KEY,
+      value: clean,
+      updated_at: new Date().toISOString(),
+    }).then(() => registerOutboxBackgroundSync()).catch(() => {})
+  } else {
+    dexieDb.settings.delete(OFFLINE_AUTH_SESSION_TOKEN_KEY).catch(() => {})
+  }
+}
+
 function refreshOfflineSnapshotSoon(force = false) {
   if (typeof window === 'undefined') return
   const run = () => {
@@ -34,6 +73,75 @@ function refreshOfflineSnapshotSoon(force = false) {
     return
   }
   window.setTimeout(run, 1500)
+}
+
+function refreshServiceWorkerSoon(force = false) {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
+  const now = Date.now()
+  if (!force && now - lastServiceWorkerUpdateAt < SERVICE_WORKER_UPDATE_INTERVAL_MS) return
+  lastServiceWorkerUpdateAt = now
+  navigator.serviceWorker.ready
+    .then((registration) => registration.update?.())
+    .catch(() => {})
+}
+
+function runOfflineMaintenance(force = false) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+  methods.retryPendingSyncNow?.().catch(() => {})
+  refreshOfflineSnapshotSoon(force)
+  registerOutboxBackgroundSync()
+  refreshServiceWorkerSoon(force)
+}
+
+function startOfflineMaintenanceLoop() {
+  if (typeof window === 'undefined' || offlineMaintenanceStarted) return
+  offlineMaintenanceStarted = true
+  window.setInterval(() => {
+    runOfflineMaintenance(false)
+  }, OFFLINE_REFRESH_INTERVAL_MS)
+}
+
+function forwardServiceWorkerOutboxEvent(event) {
+  if (typeof window === 'undefined') return
+  const type = event?.data?.type
+  const detail = event?.data?.detail || {}
+  if (!type || !String(type).startsWith('BUSINESS_OS_OUTBOX_')) return
+
+  if (type === 'BUSINESS_OS_OUTBOX_SYNCED') {
+    window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
+      detail: {
+        channel: detail.channel || 'sales:create',
+        receiptNumber: detail.entity_name || null,
+        ts: detail.ts || Date.now(),
+      },
+    }))
+    ;['sales', 'products', 'inventory', 'dashboard'].forEach((channel) => {
+      window.dispatchEvent(new CustomEvent('sync:update', {
+        detail: { channel, reason: 'offline-background-sale-synced', ts: Date.now() },
+      }))
+    })
+    return
+  }
+
+  if (type === 'BUSINESS_OS_OUTBOX_CONFLICT') {
+    window.dispatchEvent(new CustomEvent('sync:write-conflict', {
+      detail: {
+        channel: detail.channel || 'sales:create',
+        entity_name: detail.entity_name || null,
+        refreshChannels: ['sales', 'products', 'inventory', 'dashboard'],
+        ts: detail.ts || Date.now(),
+      },
+    }))
+    return
+  }
+
+  window.dispatchEvent(new CustomEvent('sync:queue-changed', {
+    detail: {
+      reason: detail.reason || 'background-sync-waiting',
+      error: detail.error || '',
+      ts: detail.ts || Date.now(),
+    },
+  }))
 }
 
 function getStoredAuthToken() {
@@ -107,8 +215,7 @@ window.api = {
       cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       connectWS()
       startHealthCheck()
-      methods.retryPendingSyncNow?.().catch(() => {})
-      refreshOfflineSnapshotSoon()
+      runOfflineMaintenance(true)
     } else {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
       disconnectWS()
@@ -131,6 +238,7 @@ window.api = {
   setAuthSessionToken(token) {
     const clean = (token || '').trim()
     setAuthSessionToken(clean)
+    syncBackgroundAuthSessionToken(clean)
     disconnectWS()
     if (clean) {
       connectWS()
@@ -148,6 +256,7 @@ window.api = {
 }
 
 if (typeof window !== 'undefined') {
+  navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerOutboxEvent)
   window.addEventListener('online', () => {
     if (getAuthSessionToken()) {
       reconnectWS()
@@ -155,28 +264,25 @@ if (typeof window !== 'undefined') {
       connectWS()
     }
     startHealthCheck()
-    methods.retryPendingSyncNow?.().catch(() => {})
-    refreshOfflineSnapshotSoon()
+    runOfflineMaintenance(true)
   })
   window.addEventListener('focus', () => {
     if (getAuthSessionToken()) {
       connectWS()
     }
-    methods.retryPendingSyncNow?.().catch(() => {})
-    refreshOfflineSnapshotSoon()
+    runOfflineMaintenance()
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     if (getAuthSessionToken()) {
       connectWS()
     }
-    methods.retryPendingSyncNow?.().catch(() => {})
-    refreshOfflineSnapshotSoon()
+    runOfflineMaintenance()
   })
   window.addEventListener('sync:reconnected', () => {
-    methods.retryPendingSyncNow?.().catch(() => {})
-    refreshOfflineSnapshotSoon(true)
+    runOfflineMaintenance(true)
   })
+  startOfflineMaintenanceLoop()
 }
 
 // ?? Bootstrap: read stored token, auto-detect server URL from page origin ?????
@@ -193,6 +299,7 @@ if (typeof window !== 'undefined') {
     // Retrieve auth token from storage
     let authToken = getStoredAuthToken()
     if (authToken) setAuthSessionToken(authToken)
+    syncBackgroundAuthSessionToken(authToken)
     try {
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
@@ -218,9 +325,8 @@ if (typeof window !== 'undefined') {
     if (url) {
       setSyncServerUrl(url)
       if (authToken) connectWS()
-      refreshOfflineSnapshotSoon()
       startHealthCheck()  // ping every 12 s so offline?nline recovery works
-      methods.retryPendingSyncNow?.().catch(() => {})
+      runOfflineMaintenance()
     }
   } catch (e) {
     console.warn('[web-api] Bootstrap error:', e.message)
