@@ -25,6 +25,10 @@ for (const [name, source] of [
 }
 
 assert.match(inventory, /Stats \+ sections/)
+assert.match(inventory, /showInventorySections/)
+assert.match(inventory, /showInventoryTabs/)
+assert.match(inventory, /showProductsSection/)
+assert.match(inventory, /inventorySection === 'stats'/)
 assert.match(inventory, /RFID_SECTION_OPTIONS/)
 assert.match(inventory, /Overview/)
 assert.match(inventory, /Tagging/)

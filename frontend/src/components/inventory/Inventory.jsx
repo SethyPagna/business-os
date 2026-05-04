@@ -1651,6 +1651,11 @@ export default function Inventory() {
   const showMovementActionGroups = movementGroupMode === 'time+action'
   const sectionStorageKey = 'business-os:inventory:section'
   const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
+  const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
+  const showInventoryTabs = inventorySection === 'all'
+  const showProductsSection = showInventorySections && tab === 'products'
+  const showMovementsSection = showInventorySections && tab === 'movements'
+  const showRfidSection = showInventorySections && tab === 'rfid'
   const selectInventorySection = (nextSection) => {
     setInventorySection(nextSection)
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
@@ -1688,7 +1693,7 @@ export default function Inventory() {
               {tr('import', 'Import', 'នាំចូល')}
             </span>
           </button>
-          {tab === 'products' ? (
+          {showProductsSection ? (
             <ExportMenu
               label={tr('export', 'Export', 'នាំចេញ')}
               items={inventoryExportItems}
@@ -1872,6 +1877,7 @@ export default function Inventory() {
       {/* ?? Tabs ?? */}
       </>
       )}
+      {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[['products', t('products')], ['movements', t('movements')], ['rfid', 'RFID']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
@@ -1880,8 +1886,10 @@ export default function Inventory() {
           </button>
         ))}
       </div>
+      ) : null}
 
       {/* ?? Filters ?? */}
+      {showInventorySections ? (
       <div className="mb-2 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
           <input
@@ -1918,11 +1926,14 @@ export default function Inventory() {
           />
         </div>
       </div>
+      ) : null}
+      {showInventorySections ? (
       <div className="inventory-history-row mb-2 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory} className="min-w-max" />
       </div>
+      ) : null}
 
-      {search.trim() && tab === 'products' && (
+      {search.trim() && showProductsSection && (
         <p className="text-[10px] text-gray-400 mb-1">
           {t('inventory_and_or_tip')||'Comma separates terms. AND requires all terms, OR requires any term.'} -{' '}
           <span className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">cola, water</span>
@@ -1930,7 +1941,7 @@ export default function Inventory() {
         </p>
       )}
 
-      {tab === 'products' && inventoryInitialOptions.length ? (
+      {showProductsSection && inventoryInitialOptions.length ? (
         <div className="mb-2 flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 text-xs dark:border-gray-700 dark:bg-gray-800">
           <button
             type="button"
@@ -1953,6 +1964,7 @@ export default function Inventory() {
         </div>
       ) : null}
 
+      {showInventorySections ? (
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
@@ -1960,11 +1972,12 @@ export default function Inventory() {
             ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
             : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${t('tap_for_details')||'click a row for details'}`}
       </p>
+      ) : null}
 
       {/* ????????????????????????????????????????
           PRODUCTS TAB
       ???????????????????????????????????????? */}
-      {tab === 'products' && (
+      {showProductsSection && (
         <>
           <PaginationControls
             className="mb-3"
@@ -2126,7 +2139,7 @@ export default function Inventory() {
       {/* ????????????????????????????????????????
           MOVEMENTS TAB
       ???????????????????????????????????????? */}
-      {tab === 'movements' && (
+      {showMovementsSection && (
         <>
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2457,7 +2470,7 @@ export default function Inventory() {
         </>
       )}
 
-      {tab === 'rfid' && (
+      {showRfidSection && (
         <div className="space-y-3">
           <SectionSwitcher
             label="RFID"
