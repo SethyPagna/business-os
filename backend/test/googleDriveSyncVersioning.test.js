@@ -68,14 +68,16 @@ runTest('drive sync falls back cleanly from invalid stored version state', () =>
   assert.equal(state.rotated, true)
 })
 
-runTest('drive sync retention keeps newest thirty versions by default', () => {
+runTest('drive sync retention deletes versions older than seven days by default', () => {
+  const now = new Date('2026-05-10T00:00:00.000Z')
   const versions = Array.from({ length: 33 }, (_, index) => ({
     id: `id-${index + 1}`,
     name: `datasync-${index + 1}`,
+    modifiedTime: new Date(now.getTime() - index * 24 * 60 * 60 * 1000).toISOString(),
   }))
-  const expired = selectExpiredDriveSyncVersions(versions)
-  assert.equal(DRIVE_SYNC_DEFAULT_RETENTION_DAYS, 30)
-  assert.deepEqual(expired.map((entry) => entry.name), ['datasync-1', 'datasync-2', 'datasync-3'])
+  const expired = selectExpiredDriveSyncVersions(versions, undefined, now)
+  assert.equal(DRIVE_SYNC_DEFAULT_RETENTION_DAYS, 7)
+  assert.deepEqual(expired.map((entry) => entry.name), versions.slice(8).map((entry) => entry.name).reverse())
 })
 
 runTest('drive sync interval defaults to one hour and allows up to twenty four hours', () => {

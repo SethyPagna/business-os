@@ -2,7 +2,7 @@
 
 const DRIVE_SYNC_VERSION_PREFIX = 'datasync'
 const DRIVE_SYNC_VERSION_MS = 24 * 60 * 60 * 1000
-const DRIVE_SYNC_DEFAULT_RETENTION_DAYS = 30
+const DRIVE_SYNC_DEFAULT_RETENTION_DAYS = 7
 
 function toSafeDate(value) {
   const time = Date.parse(String(value || ''))
@@ -58,17 +58,27 @@ function parseVersionName(name) {
   return match ? Number.parseInt(match[1], 10) : 0
 }
 
-function selectExpiredDriveSyncVersions(items = [], retentionCount = DRIVE_SYNC_DEFAULT_RETENTION_DAYS) {
-  const safeRetention = Math.max(1, Number.parseInt(retentionCount, 10) || DRIVE_SYNC_DEFAULT_RETENTION_DAYS)
+function selectExpiredDriveSyncVersions(items = [], retentionDays = DRIVE_SYNC_DEFAULT_RETENTION_DAYS, now = new Date()) {
+  const safeRetentionDays = Math.max(1, Number.parseInt(retentionDays, 10) || DRIVE_SYNC_DEFAULT_RETENTION_DAYS)
+  const nowDate = now instanceof Date ? now : toSafeDate(now)
+  const cutoffMs = (nowDate || new Date()).getTime() - (safeRetentionDays * DRIVE_SYNC_VERSION_MS)
   const versions = (Array.isArray(items) ? items : [])
     .map((item) => ({
       ...item,
       versionNumber: parseVersionName(item?.name),
+      versionTime: toSafeDate(item?.modifiedTime || item?.createdTime || item?.created_at || item?.modified_at),
     }))
     .filter((item) => item.versionNumber > 0)
-    .sort((a, b) => b.versionNumber - a.versionNumber)
 
-  return versions.slice(safeRetention).sort((a, b) => a.versionNumber - b.versionNumber)
+  const dateExpired = versions
+    .filter((item) => item.versionTime && item.versionTime.getTime() < cutoffMs)
+    .sort((a, b) => a.versionTime.getTime() - b.versionTime.getTime())
+  if (dateExpired.length || versions.every((item) => item.versionTime)) return dateExpired
+
+  return versions
+    .sort((a, b) => b.versionNumber - a.versionNumber)
+    .slice(safeRetentionDays)
+    .sort((a, b) => a.versionNumber - b.versionNumber)
 }
 
 module.exports = {

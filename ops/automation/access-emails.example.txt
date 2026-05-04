@@ -1,0 +1,3 @@
+# Add one allowed Cloudflare Access admin email per line.
+# Example:
+# admin@example.com

@@ -1,0 +1,54 @@
+{
+  "domains": {
+    "admin": "https://admin.leangcosmetics.dpdns.org",
+    "public": "https://leangcosmetics.dpdns.org"
+  },
+  "cloudflare": {
+    "zoneName": "leangcosmetics.dpdns.org",
+    "apiTokenFile": "ops/runtime/secrets/cloudflare-api-token.txt",
+    "tunnelTokenFile": "ops/runtime/secrets/cloudflare-business-os-leangcosmetics.token",
+    "allowedCountries": ["KH", "HK", "AU"],
+    "allowedEmailsFile": "ops/runtime/automation/access-emails.txt",
+    "rateLimitProfile": "normal",
+    "requiredPermissions": [
+      "Zone DNS Edit",
+      "Zone Rulesets Edit",
+      "Account Cloudflare Tunnel Edit",
+      "Account Access: Apps and Policies Edit"
+    ]
+  },
+  "auth": {
+    "login": true,
+    "otp": true,
+    "email": true,
+    "gmailOptional": true
+  },
+  "offline": {
+    "autoEnable": true,
+    "notifyUsers": true,
+    "pinLength": 6,
+    "scope": "all_business_edits"
+  },
+  "backups": {
+    "googleDrive": true,
+    "cloudflareR2": true,
+    "retentionDays": 7,
+    "deleteExpiredBackupVersions": true
+  },
+  "media": {
+    "objectStorage": "r2",
+    "optimize": true,
+    "compress": true,
+    "allowEditDelete": true
+  },
+  "release": {
+    "runTests": true,
+    "buildFrontend": true,
+    "buildDocker": true,
+    "startDocker": true,
+    "healthUrl": "http://127.0.0.1:4000/health",
+    "serviceWorkerUrl": "http://127.0.0.1:4000/sw.js",
+    "commitAndPush": true,
+    "branch": "main"
+  }
+}
