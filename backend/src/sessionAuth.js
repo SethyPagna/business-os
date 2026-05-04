@@ -98,19 +98,6 @@ function buildRevocationTimestamp(graceMs = 0) {
 }
 
 function getPresentedSessionToken(req) {
-  const direct = String(req?.headers?.['x-auth-session'] || '').trim()
-  if (direct) return direct
-
-  const authHeader = String(req?.headers?.authorization || '').trim()
-  const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i)
-  if (bearerMatch) return String(bearerMatch[1] || '').trim()
-
-  try {
-    const fullUrl = new URL(String(req?.url || ''), 'http://localhost')
-    const queryToken = String(fullUrl.searchParams.get('token') || '').trim()
-    if (queryToken) return queryToken
-  } catch (_) {}
-
   const cookieHeader = String(req?.headers?.cookie || '')
   if (!cookieHeader) return ''
   const cookies = cookieHeader.split(';')

@@ -13,7 +13,7 @@
  *   api/methods.js   ??all domain API methods
  */
 
-import { apiFetch, setSyncServerUrl, setSyncToken, setAuthSessionToken, getAuthSessionToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
+import { apiFetch, setSyncServerUrl, setSyncToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import * as methods                from './api/methods.js'
@@ -604,13 +604,6 @@ window.api = {
     }
   },
 
-  setAuthSessionToken(token) {
-    const clean = (token || '').trim()
-    setAuthSessionToken(clean)
-    disconnectWS()
-    connectWS()
-  },
-
   useSessionSyncToken(token) {
     window.api.setSyncToken(token)
   },
@@ -630,7 +623,6 @@ window.api = {
   syncUnlockedOfflineOutbox,
   syncUnlockedOfflineFileChunks,
   requestOfflinePersistentStorage,
-  getAuthSessionToken,
   getCallLog,
   clearCallLog,
 }
@@ -671,8 +663,8 @@ if (typeof window !== 'undefined') {
       (location.port === '5173' || location.port === '5174')
 
     try {
-      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
-      sessionStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
+      localStorage.removeItem('businessos_auth_token')
+      sessionStorage.removeItem('businessos_auth_token')
       localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
       sessionStorage.removeItem('businessos_sync_token_session')
       await dexieDb.settings.delete('sync_token')

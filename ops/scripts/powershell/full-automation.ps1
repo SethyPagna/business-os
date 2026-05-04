@@ -16,6 +16,7 @@ $Root = Resolve-Root
 $PolicyPath = Join-Path $Root 'ops\automation\business-os-automation.json'
 $DockerRelease = Join-Path $Root 'ops\scripts\powershell\docker-release.ps1'
 $CloudflareVerify = Join-Path $Root 'ops\scripts\runtime\verify-cloudflare-automation.mjs'
+$R2Verify = Join-Path $Root 'ops\scripts\runtime\verify-r2-object-store.mjs'
 
 function Write-Step($message) { Write-Host "[STEP] $message" }
 function Write-Ok($message) { Write-Host "[OK] $message" }
@@ -71,6 +72,9 @@ function Invoke-TestGate {
   Invoke-Checked 'Secret hygiene verification' {
     node ops\scripts\verify-secret-hygiene.js
   }
+  Invoke-Checked 'Live R2 object write/read/delete verification' {
+    node $R2Verify
+  }
   Invoke-Checked 'Git whitespace check' {
     git diff --check
   }
@@ -107,6 +111,9 @@ function Invoke-ServiceWorkerCheck {
   if (-not $content.Contains("credentials: 'include'")) { Fail '/sw.js is missing cookie credentials.' }
   if ($content.Contains('OFFLINE_AUTH_SESSION_TOKEN_KEY')) { Fail '/sw.js still contains retired offline auth token storage.' }
   if (-not $content.Contains('BUSINESS_OS_APP_UPDATE_AVAILABLE')) { Fail '/sw.js is missing update notification support.' }
+  if (-not $content.Contains("pathname.startsWith('/api/')")) { Fail '/sw.js does not explicitly bypass API caching.' }
+  if (-not $content.Contains("pathname.startsWith('/uploads/')")) { Fail '/sw.js does not explicitly bypass upload/media caching.' }
+  if (-not $content.Contains("pathname.startsWith('/portal/uploads/')")) { Fail '/sw.js does not explicitly bypass portal media caching.' }
   Write-Ok '/sw.js secure offline sync check passed'
 }
 

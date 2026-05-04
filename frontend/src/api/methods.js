@@ -15,7 +15,6 @@ import {
   apiFetch,
   route,
   getSyncServerUrl,
-  getAuthSessionToken,
   cacheInvalidate,
   cacheClearAll,
   requireLiveServerWrite,
@@ -79,6 +78,15 @@ function registerOutboxBackgroundSync() {
       registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
     })
     .catch(() => {})
+}
+
+function hasStoredUserSession() {
+  if (typeof window === 'undefined') return false
+  try {
+    return !!(window.sessionStorage.getItem(STORAGE_KEYS.USER) || window.localStorage.getItem(STORAGE_KEYS.USER))
+  } catch (_) {
+    return false
+  }
 }
 
 function emitSyncQueueChanged(detail = {}) {
@@ -165,7 +173,7 @@ export async function retryPendingSyncNow() {
 }
 
 function canRefreshOfflineDeviceSnapshot(options = {}) {
-  if (!getSyncServerUrl() || !getAuthSessionToken()) return false
+  if (!getSyncServerUrl() || !hasStoredUserSession()) return false
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
   if (!options.force && !isServerOnline()) return false
   return true
@@ -576,7 +584,7 @@ export async function getAppBootstrap() {
   }
 
   const hasServer = !!getSyncServerUrl()
-  const hasSession = !!getAuthSessionToken()
+  const hasSession = hasStoredUserSession()
 
   if (!hasServer) {
     sensitiveMirrorPurgePromise = null
@@ -876,15 +884,12 @@ export const bulkImportProducts = d        => route('products:bulkImport', () =>
 
 function buildMultipartHeaders() {
   const device = getDeviceInfo()
-  const headers = {
+  return {
     'bypass-tunnel-reminder': 'true',
     'x-client-time': device.clientTime || '',
     'x-device-tz': device.deviceTz || '',
     'x-device-name': device.deviceName || '',
   }
-  const authToken = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
-  return headers
 }
 
 async function apiFormPost(path, form, channel = 'importJobs:upload') {
@@ -896,6 +901,7 @@ async function apiFormPost(path, form, channel = 'importJobs:upload') {
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
     headers: buildMultipartHeaders(),
+    credentials: 'include',
     body: form,
   })
   const text = await res.text()
@@ -956,6 +962,7 @@ export async function downloadImportJobErrors(jobId) {
   const res = await fetch(`${base}/api/import-jobs/${encodeURIComponent(jobId)}/errors.csv`, {
     method: 'GET',
     headers: buildMultipartHeaders(),
+    credentials: 'include',
   })
   if (!res.ok) throw new Error(await res.text().catch(() => 'Failed to download import errors'))
   const blob = await res.blob()
@@ -1028,8 +1035,6 @@ export async function uploadFileAsset({ file, userId, userName }) {
     'x-device-tz': device.deviceTz || '',
     'x-device-name': device.deviceName || '',
   }
-  const authToken = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
 
   const form = new FormData()
   form.append('file', file, file.name)
@@ -1039,7 +1044,7 @@ export async function uploadFileAsset({ file, userId, userName }) {
   if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
   if (device.clientTime) form.append('clientTime', String(device.clientTime))
 
-  const res = await fetch(`${base}/api/files/upload`, { method: 'POST', headers, body: form })
+  const res = await fetch(`${base}/api/files/upload`, { method: 'POST', headers, credentials: 'include', body: form })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`File upload failed: ${text || res.status}`)
@@ -1068,8 +1073,6 @@ export async function uploadProductImage({ productId, file, filePath, fileName }
   })
   const base    = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
-  const authToken   = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
 
   const fd = new FormData()
 
@@ -1088,7 +1091,7 @@ export async function uploadProductImage({ productId, file, filePath, fileName }
     throw new Error('No image file provided')
   }
 
-  const res = await fetch(`${base}/api/products/upload-image`, { method: 'POST', headers, body: fd })
+  const res = await fetch(`${base}/api/products/upload-image`, { method: 'POST', headers, credentials: 'include', body: fd })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`Image upload failed: ${text || res.status}`)
@@ -1111,8 +1114,6 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
   })
   const base = getSyncServerUrl().replace(/\/$/, '')
   const headers = { 'bypass-tunnel-reminder': 'true' }
-  const authToken = getAuthSessionToken()
-  if (authToken) headers['x-auth-session'] = authToken
 
   if (!filePath || !filePath.startsWith('data:')) {
     throw new Error('No avatar image data provided')
@@ -1124,7 +1125,7 @@ export async function uploadUserAvatar({ filePath, fileName, file }) {
   const fd = new FormData()
   fd.append('image', new Blob([bytes], { type: mime }), fileName || 'avatar.jpg')
 
-  const res = await fetch(`${base}/api/users/avatar-upload`, { method: 'POST', headers, body: fd })
+  const res = await fetch(`${base}/api/users/avatar-upload`, { method: 'POST', headers, credentials: 'include', body: fd })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`Avatar upload failed: ${text || res.status}`)
@@ -1170,7 +1171,7 @@ export function getImageDataUrl(_path) {
 }
 
 /** getSyncServerUrl — exposed on window.api for components that build URLs directly. */
-export { getSyncServerUrl, getAuthSessionToken }
+export { getSyncServerUrl }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)

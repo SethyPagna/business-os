@@ -85,7 +85,7 @@ async function stopServer(child) {
 
 async function fetchJson(baseUrl, pathname, options = {}) {
   const headers = { ...(options.headers || {}) }
-  if (options.authToken) headers['x-auth-session'] = options.authToken
+  if (options.authCookie || options.authToken) headers.cookie = options.authCookie || options.authToken
   const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers })
   const text = await response.text()
   const json = text ? JSON.parse(text) : {}
@@ -95,8 +95,15 @@ async function fetchJson(baseUrl, pathname, options = {}) {
   return json
 }
 
+function extractSessionCookie(response) {
+  const setCookie = response.headers.get('set-cookie') || ''
+  const cookie = setCookie.split(';')[0]
+  assert.match(cookie, /^bos_session=/, 'Expected bos_session cookie')
+  return cookie
+}
+
 async function loginAsAdmin(baseUrl) {
-  const result = await fetchJson(baseUrl, '/api/auth/login', {
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -108,8 +115,11 @@ async function loginAsAdmin(baseUrl) {
       deviceName: 'Branch Stock QA',
     }),
   })
-  assert.ok(result?.authToken, 'Expected admin auth token')
-  return result.authToken
+  const text = await response.text()
+  const result = text ? JSON.parse(text) : {}
+  assert.equal(response.ok, true, result?.error || 'Expected admin login to succeed')
+  assert.equal(result?.authMode, 'cookie', 'Expected cookie auth mode from admin login')
+  return extractSessionCookie(response)
 }
 
 async function main() {

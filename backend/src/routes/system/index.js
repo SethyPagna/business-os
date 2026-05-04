@@ -923,62 +923,6 @@ router.post('/backups/:id/restore', authToken, requirePermission('backup'), asyn
   ok(res, { job_id: job.id, item: job })
 })
 
-router.get('/backup/export', authToken, requirePermission('backup'), (req, res) => {
-  err(res, 'Old single-file table downloads are not part of the final backup format. Use /api/system/backups with type export-folder.', 410)
-})
-
-router.post('/backup/export-folder', authToken, requirePermission('backup'), async (req, res) => {
-  if (!applyRouteRateLimit(req, res, { name: 'system:backup_export_folder', max: 12, windowMs: 10 * 60 * 1000 })) return
-  const destinationDir = String(req.body?.destinationDir || '').trim() || getDefaultBackupDestinationDir()
-
-  try {
-    const actor = getAuditActor(req, req.body || {})
-    const job = startSystemJob('backup_export_folder', ({ progress }) => createFolderBackup({
-      destinationDir,
-      actor,
-      progress,
-    }), {
-      prefix: 'backup',
-      dedupeKey: `backup_export_folder:${path.resolve(destinationDir)}`,
-      message: 'Backup export queued',
-      runningMessage: 'Backup export running',
-      completedMessage: 'Backup export complete',
-    })
-    return ok(res, { job_id: job.id, item: job })
-  } catch (e) {
-    return err(res, `Failed to queue backup: ${e.message}`)
-  }
-})
-
-router.post('/backup/import', authToken, requirePermission('backup'), async (req, res) => {
-  if (!applyRouteRateLimit(req, res, { name: 'system:backup_import', max: 6, windowMs: 10 * 60 * 1000 })) return
-  err(res, 'Restore accepts final backup packages only. Use /api/system/backups with type restore-folder, or run run\\docker\\restore.bat.', 410)
-})
-
-router.post('/backup/import-folder', authToken, requirePermission('backup'), async (req, res) => {
-  if (!applyRouteRateLimit(req, res, { name: 'system:backup_import_folder', max: 6, windowMs: 10 * 60 * 1000 })) return
-  const sourceDir = String(req.body?.sourceDir || '').trim()
-  if (!sourceDir) return err(res, 'sourceDir is required')
-
-  try {
-    const actor = getAuditActor(req, req.body || {})
-    const job = startSystemJob('backup_restore_folder', ({ progress }) => restoreFolderBackup({
-      sourceDir,
-      actor,
-      progress,
-    }), {
-      prefix: 'restore',
-      dedupeKey: `backup_restore_folder:${path.resolve(sourceDir)}`,
-      message: 'Backup restore validation queued',
-      runningMessage: 'Backup restore validation running',
-      completedMessage: 'Backup restore validation complete',
-    })
-    return ok(res, { job_id: job.id, item: job })
-  } catch (e) {
-    return err(res, `Failed to queue restore validation: ${e.message}`)
-  }
-})
-
 // ?€?€ Reset business data ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 // mode='sales' ??clear all transactional data (sales, RETURNS, stock movements); zero stock
 // mode='all'   ??also remove products, contacts, custom_fields; keep settings/users/branches

@@ -340,7 +340,7 @@ export default function Login() {
           return
         }
         if (result?.success && result?.user) {
-          await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '', result.sessionExpiresAt || '')
+          await persistAuthenticatedUser(result.user, sessionDuration, result.sessionExpiresAt || '')
           return
         }
         setError(result?.error || tr('oauth_signin_failed', 'Sign-in with provider failed.'))
@@ -413,7 +413,7 @@ export default function Login() {
       }), 'OTP verification')
 
       if (verifyResult?.success && verifyResult?.user) {
-        await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.authToken || '', verifyResult.sessionExpiresAt || '')
+        await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.sessionExpiresAt || '')
       } else {
         setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
       }

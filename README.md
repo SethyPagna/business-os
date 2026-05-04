@@ -38,9 +38,9 @@ Images, logos, avatars, portal/about images, and product image uploads are norma
 
 Old loose data folders are not accepted by the final app. Use a verified backup folder or Google Drive `datasync-N` folder so older data cannot overwrite newer Docker data by accident.
 
-## Secrets, R2, Google, And Supabase Setup
+## Secrets, R2, Google, And Owned Auth Setup
 
-Secrets belong only in ignored runtime files, usually `ops\runtime\docker-release\docker-release.env` inside the release folder. Do not paste real R2 keys, Google client secrets, Supabase service keys, JWT secrets, Cloudflare tokens, or app secrets into tracked code, README files, screenshots, or logs.
+Secrets belong only in ignored runtime files, usually `ops\runtime\docker-release\docker-release.env` inside the release folder. Do not paste real R2 keys, Google client secrets, Cloudflare tokens, or app secrets into tracked code, README files, screenshots, or logs.
 
 Use the Backup page **Integration Doctor** after filling the runtime env. It reports only whether each secret is present and whether each service responds; it never prints the secret value.
 
@@ -52,10 +52,16 @@ Required runtime categories:
   - `https://admin.leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback`
   - `https://leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback`
   - `http://localhost:4000/api/system/drive-sync/oauth/callback`
-- Supabase identity login: use the Google OAuth client named `business-os` for Supabase Google/Gmail login. Supabase should use its own callback URI, `https://jaqabakntgtgregtxotu.supabase.co/auth/v1/callback`.
-- Supabase URL configuration should allow `https://admin.leangcosmetics.dpdns.org`, `https://leangcosmetics.dpdns.org`, and `http://localhost:4000` for login and password recovery redirects.
+- Google/Gmail login: use the Business OS owned backend callback. Authorized redirect URIs should include:
+  - `https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback`
+  - `https://leangcosmetics.dpdns.org/api/auth/oauth/callback`
+  - `http://localhost:4000/api/auth/oauth/callback`
+  Authorized JavaScript origins should include:
+  - `https://admin.leangcosmetics.dpdns.org`
+  - `https://leangcosmetics.dpdns.org`
+  - `http://localhost:4000`
 
-Supabase is identity-only. Business OS Postgres remains the authority for users, roles, permissions, products, stock, sales, files, backups, and all business data.
+Business OS Postgres owns users, roles, permissions, products, stock, sales, files, backups, and all business data. Old Supabase-linked users must sign in with password/OTP and relink Google.
 
 If any real credential was pasted into chat, sent in email, or shown in a screenshot, rotate it after verification before using the system for production data.
 

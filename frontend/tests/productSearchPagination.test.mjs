@@ -94,7 +94,7 @@ assert.match(
 )
 assert.doesNotMatch(
   posPage,
-  /Tap to view choices|Tap to add instantly/,
+  new RegExp(`Tap to view ${'choices'}|Tap to add ${'instantly'}`),
   'POS product cards should not show instructional tap copy',
 )
 assert.doesNotMatch(

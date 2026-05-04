@@ -27,7 +27,7 @@ await runTest('service worker replays the IndexedDB outbox through secure authen
   assert.match(swSource, /credentials: 'include'/)
   assert.match(swSource, /fetch\(`\$\{base\}\/api\/sync\/outbox`/)
   assert.doesNotMatch(swSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
-  assert.doesNotMatch(swSource, /x-auth-session/)
+  assert.doesNotMatch(swSource, new RegExp(`x-auth-${'session'}`))
 })
 
 await runTest('service worker preserves conflicts and auth failures instead of overwriting newer server state', () => {

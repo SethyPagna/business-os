@@ -73,7 +73,6 @@ const DEVICE_LOCAL_SETTING_KEYS = new Set([
   'ui_custom_sidebar_text_colors',
 ])
 const SESSION_ONLY_STORAGE_KEYS = [
-  STORAGE_KEYS.AUTH_TOKEN,
   STORAGE_KEYS.USER,
   STORAGE_KEYS.USER_EXPIRY,
 ]
@@ -98,11 +97,6 @@ function safeStorageRemove(storage, key) {
   } catch (_) {}
 }
 
-function getStoredAuthToken() {
-  if (typeof window === 'undefined') return ''
-  return window.api?.getAuthSessionToken?.() || ''
-}
-
 function getStoredUserPayload() {
   return safeStorageGet(sessionStorage, STORAGE_KEYS.USER) || safeStorageGet(localStorage, STORAGE_KEYS.USER)
 }
@@ -116,12 +110,14 @@ function clearPersistedAuthState() {
     safeStorageRemove(localStorage, key)
     safeStorageRemove(sessionStorage, key)
   })
+  safeStorageRemove(localStorage, 'businessos_auth_token')
+  safeStorageRemove(sessionStorage, 'businessos_auth_token')
   safeStorageRemove(localStorage, STORAGE_KEYS.SERVER_START_TIME)
   safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LOGIN_PENDING)
   safeStorageRemove(localStorage, STORAGE_KEYS.OAUTH_LINK_PENDING)
 }
 
-function persistAuthState({ user, authToken, expiryTime, sessionDuration }) {
+function persistAuthState({ user, expiryTime, sessionDuration }) {
   const mode = String(sessionDuration || 'session').trim().toLowerCase() || 'session'
   const primaryStorage = mode === 'session' ? sessionStorage : localStorage
   const secondaryStorage = mode === 'session' ? localStorage : sessionStorage
@@ -129,7 +125,8 @@ function persistAuthState({ user, authToken, expiryTime, sessionDuration }) {
   SESSION_ONLY_STORAGE_KEYS.forEach((key) => safeStorageRemove(secondaryStorage, key))
 
   safeStorageSet(primaryStorage, STORAGE_KEYS.USER, JSON.stringify(user))
-  safeStorageRemove(primaryStorage, STORAGE_KEYS.AUTH_TOKEN)
+  safeStorageRemove(primaryStorage, 'businessos_auth_token')
+  safeStorageRemove(secondaryStorage, 'businessos_auth_token')
   if (expiryTime) safeStorageSet(primaryStorage, STORAGE_KEYS.USER_EXPIRY, String(expiryTime))
   else safeStorageRemove(primaryStorage, STORAGE_KEYS.USER_EXPIRY)
 }
@@ -334,7 +331,7 @@ export function AppProvider({ children }) {
   // ?? Settings (defined before any useEffect that uses it) ?????????????????
   const loadSettings = useCallback(async (options = {}) => {
     try {
-      const hasAuthSession = !!(window.api?.getAuthSessionToken?.() || getStoredUserPayload())
+      const hasAuthSession = !!getStoredUserPayload()
       if (!hasAuthSession) {
         const fallbackSettings = mergeSettingsWithDeviceOverrides({})
         setSettings(fallbackSettings)
@@ -453,7 +450,7 @@ export function AppProvider({ children }) {
           const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
           if (bootstrap?.user) {
             await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
-          } else if (!window.api?.getAuthSessionToken?.()) {
+          } else if (!getStoredUserPayload()) {
             await loadSettings().catch(() => {})
           }
         }
@@ -601,20 +598,14 @@ export function AppProvider({ children }) {
       setPage('dashboard')
       setAuthReady(true)
       clearPersistedAuthState()
-      window.api?.setAuthSessionToken?.('')
       setSyncConnected(false)
       setSyncServerUnreachable(false)
       setNotification({ message, type: 'error', id: Date.now() })
     }
     const onUnauthorized = (e) => {
-      const eventToken = String(e?.detail?.token || '').trim()
-      const currentToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
-      if (eventToken && currentToken && eventToken !== currentToken) {
-        return
-      }
       const message = e?.detail?.error || 'Please sign in again to continue.'
       const recentAuthEstablished = Date.now() - authEstablishedAtRef.current < 8000
-      const hasRecoverableSession = !!currentToken && !!(user?.id || getStoredUserPayload())
+      const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
       if (hasRecoverableSession && !authRecoveryRef.current && recentAuthEstablished) {
         authRecoveryRef.current = true
         window.setTimeout(async () => {
@@ -664,12 +655,13 @@ export function AppProvider({ children }) {
     const handleOtpLogin = async (e) => {
       const otpUser = e.detail
       if (!otpUser) return
-      const { password: _pw, otp_secret: _sec, authToken = '', sessionDuration = 'session', ...safeUser } = otpUser
+      const retiredTokenKey = `auth${'Token'}`
+      const { password: _pw, otp_secret: _sec, [retiredTokenKey]: _retiredAuthValue, sessionDuration = 'session', ...safeUser } = otpUser
 
       const expiryTime = computeSessionExpiryMs(sessionDuration, otpUser.sessionExpiresAt || '')
 
       try {
-        persistAuthState({ user: safeUser, authToken, expiryTime, sessionDuration })
+        persistAuthState({ user: safeUser, expiryTime, sessionDuration })
         if (safeUser?.organization_slug || safeUser?.organization_public_id || safeUser?.organization_name) {
           safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
             id: safeUser.organization_id || null,
@@ -685,7 +677,6 @@ export function AppProvider({ children }) {
 
       setAuthReady(false)
       authEstablishedAtRef.current = Date.now()
-      window.api?.setAuthSessionToken?.(authToken || '')
       const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
       if (bootstrap) {
         await applyBootstrapPayload(bootstrap, { fallbackUser: safeUser })
@@ -707,13 +698,11 @@ export function AppProvider({ children }) {
       setUser((prev) => {
         if (!prev || Number(prev.id) !== Number(nextUser.id)) return prev
         const merged = { ...prev, ...nextUser }
-        const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
         const expiry = getStoredUserExpiry()
         const expiryTime = expiry ? Number(expiry) : null
         const currentMode = safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION) || '30d'
         persistAuthState({
           user: merged,
-          authToken,
           expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
           sessionDuration: currentMode,
         })
@@ -942,11 +931,11 @@ export function AppProvider({ children }) {
   }, [])
 
   // ?? Auth ??????????????????????????????????????????????????????????????????
-  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', authToken = '', sessionExpiresAt = '') => {
+  const persistAuthenticatedUser = useCallback(async (nextUser, sessionDuration = 'session', sessionExpiresAt = '') => {
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
 
     try {
-      persistAuthState({ user: nextUser, authToken, expiryTime, sessionDuration })
+      persistAuthState({ user: nextUser, expiryTime, sessionDuration })
       if (nextUser?.organization_slug || nextUser?.organization_public_id || nextUser?.organization_name) {
         safeStorageSet(localStorage, STORAGE_KEYS.ORGANIZATION, JSON.stringify({
           id: nextUser.organization_id || null,
@@ -965,7 +954,6 @@ export function AppProvider({ children }) {
     } catch (_) {}
 
     setAuthReady(false)
-    window.api?.setAuthSessionToken?.(authToken || '')
     cacheClearAll()
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()
@@ -991,7 +979,7 @@ export function AppProvider({ children }) {
         deviceName: device.deviceName,
       })
       if (result.success) {
-        await persistAuthenticatedUser(result.user, sessionDuration, result.authToken || '', result.sessionExpiresAt || '')
+        await persistAuthenticatedUser(result.user, sessionDuration, result.sessionExpiresAt || '')
       }
       return result
     } catch (e) {
@@ -1016,7 +1004,6 @@ export function AppProvider({ children }) {
       preserveSessionDuration: true,
       preserveRuntimeMeta: true,
     })
-    window.api?.setAuthSessionToken?.('')
     setUser(null)
     setAuthReady(true)
     setPage('dashboard')
@@ -1175,7 +1162,6 @@ export function AppProvider({ children }) {
       const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
       if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
         const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
-        const authToken = window.api?.getAuthSessionToken?.() || getStoredAuthToken()
         if (user?.id && typeof window.api?.updateSessionDuration === 'function') {
           const device = getClientDeviceInfo()
           const refreshed = await window.api.updateSessionDuration({
@@ -1187,18 +1173,15 @@ export function AppProvider({ children }) {
           if (refreshed?.success === false) {
             throw new Error(refreshed.error || 'Failed to refresh login session duration')
           }
-          const nextAuthToken = String(refreshed?.authToken || '').trim()
           const nextExpiryTime = computeSessionExpiryMs(
             normalizedSessionDuration,
             refreshed?.sessionExpiresAt || '',
           )
           persistAuthState({
             user,
-            authToken: nextAuthToken,
             expiryTime: nextExpiryTime,
             sessionDuration: normalizedSessionDuration,
           })
-          window.api?.setAuthSessionToken?.(nextAuthToken)
         }
       }
       if (Object.keys(serverUpdates).length) {

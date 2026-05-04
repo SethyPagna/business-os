@@ -112,7 +112,6 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 67 | `reset_password_with_otp` | YES | YES |
 | 68 | `save_new_password` | YES | YES |
 | 69 | `set_new_password_from_email` | YES | YES |
-| 70 | `supabase_auth` | YES | YES |
 | 71 | `two_factor_auth` | YES | YES |
 | 72 | `two_factor_authentication` | YES | YES |
 | 73 | `verify` | YES | YES |
@@ -1712,8 +1711,6 @@ Auto-generated key grouping for translation modular structure across `frontend/s
 | 970 | `summary_completed` | YES | YES |
 | 971 | `summary_in_delivery` | YES | YES |
 | 972 | `summary_on_hold` | YES | YES |
-| 973 | `supabase_smtp_ready` | YES | YES |
-| 974 | `supabase_verification_email_note` | YES | YES |
 | 975 | `switch_to_dark_mode` | YES | YES |
 | 976 | `switch_to_english` | YES | YES |
 | 977 | `switch_to_khmer` | YES | YES |

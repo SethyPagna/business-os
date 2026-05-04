@@ -10,7 +10,6 @@ import {
   shouldCompareRuntimeVersions,
   isApiVersionMismatchError,
   isRequiredRuntimeApiPath,
-  setAuthSessionToken,
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.js'
@@ -43,7 +42,6 @@ function resetApiState() {
   __resetApiWriteDedupeForTests()
   setSyncServerUrl('')
   setSyncToken('')
-  setAuthSessionToken('')
 }
 
 await runTest('write dedupe key is stable for equivalent JSON bodies', () => {
@@ -130,6 +128,31 @@ await runTest('GET, HEAD, and OPTIONS requests never serialize a request body', 
     for (const [, init] of calls) {
       assert.ok(!Object.prototype.hasOwnProperty.call(init, 'body') || init.body === undefined)
     }
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('apiFetch uses HttpOnly cookie credentials and no JS-readable auth header', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = (...args) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }
+
+  try {
+    await apiFetch('POST', '/api/products', { name: 'Cookie Only' }, 1000)
+    assert.equal(calls.length, 1)
+    const [, init] = calls[0]
+    assert.equal(init.credentials, 'include')
+    assert.equal(Object.prototype.hasOwnProperty.call(init.headers, `x-auth-${'session'}`), false)
   } finally {
     globalThis.fetch = originalFetch
     resetApiState()

@@ -95,7 +95,7 @@ async function stopServer(child) {
 
 async function fetchJson(baseUrl, pathname, options = {}) {
   const headers = { ...(options.headers || {}) }
-  if (options.authToken) headers['x-auth-session'] = options.authToken
+  if (options.authCookie) headers.cookie = options.authCookie
   const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers })
   const text = await response.text()
   const json = text ? JSON.parse(text) : {}
@@ -105,8 +105,15 @@ async function fetchJson(baseUrl, pathname, options = {}) {
   return json
 }
 
+function extractSessionCookie(response) {
+  const setCookie = response.headers.get('set-cookie') || ''
+  const cookie = setCookie.split(';')[0]
+  assert.match(cookie, /^bos_session=/, 'Expected bos_session cookie')
+  return cookie
+}
+
 async function login(baseUrl, username, password, organization = null) {
-  return fetchJson(baseUrl, '/api/auth/login', {
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -119,6 +126,12 @@ async function login(baseUrl, username, password, organization = null) {
       deviceName: 'QA Browser',
     }),
   })
+  const text = await response.text()
+  const json = text ? JSON.parse(text) : {}
+  if (!response.ok || json?.success === false) {
+    throw new Error(json?.error || `Request failed: ${response.status}`)
+  }
+  return { ...json, authCookie: extractSessionCookie(response) }
 }
 
 pendingTests.add('login does not enumerate missing organizations')
@@ -152,17 +165,17 @@ runTest('changing a password revokes the previous session token', async () => {
   try {
     server = await startServer(runtimeDir)
     const loginResult = await login(server.baseUrl, 'admin', 'admin')
-    const oldToken = loginResult.authToken
-    assert.ok(oldToken, 'Expected login token')
+    const oldCookie = loginResult.authCookie
+    assert.ok(oldCookie, 'Expected login cookie')
 
-    const bootstrap = await fetchJson(server.baseUrl, '/api/auth/bootstrap', { authToken: oldToken })
+    const bootstrap = await fetchJson(server.baseUrl, '/api/auth/bootstrap', { authCookie: oldCookie })
     const userId = Number(bootstrap?.user?.id || 0)
     assert.ok(userId > 0, 'Expected bootstrap user id')
 
     await fetchJson(server.baseUrl, `/api/users/${userId}/change-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      authToken: oldToken,
+      authCookie: oldCookie,
       body: JSON.stringify({
         currentPassword: 'admin',
         newPassword: 'admin123',
@@ -171,7 +184,7 @@ runTest('changing a password revokes the previous session token', async () => {
 
     const staleResponse = await fetch(`${server.baseUrl}/api/auth/bootstrap`, {
       headers: {
-        'x-auth-session': oldToken,
+        cookie: oldCookie,
       },
     })
     const staleJson = JSON.parse(await staleResponse.text())
@@ -179,13 +192,13 @@ runTest('changing a password revokes the previous session token', async () => {
     assert.equal(staleJson.code, 'invalid_session')
 
     const newLogin = await login(server.baseUrl, 'admin', 'admin123')
-    const newToken = newLogin.authToken
-    assert.ok(newToken, 'Expected new login token')
+    const newCookie = newLogin.authCookie
+    assert.ok(newCookie, 'Expected new login cookie')
 
     await fetchJson(server.baseUrl, `/api/users/${userId}/change-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      authToken: newToken,
+      authCookie: newCookie,
       body: JSON.stringify({
         currentPassword: 'admin123',
         newPassword: 'admin',

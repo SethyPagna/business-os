@@ -146,9 +146,7 @@ const CORS_OPTIONS = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
-    'Authorization',
     'x-sync-token',
-    'x-auth-session',
     'bypass-tunnel-reminder',
     'x-client-time',
     'x-device-tz',
@@ -292,7 +290,7 @@ function setTunnelSecurityHeaders(req, res) {
       `style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com${portalTranslateStyleSources}`,
       "font-src 'self' data: https://fonts.gstatic.com",
       `frame-src 'self' https://www.google.com https://maps.google.com${portalTranslateFrameSources}`,
-      `connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com https://*.supabase.co${portalTranslateConnectSources}`,
+      `connect-src 'self' ws: wss: https://api.groq.com https://api.mistral.ai https://api.cerebras.ai https://generativelanguage.googleapis.com https://api.cohere.com https://www.googleapis.com https://oauth2.googleapis.com${portalTranslateConnectSources}`,
       "worker-src 'self' blob:",
       `script-src 'self' 'wasm-unsafe-eval'${portalTranslateEvalSource}${portalTranslateScriptSources}`,
       `script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'${portalTranslateElemEvalSource}${portalTranslateScriptSources}`,

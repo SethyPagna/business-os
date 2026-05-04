@@ -98,7 +98,7 @@ async function stopServer(child) {
 
 async function fetchJson(baseUrl, pathname, options = {}) {
   const headers = { ...(options.headers || {}) }
-  if (options.authToken) headers['x-auth-session'] = options.authToken
+  if (options.authCookie || options.authToken) headers.cookie = options.authCookie || options.authToken
   const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers })
   const text = await response.text()
   const json = text ? JSON.parse(text) : {}
@@ -120,8 +120,10 @@ async function login(baseUrl) {
     }),
   })
   assert.equal(response.ok, true, 'Expected default admin login to succeed')
-  assert.ok(json.authToken, 'Expected auth token')
-  return json.authToken
+  assert.equal(json?.authMode, 'cookie', 'Expected cookie auth mode')
+  const cookie = (response.headers.get('set-cookie') || '').split(';')[0]
+  assert.match(cookie, /^bos_session=/, 'Expected bos_session cookie')
+  return cookie
 }
 
 function buildForm(fieldName, buffer, fileName, mimeType) {

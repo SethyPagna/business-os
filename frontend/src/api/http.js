@@ -2,7 +2,7 @@
  * api/http.js ??HTTP client for the sync server.
  *
  * Provides:
- *   apiFetch(method, path, body)  ??typed JSON fetch with auth header and timeout
+ *   apiFetch(method, path, body)  ??typed JSON fetch with cookie credentials and timeout
  *   isNetErr(err)                 ??classify network errors (vs server errors)
  *   readCache / writeCache        ??short-lived in-memory read cache (20 s TTL)
  *   route(channel, serverFn, localFn, isWrite) ??smart dispatcher used by every api/* module
@@ -17,7 +17,6 @@ import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/dev
 // ??? Mutable connection state (module-level, intentionally not React state) ???
 let syncServerUrl = ''
 let syncToken     = ''
-let authSessionToken = ''
 const RECONNECT_REFRESH_CHANNELS = [
   'settings',
   'products',
@@ -38,11 +37,9 @@ const RECONNECT_REFRESH_CHANNELS = [
 
 export function getSyncServerUrl() { return syncServerUrl }
 export function getSyncToken()     { return syncToken }
-export function getAuthSessionToken() { return authSessionToken }
 
 export function setSyncServerUrl(url) { syncServerUrl = (url || '').trim().replace(/\/$/, '') }
 export function setSyncToken(token)   { syncToken = (token || '').trim() }
-export function setAuthSessionToken(token) { authSessionToken = (token || '').trim() }
 
 // ??? In-memory read cache with request deduplication ????????????????????????
 const _cache      = {}
@@ -436,8 +433,6 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
   const base    = syncServerUrl.replace(/\/$/, '')
   const headers = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
   if (syncToken) headers['x-sync-token'] = syncToken
-  const requestAuthSessionToken = authSessionToken
-  if (requestAuthSessionToken) headers['x-auth-session'] = requestAuthSessionToken
 
   const ctrl  = new AbortController()
   let timedOut = false
@@ -466,20 +461,11 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
-      if (res.status === 401 && parsed?.code === 'invalid_session' && requestAuthSessionToken && typeof window !== 'undefined') {
-        const latestInMemoryToken = authSessionToken
-        const canRetryWithCurrentToken = latestInMemoryToken && latestInMemoryToken !== requestAuthSessionToken
-        if (canRetryWithCurrentToken) {
-          return apiFetch(normalizedMethod, path, body, timeoutMs, { skipWriteDedupe: true })
-        }
-        if (authSessionToken === requestAuthSessionToken) {
-          authSessionToken = ''
-        }
+      if (res.status === 401 && parsed?.code === 'invalid_session' && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
           detail: {
             code: parsed.code,
             error: parsed.error || 'Please sign in again to continue.',
-            token: requestAuthSessionToken,
           },
         }))
       }

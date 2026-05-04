@@ -8,13 +8,13 @@ Routes call service functions as dependency boundaries. The service owns provide
 
 ## Files
 
-- `supabaseAuth.js`
-  - Supabase Auth integration for email/password, provider login, provider linking, and admin-side ban state
-  - keeps Supabase limited to identity concerns while Business OS Postgres remains the app authority
+- `googleOauth.js`
+  - owned Google/Gmail OAuth start, callback, linking, and unlinking helpers
+  - keeps Business OS Postgres as the identity and permission authority
 
 - `firebaseAuth.js`
   - legacy Firebase Identity Toolkit integration kept for migration rollback/reference
-  - no longer used by the active auth routes after the Supabase migration
+  - no longer used by the active auth routes
 
 - `verification.js`
   - one-time code issue/hash/store/verify/consume lifecycle

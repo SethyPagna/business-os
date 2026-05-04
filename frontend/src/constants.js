@@ -18,7 +18,6 @@
 export const STORAGE_KEYS = {
   SYNC_SERVER: 'businessos_sync_server',
   SYNC_TOKEN:  'businessos_sync_token',
-  AUTH_TOKEN:  'businessos_auth_token',
   USER:        'businessos_user',
   ORGANIZATION: 'businessos_organization',
   USER_EXPIRY: 'businessos_user_expiry',

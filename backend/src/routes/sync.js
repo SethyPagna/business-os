@@ -103,7 +103,6 @@ async function replayOperation(req, operation, route) {
     'x-client-request-id': operation.client_request_id,
   }
   if (req.headers.cookie) headers.cookie = req.headers.cookie
-  if (req.headers['x-auth-session']) headers['x-auth-session'] = req.headers['x-auth-session']
 
   const response = await fetch(buildReplayUrl(routePath), {
     method: route.method,

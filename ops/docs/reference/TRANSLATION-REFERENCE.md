@@ -314,7 +314,6 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 299 | `store` | 3 |
 | 300 | `submit` | 1 |
 | 301 | `summary` | 4 |
-| 302 | `supabase` | 3 |
 | 303 | `supplier` | 15 |
 | 304 | `switch` | 4 |
 | 305 | `sync` | 65 |
@@ -669,7 +668,6 @@ Auto-generated i18n key inventory and key-diff report for `frontend/src/lang/*.j
 | 302 | `store` | 3 |
 | 303 | `submit` | 1 |
 | 304 | `summary` | 4 |
-| 305 | `supabase` | 3 |
 | 306 | `supplier` | 15 |
 | 307 | `switch` | 4 |
 | 308 | `sync` | 65 |

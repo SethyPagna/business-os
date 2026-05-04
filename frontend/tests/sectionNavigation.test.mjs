@@ -27,7 +27,8 @@ assert.match(backup, /SectionSwitcher/, 'Backup should use the shared section sw
 assert.doesNotMatch(backup, /sectionStorageKey|storageKey/, 'Backup should not auto-restore heavy sections on page entry')
 assert.match(backup, /LoadingWatchdog/, 'Backup should use the loading watchdog')
 
-assert.match(inventory, /Stats \+ sections/)
+assert.match(inventory, /label: 'All'/)
+assert.doesNotMatch(inventory, /Stats \+ sections/)
 assert.match(inventory, /showInventorySections/)
 assert.match(inventory, /showInventoryTabs/)
 assert.match(inventory, /showProductsSection/)

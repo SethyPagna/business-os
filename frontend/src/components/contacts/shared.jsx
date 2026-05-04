@@ -355,9 +355,7 @@ export function ImportModal({ type, onClose, onDone }) {
     try {
       const baseUrl = String(window.api.getSyncServerUrl?.() || '').replace(/\/$/, '')
       const headers = { 'bypass-tunnel-reminder': 'true' }
-      const authToken = window.api.getAuthSessionToken?.()
-      if (authToken) headers['x-auth-session'] = authToken
-      const response = await fetch(`${baseUrl}${path}`, { headers })
+      const response = await fetch(`${baseUrl}${path}`, { headers, credentials: 'include' })
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
       loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
     } catch (error) {

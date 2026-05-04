@@ -8,13 +8,12 @@
  */
 
 import { SYNC } from '../constants.js'
-import { getSyncServerUrl, getAuthSessionToken } from './http.js'
+import { getSyncServerUrl } from './http.js'
 
 let ws               = null
 let wsReconnectTimer = null
 let wsPingTimer      = null
 let reconnectAttempts = 0
-let wsAuthToken = ''
 
 function shouldDebugWs() {
   try {
@@ -39,10 +38,7 @@ export function connectWS() {
 
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
-  const authToken = getAuthSessionToken()
-  wsAuthToken = authToken
   const wsUrl = syncServerUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws'
-    + (authToken ? `?token=${encodeURIComponent(authToken)}` : '')
 
   try {
     logWs('debug', 'attempting connect to', wsUrl)
@@ -92,26 +88,12 @@ export function connectWS() {
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
     if (code === 4001) {
-      // Session-rotation paths (for example changing session duration) revoke the
-      // old token before the frontend finishes reconnecting with the newly
-      // issued one. Give that handoff a moment before treating 4001 as a real
-      // sign-out condition.
-      window.setTimeout(() => {
-        const latestToken = getAuthSessionToken()
-        if (!latestToken) return
-        if (latestToken !== wsAuthToken && getSyncServerUrl()) {
-          logWs('debug', 'session token rotated; reconnecting websocket with fresh token')
-          connectWS()
-          return
-        }
-        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-          detail: {
-            code: 'invalid_session',
-            error: reason || 'Please sign in again to continue.',
-            token: wsAuthToken,
-          },
-        }))
-      }, 1200)
+      window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+        detail: {
+          code: 'invalid_session',
+          error: reason || 'Please sign in again to continue.',
+        },
+      }))
       return
     }
     if (getSyncServerUrl()) scheduleReconnect()
@@ -127,7 +109,6 @@ export function disconnectWS() {
   clearTimeout(wsReconnectTimer)
   clearInterval(wsPingTimer)
   wsPingTimer = null
-  wsAuthToken = ''
   if (ws) { ws.onclose = null; ws.close(); ws = null }
   window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
 }

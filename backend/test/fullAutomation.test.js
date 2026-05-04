@@ -49,6 +49,7 @@ runTest('full automation launcher and policy are present', () => {
     'npm.cmd --prefix frontend run verify:performance',
     'npm.cmd --prefix frontend run build',
     'verify-docker-release.js',
+    'verify-r2-object-store.mjs',
     'docker-release.ps1',
     '/health',
     '/sw.js',
@@ -63,6 +64,8 @@ runTest('cloudflare automation is explicit about account-level permissions', () 
   assert.match(script, /cloudflare-api-token\.txt/)
   assert.match(script, /access\/apps/)
   assert.match(script, /rulesets/)
+  assert.match(script, /upsertAccessApp/)
+  assert.match(script, /http_request_firewall_custom/)
   assert.match(script, /Account\.Cloudflare Access: Edit/)
   assert.match(script, /Zone\.Rulesets: Edit/)
   assert.match(script, /leangcosmetics\.dpdns\.org/)

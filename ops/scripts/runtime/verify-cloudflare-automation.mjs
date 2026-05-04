@@ -82,6 +82,140 @@ function summarizeFailure(result, permission) {
   return `${permission} is required. Cloudflare returned HTTP ${result.status}${messages ? `: ${messages}` : ''}`
 }
 
+function cloudflareErrors(result) {
+  return Array.isArray(result.body?.errors)
+    ? result.body.errors.map((error) => error.message || error.code).filter(Boolean).join('; ')
+    : ''
+}
+
+function assertSuccess(result, action) {
+  if (!result.ok || result.body?.success === false) {
+    throw new Error(`${action} failed with HTTP ${result.status}${cloudflareErrors(result) ? `: ${cloudflareErrors(result)}` : ''}`)
+  }
+  return result.body?.result
+}
+
+async function upsertAccessApp({ token, accountId, adminHost, emails }) {
+  const apps = assertSuccess(
+    await requestJson('GET', `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps?per_page=100`, token),
+    'List Cloudflare Access applications',
+  ) || []
+  const existing = apps.find((app) => String(app?.domain || '').toLowerCase() === adminHost.toLowerCase()
+    || String(app?.name || '').toLowerCase() === 'business os admin')
+  const payload = {
+    name: 'Business OS Admin',
+    domain: adminHost,
+    type: 'self_hosted',
+    session_duration: '24h',
+    auto_redirect_to_identity: false,
+    http_only_cookie_attribute: true,
+    same_site_cookie_attribute: 'lax',
+    policies: [
+      {
+        name: 'Business OS Admin Email Allowlist',
+        decision: 'allow',
+        precedence: 1,
+        include: emails.map((email) => ({ email: { email } })),
+      },
+    ],
+  }
+  const endpoint = existing?.id
+    ? `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps/${existing.id}`
+    : `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps`
+  const method = existing?.id ? 'PUT' : 'POST'
+  const result = assertSuccess(await requestJson(method, endpoint, token, payload), 'Apply Cloudflare Access admin app')
+  return { id: result?.id || existing?.id, created: !existing?.id, domain: adminHost }
+}
+
+async function getEntrypointRuleset({ token, zoneId, phase }) {
+  const result = await requestJson('GET', `https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets/phases/${phase}/entrypoint`, token)
+  if (result.status === 404) return null
+  return assertSuccess(result, `Read ${phase} entrypoint ruleset`)
+}
+
+async function upsertEntrypointRuleset({ token, zoneId, phase, name, rules }) {
+  const existing = await getEntrypointRuleset({ token, zoneId, phase })
+  const preserved = Array.isArray(existing?.rules)
+    ? existing.rules.filter((rule) => !String(rule?.description || '').startsWith('Business OS '))
+    : []
+  const payload = {
+    name: existing?.name || name,
+    description: existing?.description || 'Business OS managed Cloudflare rules',
+    kind: 'zone',
+    phase,
+    rules: [...preserved, ...rules],
+  }
+  const endpoint = existing?.id
+    ? `https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets/${existing.id}`
+    : `https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets`
+  const method = existing?.id ? 'PUT' : 'POST'
+  return assertSuccess(await requestJson(method, endpoint, token, payload), `Apply ${phase} ruleset`)
+}
+
+async function tryApplyRuleset(label, fn) {
+  try {
+    await fn()
+    console.log(`${label}: applied`)
+    return true
+  } catch (error) {
+    console.log(`${label}: skipped (${error?.message || error})`)
+    return false
+  }
+}
+
+async function applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails }) {
+  const accessApp = await upsertAccessApp({ token, accountId, adminHost, emails })
+  console.log(`Access admin app: ${accessApp.created ? 'created' : 'updated'} (${accessApp.domain})`)
+
+  const allowedCountries = (policy.cloudflare?.allowedCountries || ['KH', 'HK', 'AU'])
+    .map((country) => String(country || '').trim().toUpperCase())
+    .filter(Boolean)
+  const countrySet = allowedCountries.map((country) => `"${country}"`).join(' ')
+  const hostSet = [adminHost, publicHost].map((host) => `"${host}"`).join(' ')
+
+  await tryApplyRuleset('WAF custom rules', () => upsertEntrypointRuleset({
+    token,
+    zoneId: zone.id,
+    phase: 'http_request_firewall_custom',
+    name: 'Business OS custom WAF',
+    rules: [
+      {
+        action: 'managed_challenge',
+        expression: `(http.host eq "${adminHost}" and not ip.geoip.country in {${countrySet}})`,
+        description: 'Business OS admin country challenge',
+        enabled: true,
+      },
+      {
+        action: 'block',
+        expression: `(http.host in {${hostSet}} and (lower(http.request.uri.query) contains "<script" or lower(http.request.uri.query) contains "union select" or lower(http.request.uri.query) contains "../" or lower(http.request.uri.path) contains "../"))`,
+        description: 'Business OS obvious injection block',
+        enabled: true,
+      },
+    ],
+  }))
+
+  await tryApplyRuleset('Rate-limit rules', () => upsertEntrypointRuleset({
+    token,
+    zoneId: zone.id,
+    phase: 'http_ratelimit',
+    name: 'Business OS rate limits',
+    rules: [
+      {
+        action: 'block',
+        expression: `(http.host eq "${adminHost}" and http.request.uri.path contains "/api/auth/")`,
+        description: 'Business OS auth rate limit',
+        enabled: true,
+        ratelimit: {
+          characteristics: ['ip.src', 'cf.colo.id'],
+          period: 10,
+          requests_per_period: 10,
+          mitigation_timeout: 10,
+        },
+      },
+    ],
+  }))
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const policy = readJson(args.policy)
@@ -134,7 +268,7 @@ async function main() {
   }
 
   if (args.apply && !needs.length) {
-    console.log('Cloudflare apply mode is ready. Access/WAF creation is intentionally gated by the configured email allowlist to avoid lockout.')
+    await applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails })
   }
 }
 

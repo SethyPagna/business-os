@@ -172,10 +172,8 @@ export async function resetClientRuntimeState(options = {}) {
   if (preserveRuntimeMeta) localPreserveKeys.add(STORAGE_KEYS.CLIENT_RUNTIME)
   if (preserveOrganization) localPreserveKeys.add(STORAGE_KEYS.ORGANIZATION)
   if (preserveAuth) {
-    localPreserveKeys.add(STORAGE_KEYS.AUTH_TOKEN)
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
-    sessionPreserveKeys.add(STORAGE_KEYS.AUTH_TOKEN)
     sessionPreserveKeys.add(STORAGE_KEYS.USER)
     sessionPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
   }

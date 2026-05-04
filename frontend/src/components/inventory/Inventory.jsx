@@ -70,7 +70,7 @@ const RFID_READER_REQUIREMENTS = [
 ]
 
 const INVENTORY_SECTION_OPTIONS = [
-  { value: 'all', label: 'Stats + sections', hint: 'Show inventory statistics, products, movements, and RFID tools together.' },
+  { value: 'all', label: 'All', hint: 'Show inventory statistics, products, movements, and RFID tools together.' },
   { value: 'stats', label: 'Stats', hint: 'Show only the inventory summary cards.' },
   { value: 'products', label: 'Products', hint: 'Show product stock, values, and item-level controls.' },
   { value: 'movements', label: 'Movements', hint: 'Show stock movement history and grouped movement filters.' },

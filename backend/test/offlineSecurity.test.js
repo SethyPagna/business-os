@@ -33,6 +33,9 @@ runTest('auth sessions are issued as HttpOnly cookies and cleared on logout', ()
   assert.match(authSource, /setAuthSessionCookie\(req, res, session\)/)
   assert.match(authSource, /clearAuthSessionCookie\(req, res\)/)
   assert.doesNotMatch(authSource, /authToken:\s*session\.token/)
+  assert.doesNotMatch(sessionSource, new RegExp(`x-auth-${'session'}`))
+  assert.doesNotMatch(sessionSource, /authorization/i)
+  assert.doesNotMatch(sessionSource, /searchParams\.get\('token'\)/)
 })
 
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
