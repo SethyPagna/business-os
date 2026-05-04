@@ -359,6 +359,27 @@ function SectionChip({ label, value, tone = 'slate' }) {
   )
 }
 
+const DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES = 60
+const DRIVE_SYNC_MIN_INTERVAL_MINUTES = 60
+const DRIVE_SYNC_MAX_INTERVAL_MINUTES = 24 * 60
+const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
+
+function secondsToSyncMinutes(seconds) {
+  const raw = Number(seconds)
+  if (!Number.isFinite(raw) || raw <= 0) return DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES
+  return Math.min(
+    DRIVE_SYNC_MAX_INTERVAL_MINUTES,
+    Math.max(DRIVE_SYNC_MIN_INTERVAL_MINUTES, Math.round(raw / 60)),
+  )
+}
+
+function minutesToSyncSeconds(minutes) {
+  const raw = Number(minutes)
+  const safeMinutes = Number.isFinite(raw)
+    ? Math.min(DRIVE_SYNC_MAX_INTERVAL_MINUTES, Math.max(DRIVE_SYNC_MIN_INTERVAL_MINUTES, Math.round(raw)))
+    : DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES
+  return safeMinutes * 60
+}
 
 function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }) {
   const copy = useCopy(t)
@@ -369,7 +390,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     folderName: 'Business OS Sync',
     deleteMissing: true,
     enabled: true,
-    syncIntervalSeconds: 120,
+    syncIntervalMinutes: DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES,
   })
   const [activeJob, setActiveJob] = useState(null)
   const [pendingAuthUrl, setPendingAuthUrl] = useState('')
@@ -418,7 +439,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         folderName: item?.folderName || current.folderName || 'Business OS Sync',
         deleteMissing: !!item?.deleteMissing,
         enabled: item?.enabled !== false,
-        syncIntervalSeconds: Number(item?.syncIntervalSeconds || current.syncIntervalSeconds || 120),
+        syncIntervalMinutes: secondsToSyncMinutes(item?.syncIntervalSeconds || minutesToSyncSeconds(current.syncIntervalMinutes)),
       }))
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -514,7 +535,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
         enabled: form.enabled,
-        syncIntervalSeconds: form.syncIntervalSeconds,
+        syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
       })
       setStatus(result?.item || status)
       actionHistory?.pushAction?.({
@@ -551,7 +572,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         folderName: form.folderName,
         deleteMissing: form.deleteMissing,
         enabled: form.enabled,
-        syncIntervalSeconds: form.syncIntervalSeconds,
+        syncIntervalSeconds: minutesToSyncSeconds(form.syncIntervalMinutes),
         returnOrigin: window.location.origin,
         returnPath: window.location.pathname + window.location.search,
       })
@@ -706,19 +727,39 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           />
         </label>
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
-          <span id="drive-sync-interval-label">{copy('drive_sync_interval', 'Sync every (seconds)')}</span>
+          <span id="drive-sync-interval-label">{copy('drive_sync_interval', 'Sync interval (mins)')}</span>
           <input
             id="drive-sync-interval"
-            name="drive_sync_interval_seconds"
+            name="drive_sync_interval_minutes"
             type="number"
-            min="30"
-            max="3600"
+            min={DRIVE_SYNC_MIN_INTERVAL_MINUTES}
+            max={DRIVE_SYNC_MAX_INTERVAL_MINUTES}
+            step="30"
             className="input"
             autoComplete="off"
             aria-labelledby="drive-sync-interval-label"
-            value={form.syncIntervalSeconds}
-            onChange={(event) => setForm((current) => ({ ...current, syncIntervalSeconds: event.target.value }))}
+            value={form.syncIntervalMinutes}
+            onChange={(event) => setForm((current) => ({ ...current, syncIntervalMinutes: event.target.value }))}
           />
+          <div className="flex flex-wrap gap-1.5">
+            {DRIVE_SYNC_PRESET_HOURS.map((hours) => (
+              <button
+                key={hours}
+                type="button"
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  Number(form.syncIntervalMinutes) === hours * 60
+                    ? 'border-blue-500 bg-blue-600 text-white'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300'
+                }`}
+                onClick={() => setForm((current) => ({ ...current, syncIntervalMinutes: hours * 60 }))}
+              >
+                {hours}h
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {copy('drive_sync_interval_note', 'Default is 60 minutes (every 1 hour). Quick choices use 3, 6, 9, 12, or 24 hours.')}
+          </p>
         </label>
       </div>
 

@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const {
   DRIVE_SYNC_DEFAULT_RETENTION_DAYS,
@@ -74,6 +76,13 @@ runTest('drive sync retention keeps newest thirty versions by default', () => {
   const expired = selectExpiredDriveSyncVersions(versions)
   assert.equal(DRIVE_SYNC_DEFAULT_RETENTION_DAYS, 30)
   assert.deepEqual(expired.map((entry) => entry.name), ['datasync-1', 'datasync-2', 'datasync-3'])
+})
+
+runTest('drive sync interval defaults to one hour and allows up to twenty four hours', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*60\s*\*\s*60/)
+  assert.match(source, /DRIVE_SYNC_MAX_INTERVAL_SECONDS\s*=\s*24\s*\*\s*60\s*\*\s*60/)
+  assert.match(source, /Math\.max\(DRIVE_SYNC_MIN_INTERVAL_SECONDS,\s*config\.syncIntervalSeconds\)/)
 })
 
 if (failed > 0) {

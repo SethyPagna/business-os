@@ -26,6 +26,9 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3'
 const GOOGLE_DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3'
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
+const DRIVE_SYNC_MIN_INTERVAL_SECONDS = 60 * 60
+const DRIVE_SYNC_MAX_INTERVAL_SECONDS = 24 * 60 * 60
+const DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS = 60 * 60
 
 const SETTINGS_KEYS = {
   enabled: 'google_drive_sync_enabled',
@@ -148,7 +151,12 @@ function getDriveSyncConfig() {
     currentVersionStartedAt: trim(settings[SETTINGS_KEYS.currentVersionStartedAt]),
     retentionDays: clamp(settings[SETTINGS_KEYS.retentionDays], 1, 365, DRIVE_SYNC_DEFAULT_RETENTION_DAYS),
     deleteMissing: toBool(settings[SETTINGS_KEYS.deleteMissing], true),
-    syncIntervalSeconds: clamp(settings[SETTINGS_KEYS.syncIntervalSeconds], 30, 3600, 120),
+    syncIntervalSeconds: clamp(
+      settings[SETTINGS_KEYS.syncIntervalSeconds],
+      DRIVE_SYNC_MIN_INTERVAL_SECONDS,
+      DRIVE_SYNC_MAX_INTERVAL_SECONDS,
+      DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS,
+    ),
     connectedEmail: trim(settings[SETTINGS_KEYS.connectedEmail]),
     connectedName: trim(settings[SETTINGS_KEYS.connectedName]),
     lastSyncedAt: trim(settings[SETTINGS_KEYS.lastSyncedAt]),
@@ -895,7 +903,12 @@ function beginGoogleDriveOAuth(payload = {}) {
     clientSecret: trim(payload.clientSecret),
     folderName: trim(payload.folderName) || 'Business OS Sync',
     deleteMissing: payload.deleteMissing == null ? true : !!payload.deleteMissing,
-    syncIntervalSeconds: clamp(payload.syncIntervalSeconds, 30, 3600, 120),
+    syncIntervalSeconds: clamp(
+      payload.syncIntervalSeconds,
+      DRIVE_SYNC_MIN_INTERVAL_SECONDS,
+      DRIVE_SYNC_MAX_INTERVAL_SECONDS,
+      DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS,
+    ),
     enabled: payload.enabled !== false,
     redirectUri: trim(payload.redirectUri),
     returnOrigin: trim(payload.returnOrigin),
@@ -963,7 +976,12 @@ function saveDriveSyncPreferences(payload = {}) {
     [SETTINGS_KEYS.folderName]: nextFolderName,
     [SETTINGS_KEYS.enabled]: (payload.enabled == null ? current.enabled : !!payload.enabled) ? '1' : '0',
     [SETTINGS_KEYS.deleteMissing]: (payload.deleteMissing == null ? current.deleteMissing : !!payload.deleteMissing) ? '1' : '0',
-    [SETTINGS_KEYS.syncIntervalSeconds]: String(clamp(payload.syncIntervalSeconds, 30, 3600, current.syncIntervalSeconds || 120)),
+    [SETTINGS_KEYS.syncIntervalSeconds]: String(clamp(
+      payload.syncIntervalSeconds,
+      DRIVE_SYNC_MIN_INTERVAL_SECONDS,
+      DRIVE_SYNC_MAX_INTERVAL_SECONDS,
+      current.syncIntervalSeconds || DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS,
+    )),
   }
   if (trim(current.folderName).toLowerCase() !== nextFolderName.toLowerCase()) {
     updates[SETTINGS_KEYS.rootFolderId] = null
@@ -1007,7 +1025,7 @@ function schedulePeriodicDriveSync() {
     const config = getDriveSyncConfig()
     if (!config.enabled || !config.ready) return
     const lastSyncMs = config.lastSyncedAt ? Date.parse(config.lastSyncedAt) : 0
-    const dueMs = Math.max(30, config.syncIntervalSeconds) * 1000
+    const dueMs = Math.max(DRIVE_SYNC_MIN_INTERVAL_SECONDS, config.syncIntervalSeconds) * 1000
     if (!lastSyncMs || (Date.now() - lastSyncMs) >= dueMs) {
       scheduleDriveSync('interval', 1000)
     }
