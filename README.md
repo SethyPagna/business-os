@@ -34,6 +34,8 @@ Normal URLs:
 - Redis owns durable jobs and short-lived cache.
 - DuckDB/Parquet owns heavy staging and read-only workloads such as CSV import staging, conflict scans, exports, analytics snapshots, and backup verification.
 
+Images, logos, avatars, portal/about images, and product image uploads are normalized through the same media optimizer before storage. Compressible image formats are resized and recompressed until they fit the 40KB asset budget; oversized image formats that cannot be made 40KB or smaller are rejected with a clear upload error. MP4 videos are recompressed with H.264, slow preset, CRF 24, 96k AAC audio, 1280px max display edge, stripped metadata, and fast-start playback so they stay clear while reducing storage and loading cost.
+
 Old loose data folders are not accepted by the final app. Use a verified backup folder or Google Drive `datasync-N` folder so older data cannot overwrite newer Docker data by accident.
 
 ## Secrets, R2, Google, And Supabase Setup

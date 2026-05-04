@@ -1,8 +1,9 @@
 'use strict'
 
 const fs = require('fs')
-let sharp = null
-try { sharp = require('sharp') } catch (_) {}
+const { loadSharp } = require('./optionalSharp')
+
+const sharp = loadSharp()
 
 const MAX_IMAGE_DIMENSION = 12_000
 const MAX_IMAGE_PIXELS = 40_000_000
