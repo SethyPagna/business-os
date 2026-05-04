@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   buildPortalHighlightBadges,
   buildPortalPricePresentation,
@@ -8,6 +9,9 @@ import {
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
 } from '../src/components/catalog/portalCatalogDisplay.mjs'
+
+const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.mjs', import.meta.url), 'utf8')
+const catalogPageSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
 
 let failed = 0
 
@@ -37,6 +41,9 @@ runTest('portal grid helpers honor configured mobile and desktop columns', () =>
   assert.equal(getPortalMobileGridClass(3), 'grid-cols-3')
   assert.equal(getPortalGridClass(7), 'lg:grid-cols-4 xl:grid-cols-7')
   assert.equal(getPortalGridClass(8), 'lg:grid-cols-4 xl:grid-cols-8')
+  assert.match(tailwindConfig, /\{js,jsx,mjs\}/, 'Tailwind must scan mjs helpers that contain portal grid classes')
+  assert.match(catalogPageSource, /customer_portal_grid_columns_mobile \?\? '1'/, 'mobile grid input should allow in-progress edits')
+  assert.match(catalogPageSource, /customer_portal_grid_columns_desktop \?\? '4'/, 'desktop grid input should allow in-progress edits')
 })
 
 runTest('branch matching uses branch presence instead of positive stock only', () => {

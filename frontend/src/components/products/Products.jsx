@@ -630,10 +630,10 @@ export default function Products() {
   const renderUnitChip = (unitName) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
-    if (!color) return <span className="ml-1 text-xs font-normal text-gray-400">{unitName}</span>
+    if (!color) return <span className="ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400">{unitName}</span>
     return (
       <span
-        className="ml-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
+        className="ml-1 inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold"
         style={{ background: color, color: getContrastingTextColor(color) }}
       >
         {unitName}
@@ -1453,6 +1453,7 @@ export default function Products() {
       selectedBranchName ? { key: 'branch', label: selectedBranchName } : null,
       p.barcode ? { key: 'barcode', label: p.barcode } : null,
       p.brand ? { key: 'brand', label: p.brand } : null,
+      p.category ? { key: 'category', label: p.category } : null,
     ].filter(Boolean)
     return (
       <tr
@@ -1485,19 +1486,6 @@ export default function Products() {
             {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
           </div>
           {p.supplier && <div className="text-xs text-gray-400 truncate max-w-32">{p.supplier}</div>}
-        </td>
-        <td className="px-3 py-2 hidden md:table-cell">
-          {p.category ? (
-            <span
-              className="rounded-full px-2 py-0.5 text-xs"
-              style={{
-                background: catMap[p.category]?.color || '#6b7280',
-                color: getContrastingTextColor(catMap[p.category]?.color || '#6b7280'),
-              }}
-            >
-              {p.category}
-            </span>
-          ) : 'N/A'}
         </td>
         <td className="px-3 py-2 text-right col-highlight-red">
           <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(purchaseUsd)}</div>
@@ -1540,7 +1528,7 @@ export default function Products() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
+  }, [branchFilter, branchNameById, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, renderUnitChip, tr])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1610,7 +1598,7 @@ export default function Products() {
                 </>
               ) : null}
               <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="flex min-w-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
+              <span className="flex shrink-0 items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
             </div>
           </div>
           <div onClick={(e) => e.stopPropagation()}>
@@ -1879,7 +1867,6 @@ export default function Products() {
                 </th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold w-16">Image</th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('product_name')}</th>
-                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold hidden md:table-cell">{t('category')}</th>
                 <th className="text-right px-3 py-3 text-red-600 dark:text-red-400 font-semibold col-highlight-red">{t('cost_in_purchase')}</th>
                 <th className="text-right px-3 py-3 text-green-600 dark:text-green-400 font-semibold col-highlight-green">{t('selling_price_label')}</th>
                 <th className="text-right px-3 py-3 text-blue-600 dark:text-blue-400 font-semibold hidden lg:table-cell">{t('margin')}</th>
@@ -1889,14 +1876,14 @@ export default function Products() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-              : visibleProducts.length === 0 ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
+              {loading ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
+              : visibleProducts.length === 0 ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{t('no_data')}</td></tr>
               : productSections.map((section) => {
                 const isCollapsed = collapsedProductSections.has(section.id)
                 return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={10} className="px-4 py-2">
+                    <td colSpan={9} className="px-4 py-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
@@ -1933,7 +1920,7 @@ export default function Products() {
                             className="bg-white/80 dark:bg-slate-900/45"
                             data-product-jump-id={group.anchorId}
                           >
-                            <td colSpan={10} className="px-4 py-2.5">
+                            <td colSpan={9} className="px-4 py-2.5">
                               <div className="flex items-center justify-between gap-3">
                                 <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-100">
                                   <input

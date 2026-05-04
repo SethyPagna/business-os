@@ -60,7 +60,7 @@ const ADMIN_PAGE_SEQUENCE = [
   'backup',
 ]
 
-const CHUNK_IMPORT_TIMEOUT_MS = 8000
+const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 
 function getChunkErrorMessage(error) {

@@ -12,6 +12,7 @@ const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab
 assert.match(app, /const WARMUP_PAGE_IDS = \[\]/, 'background chunk warmup should stay disabled to protect INP')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
+assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
@@ -24,6 +25,8 @@ assert.doesNotMatch(backup, /function ScaleMigrationSection/, 'unused backup mig
 assert.doesNotMatch(backup, /backupSection === 'all' \|\|/, 'Backup sections should not mount every tool in overview mode')
 
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
+assert.match(customers, /generateCustomerMembershipNumber/, 'customer form should auto-generate membership numbers')
+assert.match(customers, /Regenerate/, 'customer form should let staff regenerate membership numbers')
 for (const [name, source] of [
   ['Customers', customers],
   ['Suppliers', suppliers],

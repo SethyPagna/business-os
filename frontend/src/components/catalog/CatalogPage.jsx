@@ -3225,7 +3225,7 @@ export default function CatalogPage({ publicView = false }) {
                   min="1"
                   max="3"
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_mobile || '1'}
+                  value={editorDraft.customer_portal_grid_columns_mobile ?? '1'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_mobile', event.target.value)}
                 />
               </div>
@@ -3239,7 +3239,7 @@ export default function CatalogPage({ publicView = false }) {
                   min="2"
                   max="8"
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_desktop || '4'}
+                  value={editorDraft.customer_portal_grid_columns_desktop ?? '4'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}
                 />
               </div>

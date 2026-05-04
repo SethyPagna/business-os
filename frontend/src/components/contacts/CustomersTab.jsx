@@ -37,6 +37,18 @@ function tr(t, key, fallback) {
   return value && value !== key ? value : fallback
 }
 
+export function generateCustomerMembershipNumber(seed = '') {
+  const prefix = String(seed || 'customer')
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .slice(0, 4)
+    .toUpperCase() || 'CUS'
+  const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    .replace(/[^a-z0-9]/gi, '')
+    .toUpperCase()
+  return `${prefix}-${entropy.slice(-8).padStart(8, '0')}`
+}
+
 function OptionEditor({ option, index, total, onChange, onRemove }) {
   const setField = (key, value) => onChange({ ...option, [key]: value })
   const fieldId = (suffix) => `customer-option-${index}-${suffix}`
@@ -85,7 +97,7 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
 function CustomerForm({ customer, onSave, onClose, t }) {
   const initial = customer
     ? { ...customer }
-    : { name: '', membership_number: '', phone: '', email: '', company: '', notes: '' }
+    : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', company: '', notes: '' }
   const [form, setForm] = useState(initial)
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
@@ -139,15 +151,24 @@ function CustomerForm({ customer, onSave, onClose, t }) {
           <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {tr(t, 'membership_number', 'Membership number')} *
           </label>
-          <input
-            id="customer-form-membership"
-            name="customer_membership_number"
-            autoComplete="off"
-            className="input"
-            value={form.membership_number || ''}
-            onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
-            placeholder="MEM-00000000-ABCD"
-          />
+          <div className="flex gap-2">
+            <input
+              id="customer-form-membership"
+              name="customer_membership_number"
+              autoComplete="off"
+              className="input min-w-0 flex-1"
+              value={form.membership_number || ''}
+              onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
+              placeholder="MEM-00000000-ABCD"
+            />
+            <button
+              type="button"
+              className="btn-secondary shrink-0 px-3 text-xs"
+              onClick={() => setField('membership_number', generateCustomerMembershipNumber(form.name))}
+            >
+              {tr(t, 'regenerate', 'Regenerate')}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

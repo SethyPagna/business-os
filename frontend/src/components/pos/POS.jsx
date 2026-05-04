@@ -270,6 +270,10 @@ export default function POS() {
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(settings.customer_portal_redeem_value_khr || String(exchangeRate)) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
   const debouncedProductSearch = useDebouncedValue(search, 180)
+  const hasProductDiscoveryQuery = useMemo(
+    () => String(debouncedProductSearch || '').trim().length > 0 || initialFilter !== 'all',
+    [debouncedProductSearch, initialFilter],
+  )
 
   const applyCatalogData = useCallback((prods, cats, brs) => {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
@@ -289,6 +293,9 @@ export default function POS() {
     const requestId = beginTrackedRequest(catalogRequestRef)
     setCatalogRefreshing(true)
     try {
+      const effectiveStockState = stockFilter === 'all'
+        ? (hasProductDiscoveryQuery ? '' : 'positive')
+        : stockFilter
       const productQuery = {
         page: productPage,
         pageSize: productPageSize,
@@ -298,7 +305,7 @@ export default function POS() {
         brand: brandFilter === 'all' ? '' : brandFilter,
         supplier: supplierFilter === 'all' ? '' : supplierFilter,
         branchId: branchFilter === 'all' ? '' : branchFilter,
-        stockState: stockFilter === 'all' ? 'positive' : stockFilter,
+        stockState: effectiveStockState,
         groupState: groupFilter === 'all' ? '' : groupFilter,
         initial: initialFilter === 'all' ? '' : initialFilter,
         sort: 'name_asc',
@@ -334,7 +341,7 @@ export default function POS() {
         setCatalogRefreshing(false)
       }
     }
-  }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+  }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, hasProductDiscoveryQuery, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
 
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
@@ -702,14 +709,16 @@ export default function POS() {
       if (stockFilter === 'low')      return qty > (p.out_of_stock_threshold || 0) && qty <= (p.low_stock_threshold || 10)
       if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 10)
 
-      // ??Default (stockFilter === 'all'): always hide out-of-stock in POS ??you can't sell them
-      if (qty <= (p.out_of_stock_threshold || 0)) return false
+      // Default browsing stays sellable-first. Active search/initial filters become discovery mode,
+      // so POS can find the same matching products as Products and Inventory.
+      if (stockFilter === 'all' && !hasProductDiscoveryQuery && qty <= (p.out_of_stock_threshold || 0)) return false
 
       return true
     })
   }, [
     branchFilterId,
     categoryFilter,
+    hasProductDiscoveryQuery,
     normalizedBrandFilter,
     normalizedSupplierFilter,
     products,

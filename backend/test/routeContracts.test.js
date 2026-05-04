@@ -23,10 +23,13 @@ function getRoutePaths(router) {
 
 runTest('product router registers required paged search routes', () => {
   const router = require('../src/routes/products')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/products.js'), 'utf8')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/search'), 'missing /api/products/search')
   assert.ok(paths.includes('/filters'), 'missing /api/products/filters')
   assert.ok(paths.indexOf('/search') < paths.indexOf('/'), '/search must be registered before root route')
+  assert.match(source, /COALESCE\(p\.name,\s*''\)/, 'initial search must use a SQL string literal fallback')
+  assert.doesNotMatch(source, /COALESCE\(p\.name,\s*""\)/, 'initial search must not use double-quoted identifiers')
 })
 
 runTest('inventory router registers required paged product search route', () => {
@@ -44,9 +47,12 @@ runTest('inventory router registers required paged product search route', () => 
 
 runTest('portal router registers required public catalog search route', () => {
   const router = require('../src/routes/portal')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/portal.js'), 'utf8')
   const paths = getRoutePaths(router)
   assert.ok(paths.includes('/catalog/products/search'), 'missing /api/portal/catalog/products/search')
   assert.ok(paths.indexOf('/catalog/products/search') > paths.indexOf('/catalog/products'), 'public search route should be explicit and registered')
+  assert.match(source, /COALESCE\(p\.name,\s*''\)/, 'public initial search must use a SQL string literal fallback')
+  assert.doesNotMatch(source, /COALESCE\(p\.name,\s*""\)/, 'public initial search must not use double-quoted identifiers')
 })
 
 runTest('auth router registers Google OAuth start and completion routes', () => {
