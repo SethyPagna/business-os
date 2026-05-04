@@ -36,6 +36,31 @@ async function main() {
   const failedJob = await waitForStatus(failed.id, 'failed')
   assert.match(failedJob.error, /expected failure/)
 
+  let deferredStarted = false
+  const deferred = startSystemJob('test_deferred_start', async () => {
+    deferredStarted = true
+    return { deferred: true }
+  }, { prefix: 'test' })
+  await Promise.resolve()
+  assert.equal(deferredStarted, false)
+  await waitForStatus(deferred.id, 'completed')
+
+  let dedupedRuns = 0
+  const dedupedA = startSystemJob('test_dedupe', async ({ progress }) => {
+    dedupedRuns += 1
+    progress({ phase: 'working', progress: 25, message: 'Working' })
+    await wait(25)
+    return { deduped: true }
+  }, { prefix: 'test', dedupeKey: 'test:dedupe' })
+  const dedupedB = startSystemJob('test_dedupe', async () => {
+    dedupedRuns += 1
+    return { deduped: false }
+  }, { prefix: 'test', dedupeKey: 'test:dedupe' })
+  assert.equal(dedupedB.id, dedupedA.id)
+  const dedupedJob = await waitForStatus(dedupedA.id, 'completed')
+  assert.equal(dedupedRuns, 1)
+  assert.equal(dedupedJob.result.deduped, true)
+
   const jobs = listSystemJobs({ limit: 10 })
   assert.ok(jobs.some((job) => job.id === completed.id))
   assert.ok(jobs.some((job) => job.id === failed.id))

@@ -32,16 +32,22 @@ function readTableRows(tableName) {
   }
 }
 
-function readBackupTables(progress) {
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+async function readBackupTables(progress) {
   const tables = {}
-  BACKUP_TABLES.forEach((tableName, index) => {
+  for (let index = 0; index < BACKUP_TABLES.length; index += 1) {
+    const tableName = BACKUP_TABLES[index]
     progress?.({
       phase: 'database',
       progress: 10 + Math.round(((index + 1) / BACKUP_TABLES.length) * 30),
       message: `Reading ${tableName}`,
     })
+    await yieldToEventLoop()
     tables[tableName] = readTableRows(tableName)
-  })
+  }
   return tables
 }
 
@@ -138,6 +144,7 @@ async function writePackageFiles({ files, packageId, destinationDir, progress } 
       progress: 45 + Math.round(((index + 1) / entries.length) * 40),
       message: `Writing ${fileName}`,
     })
+    await yieldToEventLoop()
     fs.writeFileSync(path.join(localPath, fileName), contents, 'utf8')
     await putObject(`${prefix}/${fileName}`, Buffer.from(contents, 'utf8'), {
       contentType: fileName.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
@@ -163,6 +170,7 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
       progress: 86 + Math.round(((index + 1) / safeObjects.length) * 9),
       message: `Copying object ${index + 1} of ${safeObjects.length}`,
     })
+    await yieldToEventLoop()
     const relativeKey = sourceKey.replace(/^\.\//, '').replace(/\.\./g, '_')
     const localObjectPath = path.join(objectRoot, relativeKey)
     try {
@@ -195,7 +203,8 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
 async function createFinalBackupPackage({ destinationDir = '', actor = {}, progress = null } = {}) {
   const packageId = `datasync-${nowSafeId()}`
   progress?.({ phase: 'starting', progress: 5, message: 'Preparing final backup package' })
-  const tables = readBackupTables(progress)
+  const tables = await readBackupTables(progress)
+  await yieldToEventLoop()
   const objectManifest = buildObjectManifest(tables.file_assets)
   const payload = buildPackagePayload({ packageId, actor, tables, objectManifest })
   const writeResult = await writePackageFiles({

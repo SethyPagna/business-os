@@ -33,6 +33,17 @@ function publicJob(job) {
   }
 }
 
+function findActiveJob(dedupeKey) {
+  const safeKey = String(dedupeKey || '').trim()
+  if (!safeKey) return null
+  for (const job of jobs.values()) {
+    if (job?.dedupe_key === safeKey && ['queued', 'running'].includes(job.status)) {
+      return job
+    }
+  }
+  return null
+}
+
 function safeJsonParse(value, fallback = null) {
   if (!value) return fallback
   try {
@@ -91,8 +102,18 @@ function persistJob(job) {
       finished_at = excluded.finished_at,
       updated_at = excluded.updated_at
   `).run({
-    ...job,
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    phase: job.phase,
+    progress: job.progress,
+    message: job.message,
     result_json: job.result ? JSON.stringify(job.result) : null,
+    error: job.error,
+    created_at: job.created_at,
+    started_at: job.started_at,
+    finished_at: job.finished_at,
+    updated_at: job.updated_at,
   })
 }
 
@@ -124,9 +145,14 @@ function updateJob(job, patch = {}) {
 
 function startSystemJob(type, worker, options = {}) {
   if (typeof worker !== 'function') throw new Error('System job worker must be a function')
+  const dedupeKey = String(options.dedupeKey || '').trim()
+  const activeJob = findActiveJob(dedupeKey)
+  if (activeJob) return publicJob(activeJob)
+
   const job = {
     id: makeJobId(options.prefix || 'job'),
     type: String(type || 'system'),
+    dedupe_key: dedupeKey,
     status: 'queued',
     phase: 'queued',
     progress: 0,
@@ -141,7 +167,7 @@ function startSystemJob(type, worker, options = {}) {
   jobs.set(job.id, job)
   try { persistJob(job) } catch (_) {}
 
-  Promise.resolve().then(async () => {
+  const runWorker = async () => {
     updateJob(job, {
       status: 'running',
       phase: options.phase || 'running',
@@ -172,7 +198,11 @@ function startSystemJob(type, worker, options = {}) {
     } finally {
       cleanupJobs()
     }
-  }).catch(() => {})
+  }
+
+  setImmediate(() => {
+    runWorker().catch(() => {})
+  })
 
   return publicJob(job)
 }

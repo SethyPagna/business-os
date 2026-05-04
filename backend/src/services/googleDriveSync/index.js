@@ -235,6 +235,10 @@ function md5File(filePath) {
   return hash.digest('hex')
 }
 
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 function buildMultipartBody(metadata, mediaBuffer, mimeType) {
   const boundary = `business-os-${crypto.randomBytes(12).toString('hex')}`
   const head = Buffer.from(
@@ -521,20 +525,34 @@ function shouldSkipSnapshotFile(relativePath) {
   return !String(relativePath || '').trim()
 }
 
-function createDataRootSnapshot() {
+async function createDataRootSnapshot(progress = null) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-drive-sync-'))
   const snapshotRoot = tempDir
   const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
   ensureSnapshotLayout(snapshotRoot)
 
   try {
+    const sourceFiles = []
     walkFiles(DATA_ROOT, (absolutePath) => {
       const relativePath = path.relative(DATA_ROOT, absolutePath)
       if (!relativePath || shouldSkipSnapshotFile(relativePath)) return
+      sourceFiles.push({ absolutePath, relativePath })
+    })
+
+    for (let index = 0; index < sourceFiles.length; index += 1) {
+      if (index % 10 === 0) {
+        progress?.({
+          phase: 'snapshot',
+          progress: 35 + Math.round((index / Math.max(1, sourceFiles.length)) * 3),
+          message: `Copying snapshot file ${Math.min(index + 1, sourceFiles.length)} of ${sourceFiles.length}`,
+        })
+        await yieldToEventLoop()
+      }
+      const { absolutePath, relativePath } = sourceFiles[index]
       const targetPath = path.join(managedRoot, relativePath)
       fs.mkdirSync(path.dirname(targetPath), { recursive: true })
       fs.copyFileSync(absolutePath, targetPath)
-    })
+    }
 
     fs.writeFileSync(path.join(managedRoot, 'manifest.json'), JSON.stringify({
       format: 'business-os-drive-snapshot-v3',
@@ -549,12 +567,25 @@ function createDataRootSnapshot() {
   }
 }
 
-function collectSnapshotItems(snapshotRoot) {
+async function collectSnapshotItems(snapshotRoot, progress = null) {
   const files = []
   const directories = new Set([''])
+  const absolutePaths = []
   walkFiles(snapshotRoot, (absolutePath) => {
+    absolutePaths.push(absolutePath)
+  })
+  for (let index = 0; index < absolutePaths.length; index += 1) {
+    if (index % 10 === 0) {
+      progress?.({
+        phase: 'snapshot',
+        progress: 38 + Math.round((index / Math.max(1, absolutePaths.length)) * 2),
+        message: `Hashing snapshot file ${Math.min(index + 1, absolutePaths.length)} of ${absolutePaths.length}`,
+      })
+      await yieldToEventLoop()
+    }
+    const absolutePath = absolutePaths[index]
     const relativePath = path.relative(snapshotRoot, absolutePath).replace(/\\/g, '/')
-    if (!relativePath) return
+    if (!relativePath) continue
     const stats = fs.statSync(absolutePath)
     const dirName = path.dirname(relativePath).replace(/\\/g, '/')
     let cursor = dirName === '.' ? '' : dirName
@@ -571,7 +602,13 @@ function collectSnapshotItems(snapshotRoot) {
       mimeType: inferMimeType(absolutePath),
       md5Checksum: md5File(absolutePath),
     })
+  }
+  progress?.({
+    phase: 'snapshot',
+    progress: 40,
+    message: `Prepared ${absolutePaths.length} files for Drive sync`,
   })
+  await yieldToEventLoop()
   return {
     directories: Array.from(directories).filter(Boolean).sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b)),
     files,
@@ -614,6 +651,7 @@ async function ensureRemoteDirectories(config, mappings, rootFolderId, relativeD
 }
 
 async function uploadDriveFile(config, parentRemoteId, file) {
+  await yieldToEventLoop()
   const buffer = fs.readFileSync(file.absolutePath)
   const multipart = buildMultipartBody({
     name: path.posix.basename(file.relativePath),
@@ -629,6 +667,7 @@ async function uploadDriveFile(config, parentRemoteId, file) {
 }
 
 async function updateDriveFile(config, remoteFileId, file) {
+  await yieldToEventLoop()
   const buffer = fs.readFileSync(file.absolutePath)
   return driveApiUpload(config, `${GOOGLE_DRIVE_UPLOAD_API}/files/${encodeURIComponent(remoteFileId)}?uploadType=media&supportsAllDrives=true`, {
     method: 'PATCH',
@@ -651,11 +690,24 @@ async function removeDriveFile(config, remoteFileId) {
   }
 }
 
-async function runDriveSync(reason = 'manual') {
+async function runDriveSync(reason = 'manual', options = {}) {
+  if (runtimeState.syncPromise) return runtimeState.syncPromise
+  const activePromise = runDriveSyncInternal(reason, options)
+  runtimeState.syncPromise = activePromise
+  try {
+    return await activePromise
+  } finally {
+    if (runtimeState.syncPromise === activePromise) runtimeState.syncPromise = null
+  }
+}
+
+async function runDriveSyncInternal(reason = 'manual', options = {}) {
+  const progress = typeof options.progress === 'function' ? options.progress : null
   const config = getDriveSyncConfig()
   if (!config.enabled) throw new Error('Google Drive sync is turned off.')
   if (!config.ready) throw new Error('Finish connecting Google Drive before syncing.')
 
+  progress?.({ phase: 'starting', progress: 5, message: 'Preparing Google Drive sync' })
   runtimeState.lastRunAt = nowIso()
   runtimeState.lastReason = reason
   runtimeState.lastError = ''
@@ -667,15 +719,19 @@ async function runDriveSync(reason = 'manual') {
   const backupPackage = await createFinalBackupPackage({
     destinationDir: path.join(DATA_ROOT, 'backups'),
     actor: { userName: 'Google Drive sync' },
+    progress,
   })
-  const snapshot = createDataRootSnapshot()
+  progress?.({ phase: 'snapshot', progress: 35, message: 'Creating Drive snapshot' })
+  await yieldToEventLoop()
+  const snapshot = await createDataRootSnapshot(progress)
   try {
     let mappings = getDriveSyncEntriesMap()
+    progress?.({ phase: 'drive', progress: 40, message: 'Checking Google Drive folders' })
     const rootFolderId = await ensureRootFolder(config)
     const versionState = await ensureDriveVersionFolder(config, rootFolderId)
     mappings = getDriveSyncEntriesMap()
     const manifest = writeSnapshotManifest(snapshot.snapshotRoot, versionState)
-    const items = collectSnapshotItems(snapshot.snapshotRoot)
+    const items = await collectSnapshotItems(snapshot.snapshotRoot, progress)
     const canonicalRootRelative = `${DATA_FOLDER_NAME}/organizations/${ORGANIZATION_FOLDER_NAME}`
     const hasCanonicalLayout = !!mappings[canonicalRootRelative]
       || Object.keys(mappings).some((relativePath) => (
@@ -687,6 +743,7 @@ async function runDriveSync(reason = 'manual') {
       clearDriveSyncMappings()
       mappings = {}
     }
+    progress?.({ phase: 'drive', progress: 45, message: 'Preparing Drive folders' })
     const remoteDirs = await ensureRemoteDirectories(config, mappings, versionState.folderId, items.directories)
 
     let removed = 0
@@ -706,6 +763,15 @@ async function runDriveSync(reason = 'manual') {
     let skipped = 0
 
     for (const file of items.files) {
+      const completed = uploaded + updated + skipped
+      if (completed % 5 === 0) {
+        progress?.({
+          phase: 'uploading',
+          progress: 50 + Math.round((completed / Math.max(1, items.files.length)) * 45),
+          message: `Syncing file ${Math.min(completed + 1, items.files.length)} of ${items.files.length}`,
+        })
+        await yieldToEventLoop()
+      }
       const parentRelative = path.posix.dirname(file.relativePath) === '.' ? '' : path.posix.dirname(file.relativePath)
       const parentRemoteId = remoteDirs[parentRelative] || versionState.folderId
       const existing = mappings[file.relativePath]
@@ -810,6 +876,7 @@ async function runDriveSync(reason = 'manual') {
       manifest,
     }
     runtimeState.lastSummary = summary
+    progress?.({ phase: 'completed', progress: 100, message: 'Google Drive sync complete' })
     writeSettingsMap({
       [SETTINGS_KEYS.lastSyncedAt]: nowIso(),
       [SETTINGS_KEYS.lastError]: '',
@@ -837,10 +904,9 @@ function scheduleDriveSync(reason = 'change', delayMs = 5000) {
   runtimeState.timer = setTimeout(async () => {
     runtimeState.timer = null
     if (runtimeState.syncPromise) return
-    runtimeState.syncPromise = runDriveSync(runtimeState.queuedReason || 'change')
+    const syncPromise = runDriveSync(runtimeState.queuedReason || 'change')
       .catch(() => null)
       .finally(() => {
-        runtimeState.syncPromise = null
         const queuedAgain = trim(runtimeState.queuedReason)
         runtimeState.queuedReason = ''
         if (queuedAgain && queuedAgain !== reason) {
@@ -848,7 +914,7 @@ function scheduleDriveSync(reason = 'change', delayMs = 5000) {
         }
       })
     runtimeState.queuedReason = ''
-    await runtimeState.syncPromise
+    await syncPromise
   }, Math.max(500, Number(delayMs || 0)))
 }
 

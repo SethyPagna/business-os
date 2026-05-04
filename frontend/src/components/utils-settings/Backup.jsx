@@ -420,6 +420,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const isMountedRef = useRef(true)
   const jobStopRef = useRef(null)
   const dirtyFieldsRef = useRef(new Set())
+  const actionLockRef = useRef('')
 
   const updateDraftField = useCallback((field, value) => {
     dirtyFieldsRef.current.add(field)
@@ -509,6 +510,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   }, [active, load])
   useEffect(() => () => {
     isMountedRef.current = false
+    actionLockRef.current = ''
     window.clearTimeout(retryTimerRef.current)
     jobStopRef.current?.()
     invalidateTrackedRequest(loadRequestRef)
@@ -557,9 +559,20 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     return queued
   }, [load])
 
+  const beginAction = useCallback((action) => {
+    if (actionLockRef.current) return false
+    actionLockRef.current = action
+    setBusy(action)
+    return true
+  }, [])
+
+  const finishAction = useCallback((action) => {
+    if (actionLockRef.current === action) actionLockRef.current = ''
+    setBusy('')
+  }, [])
+
   const savePreferences = async () => {
-    if (busy) return
-    setBusy('save')
+    if (!beginAction('save')) return
     try {
       await yieldToBrowser()
       const result = await window.api.saveGoogleDriveSyncPreferences?.({
@@ -580,12 +593,12 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     } catch (error) {
       notify(`${copy('save_failed', 'Save failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBusy('')
+      finishAction('save')
     }
   }
 
   const connectGoogleDrive = async () => {
-    if (busy) return
+    if (actionLockRef.current) return
     if (!String(form.clientId || '').trim() && !status?.clientId) {
       notify(copy('drive_sync_client_required', 'Google OAuth client ID is required'), 'error')
       return
@@ -596,7 +609,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     }
 
     setPendingAuthUrl('')
-    setBusy('connect')
+    if (!beginAction('connect')) return
     try {
       await yieldToBrowser()
       const result = await window.api.startGoogleDriveSyncOauth?.({
@@ -621,13 +634,12 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     } catch (error) {
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBusy('')
+      finishAction('connect')
     }
   }
 
   const syncNow = async () => {
-    if (busy) return
-    setBusy('sync')
+    if (!beginAction('sync')) return
     try {
       await yieldToBrowser()
       const queued = await window.api.queueGoogleDriveSyncNow?.()
@@ -655,14 +667,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     } catch (error) {
       notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBusy('')
+      finishAction('sync')
     }
   }
 
   const disconnect = async () => {
-    if (busy) return
+    if (actionLockRef.current) return
     if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
-    setBusy('disconnect')
+    if (!beginAction('disconnect')) return
     try {
       await yieldToBrowser()
       await window.api.disconnectGoogleDriveSync?.()
@@ -676,14 +688,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBusy('')
+      finishAction('disconnect')
     }
   }
 
   const forgetCredentials = async () => {
-    if (busy) return
+    if (actionLockRef.current) return
     if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
-    setBusy('forget')
+    if (!beginAction('forget')) return
     try {
       await yieldToBrowser()
       await window.api.forgetGoogleDriveSyncCredentials?.({ confirm: true })
@@ -701,9 +713,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     } catch (error) {
       notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
-      setBusy('')
+      finishAction('forget')
     }
   }
+
+  const activeDriveJobRunning = ['queued', 'running'].includes(String(activeJob?.status || '').toLowerCase())
 
   return (
     <div className="card p-5 sm:p-6">
@@ -884,7 +898,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <Link2 className="h-4 w-4" />
           {busy === 'connect' ? copy('connecting', 'Connecting...') : copy('drive_sync_connect', status?.connected ? 'Reconnect' : 'Connect Google Drive')}
         </PathActionButton>
-        <PathActionButton onClick={syncNow} disabled={!!busy || !status?.connected}>
+        <PathActionButton onClick={syncNow} disabled={!!busy || activeDriveJobRunning || !status?.connected}>
           <RefreshCw className="h-4 w-4" />
           {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
         </PathActionButton>
@@ -945,11 +959,11 @@ function BackupOverview({ copy, onSelect }) {
           <button
             key={entry.id}
             type="button"
-            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+            className="min-h-[112px] rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
             onClick={() => onSelect(entry.id)}
           >
             <div className="flex items-start gap-3">
-              <span className="rounded-xl bg-blue-50 p-2 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
                 <Icon className="h-4 w-4" />
               </span>
               <span className="min-w-0">
@@ -978,21 +992,35 @@ export default function Backup() {
   const [backupSection, setBackupSection] = useState('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
+  const actionLockRef = useRef('')
   const showBackupSection = (sectionId) => backupSection === sectionId
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
+      actionLockRef.current = ''
       jobStopRef.current?.()
     }
   }, [])
 
+  const beginBackupAction = useCallback((action) => {
+    if (actionLockRef.current) return false
+    actionLockRef.current = action
+    setLoading(action)
+    return true
+  }, [])
+
+  const finishBackupAction = useCallback((action) => {
+    if (actionLockRef.current === action) actionLockRef.current = ''
+    if (aliveRef.current) setLoading((current) => (current === action ? '' : current))
+  }, [])
+
   const handleFolderExport = async () => {
-    if (loading) return
+    if (actionLockRef.current) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     const exportDestination = String(folderExportPath || '').trim()
-    setLoading('folder-export')
+    if (!beginBackupAction('folder-export')) return
     try {
       await yieldToBrowser()
       const queued = await window.api.queueBackupFolderExport?.(exportDestination)
@@ -1035,17 +1063,17 @@ export default function Backup() {
     } catch (error) {
       notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
     } finally {
-      if (aliveRef.current) setLoading((current) => (current === 'folder-export' ? '' : current))
+      finishBackupAction('folder-export')
     }
   }
 
   const handleFolderImport = async () => {
-    if (loading) return
+    if (actionLockRef.current) return
     if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
     if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
 
-    setLoading('folder-import')
+    if (!beginBackupAction('folder-import')) return
     try {
       await yieldToBrowser()
       const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
@@ -1087,9 +1115,11 @@ export default function Backup() {
     } catch (error) {
       notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
     } finally {
-      if (aliveRef.current) setLoading((current) => (current === 'folder-import' ? '' : current))
+      finishBackupAction('folder-import')
     }
   }
+
+  const activeBackupJobRunning = ['queued', 'running'].includes(String(activeJob?.status || '').toLowerCase())
 
   return (
     <div className="page-scroll p-4 sm:p-6">
@@ -1138,7 +1168,7 @@ export default function Backup() {
 
           <div className="grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-900/40 dark:bg-blue-900/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderExport} disabled={!!loading}>
+              <PrimaryActionButton onClick={handleFolderExport} disabled={!!loading || activeBackupJobRunning}>
                 <ArchiveRestore className="h-4 w-4" />
                 {loading === 'folder-export' ? copy('exporting', 'Exporting...') : copy('export_backup_btn', 'Export')}
               </PrimaryActionButton>
@@ -1186,7 +1216,7 @@ export default function Backup() {
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <PrimaryActionButton onClick={handleFolderImport} disabled={!!loading}>
+              <PrimaryActionButton onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
                 <Upload className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>

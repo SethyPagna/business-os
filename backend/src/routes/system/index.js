@@ -758,7 +758,7 @@ router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'sett
     const actor = getAuditActor(req, req.body || {})
     const job = startSystemJob('google_drive_sync', async ({ progress }) => {
       progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
-      const summary = await runDriveSync('manual')
+      const summary = await runDriveSync('manual', { progress })
       audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
         reason: 'manual',
         uploaded: summary?.uploaded || 0,
@@ -771,6 +771,7 @@ router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'sett
       }
     }, {
       prefix: 'drive',
+      dedupeKey: 'google_drive_sync:manual',
       message: 'Google Drive sync queued',
       runningMessage: 'Google Drive sync running',
       completedMessage: 'Google Drive sync complete',
@@ -786,7 +787,7 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
     const actor = getAuditActor(req, req.body || {})
     const job = startSystemJob('google_drive_sync', async ({ progress }) => {
       progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
-      const summary = await runDriveSync('manual')
+      const summary = await runDriveSync('manual', { progress })
       audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
         reason: 'manual',
         uploaded: summary?.uploaded || 0,
@@ -799,6 +800,7 @@ router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', '
       }
     }, {
       prefix: 'drive',
+      dedupeKey: 'google_drive_sync:manual',
       message: 'Google Drive sync queued',
       runningMessage: 'Google Drive sync running',
       completedMessage: 'Google Drive sync complete',
@@ -873,6 +875,7 @@ router.post('/backups', authToken, requirePermission('backup'), async (req, res)
         progress,
       }), {
         prefix: 'backup',
+        dedupeKey: `backup_export_folder:${path.resolve(destinationDir)}`,
         message: 'Backup export queued',
         runningMessage: 'Backup export running',
         completedMessage: 'Backup export complete',
@@ -888,6 +891,7 @@ router.post('/backups', authToken, requirePermission('backup'), async (req, res)
         progress,
       }), {
         prefix: 'restore',
+        dedupeKey: `backup_restore_folder:${path.resolve(sourceDir)}`,
         message: 'Backup restore queued',
         runningMessage: 'Backup restore running',
         completedMessage: 'Backup restore complete',
@@ -911,6 +915,7 @@ router.post('/backups/:id/restore', authToken, requirePermission('backup'), asyn
     progress,
   }), {
     prefix: 'restore',
+    dedupeKey: `backup_restore_folder:${path.resolve(sourceDir)}`,
     message: 'Backup restore queued',
     runningMessage: 'Backup restore running',
     completedMessage: 'Backup restore complete',
@@ -934,6 +939,7 @@ router.post('/backup/export-folder', authToken, requirePermission('backup'), asy
       progress,
     }), {
       prefix: 'backup',
+      dedupeKey: `backup_export_folder:${path.resolve(destinationDir)}`,
       message: 'Backup export queued',
       runningMessage: 'Backup export running',
       completedMessage: 'Backup export complete',
@@ -962,6 +968,7 @@ router.post('/backup/import-folder', authToken, requirePermission('backup'), asy
       progress,
     }), {
       prefix: 'restore',
+      dedupeKey: `backup_restore_folder:${path.resolve(sourceDir)}`,
       message: 'Backup restore validation queued',
       runningMessage: 'Backup restore validation running',
       completedMessage: 'Backup restore validation complete',
