@@ -1887,6 +1887,7 @@ export default function Inventory() {
           <input
             id="inventory-search"
             name="inventory_search"
+            autoComplete="off"
             aria-label="Inventory search"
             className={`input min-w-0 flex-1 text-sm ${tab === 'products' ? 'rounded-r-none' : ''}`}
             placeholder={tab === 'products'
@@ -1915,8 +1916,10 @@ export default function Inventory() {
             onClear={clearInventoryFilters}
             compact
           />
-          <ActionHistoryBar history={actionHistory} className="shrink-0" />
         </div>
+      </div>
+      <div className="inventory-history-row mb-2 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory} className="min-w-max" />
       </div>
 
       {search.trim() && tab === 'products' && (

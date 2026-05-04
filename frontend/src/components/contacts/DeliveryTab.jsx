@@ -50,6 +50,7 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
         <input
           id={fieldId('label')}
           name={fieldId('label')}
+          autoComplete="off"
           className="input text-xs py-1 flex-1"
           placeholder="Label (e.g. Morning Shift, Zone A)"
           value={option.label}
@@ -62,16 +63,16 @@ function OptionEditor({ option, index, total, onChange, onRemove }) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label htmlFor={fieldId('name')} className="block text-xs text-gray-400 mb-0.5">Name</label>
-          <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" placeholder="Driver / rider name" value={option.name} onChange={e => set('name', e.target.value)} />
+          <input id={fieldId('name')} name={fieldId('name')} autoComplete="name" className="input text-xs py-1" placeholder="Driver / rider name" value={option.name} onChange={e => set('name', e.target.value)} />
         </div>
         <div>
           <label htmlFor={fieldId('phone')} className="block text-xs text-gray-400 mb-0.5">Phone</label>
-          <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={e => set('phone', e.target.value)} />
+          <input id={fieldId('phone')} name={fieldId('phone')} autoComplete="tel" className="input text-xs py-1" placeholder="Phone number" value={option.phone} onChange={e => set('phone', e.target.value)} />
         </div>
       </div>
       <div>
         <label htmlFor={fieldId('area')} className="block text-xs text-gray-400 mb-0.5">Area / Zone</label>
-        <input id={fieldId('area')} name={fieldId('area')} className="input text-xs py-1" placeholder="Coverage area or zone" value={option.area} onChange={e => set('area', e.target.value)} />
+        <input id={fieldId('area')} name={fieldId('area')} autoComplete="off" className="input text-xs py-1" placeholder="Coverage area or zone" value={option.area} onChange={e => set('area', e.target.value)} />
       </div>
     </div>
   )
@@ -123,7 +124,7 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {t('name')} <span className="text-xs font-normal text-gray-400">(driver / rider)</span>
           </label>
-          <input id="delivery-form-name" name="delivery_name" className="input" value={form.name} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
+          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
         </div>
         <div>
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -150,7 +151,7 @@ function DeliveryForm({ contact, onSave, onClose, t }) {
         </div>
         <div>
           <label htmlFor="delivery-form-notes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('notes')||'Notes'}</label>
-          <textarea id="delivery-form-notes" name="delivery_notes" className="input resize-none" rows={2} value={form.notes||''} onChange={e => set('notes', e.target.value)} />
+          <textarea id="delivery-form-notes" name="delivery_notes" autoComplete="off" className="input resize-none" rows={2} value={form.notes||''} onChange={e => set('notes', e.target.value)} />
         </div>
         <p className="text-xs text-gray-400">Provide driver name or phone number.</p>
 
@@ -551,7 +552,7 @@ function DeliveryTab({ t, notify, active = true }) {
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex gap-2 items-center flex-1 min-w-0">
           <label htmlFor="delivery-search" className="sr-only">{t('search_delivery_placeholder')||'Search delivery contacts'}</label>
-          <input id="delivery-search" name="delivery_search" className="input flex-1 min-w-0 max-w-xs"
+          <input id="delivery-search" name="delivery_search" autoComplete="off" className="input flex-1 min-w-0 max-w-xs"
             placeholder={t('search_delivery_placeholder')||`Search...`}
             value={search} onChange={e => setSearch(e.target.value)} />
           <span className="text-sm text-gray-400 whitespace-nowrap">{visibleContacts.length}</span>
@@ -632,6 +633,9 @@ function DeliveryTab({ t, notify, active = true }) {
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
         totalCount={visibleContacts.length}
+        onRetry={() => load({ silent: false, label: 'Delivery contacts retry' })}
+        loadingLabel={tr('loading_delivery_contacts', 'Loading delivery contacts...')}
+        loadingDetails={tr('contacts_loading_details', 'Fetching delivery contacts, filters, and grouped sections.')}
         t={t}
         renderRow={c => (
           c?.__kind === 'section' ? (

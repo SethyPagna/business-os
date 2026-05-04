@@ -1,5 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, CheckCircle2, Cloud, DatabaseZap, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArchiveRestore, CheckCircle2, Cloud, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
@@ -23,7 +23,7 @@ const QUICK_BACKUP_SECTIONS = [
 ]
 
 const BACKUP_SECTION_OPTIONS = [
-  { value: 'all', label: 'All', hint: 'Show doctor, export, restore, Google Drive, and maintenance tools.' },
+  { value: 'overview', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
   { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Supabase Auth, and backup package readiness.' },
   { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
   { value: 'restore', label: 'Restore', hint: 'Restore a verified Business OS backup folder.' },
@@ -264,37 +264,6 @@ function useCopy(t) {
   }
 }
 
-function buildPathCrumbs(basePath) {
-  const raw = String(basePath || '')
-  if (!raw) return []
-  const normalized = raw.replace(/\//g, '\\')
-  const parts = normalized.split('\\').filter(Boolean)
-  if (!parts.length) return []
-  const crumbs = []
-  let cursor = normalized.startsWith('\\\\') ? '\\\\' : ''
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index]
-    if (/^[A-Za-z]:$/.test(part)) cursor = `${part}\\`
-    else if (cursor.endsWith('\\') || cursor === '\\\\') cursor = `${cursor}${part}`
-    else cursor = `${cursor}\\${part}`
-    crumbs.push({ label: part, path: cursor })
-  }
-  return crumbs
-}
-
-function buildFinalDataFolderPath(basePath, folderName = 'business-os-data') {
-  const raw = String(basePath || '').trim().replace(/\//g, '\\')
-  if (!raw) return ''
-  const normalized = /^[A-Za-z]:\\?$/.test(raw)
-    ? raw.replace(/\\?$/, '\\')
-    : raw.replace(/[\\]+$/, '')
-  const parts = normalized.split('\\').filter(Boolean)
-  const lastSegment = parts[parts.length - 1] || ''
-  if (lastSegment.toLowerCase() === folderName.toLowerCase()) return normalized
-  if (normalized.endsWith('\\')) return `${normalized}${folderName}`
-  return `${normalized}\\${folderName}`
-}
-
 function formatDateTime(raw) {
   if (!raw) return '--'
   const value = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
@@ -375,17 +344,6 @@ function startJobWatcher(jobId, {
   return stop
 }
 
-function normalizeFolderBrowserResult(result, maxDirs = 200) {
-  if (!result || typeof result !== 'object') return result
-  const dirs = Array.isArray(result.dirs) ? result.dirs : []
-  if (dirs.length <= maxDirs) return { ...result, dirs }
-  return {
-    ...result,
-    dirs: dirs.slice(0, maxDirs),
-    truncatedCount: dirs.length - maxDirs,
-  }
-}
-
 function SectionChip({ label, value, tone = 'slate' }) {
   const toneClass = {
     slate: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
@@ -401,424 +359,6 @@ function SectionChip({ label, value, tone = 'slate' }) {
   )
 }
 
-function FolderBrowserPanel({
-  browseState,
-  busy,
-  copy,
-  onBrowse,
-  onBrowseDrives,
-  onClose,
-  onSelect,
-  useCurrentLabel,
-  currentPathLabel,
-}) {
-  if (!browseState) return null
-  const browseCrumbs = buildPathCrumbs(browseState?.base || '')
-  const selectedFolderLabel = String(browseState?.base || '').split(/[/\\]/).pop() || String(browseState?.base || '')
-
-  return (
-    <div className="mt-3 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/30">
-      <div className="border-b border-gray-200 bg-gray-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800/80">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => browseState.parent && onBrowse(browseState.parent)}
-            disabled={busy || !browseState.parent}
-            className={`rounded-lg px-2.5 py-1.5 text-xs ${browseState.parent ? 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-zinc-700 dark:text-gray-200 dark:hover:bg-zinc-600' : 'cursor-not-allowed bg-gray-100 text-gray-300 dark:bg-zinc-800 dark:text-gray-600'}`}
-          >
-            {browseState.parent === '__ROOTS__' ? copy('browse_drives', 'Browse drives') : copy('up', 'Up')}
-          </button>
-          <button
-            onClick={onBrowseDrives}
-            disabled={busy}
-            className="rounded-lg bg-white px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:bg-zinc-700 dark:text-gray-200 dark:hover:bg-zinc-600"
-          >
-            {copy('browse_drives', 'Browse drives')}
-          </button>
-          <button
-            onClick={onClose}
-            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-zinc-700 dark:hover:text-gray-200"
-          >
-            {copy('close', 'Close')}
-          </button>
-        </div>
-        <div className="mt-3">
-          {!browseState.isRootList && browseCrumbs.length ? (
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              {browseCrumbs.map((crumb, index) => (
-                <button
-                  key={`${crumb.path}-${index}`}
-                  className="rounded-full bg-white px-2.5 py-1 font-mono text-gray-600 hover:bg-blue-50 hover:text-blue-700 dark:bg-zinc-700 dark:text-gray-300 dark:hover:bg-blue-900/30 dark:hover:text-blue-200"
-                  onClick={() => onBrowse(crumb.path)}
-                >
-                  {crumb.label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="font-mono text-xs text-gray-500 dark:text-gray-400">{browseState.base}</div>
-          )}
-        </div>
-      </div>
-
-      <div className="max-h-72 overflow-y-auto p-3">
-        {browseState.error ? (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-500 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
-            {browseState.error}
-          </div>
-        ) : null}
-        {!browseState.error && browseState.dirs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 px-4 py-4 text-sm text-gray-400 dark:border-zinc-700">
-            {copy('no_subfolders_found', 'No subfolders found')}
-          </div>
-        ) : null}
-        {Number(browseState.truncatedCount || 0) > 0 ? (
-          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-            {copy('folder_browser_limited', 'Showing the first 200 folders so the page stays responsive. Type a more specific path to narrow the list.')} ({browseState.truncatedCount} {copy('hidden', 'hidden')})
-          </div>
-        ) : null}
-
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {browseState.dirs.map((dir) => (
-            <div key={dir.fullPath} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-              <button
-                className="w-full text-left text-sm font-medium text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
-                onClick={() => onBrowse(dir.fullPath)}
-              >
-                {dir.name}
-              </button>
-              <div className="mt-1 truncate text-[11px] font-mono text-gray-400">{dir.fullPath}</div>
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-gray-400">
-                  {dir.kind === 'drive'
-                    ? copy('drive', 'Drive')
-                    : browseState.isRootList
-                      ? copy('shortcut', 'Shortcut')
-                      : copy('folder', 'Folder')}
-                </span>
-                <button
-                  className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50"
-                  onClick={() => onSelect(dir.fullPath)}
-                >
-                  {copy('use_folder', 'Use')}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {!browseState.isRootList ? (
-        <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800/70 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-gray-500 dark:text-gray-400">{currentPathLabel}</span>
-          <button className="btn-primary w-full px-3 py-1.5 text-xs sm:w-auto" onClick={() => onSelect(browseState.base)}>
-            {useCurrentLabel || `${copy('use_folder', 'Use')} "${selectedFolderLabel}"`}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function DataFolderLocation({ t, notify, active = true, actionHistory = null }) {
-  const copy = useCopy(t)
-  const [info, setInfo] = useState(null)
-  const [systemConfig, setSystemConfig] = useState(null)
-  const [inputPath, setInputPath] = useState('')
-  const [browseState, setBrowseState] = useState(null)
-  const [showAdvancedBrowser, setShowAdvancedBrowser] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const inputRef = useRef(null)
-  const loadRequestRef = useRef(0)
-
-  const load = useCallback(async () => {
-    const requestId = beginTrackedRequest(loadRequestRef)
-    try {
-      const [resultState, configState] = await Promise.allSettled([
-        withLoaderTimeout(() => window.api.getDataPath(), 'Backup data path'),
-        withLoaderTimeout(() => window.api.getSystemConfig?.(), 'Backup system config').catch(() => null),
-      ])
-
-      const result = resultState.status === 'fulfilled' ? resultState.value : null
-      const config = configState.status === 'fulfilled' ? configState.value : null
-
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      if (result) {
-        setInfo(result)
-        setInputPath(result?.storageRootParent || result?.dataRootParent || result?.storageRoot || result?.dataRoot || '')
-      }
-      setSystemConfig(config)
-
-      if (!result && resultState.status === 'rejected') {
-        throw resultState.reason || new Error('Failed to load data folder information')
-      }
-    } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      notify(`${copy('data_folder_load_failed', 'Failed to load data folder information')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    }
-  }, [copy, notify])
-
-  useEffect(() => {
-    if (!active) {
-      invalidateTrackedRequest(loadRequestRef)
-      return
-    }
-    load()
-  }, [active, load])
-  useEffect(() => () => invalidateTrackedRequest(loadRequestRef), [])
-
-  const folderName = info?.dataFolderName || 'business-os-data'
-  const currentSummary = info?.summary || {}
-  const orgStorageStatus = info?.organizationStorageStatus || null
-  const hostUiAvailable = !!systemConfig?.hostUiAvailable
-  const previewPath = useMemo(
-    () => buildFinalDataFolderPath(inputPath, folderName),
-    [folderName, inputPath],
-  )
-
-  const openBrowser = async (dir) => {
-    if (busy) return
-    try {
-      setBusy(true)
-      await yieldToBrowser()
-      const result = await window.api.browseDir(dir || inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
-      if (result) setBrowseState(normalizeFolderBrowserResult(result))
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const openDriveBrowser = async () => {
-    await openBrowser('__ROOTS__')
-  }
-
-  const pickFolderNatively = async () => {
-    if (busy) return
-    if (!hostUiAvailable) {
-      notify(copy('host_ui_local_only', 'This action only works on the server machine. Use Browse folders or type a server path manually when connected remotely.'), 'info')
-      setShowAdvancedBrowser(true)
-      return
-    }
-    try {
-      setBusy(true)
-      await yieldToBrowser()
-      const selectedFolder = await window.api.openFolderDialog?.(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot || '')
-      if (selectedFolder && typeof selectedFolder === 'string') {
-        setInputPath(selectedFolder)
-        setBrowseState(null)
-        inputRef.current?.focus()
-        notify(copy('folder_selected', 'Folder selected'), 'success')
-        return
-      }
-    } catch (error) {
-      console.warn('[Backup] Native folder picker unavailable:', error?.message || error)
-    } finally {
-      setBusy(false)
-    }
-    notify(copy('folder_picker_fallback', 'Native folder picker is unavailable in this runtime. Use Browse folders below.'), 'info')
-    setShowAdvancedBrowser(true)
-    await openDriveBrowser()
-  }
-
-  const openInlinePicker = async () => {
-    const next = !showAdvancedBrowser
-    setShowAdvancedBrowser(next)
-    if (next && !browseState && String(inputPath || '').trim()) await openBrowser(inputPath)
-  }
-
-  const openInExplorer = async () => {
-    const target = String(info?.dataRoot || previewPath || '').trim()
-    if (!target) return
-    if (!hostUiAvailable) {
-      notify(copy('open_folder_local_only', 'Opening the folder is only available on the server machine.'), 'info')
-      return
-    }
-    try {
-      const result = await window.api.openPath?.(target)
-      if (result?.success === false) notify(result.error || result.message || copy('unknown_error', 'Unknown error'), 'error')
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    }
-  }
-
-  const selectDir = (fullPath) => {
-    setInputPath(fullPath)
-    setBrowseState(null)
-    inputRef.current?.focus()
-  }
-
-  const handleApply = async () => {
-    if (busy) return
-    const target = String(previewPath || '').trim()
-    if (!target) return notify(copy('data_folder_path_required', 'Please enter a folder path'), 'error')
-    if (!confirm(`${copy('data_folder_change_prompt', 'Copy current live Business OS data to')}:\n\n${target}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}\n\n${copy('proceed', 'Proceed?')}`)) return
-
-    try {
-      setBusy(true)
-      const result = await window.api.setDataPath(target)
-      if (result?.success) {
-        actionHistory?.pushAction?.({
-          scope: 'backup',
-          entity: 'data_path',
-          label: copy('data_folder_updated', 'Data folder updated. Restart the server to apply.'),
-          undo_payload: { previousPath: info?.dataRoot || null },
-          redo_payload: { nextPath: target },
-        })
-        notify(copy('data_folder_updated', 'Data folder updated. Restart the server to apply.'), 'success')
-        load()
-        return
-      }
-      notify(`${copy('failed', 'Failed')}: ${result?.error || copy('unknown_error', 'Unknown error')}`, 'error')
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleReset = async () => {
-    if (busy) return
-    if (!confirm(`${copy('data_folder_reset_prompt', 'Copy current live data back to the default business-os-data folder?')}\n\n${copy('data_folder_copy_safe', 'The current folder stays untouched as a safety copy. The server must be restarted after this change.')}`)) return
-    try {
-      setBusy(true)
-      const result = await window.api.resetDataPath()
-      if (result?.success === false) {
-        notify(result.error || copy('unknown_error', 'Unknown error'), 'error')
-        return
-      }
-      notify(copy('data_folder_reset_done', 'Reverted to default folder. Restart the server to apply.'))
-      actionHistory?.pushAction?.({
-        scope: 'backup',
-        entity: 'data_path',
-        label: copy('data_folder_reset_done', 'Reverted to default folder. Restart the server to apply.'),
-        undo_payload: { previousPath: info?.dataRoot || null },
-      })
-      load()
-    } catch (error) {
-      notify(`${copy('failed', 'Failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="card p-5 sm:p-6">
-      <h2 className="mb-1 text-base font-semibold text-gray-900 dark:text-white">
-        {copy('data_folder_location', 'Live Data Location')}
-      </h2>
-      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        {copy('data_folder_desc', 'Choose the parent folder for live data. Business OS keeps the database, uploads, and generated files together in')} <code className="rounded bg-gray-100 px-1 text-xs dark:bg-zinc-800">{folderName}</code>.
-      </p>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <SectionChip label={copy('active_path', 'Active live folder')} value={info?.dataRoot || '--'} tone="blue" />
-        <SectionChip label={copy('storage_home', 'Storage home')} value={info?.storageRoot || '--'} tone="amber" />
-      </div>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SectionChip label={copy('location_mode', 'Location mode')} value={info?.hasOverride ? copy('custom_path', 'Custom path') : copy('portable_default', 'Portable default')} />
-        <SectionChip label={copy('database_size', 'Database size')} value={formatBytes(currentSummary.dbSizeBytes)} />
-        <SectionChip label={copy('uploads', 'Uploads')} value={currentSummary.uploadCount ?? 0} />
-        <SectionChip label={copy('files_total', 'Files on disk')} value={currentSummary.totalFileCount ?? 0} />
-      </div>
-
-      {orgStorageStatus ? (
-        <div className="mt-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <SectionChip
-              label={copy('organization_runtime_alignment', 'Organization runtime alignment')}
-              value={orgStorageStatus.fullyAligned ? copy('aligned', 'Aligned') : copy('docker_runtime_pending', 'Docker runtime pending')}
-              tone={orgStorageStatus.fullyAligned ? 'blue' : 'amber'}
-            />
-            <SectionChip
-              label={copy('recommended_org_data_root', 'Recommended org data root')}
-              value={orgStorageStatus.recommendedDataRoot || '--'}
-            />
-          </div>
-          <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {orgStorageStatus.fullyAligned
-              ? copy('organization_runtime_alignment_desc_ok', 'The active runtime data, database, and uploads are all aligned with the organization storage layout.')
-              : copy('organization_runtime_alignment_desc_warn', 'The app is still running from the shared runtime data root. The organization layout exists, but the live database and uploads are not fully rooted there yet.')}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:flex-wrap">
-        <input
-          id="backup-data-folder-path"
-          name="backup_data_folder_path"
-          aria-label={copy('choose_data_folder_path', 'Choose parent folder for live data')}
-          ref={inputRef}
-          className="input min-w-0 w-full flex-1 font-mono text-sm"
-          placeholder={copy('data_folder_placeholder', 'e.g. D:\\Business Data')}
-          value={inputPath}
-          onChange={(event) => setInputPath(event.target.value)}
-          spellCheck={false}
-        />
-        <PathActionButton onClick={pickFolderNatively} disabled={busy}>
-          <FolderOutput className="h-4 w-4" />
-          {copy('browse_folder', 'Choose Folder')}
-        </PathActionButton>
-        <PathActionButton onClick={openInlinePicker} disabled={busy}>
-          <FolderOutput className="h-4 w-4" />
-          {showAdvancedBrowser ? copy('hide_advanced_browser', 'Hide') : copy('browse', 'Server folders')}
-        </PathActionButton>
-        <PathActionButton onClick={openInExplorer} disabled={!hostUiAvailable || !String(info?.dataRoot || previewPath || '').trim()}>
-          <FolderOutput className="h-4 w-4" />
-          {copy('open_in_explorer', 'Open')}
-        </PathActionButton>
-      </div>
-
-      {!hostUiAvailable ? (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">
-          {copy('host_ui_remote_note', 'Remote sessions cannot open the server machine folder dialog or Explorer window. Use Browse folders below or type a server path manually.')}
-        </p>
-      ) : null}
-
-      {showAdvancedBrowser ? (
-        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={() => openBrowser(inputPath || info?.storageRootParent || info?.storageRoot || info?.dataRoot)} disabled={busy}>
-            {copy('open_typed_path', 'Open typed path')}
-          </button>
-          <button className="btn-secondary w-full text-xs sm:w-auto" onClick={openDriveBrowser} disabled={busy}>
-            {copy('browse_drives', 'Browse drives')}
-          </button>
-        </div>
-      ) : null}
-
-      {showAdvancedBrowser ? (
-        <FolderBrowserPanel
-          browseState={browseState}
-          busy={busy}
-          copy={copy}
-          onBrowse={openBrowser}
-          onBrowseDrives={openDriveBrowser}
-          onClose={() => setBrowseState(null)}
-          onSelect={selectDir}
-          currentPathLabel={copy('use_this_folder_directly', 'Use this folder as the parent location')}
-        />
-      ) : null}
-
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <PrimaryActionButton onClick={handleApply} disabled={busy || !previewPath || previewPath === info?.dataRoot}>
-          <HardDriveDownload className="h-4 w-4" />
-          {busy ? copy('applying', 'Applying...') : copy('apply_new_location', 'Switch')}
-        </PrimaryActionButton>
-        {info?.hasOverride ? (
-          <PathActionButton onClick={handleReset} disabled={busy}>
-            <ArchiveRestore className="h-4 w-4" />
-            {copy('reset_to_default', 'Reset')}
-          </PathActionButton>
-        ) : null}
-      </div>
-
-      <p className="mt-3 text-xs text-gray-400">
-        {copy('data_folder_safe_copy', 'Switch copies the current live data first, then leaves the old folder in place as a rollback copy.')}
-      </p>
-    </div>
-  )
-}
 
 function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }) {
   const copy = useCopy(t)
@@ -1295,150 +835,67 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   )
 }
 
-function ScaleMigrationSection({ t, notify, active = true }) {
-  const copy = useCopy(t)
-  const [status, setStatus] = useState(null)
-  const [prepared, setPrepared] = useState(null)
-  const [busy, setBusy] = useState('')
-  const requestRef = useRef(0)
-
-  const loadStatus = useCallback(async () => {
-    const requestId = beginTrackedRequest(requestRef)
-    try {
-      const result = await withLoaderTimeout(() => window.api.getScaleMigrationStatus?.(), 'Scale migration status', 10000)
-      if (!isTrackedRequestCurrent(requestRef, requestId)) return
-      setStatus(result?.item || null)
-    } catch (error) {
-      if (!isTrackedRequestCurrent(requestRef, requestId)) return
-      notify(`${copy('migration_status_failed', 'Migration status failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    }
-  }, [copy, notify])
-
-  useEffect(() => {
-    if (!active) {
-      invalidateTrackedRequest(requestRef)
-      return
-    }
-    loadStatus()
-  }, [active, loadStatus])
-  useEffect(() => () => invalidateTrackedRequest(requestRef), [])
-
-  const prepare = async () => {
-    if (busy) return
-    setBusy('prepare')
-    try {
-      const result = await withLoaderTimeout(() => window.api.prepareScaleMigration?.(), 'Migration safety automation', 10 * 60 * 1000)
-      setPrepared(result?.item || null)
-      setStatus(result?.item || status)
-      notify(copy('migration_precheck_complete', 'Safety backup complete. No live data was moved.'), 'success')
-    } catch (error) {
-      notify(`${copy('migration_precheck_failed', 'Migration safety automation failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const totalRows = status?.verification?.totalRows ?? prepared?.verification?.totalRows ?? 0
-  const queueStatus = status?.scaleServices?.queueStatus || {}
-  const queueReady = !!status?.verification?.queueReady || queueStatus.reason === 'ready'
-  const canRun = !!status?.canRunMigration && !!prepared
-  const automation = prepared?.automation || status?.automation || {}
-  const localBackup = automation.localBackup || {}
-  const driveSafety = automation.driveSync || {}
-  const driveSafetyOk = driveSafety.status === 'ok'
-  const driveSafetySkipped = driveSafety.status === 'skipped' || driveSafety.status === 'not_run' || !driveSafety.status
-  const activeDatabaseDriver = String(status?.authoritativeData?.databaseDriver || 'postgres').toLowerCase()
-  const activeStorageLabel = activeDatabaseDriver === 'postgres'
-    ? copy('postgres_object_storage', 'Postgres / object storage')
-    : copy('unsupported_storage_mode', 'Unsupported storage mode')
+function BackupOverview({ copy, onSelect }) {
+  const entries = [
+    {
+      id: 'doctor',
+      icon: CheckCircle2,
+      title: copy('integration_doctor_title', 'Integration doctor'),
+      body: copy('backup_overview_doctor_desc', 'Run checks only when you need storage, Drive, auth, or package diagnostics.'),
+    },
+    {
+      id: 'export',
+      icon: FolderOutput,
+      title: copy('export_backup_title', 'Export backup'),
+      body: copy('backup_overview_export_desc', 'Queue a Docker-safe package without blocking the page.'),
+    },
+    {
+      id: 'restore',
+      icon: FolderInput,
+      title: copy('import_backup_title', 'Restore backup'),
+      body: copy('backup_overview_restore_desc', 'Validate a backup folder before any restore action.'),
+    },
+    {
+      id: 'drive',
+      icon: Cloud,
+      title: copy('drive_sync_title', 'Google Drive Sync'),
+      body: copy('backup_overview_drive_desc', 'Connect, sync, and troubleshoot Drive separately from backup jobs.'),
+    },
+    {
+      id: 'maintenance',
+      icon: HardDriveDownload,
+      title: copy('advanced_maintenance', 'Advanced maintenance'),
+      body: copy('backup_overview_maintenance_desc', 'Open reset tools only when you intentionally need them.'),
+    },
+  ]
 
   return (
-    <div className="card p-5 sm:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
-            <DatabaseZap className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            {copy('scale_migration_title', 'Docker storage safety')}
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('scale_migration_desc', 'Use this safety workflow before migration, restore, or major maintenance. It creates a local backup first and syncs Google Drive when connected.')}
-          </p>
-        </div>
-        <button type="button" className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm" onClick={loadStatus} disabled={!!busy}>
-          <RefreshCw className="h-4 w-4" />
-          {copy('refresh', 'Refresh')}
-        </button>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('current_data_source', 'Current data')}</div>
-          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{activeStorageLabel}</div>
-          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={status?.authoritativeData?.databasePath || ''}>
-            {status?.authoritativeData?.databasePath || copy('loading', 'Loading...')}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('scale_services', 'Scale services')}</div>
-          <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${queueReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
-            <CheckCircle2 className="h-4 w-4" />
-            {queueReady ? copy('ready', 'Ready') : copy('checking', 'Checking')}
-          </div>
-          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {copy('queue_driver', 'Queue')}: {queueStatus.driver || status?.scaleServices?.queueDriver || 'bullmq'}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('migration_readiness', 'Migration readiness')}</div>
-          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-            {Number(totalRows).toLocaleString()} {copy('rows', 'rows')}
-          </div>
-          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {status?.canRunMigration ? copy('ready_after_precheck', 'Ready after precheck') : copy('locked_for_safety', 'Locked for safety')}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('local_safety_backup', 'Local safety backup')}</div>
-          <div className={`mt-1 text-sm font-semibold ${localBackup.exists ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
-            {localBackup.exists ? copy('ready', 'Ready') : copy('not_created_yet', 'Not created yet')}
-          </div>
-          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={localBackup.backupRoot || ''}>
-            {localBackup.createdAt ? formatDateTime(localBackup.createdAt) : copy('run_safety_first', 'Run safety first')}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{copy('drive_safety_sync', 'Drive safety sync')}</div>
-          <div className={`mt-1 text-sm font-semibold ${driveSafetyOk ? 'text-emerald-700 dark:text-emerald-300' : driveSafetySkipped ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>
-            {driveSafetyOk ? copy('synced', 'Synced') : driveSafetySkipped ? copy('optional', 'Optional') : copy('needs_attention', 'Needs attention')}
-          </div>
-          <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={driveSafety.error || ''}>
-            {driveSafety.attemptedAt ? formatDateTime(driveSafety.attemptedAt) : copy('connect_drive_to_sync', 'Connect Drive to sync')}
-          </div>
-        </div>
-      </div>
-
-      {status?.blockedReason ? (
-        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-          {status.blockedReason}
-        </div>
-      ) : null}
-
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <PrimaryActionButton onClick={prepare} disabled={!!busy}>
-          <DatabaseZap className="h-4 w-4" />
-          {busy === 'prepare' ? copy('checking', 'Checking...') : copy('prepare_migration_check', 'Run safety backup')}
-        </PrimaryActionButton>
-        <PathActionButton disabled={!canRun || !!busy} title={!canRun ? copy('migration_run_disabled', 'Run migration unlocks only after a passing verified migration precheck and enabled migration runner.') : undefined}>
-          <Upload className="h-4 w-4" />
-          {copy('run_verified_migration', 'Run verified migration')}
-        </PathActionButton>
-      </div>
-      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-        {copy('migration_no_auto_move', 'Safety is automated: local backup first, Google Drive sync when connected, then verification. Live storage is not switched until the verified migration runner is available.')}
-      </p>
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {entries.map((entry) => {
+        const Icon = entry.icon
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+            onClick={() => onSelect(entry.id)}
+          >
+            <div className="flex items-start gap-3">
+              <span className="rounded-xl bg-blue-50 p-2 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-gray-900 dark:text-white">{entry.title}</span>
+                <span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{entry.body}</span>
+              </span>
+            </div>
+          </button>
+        )
+      })}
     </div>
   )
 }
+
 
 export default function Backup() {
   const { t, notify, hasPermission } = useApp()
@@ -1450,11 +907,11 @@ export default function Backup() {
   const [folderImportPath, setFolderImportPath] = useState('')
   const [activeJob, setActiveJob] = useState(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
-  const [backupSection, setBackupSection] = useState('all')
+  const [backupSection, setBackupSection] = useState('overview')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
   const sectionStorageKey = 'business-os:backup:section'
-  const showBackupSection = (sectionId) => backupSection === 'all' || backupSection === sectionId
+  const showBackupSection = (sectionId) => backupSection === sectionId
 
   useEffect(() => {
     aliveRef.current = true
@@ -1592,6 +1049,7 @@ export default function Backup() {
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
+        {backupSection === 'overview' ? <BackupOverview copy={copy} onSelect={setBackupSection} /> : null}
         {showBackupSection('doctor') ? (
         <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
         ) : null}
@@ -1635,6 +1093,7 @@ export default function Backup() {
                     id="backup-folder-export-path"
                     name="backup_folder_export_path"
                     className="input flex-1 font-mono text-sm"
+                    autoComplete="off"
                     value={folderExportPath}
                     onChange={(event) => setFolderExportPath(event.target.value)}
                     placeholder={copy('folder_backup_placeholder', 'Optional server folder for full backups')}
@@ -1681,6 +1140,7 @@ export default function Backup() {
                     id="backup-folder-import-path"
                     name="backup_folder_import_path"
                     className="input flex-1 font-mono text-sm"
+                    autoComplete="off"
                     value={folderImportPath}
                     onChange={(event) => setFolderImportPath(event.target.value)}
                     placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
