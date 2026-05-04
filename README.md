@@ -97,6 +97,19 @@ Large product, inventory, sales, customer, supplier, and delivery imports run as
 - Imports wait for review before applying large changes.
 - Cancel, retry, failed-row download, remove, undo, and redo are available where supported. Cancelling during upload/start stops the start sequence, and retry resets cancelled jobs before queueing analysis again.
 - Import create, upload, start, cancel, retry, approve, and delete actions are recorded in the audit log with actor, job type, status changes, and cancellation source.
+- Product import review groups same-name families with collapse/expand sections, parent/variant scenario chips, inline editable details, action target labels, filter hover hints, and undo for accidental conflict-resolution changes.
+
+## RFID Inventory Roadmap
+
+RFID should be added as a parallel inventory capture path, not as a replacement for barcode scanning.
+
+Recommended rollout:
+
+1. Tag products with EPC/UHF RFID labels and store each tag ID against product, variant, branch, and optional lot/expiry metadata.
+2. Add an RFID reader gateway service that receives scans from handheld or fixed readers, deduplicates repeated reads, and posts normalized tag events into Business OS.
+3. Map tag events to inventory movements: receiving, stock count, transfer, POS verification, return verification, and shrinkage review.
+4. Require a review queue for unknown tags, duplicate tags, cross-branch reads, and tags attached to disabled products.
+5. Keep barcode fallback on every RFID screen so staff can resolve unreadable or damaged tags without leaving the workflow.
 
 ## Audit, Activity, And Receipts
 
