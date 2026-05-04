@@ -496,7 +496,10 @@ export default function Branches() {
             const stockRows = Array.isArray(stockState) ? stockState : (Array.isArray(stockState?.items) ? stockState.items : [])
             const inStock = stockRows.filter((product) => Number(product.branch_quantity || 0) > 0)
             const stockSummary = !Array.isArray(stockState) ? stockState?.summary || {} : {}
-            const stockCount = Number(stockSummary.positive_products ?? inStock.length)
+            const totalProducts = Number(stockSummary.total_products ?? stockSummary.total_product ?? stockRows.length)
+            const stockCount = Number(stockSummary.in_stock_products ?? stockSummary.positive_products ?? inStock.length)
+            const lowStockCount = Number(stockSummary.low_stock_products ?? 0)
+            const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
             const totalValue = inStock.reduce(
               (sum, product) => sum + Number(product.branch_quantity || 0) * Number(product.purchase_price_usd || 0),
               0,
@@ -553,7 +556,14 @@ export default function Branches() {
                       {isExpanded ? (
                         <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
                           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                              <span>{t('total_product') || 'Total product'}: <span className="text-gray-900 dark:text-white">{totalProducts}</span></span>
+                              <span>{t('in_stock') || 'In stock'}: <span className="text-green-600">{stockCount}</span></span>
+                              <span>{t('low_stock') || 'Low stock'}: <span className="text-amber-600">{lowStockCount}</span></span>
+                              <span>{t('out_of_stock') || 'Out of stock'}: <span className="text-red-600">{outStockCount}</span></span>
+                              <span>{t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? totalValue))}</span></span>
+                            </div>
+                            <span className="hidden text-sm font-semibold text-gray-700 dark:text-gray-300">
                               {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(stockCount))}
                               {' · '}
                               {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(Number(stockSummary.positive_value_usd ?? totalValue))}</span>

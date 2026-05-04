@@ -88,6 +88,7 @@ export default function Inventory() {
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
   const [summary,       setSummary]       = useState([])
+  const [stockStats,    setStockStats]    = useState(null)
   const [movements,     setMovements]     = useState([])
   const [branches,      setBranches]      = useState([])
   const [returnStats,   setReturnStats]   = useState(null)
@@ -201,6 +202,7 @@ export default function Inventory() {
       }
       try {
         const result = await settleLoaderMap({
+          stats: () => window.api.getInventoryStats(branchOpts),
           summary: () => window.api.searchInventoryProducts(productQuery),
           movements: () => window.api.getInventoryMovements(branchOpts),
           rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
@@ -209,6 +211,7 @@ export default function Inventory() {
           dashboard: () => window.api.getDashboard().catch(() => ({})),
         })
         const sumResult = result.values.summary
+        const statsResult = result.values.stats
         const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
         const rfid = result.values.rfid
@@ -236,6 +239,7 @@ export default function Inventory() {
             setInventoryProductFilters({ brands: [] })
           }
         }
+        if (statsResult?.item) setStockStats(statsResult.item)
         if (Array.isArray(movs)) setMovements(movs || [])
         if (rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
@@ -646,13 +650,17 @@ export default function Inventory() {
   }
 
   // Stats ??backend SQL already nets out returned quantities and revenue
-  const totalValue    = filteredSummary.reduce((s, p) => s + (p.stock_value_usd || 0), 0)
-  const lowStockCount = filteredSummary.filter(p => {
+  const visibleTotalValue = filteredSummary.reduce((s, p) => s + (p.stock_value_usd || 0), 0)
+  const visibleLowStockCount = filteredSummary.filter(p => {
     const qty = getStockQty(p)
     return qty > 0 && qty <= p.low_stock_threshold
   }).length
-  const outStockCount = filteredSummary.filter(p => getStockQty(p) <= (p.out_of_stock_threshold || 0)).length
-  const totalProducts = inventoryProductTotal || summary.length
+  const visibleOutStockCount = filteredSummary.filter(p => getStockQty(p) <= (p.out_of_stock_threshold || 0)).length
+  const totalValue = Number(stockStats?.stock_value_usd ?? visibleTotalValue)
+  const lowStockCount = Number(stockStats?.low_stock ?? visibleLowStockCount)
+  const outStockCount = Number(stockStats?.out_of_stock ?? visibleOutStockCount)
+  const inStockCount = Number(stockStats?.in_stock ?? filteredSummary.filter((p) => getStockQty(p) > (p.out_of_stock_threshold || 0)).length)
+  const totalProducts = Number(stockStats?.total_products ?? inventoryProductTotal ?? summary.length)
   const totalQtySold  = filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0)
   const totalRevenue  = filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0)
   const totalCOGS     = filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0)
@@ -681,7 +689,7 @@ export default function Inventory() {
       details: [
         { label: t('stock_value') || 'Stock value', value: fmtUSD(totalValue) },
         { label: t('products') || 'Products', value: totalProducts },
-        { label: t('formula') || 'Formula', value: 'Stock value = quantity ? purchase cost per product' },
+        { label: t('formula') || 'Formula', value: 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page' },
       ],
     },
     {
@@ -898,10 +906,10 @@ export default function Inventory() {
   }, [movementTimeMode, visibleMovementGroups])
 
   const stockStatusRows = useMemo(() => ([
-    { name: tr('in_stock', 'In Stock', 'មានស្តុក'), value: filteredSummary.filter((product) => getStockQty(product) > (product.low_stock_threshold || 0)).length },
+    { name: tr('in_stock', 'In Stock', 'មានស្តុក'), value: inStockCount },
     { name: tr('low_stock', 'Low Stock', 'ស្តុកទាប'), value: lowStockCount },
     { name: tr('out_of_stock', 'Out of Stock', 'អស់ស្តុក'), value: outStockCount },
-  ]), [filteredSummary, getStockQty, lowStockCount, outStockCount, tr])
+  ]), [inStockCount, lowStockCount, outStockCount, tr])
 
   const topStockValueRows = useMemo(() => (
     [...filteredSummary]

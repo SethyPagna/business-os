@@ -14,6 +14,7 @@ const { normalizeClientRequestId } = require('../idempotency')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
+const { getStockMetrics } = require('../businessMetrics')
 const {
   hasImportValue,
   normalizeFieldRule,
@@ -24,6 +25,14 @@ const {
 } = require('../productImportPolicies')
 
 const router = express.Router()
+
+router.get('/stats', authToken, requirePermission('products'), (_req, res) => {
+  try {
+    ok(res, { item: getStockMetrics() })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load product stats')
+  }
+})
 
 function getActiveBranches() {
   return db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()

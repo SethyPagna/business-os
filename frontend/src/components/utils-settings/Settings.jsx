@@ -347,6 +347,7 @@ export default function Settings() {
   const [pmList, setPmList] = useState([])
   const [newPm, setNewPm] = useState('')
   const [form, setForm] = useState({})
+  const [previewNow, setPreviewNow] = useState(() => new Date())
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState(null)
   const [settingsSection, setSettingsSection] = useState('all')
@@ -467,6 +468,11 @@ export default function Settings() {
   useEffect(() => {
     setForm({ ...settings })
   }, [settings])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPreviewNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const isAdmin = useMemo(() => {
     try {
@@ -628,10 +634,13 @@ export default function Settings() {
   const handleSaveSettings = async () => {
     const result = await saveSettings(form)
     if (result?.conflict) {
+      if (result.latestSettings && typeof result.latestSettings === 'object') {
+        setForm({ ...result.latestSettings })
+      }
       notify(
         uiLanguage === 'km'
-          ? 'ការកំណត់ត្រូវបានផ្លាស់ប្តូរនៅកន្លែងផ្សេង។ យើងបានផ្ទុកទិន្នន័យថ្មីឡើងវិញ។ សូមពិនិត្យ ហើយរក្សាទុកម្តងទៀត។'
-          : 'Settings changed somewhere else. We reloaded the latest values. Please review and save again.',
+          ? 'ការកំណត់ត្រូវបានផ្លាស់ប្តូរនៅកន្លែងផ្សេង។ យើងកំពុងបង្ហាញតម្លៃថ្មីបំផុត។ សូមពិនិត្យ ហើយរក្សាទុកម្តងទៀត។'
+          : 'Settings changed somewhere else. The latest values are now shown. Please review and save again.',
         'warning',
       )
     }
@@ -1082,7 +1091,7 @@ export default function Settings() {
 
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs">
               <p className="font-semibold text-blue-700 dark:text-blue-300 mb-1">{t('current_device_time')}</p>
-              <p className="font-mono text-blue-600 dark:text-blue-400">{formatPreviewDateTime(new Date())}</p>
+              <p className="font-mono text-blue-600 dark:text-blue-400">{formatPreviewDateTime(previewNow)}</p>
               <p className="text-gray-500 mt-1">{t('display_timezone')}: <strong>{selectedDisplayTimezone}</strong></p>
               <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{deviceTimezone}</strong></p>
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>

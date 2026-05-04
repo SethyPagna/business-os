@@ -6,6 +6,7 @@ const { authToken, requirePermission, getAuditActor, isAdminControlUser } = requ
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
+const { getStockMetrics } = require('../businessMetrics')
 
 const router = express.Router()
 
@@ -82,7 +83,7 @@ function appendInventoryProductFilters(query = {}) {
   const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
   if (stockState === 'low') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10)`)
   if (stockState === 'out') where.push(`${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0)`)
-  if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.low_stock_threshold, 0)`)
+  if (stockState === 'in_stock' || stockState === 'positive') where.push(`${stockExpr} > COALESCE(p.out_of_stock_threshold, 0)`)
   const groupState = String(query.groupState || query.group_state || '').toLowerCase()
   if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
@@ -858,6 +859,16 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
     ok(res, { item: refreshRfidSessionCounts(sessionId), movements })
   } catch (error) {
     err(res, error?.message || 'Failed to apply RFID session', 500)
+  }
+})
+
+// GET /api/inventory/stats
+router.get('/stats', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const branchId = req.query.branchId ? Number.parseInt(req.query.branchId, 10) : null
+    ok(res, { item: getStockMetrics({ branchId }) })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load inventory stats')
   }
 })
 

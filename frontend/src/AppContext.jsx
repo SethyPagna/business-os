@@ -538,7 +538,7 @@ export function AppProvider({ children }) {
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
       let entityLabel = 'Item'
       if (entity === 'settings') {
-        message = 'Settings changed on another device. Latest values have been reloaded.'
+        message = 'Settings changed on another device. Latest values are loading now.'
         entityLabel = 'Settings'
         loadSettings().catch(() => {})
       } else if (entity === 'sale') {
@@ -1211,8 +1211,8 @@ export function AppProvider({ children }) {
       return { success: true }
     } catch (error) {
       if (error?.conflict || error?.code === 'write_conflict') {
-        await loadSettings().catch(() => {})
-        return { success: false, conflict: true }
+        const latestSettings = await loadSettings().catch(() => null)
+        return { success: false, conflict: true, latestSettings }
       }
       notify(error?.message || 'Failed to save settings', 'error')
       return { success: false, error }

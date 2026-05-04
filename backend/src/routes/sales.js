@@ -5,6 +5,7 @@ const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require
 const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
+const { getLowStockProducts, getStockMetrics } = require('../businessMetrics')
 
 const router = express.Router()
 
@@ -895,6 +896,7 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
 // GET /api/dashboard
 router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
   const todayStr = new Date().toISOString().split('T')[0]
+  const stockMetrics = getStockMetrics()
 
   const todaySales = db.prepare(
     "SELECT COUNT(*) AS count, COALESCE(SUM(subtotal_usd),0) AS subtotal, COALESCE(SUM(subtotal_khr),0) AS subtotal_khr, COALESCE(SUM(discount_usd + COALESCE(membership_discount_usd,0)),0) AS discount_usd, COALESCE(SUM(discount_khr + COALESCE(membership_discount_khr,0)),0) AS discount_khr FROM sales WHERE date(created_at) = ? AND COALESCE(sale_status,'completed') NOT IN ('cancelled','awaiting_payment')"
@@ -983,10 +985,13 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     cost_in_khr:          costs.cost_in_khr,
     cost_out:             saleCostOut.cost_out - returnedCost.cost_out,
     cost_out_khr:         saleCostOut.cost_out_khr - returnedCost.cost_out_khr,
-    product_count:        db.prepare('SELECT COUNT(*) AS n FROM products WHERE is_active = 1').get().n,
-    stock_value_usd:      db.prepare('SELECT COALESCE(SUM(stock_quantity * COALESCE(NULLIF(purchase_price_usd,0), cost_price_usd, 0)),0) AS n FROM products WHERE is_active = 1').get().n,
-    stock_value_khr:      db.prepare('SELECT COALESCE(SUM(stock_quantity * COALESCE(NULLIF(purchase_price_khr,0), cost_price_khr, 0)),0) AS n FROM products WHERE is_active = 1').get().n,
-    low_stock:            db.prepare('SELECT id, name, category, unit, stock_quantity, low_stock_threshold FROM products WHERE is_active = 1 AND stock_quantity <= low_stock_threshold ORDER BY stock_quantity ASC LIMIT 20').all(),
+    product_count:        stockMetrics.total_products,
+    stock_value_usd:      stockMetrics.stock_value_usd,
+    stock_value_khr:      stockMetrics.stock_value_khr,
+    in_stock_count:       stockMetrics.in_stock,
+    low_stock_count:      stockMetrics.low_stock,
+    out_of_stock_count:   stockMetrics.out_of_stock,
+    low_stock:            getLowStockProducts({ limit: 20 }),
     recent_sales:         db.prepare('SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status FROM sales s ORDER BY s.created_at DESC LIMIT 10').all(),
   })
 })
