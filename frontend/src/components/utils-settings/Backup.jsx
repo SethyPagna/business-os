@@ -562,14 +562,8 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         entity: 'google_drive_sync',
         label: copy('drive_sync_connect_started', 'Google Drive connection started'),
       })
-      const popup = window.open(authUrl, 'business-os-drive-sync', 'width=640,height=760')
-      if (popup && !popup.closed) {
-        popup.focus?.()
-      } else {
-        setPendingAuthUrl(authUrl)
-        notify(copy('drive_sync_popup_blocked', 'Google Drive setup is ready. Use the open setup button to continue.'), 'info')
-      }
-      notify(copy('drive_sync_connect_started', 'Complete Google Drive access in the new tab.'), 'info')
+      setPendingAuthUrl(authUrl)
+      notify(copy('drive_sync_setup_ready', 'Google Drive setup is ready.'), 'info')
     } catch (error) {
       notify(`${copy('drive_sync_connect_failed', 'Google Drive connection failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
     } finally {
@@ -799,6 +793,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         </div>
       ) : null}
 
+      <LoadingWatchdog
+        loading={!!busy}
+        timeoutMs={6000}
+        label={copy('checking', 'Checking...')}
+        details={busy ? `Google Drive action: ${busy}` : ''}
+      />
+
       <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} />
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -1027,7 +1028,7 @@ export default function Backup() {
           subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
         />
         <SectionSwitcher
-          label="Backup"
+          label=""
           options={BACKUP_SECTION_OPTIONS}
           value={backupSection}
           onChange={setBackupSection}

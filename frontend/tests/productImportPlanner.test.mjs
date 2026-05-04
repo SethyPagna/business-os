@@ -198,6 +198,9 @@ await runTest('bulk import modal surfaces grouped families, filter hints, inline
   const source = fs.readFileSync(new URL('../src/components/products/BulkImportModal.jsx', import.meta.url), 'utf8')
 
   assert.match(source, /CONFLICT_FILTER_OPTIONS/)
+  assert.doesNotMatch(source, /value:\s*'identifier',\s*label:\s*'SKU\/barcode'/)
+  assert.match(source, /value:\s*'barcode',\s*label:\s*'Barcode'/)
+  assert.match(source, /value:\s*'sku',\s*label:\s*'SKU'/)
   assert.match(source, /title=\{item\.hint\}/)
   assert.match(source, /reviewGroups/)
   assert.match(source, /collapsedFamilyKeys/)

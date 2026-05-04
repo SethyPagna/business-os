@@ -52,7 +52,7 @@ export default function SectionSwitcher({
   return (
     <div className={`overflow-x-auto pb-1 ${className}`}>
       <div className="flex min-w-max items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <span className="px-2 font-semibold text-slate-400 dark:text-slate-500">{label}</span>
+        {label ? <span className="px-2 font-semibold text-slate-400 dark:text-slate-500">{label}</span> : null}
         {safeOptions.map((option) => (
           <button
             key={option.value}

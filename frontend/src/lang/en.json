@@ -2424,6 +2424,8 @@
   "users_refresh_failed": "Unable to refresh users right now. Showing the latest loaded data.",
   "analyzed": "Analyzed",
   "analyzing_file": "Analyzing file",
+  "import_analysis_started": "Import analysis started. Review and approve it from the top progress bar.",
+  "import_ready_to_analyze": "Ready to analyze",
   "cancelled": "Cancelled",
   "created": "created",
   "duplicate": "duplicate",

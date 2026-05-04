@@ -102,5 +102,15 @@ assert.match(
   /auditImportJobEvent\(.*import_job_start/s,
   'import start must be audited with actor and job metadata',
 )
+assert.doesNotMatch(
+  source,
+  /attempts\s*=\s*attempts\s*\+\s*1/,
+  'import batch upserts must qualify attempts so Postgres does not see an ambiguous column reference',
+)
+assert.match(
+  source,
+  /attempts\s*=\s*COALESCE\(import_job_batches\.attempts,\s*0\)\s*\+\s*1/,
+  'import batch attempts should increment the existing import_job_batches value on retry',
+)
 
 console.log('PASS import decision integrity source checks')

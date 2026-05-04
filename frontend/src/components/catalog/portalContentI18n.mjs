@@ -153,6 +153,371 @@ const FAQ_VOCABULARY_BY_LANGUAGE = {
   tr: { products: 'ürünler', product: 'ürün', membership: 'üyelik', points: 'puan', stock: 'stok', budget: 'bütçe', price: 'fiyat', skincare: 'cilt bakımı', makeup: 'makyaj', brand: 'marka', store: 'mağaza' },
 }
 
+const DEFAULT_FAQ_QUESTION_TRANSLATIONS_BY_LANGUAGE = {
+  km: {
+    'How do I choose products for my skin type?': 'តើខ្ញុំគួរជ្រើសរើសផលិតផលសម្រាប់ប្រភេទស្បែករបស់ខ្ញុំដោយរបៀបណា?',
+    'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.': 'ប្រាប់យើងពីប្រភេទស្បែក បញ្ហាស្បែក និងរបៀបថែរក្សាដែលអ្នកចង់បាន។ យើងអាចណែនាំផលិតផលថែរក្សាស្បែក គ្រឿងសម្អាង សក់ ឬរាងកាយដែលសមស្របពីស្តុកបច្ចុប្បន្ន។',
+    'Are the products shown here available in store?': 'តើផលិតផលដែលបង្ហាញនៅទីនេះមាននៅហាងដែរឬទេ?',
+    'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.': 'ទំព័រនេះអានពីកាតាឡុក Business OS បច្ចុប្បន្ន។ ស្តុកអាចផ្លាស់ប្តូរនៅពេលរវល់ ដូច្នេះសូមទាក់ទងហាង ប្រសិនបើអ្នកត្រូវការបញ្ជាក់ចុងក្រោយមុនទៅហាង។',
+    'How do I check my membership points?': 'តើខ្ញុំអាចពិនិត្យពិន្ទុសមាជិកភាពរបស់ខ្ញុំដោយរបៀបណា?',
+    'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.': 'បើកផ្នែកសមាជិកភាព បញ្ចូលលេខសមាជិករបស់អ្នក ហើយអ្នកអាចមើលប្រវត្តិទិញ ការត្រឡប់ និងពិន្ទុបច្ចុប្បន្នពីគណនីអតិថិជន។',
+    'What should I do if an item is out of stock?': 'តើខ្ញុំគួរធ្វើដូចម្តេច ប្រសិនបើទំនិញអស់ស្តុក?',
+    'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.': 'ប្រសិនបើទំនិញមិនមាន សូមផ្ញើសារទៅហាងតាម Facebook, Instagram, Telegram ឬទូរស័ព្ទ ដើម្បីឱ្យក្រុមការងារណែនាំជម្រើសជំនួស ឬបញ្ជាក់ពេលស្តុកផ្លាស់ប្តូរ។',
+  },
+  'zh-CN': {
+    'How do I choose products for my skin type?': '如何根据我的肤质选择产品？',
+    'Are the products shown here available in store?': '这里显示的产品店里有货吗？',
+    'How do I check my membership points?': '如何查询我的会员积分？',
+    'What should I do if an item is out of stock?': '商品缺货时该怎么办？',
+  },
+  'zh-TW': {
+    'How do I choose products for my skin type?': '如何依照我的膚質選擇產品？',
+    'Are the products shown here available in store?': '這裡顯示的產品門市有貨嗎？',
+    'How do I check my membership points?': '如何查詢我的會員點數？',
+    'What should I do if an item is out of stock?': '商品缺貨時該怎麼辦？',
+  },
+  vi: {
+    'How do I choose products for my skin type?': 'Làm sao chọn sản phẩm phù hợp với loại da của tôi?',
+    'Are the products shown here available in store?': 'Các sản phẩm hiển thị ở đây có sẵn tại cửa hàng không?',
+    'How do I check my membership points?': 'Làm sao kiểm tra điểm thành viên của tôi?',
+    'What should I do if an item is out of stock?': 'Tôi nên làm gì nếu sản phẩm hết hàng?',
+  },
+  th: {
+    'How do I choose products for my skin type?': 'ฉันจะเลือกสินค้าสำหรับสภาพผิวของฉันได้อย่างไร?',
+    'Are the products shown here available in store?': 'สินค้าที่แสดงอยู่ที่นี่มีที่ร้านหรือไม่?',
+    'How do I check my membership points?': 'ฉันจะตรวจสอบคะแนนสมาชิกได้อย่างไร?',
+    'What should I do if an item is out of stock?': 'ถ้าสินค้าหมดสต็อกควรทำอย่างไร?',
+  },
+  ru: {
+    'How do I choose products for my skin type?': 'Как выбрать товары для моего типа кожи?',
+    'Are the products shown here available in store?': 'Есть ли показанные здесь товары в магазине?',
+    'How do I check my membership points?': 'Как проверить мои бонусные баллы?',
+    'What should I do if an item is out of stock?': 'Что делать, если товара нет в наличии?',
+  },
+  fr: {
+    'How do I choose products for my skin type?': 'Comment choisir des produits adaptés à mon type de peau ?',
+    'Are the products shown here available in store?': 'Les produits affichés ici sont-ils disponibles en boutique ?',
+    'How do I check my membership points?': 'Comment consulter mes points de fidélité ?',
+    'What should I do if an item is out of stock?': 'Que faire si un article est en rupture de stock ?',
+  },
+  es: {
+    'How do I choose products for my skin type?': '¿Cómo elijo productos para mi tipo de piel?',
+    'Are the products shown here available in store?': '¿Los productos que se muestran aquí están disponibles en tienda?',
+    'How do I check my membership points?': '¿Cómo reviso mis puntos de membresía?',
+    'What should I do if an item is out of stock?': '¿Qué hago si un artículo está agotado?',
+  },
+  de: {
+    'How do I choose products for my skin type?': 'Wie wähle ich Produkte für meinen Hauttyp aus?',
+    'Are the products shown here available in store?': 'Sind die hier gezeigten Produkte im Geschäft verfügbar?',
+    'How do I check my membership points?': 'Wie prüfe ich meine Mitgliedspunkte?',
+    'What should I do if an item is out of stock?': 'Was soll ich tun, wenn ein Artikel nicht vorrätig ist?',
+  },
+  ja: {
+    'How do I choose products for my skin type?': '自分の肌タイプに合う商品はどう選べばよいですか？',
+    'Are the products shown here available in store?': 'ここに表示されている商品は店舗で購入できますか？',
+    'How do I check my membership points?': '会員ポイントはどう確認できますか？',
+    'What should I do if an item is out of stock?': '商品が在庫切れの場合はどうすればよいですか？',
+  },
+  ko: {
+    'How do I choose products for my skin type?': '제 피부 타입에 맞는 제품은 어떻게 고르나요?',
+    'Are the products shown here available in store?': '여기에 표시된 제품은 매장에서 구매할 수 있나요?',
+    'How do I check my membership points?': '멤버십 포인트는 어떻게 확인하나요?',
+    'What should I do if an item is out of stock?': '상품이 품절이면 어떻게 해야 하나요?',
+  },
+  pt: {
+    'How do I choose products for my skin type?': 'Como escolher produtos para o meu tipo de pele?',
+    'Are the products shown here available in store?': 'Os produtos mostrados aqui estão disponíveis na loja?',
+    'How do I check my membership points?': 'Como consulto meus pontos de fidelidade?',
+    'What should I do if an item is out of stock?': 'O que devo fazer se um item estiver sem estoque?',
+  },
+  it: {
+    'How do I choose products for my skin type?': 'Come scelgo prodotti per il mio tipo di pelle?',
+    'Are the products shown here available in store?': 'I prodotti mostrati qui sono disponibili in negozio?',
+    'How do I check my membership points?': 'Come controllo i miei punti fedeltà?',
+    'What should I do if an item is out of stock?': 'Cosa devo fare se un articolo è esaurito?',
+  },
+  ar: {
+    'How do I choose products for my skin type?': 'كيف أختار المنتجات المناسبة لنوع بشرتي؟',
+    'Are the products shown here available in store?': 'هل المنتجات المعروضة هنا متوفرة في المتجر؟',
+    'How do I check my membership points?': 'كيف أتحقق من نقاط عضويتي؟',
+    'What should I do if an item is out of stock?': 'ماذا أفعل إذا كان المنتج غير متوفر؟',
+  },
+  hi: {
+    'How do I choose products for my skin type?': 'मैं अपनी त्वचा के प्रकार के लिए उत्पाद कैसे चुनूं?',
+    'Are the products shown here available in store?': 'क्या यहां दिखाए गए उत्पाद स्टोर में उपलब्ध हैं?',
+    'How do I check my membership points?': 'मैं अपने सदस्यता अंक कैसे जांचूं?',
+    'What should I do if an item is out of stock?': 'अगर कोई आइटम स्टॉक में नहीं है तो मुझे क्या करना चाहिए?',
+  },
+  id: {
+    'How do I choose products for my skin type?': 'Bagaimana memilih produk untuk jenis kulit saya?',
+    'Are the products shown here available in store?': 'Apakah produk yang ditampilkan di sini tersedia di toko?',
+    'How do I check my membership points?': 'Bagaimana cara memeriksa poin keanggotaan saya?',
+    'What should I do if an item is out of stock?': 'Apa yang harus saya lakukan jika barang habis stok?',
+  },
+  ms: {
+    'How do I choose products for my skin type?': 'Bagaimana saya memilih produk untuk jenis kulit saya?',
+    'Are the products shown here available in store?': 'Adakah produk yang dipaparkan di sini tersedia di kedai?',
+    'How do I check my membership points?': 'Bagaimana saya menyemak mata keahlian saya?',
+    'What should I do if an item is out of stock?': 'Apa yang perlu saya buat jika item kehabisan stok?',
+  },
+  tr: {
+    'How do I choose products for my skin type?': 'Cilt tipime uygun ürünleri nasıl seçerim?',
+    'Are the products shown here available in store?': 'Burada gösterilen ürünler mağazada mevcut mu?',
+    'How do I check my membership points?': 'Üyelik puanlarımı nasıl kontrol ederim?',
+    'What should I do if an item is out of stock?': 'Bir ürün stokta yoksa ne yapmalıyım?',
+  },
+}
+
+Object.entries(DEFAULT_FAQ_QUESTION_TRANSLATIONS_BY_LANGUAGE).forEach(([language, textByEnglish]) => {
+  DEFAULT_FAQ_TEXT_BY_LANGUAGE[language] = {
+    ...(DEFAULT_FAQ_TEXT_BY_LANGUAGE[language] || {}),
+    ...textByEnglish,
+  }
+})
+
+const FAQ_VOCABULARY_EXTENSIONS_BY_LANGUAGE = {
+  km: {
+    'available in store': 'មាននៅហាង',
+    'membership points': 'ពិន្ទុសមាជិកភាព',
+    'purchase history': 'ប្រវត្តិទិញ',
+    'out of stock': 'អស់ស្តុក',
+    'specific budget': 'ថវិកាជាក់លាក់',
+    concerns: 'បញ្ហាស្បែក',
+    routine: 'របៀបថែរក្សា',
+    cosmetics: 'គ្រឿងសម្អាង',
+    'hair care': 'ការថែសក់',
+    'body care': 'ការថែទាំរាងកាយ',
+    available: 'មាន',
+    unavailable: 'មិនមាន',
+    category: 'ប្រភេទ',
+    categories: 'ប្រភេទ',
+    branch: 'សាខា',
+    item: 'ទំនិញ',
+    items: 'ទំនិញ',
+    assistant: 'ជំនួយការ',
+    advice: 'ការណែនាំ',
+    medical: 'វេជ្ជសាស្ត្រ',
+    allergies: 'អាឡែហ្ស៊ី',
+    oily: 'ស្បែកខ្លាញ់',
+    dry: 'ស្បែកស្ងួត',
+    combination: 'ស្បែកចម្រុះ',
+    suitable: 'សមស្រប',
+    contact: 'ទាក់ទង',
+    phone: 'ទូរស័ព្ទ',
+  },
+  vi: {
+    'available in store': 'có sẵn tại cửa hàng',
+    'membership points': 'điểm thành viên',
+    'purchase history': 'lịch sử mua hàng',
+    'out of stock': 'hết hàng',
+    'specific budget': 'ngân sách cụ thể',
+    'sensitive skin': 'da nhạy cảm',
+    'skin type': 'loại da',
+    concerns: 'vấn đề da',
+    routine: 'quy trình chăm sóc',
+    alternatives: 'lựa chọn thay thế',
+    recommendations: 'gợi ý',
+  },
+  th: {
+    'available in store': 'มีที่ร้าน',
+    'membership points': 'คะแนนสมาชิก',
+    'purchase history': 'ประวัติการซื้อ',
+    'out of stock': 'หมดสต็อก',
+    'specific budget': 'งบประมาณที่กำหนด',
+    'sensitive skin': 'ผิวแพ้ง่าย',
+    'skin type': 'สภาพผิว',
+    concerns: 'ปัญหาผิว',
+    routine: 'รูทีน',
+    alternatives: 'ตัวเลือกทดแทน',
+    recommendations: 'คำแนะนำ',
+  },
+  ru: {
+    'available in store': 'доступно в магазине',
+    'membership points': 'бонусные баллы',
+    'purchase history': 'история покупок',
+    'out of stock': 'нет в наличии',
+    'specific budget': 'конкретный бюджет',
+    'sensitive skin': 'чувствительная кожа',
+    'skin type': 'тип кожи',
+    concerns: 'проблемы кожи',
+    routine: 'уход',
+    alternatives: 'альтернативы',
+    recommendations: 'рекомендации',
+  },
+  fr: {
+    'available in store': 'disponible en boutique',
+    'membership points': 'points de fidélité',
+    'purchase history': 'historique d’achat',
+    'out of stock': 'en rupture de stock',
+    'specific budget': 'budget précis',
+    'sensitive skin': 'peau sensible',
+    'skin type': 'type de peau',
+    concerns: 'préoccupations',
+    routine: 'routine',
+    alternatives: 'alternatives',
+    recommendations: 'recommandations',
+  },
+  es: {
+    'available in store': 'disponible en tienda',
+    'membership points': 'puntos de membresía',
+    'purchase history': 'historial de compras',
+    'out of stock': 'agotado',
+    'specific budget': 'presupuesto específico',
+    'sensitive skin': 'piel sensible',
+    'skin type': 'tipo de piel',
+    concerns: 'preocupaciones',
+    routine: 'rutina',
+    alternatives: 'alternativas',
+    recommendations: 'recomendaciones',
+  },
+  de: {
+    'available in store': 'im Geschäft verfügbar',
+    'membership points': 'Mitgliedspunkte',
+    'purchase history': 'Kaufverlauf',
+    'out of stock': 'nicht vorrätig',
+    'specific budget': 'bestimmtes Budget',
+    'sensitive skin': 'empfindliche Haut',
+    'skin type': 'Hauttyp',
+    concerns: 'Hautprobleme',
+    routine: 'Routine',
+    alternatives: 'Alternativen',
+    recommendations: 'Empfehlungen',
+  },
+  ja: {
+    'available in store': '店舗で利用可能',
+    'membership points': '会員ポイント',
+    'purchase history': '購入履歴',
+    'out of stock': '在庫切れ',
+    'specific budget': '指定予算',
+    'sensitive skin': '敏感肌',
+    'skin type': '肌タイプ',
+    concerns: '肌悩み',
+    routine: 'ルーティン',
+    alternatives: '代替品',
+    recommendations: 'おすすめ',
+  },
+  ko: {
+    'available in store': '매장에서 구매 가능',
+    'membership points': '멤버십 포인트',
+    'purchase history': '구매 내역',
+    'out of stock': '품절',
+    'specific budget': '지정 예산',
+    'sensitive skin': '민감성 피부',
+    'skin type': '피부 타입',
+    concerns: '피부 고민',
+    routine: '루틴',
+    alternatives: '대체 제품',
+    recommendations: '추천',
+  },
+  pt: {
+    'available in store': 'disponível na loja',
+    'membership points': 'pontos de fidelidade',
+    'purchase history': 'histórico de compras',
+    'out of stock': 'sem estoque',
+    'specific budget': 'orçamento específico',
+    'sensitive skin': 'pele sensível',
+    'skin type': 'tipo de pele',
+    concerns: 'preocupações',
+    routine: 'rotina',
+    alternatives: 'alternativas',
+    recommendations: 'recomendações',
+  },
+  it: {
+    'available in store': 'disponibile in negozio',
+    'membership points': 'punti fedeltà',
+    'purchase history': 'cronologia acquisti',
+    'out of stock': 'esaurito',
+    'specific budget': 'budget specifico',
+    'sensitive skin': 'pelle sensibile',
+    'skin type': 'tipo di pelle',
+    concerns: 'esigenze',
+    routine: 'routine',
+    alternatives: 'alternative',
+    recommendations: 'consigli',
+  },
+  ar: {
+    'available in store': 'متوفر في المتجر',
+    'membership points': 'نقاط العضوية',
+    'purchase history': 'سجل المشتريات',
+    'out of stock': 'غير متوفر',
+    'specific budget': 'ميزانية محددة',
+    'sensitive skin': 'بشرة حساسة',
+    'skin type': 'نوع البشرة',
+    concerns: 'مشاكل البشرة',
+    routine: 'روتين',
+    alternatives: 'بدائل',
+    recommendations: 'توصيات',
+  },
+  hi: {
+    'available in store': 'स्टोर में उपलब्ध',
+    'membership points': 'सदस्यता अंक',
+    'purchase history': 'खरीद इतिहास',
+    'out of stock': 'स्टॉक में नहीं',
+    'specific budget': 'विशिष्ट बजट',
+    'sensitive skin': 'संवेदनशील त्वचा',
+    'skin type': 'त्वचा का प्रकार',
+    concerns: 'त्वचा संबंधी चिंताएं',
+    routine: 'रूटीन',
+    alternatives: 'विकल्प',
+    recommendations: 'सुझाव',
+  },
+  id: {
+    'available in store': 'tersedia di toko',
+    'membership points': 'poin keanggotaan',
+    'purchase history': 'riwayat pembelian',
+    'out of stock': 'habis stok',
+    'specific budget': 'anggaran tertentu',
+    'sensitive skin': 'kulit sensitif',
+    'skin type': 'jenis kulit',
+    concerns: 'masalah kulit',
+    routine: 'rutinitas',
+    alternatives: 'alternatif',
+    recommendations: 'rekomendasi',
+  },
+  ms: {
+    'available in store': 'tersedia di kedai',
+    'membership points': 'mata keahlian',
+    'purchase history': 'sejarah pembelian',
+    'out of stock': 'kehabisan stok',
+    'specific budget': 'bajet khusus',
+    'sensitive skin': 'kulit sensitif',
+    'skin type': 'jenis kulit',
+    concerns: 'masalah kulit',
+    routine: 'rutin',
+    alternatives: 'pilihan gantian',
+    recommendations: 'cadangan',
+  },
+  tr: {
+    'available in store': 'mağazada mevcut',
+    'membership points': 'üyelik puanları',
+    'purchase history': 'satın alma geçmişi',
+    'out of stock': 'stokta yok',
+    'specific budget': 'belirli bütçe',
+    'sensitive skin': 'hassas cilt',
+    'skin type': 'cilt tipi',
+    concerns: 'cilt sorunları',
+    routine: 'rutin',
+    alternatives: 'alternatifler',
+    recommendations: 'öneriler',
+  },
+}
+
+Object.entries(FAQ_VOCABULARY_EXTENSIONS_BY_LANGUAGE).forEach(([language, vocabulary]) => {
+  FAQ_VOCABULARY_BY_LANGUAGE[language] = {
+    ...(FAQ_VOCABULARY_BY_LANGUAGE[language] || {}),
+    ...vocabulary,
+  }
+})
+
+const PUBLIC_COPY_PROTECTED_TERMS = [
+  'Leang Cosmetics',
+  'Leang Cosmetic',
+  'Business OS',
+  'Facebook',
+  'Instagram',
+  'Telegram',
+]
+
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -266,6 +631,24 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function protectPublicCopyTerms(value) {
+  let text = String(value || '')
+  const placeholders = []
+  PUBLIC_COPY_PROTECTED_TERMS.forEach((term) => {
+    const pattern = new RegExp(escapeRegExp(term), 'g')
+    text = text.replace(pattern, (match) => {
+      const token = `__BUSINESS_OS_PUBLIC_TERM_${placeholders.length}__`
+      placeholders.push([token, match])
+      return token
+    })
+  })
+  return { text, placeholders }
+}
+
+function restorePublicCopyTerms(value, placeholders) {
+  return placeholders.reduce((text, [token, original]) => text.replaceAll(token, original), String(value || ''))
+}
+
 export function localizePortalFaqText(value, language) {
   const raw = normalizeText(value)
   const key = normalizeLanguageKey(language)
@@ -278,7 +661,8 @@ export function localizePortalFaqText(value, language) {
   const vocabulary = getLanguageMap(FAQ_VOCABULARY_BY_LANGUAGE, language)
   if (!vocabulary) return value
 
-  let localized = String(value || '')
+  const protectedCopy = protectPublicCopyTerms(value)
+  let localized = protectedCopy.text
   const entries = Object.entries(vocabulary)
     .filter(([term, translation]) => normalizeText(term) && normalizeText(translation))
     .sort((left, right) => right[0].length - left[0].length)
@@ -288,7 +672,7 @@ export function localizePortalFaqText(value, language) {
     localized = localized.replace(pattern, translation)
   })
 
-  return localized
+  return restorePublicCopyTerms(localized, protectedCopy.placeholders)
 }
 
 function localizeFaqItems(items, collection, language) {

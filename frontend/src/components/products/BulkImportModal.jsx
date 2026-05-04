@@ -32,7 +32,6 @@ const IDENTIFIER_DECISION_OPTIONS = [
 const CONFLICT_FILTER_OPTIONS = [
   { value: 'all', label: 'All', countKey: 'total', hint: 'All rows that need review before the import can be applied.' },
   { value: 'same_name', label: 'Family', countKey: 'sameName', hint: 'Rows sharing the same product name. Expand the family to see parent and variant scenarios.' },
-  { value: 'identifier', label: 'SKU/barcode', countKey: 'identifier', hint: 'Rows where SKU or barcode matches another row or an existing product and needs an identifier choice.' },
   { value: 'barcode', label: 'Barcode', countKey: 'barcode', hint: 'Rows with duplicate, unsafe, or review-worthy barcode values. Scientific notation blocks import until edited or cleared.' },
   { value: 'sku', label: 'SKU', countKey: 'sku', hint: 'Rows with duplicate or matched SKU values.' },
   { value: 'pricing', label: 'Pricing', countKey: 'pricing', hint: 'Rows where price/cost values differ from a match, or all price columns are blank or zero.' },
@@ -1009,7 +1008,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       if (conflictFilter === 'merge' && planned !== 'merge_stock') return false
       if (conflictFilter === 'override' && !planned.startsWith('override')) return false
       if (conflictFilter === 'errors' && !reviewIssueIndexSet.has(Number(entry.index))) return false
-      if (!CONFLICT_FILTER_OPTIONS.some((item) => item.value === conflictFilter)) return false
+      if (!CONFLICT_FILTER_OPTIONS.some((item) => item.value === conflictFilter) && conflictFilter !== 'identifier') return false
       if (!query) return true
       const existing = entry.existing || {}
       const hay = [

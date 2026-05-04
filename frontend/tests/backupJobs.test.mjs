@@ -19,6 +19,8 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /queueBackupFolderRestore/)
   assert.match(source, /backup_default_path_note/)
   assert.match(source, /advancedMaintenanceOpen/)
+  assert.match(source, /setPendingAuthUrl\(authUrl\)/)
+  assert.doesNotMatch(source, /window\.open\(authUrl/)
   assert.match(source, /<details[^>]+className=/)
   assert.doesNotMatch(source, /requiresHostAction/)
   assert.doesNotMatch(source, /host_action_required/)

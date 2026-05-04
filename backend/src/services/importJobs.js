@@ -1884,7 +1884,7 @@ async function processProductRowBatches({ jobId, rowBatches, totalRows = null, i
       VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
-        attempts = attempts + 1,
+        attempts = COALESCE(import_job_batches.attempts, 0) + 1,
         started_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
@@ -2215,7 +2215,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
       VALUES (?, ?, ?, ?, 'running', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(job_id, batch_index) DO UPDATE SET
         status = 'running',
-        attempts = attempts + 1,
+        attempts = COALESCE(import_job_batches.attempts, 0) + 1,
         started_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
     `).run(jobId, batchIndex, offset + 1, offset + batchRows.length)
