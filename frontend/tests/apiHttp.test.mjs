@@ -5,6 +5,8 @@ import {
   apiFetch,
   buildApiRequestDedupeKey,
   createApiVersionMismatchError,
+  isTransientGatewayError,
+  route,
   shouldCompareRuntimeVersions,
   isApiVersionMismatchError,
   isRequiredRuntimeApiPath,
@@ -134,6 +136,57 @@ await runTest('GET, HEAD, and OPTIONS requests never serialize a request body', 
   }
 })
 
+await runTest('transient gateway statuses are classified for Cloudflare and proxy outages', () => {
+  assert.equal(isTransientGatewayError(502), true)
+  assert.equal(isTransientGatewayError(503), true)
+  assert.equal(isTransientGatewayError(504), true)
+  assert.equal(isTransientGatewayError(520), true)
+  assert.equal(isTransientGatewayError(530), true)
+  assert.equal(isTransientGatewayError(500), false)
+  assert.equal(isTransientGatewayError(409), false)
+})
+
+await runTest('read routes return fallback on transient gateway errors without sync:error', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const events = []
+  if (typeof globalThis.CustomEvent === 'undefined') {
+    globalThis.CustomEvent = class CustomEvent {
+      constructor(type, init = {}) {
+        this.type = type
+        this.detail = init.detail
+      }
+    }
+  }
+  globalThis.window = {
+    setTimeout,
+    clearTimeout,
+    dispatchEvent: (event) => events.push(event),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }
+  globalThis.fetch = () => Promise.resolve(new Response('Gateway unavailable', { status: 530 }))
+
+  try {
+    const result = await route(
+      'transient:read',
+      () => apiFetch('GET', '/api/transient-read', undefined, 1000),
+      () => ({ items: ['cached'] }),
+    )
+    assert.deepEqual(result, { items: ['cached'] })
+    assert.equal(events.some((event) => event.type === 'sync:error'), false)
+    assert.equal(events.some((event) => event.type === 'sync:transient-outage'), true)
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+    resetApiState()
+  }
+})
+
 await runTest('integration doctor is a read-only route and does not pass a null GET body', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   const block = source.match(/export async function getIntegrationDoctor[\s\S]*?\n}/)?.[0] || ''
@@ -146,6 +199,23 @@ await runTest('import job delete prefers canonical DELETE route with legacy fall
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
   assert.match(source, /deleteImportJob\s*=\s*\(id,[\s\S]*apiFetch\('DELETE',\s*`\/api\/import-jobs\/\$\{encodedId\}/)
   assert.match(source, /apiFetch\('POST',\s*`\/api\/import-jobs\/\$\{encodedId\}\/delete`/)
+})
+
+await runTest('read-only 530 pollers use fallback data and backoff hooks', () => {
+  const methodsSource = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.jsx', import.meta.url), 'utf8')
+  const appContextSource = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+  const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+
+  assert.match(methodsSource, /isTransientGatewayError\(error\?\.status\)/)
+  assert.match(methodsSource, /lastImportJobsByQuery/)
+  assert.match(methodsSource, /transient:\s*true/)
+  assert.match(trackerSource, /pollBackoffMs/)
+  assert.match(trackerSource, /nextImportTrackerBackoff/)
+  assert.match(appContextSource, /syncErrorLogAtRef/)
+  assert.match(appContextSource, /console\.warn\('\[sync:transient\]'/)
+  assert.match(appSource, /sync:transient-outage/)
+  assert.match(appSource, /Server\/tunnel reconnecting/)
 })
 
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {

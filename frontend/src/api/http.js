@@ -77,6 +77,7 @@ const CACHE_TTL   = 20_000   // 20 seconds
 const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const API_MISMATCH_COOLDOWN_MS = 30_000
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
@@ -212,6 +213,7 @@ function createApiError(status, parsed, text) {
   const error = new Error(parsed?.error || text || `HTTP ${status}`)
   error.status = status
   error.code = parsed?.code || null
+  error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
@@ -261,6 +263,7 @@ function createWriteBlockedError(channel, message, detail = {}) {
   error.reason = detail.reason || 'server_unavailable'
   error.serverOnline = detail.serverOnline !== false
   error.serverConfigured = detail.serverConfigured !== false
+  error.status = Number(detail.status || 0) || null
   return error
 }
 
@@ -273,6 +276,23 @@ function dispatchWriteBlocked(channel, message, detail = {}) {
       reason: detail.reason || 'server_unavailable',
       serverOnline: detail.serverOnline !== false,
       serverConfigured: detail.serverConfigured !== false,
+      status: Number(detail.status || 0) || null,
+      ts: new Date().toISOString(),
+    },
+  }))
+}
+
+function dispatchTransientGatewayOutage(channel, error = null, active = true) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('sync:transient-outage', {
+    detail: {
+      active,
+      channel,
+      status: Number(error?.status || 0) || null,
+      error: active
+        ? (error?.message || 'Server/tunnel is reconnecting. Read-only data will refresh automatically.')
+        : '',
+      transient: true,
       ts: new Date().toISOString(),
     },
   }))
@@ -355,10 +375,25 @@ async function tryServerReadWithRetry(serverFn) {
   try {
     return await serverFn()
   } catch (error) {
+    if (isTransientGatewayError(error?.status)) throw error
     if (!isConnectivityError(error)) throw error
     await sleep(SYNC.READ_SERVER_RETRY_DELAY_MS)
     return serverFn()
   }
+}
+
+function noteReadFailure(channel, error, source, startedAt) {
+  if (isTransientGatewayError(error?.status)) {
+    setServerHealth(false)
+    dispatchTransientGatewayOutage(channel, error, true)
+    logCall(channel, source || 'transient-gateway', Date.now() - startedAt, false)
+    return true
+  }
+  if (isConnectivityError(error)) {
+    setServerHealth(false)
+  }
+  logCall(channel, source || 'local-fallback', Date.now() - startedAt, false)
+  return false
 }
 
 async function resolveLocalRead(channel, localFn, source = 'local') {
@@ -508,8 +543,14 @@ export function isNetErr(e) {
     .some(s => m.toLowerCase().includes(s.toLowerCase()))
 }
 
+export function isTransientGatewayError(statusOrError) {
+  const status = Number(typeof statusOrError === 'object' ? statusOrError?.status : statusOrError)
+  return TRANSIENT_GATEWAY_STATUSES.has(status) || (status >= 520 && status <= 530)
+}
+
 function isConnectivityError(error) {
   if (!error) return false
+  if (isTransientGatewayError(error?.status)) return true
   if (isNetErr(error)) return true
   const name = String(error?.name || '').toLowerCase()
   if (name.includes('abort')) return true
@@ -534,6 +575,7 @@ function setServerHealth(online) {
   _serverOnline = online
   window.dispatchEvent(new CustomEvent('server:health', { detail: { online } }))
   if (online) {
+    dispatchTransientGatewayOutage('server:health', null, false)
     // Server just came back ??clear all caches so fresh data is fetched
     cacheClearAll()
     dispatchGlobalDataRefresh()
@@ -690,6 +732,9 @@ async function raceServerReadWithLocalFallback(channel, inflightPromise, localFn
     }
     const localResult = await localPromise
     if (hasUsableLocalData(localResult)) {
+      if (isTransientGatewayError(error?.status)) {
+        noteReadFailure(channel, error, `${sourceLabel}-transient-gateway-local-recovery`, t0)
+      }
       logCall(channel, `${sourceLabel}-local-recovery`, Date.now() - t0)
       inflightPromise
         .then((result) => {
@@ -731,7 +776,11 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
         tryServerReadWithRetry(serverFn).then(result => {
           cacheSet(channel, result)
           emitCacheRefresh(channel)
-        }).catch(() => {})
+        }).catch((error) => {
+          if (isTransientGatewayError(error?.status)) {
+            noteReadFailure(channel, error, 'transient-gateway-stale-refresh', t0)
+          }
+        })
         return cached
       }
 
@@ -810,14 +859,16 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
             }
             const localResult = await localPromise
             if (hasUsableLocalData(localResult)) {
+              if (isTransientGatewayError(e?.status)) {
+                noteReadFailure(channel, e, 'transient-gateway-local-recovery', t0)
+              }
               logCall(channel, 'local-recovery', Date.now() - t0)
               promise
                 .then(() => emitCacheRefresh(channel))
                 .catch(() => {})
               return localResult
             }
-            if (isConnectivityError(e)) setServerHealth(false)
-            logCall(channel, 'local-fallback', Date.now() - t0, false)
+            noteReadFailure(channel, e, 'local-fallback', t0)
           }
         } else {
           try {
@@ -827,8 +878,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
               logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
               throw e
             }
-            if (isConnectivityError(e)) setServerHealth(false)
-            logCall(channel, 'local-fallback', Date.now() - t0, false)
+            noteReadFailure(channel, e, 'local-fallback', t0)
           }
         }
       }
@@ -883,17 +933,22 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     const ms = Date.now() - t0
     if (isConnectivityError(e)) {
       setServerHealth(false)
+      if (isTransientGatewayError(e?.status)) {
+        dispatchTransientGatewayOutage(channel, e, true)
+      }
       const message = 'Server is offline. Changes are invalid until the server reconnects.'
       logCall(channel, 'server', ms, false)
       dispatchWriteBlocked(channel, message, {
         reason: 'server_unreachable',
         serverOnline: false,
         serverConfigured: true,
+        status: Number(e?.status || 0) || null,
       })
       throw createWriteBlockedError(channel, message, {
         reason: 'server_unreachable',
         serverOnline: false,
         serverConfigured: true,
+        status: Number(e?.status || 0) || null,
       })
     }
     logCall(channel, 'server', ms, false)

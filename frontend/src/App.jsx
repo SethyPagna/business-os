@@ -275,26 +275,44 @@ function useMountedPages(activePage) {
 function useSyncErrorBanner() {
   // Central listener for sync write/read failures that should surface globally.
   const [syncError, setSyncError] = useState(null)
+  const [transientOutage, setTransientOutage] = useState(null)
 
   useEffect(() => {
-    const onSyncError = (event) => setSyncError(event.detail)
+    const onSyncError = (event) => {
+      if (event?.detail?.transient) return
+      setSyncError(event.detail)
+    }
+    const onTransientOutage = (event) => {
+      const detail = event?.detail || {}
+      if (detail.active === false) {
+        setTransientOutage(null)
+        return
+      }
+      setTransientOutage(detail)
+    }
     const onSyncRecovered = (event) => {
-      if (event?.detail?.connected) {
+      if (event?.type === 'sync:reconnected' || event?.detail?.connected) {
         setSyncError(null)
+        setTransientOutage(null)
       }
     }
     window.addEventListener('sync:error', onSyncError)
     window.addEventListener('sync:write-blocked', onSyncError)
+    window.addEventListener('sync:transient-outage', onTransientOutage)
     window.addEventListener('sync:status', onSyncRecovered)
+    window.addEventListener('sync:reconnected', onSyncRecovered)
     return () => {
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
+      window.removeEventListener('sync:transient-outage', onTransientOutage)
       window.removeEventListener('sync:status', onSyncRecovered)
+      window.removeEventListener('sync:reconnected', onSyncRecovered)
     }
   }, [])
 
   return {
     syncError,
+    transientOutage,
     clearSyncError: () => setSyncError(null),
   }
 }
@@ -547,6 +565,16 @@ function ReadOnlyServerBanner() {
   )
 }
 
+function TransientServerBanner({ outage }) {
+  if (!outage) return null
+  return (
+    <div className="border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+      Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.
+      {outage.status ? <span className="ml-2 opacity-70">Status {outage.status}</span> : null}
+    </div>
+  )
+}
+
 function PageLoader() {
   const [stalled, setStalled] = useState(false)
 
@@ -639,7 +667,7 @@ export default function App() {
     t,
   } = useApp()
   const faviconRequestRef = useRef(0)
-  const { syncError, clearSyncError } = useSyncErrorBanner()
+  const { syncError, transientOutage, clearSyncError } = useSyncErrorBanner()
   const mountedPages = useMountedPages(page)
 
   useVisibilityRecovery()
@@ -771,6 +799,7 @@ export default function App() {
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
           <div className="flex min-w-0 items-center gap-3">
           </div>
+          <TransientServerBanner outage={transientOutage} />
           {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
           <BackgroundImportTracker />
           {mountedPages.map((mountedPage) => (

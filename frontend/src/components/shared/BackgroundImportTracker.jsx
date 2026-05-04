@@ -1,12 +1,23 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
+import { isTransientGatewayError } from '../../api/http.js'
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
 const CANCELLABLE_STATUSES = new Set(['queued', 'running', 'approved'])
 const REMOVABLE_STATUSES = new Set(['pending', 'queued', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
+const IMPORT_TRACKER_ACTIVE_POLL_MS = 5000
+const IMPORT_TRACKER_IDLE_POLL_MS = 12000
+const IMPORT_TRACKER_MAX_BACKOFF_MS = 60000
+
+function nextImportTrackerBackoff(current = 0) {
+  return Math.min(
+    IMPORT_TRACKER_MAX_BACKOFF_MS,
+    Math.max(IMPORT_TRACKER_IDLE_POLL_MS, current ? current * 2 : IMPORT_TRACKER_IDLE_POLL_MS),
+  )
+}
 
 function normalizeJobStatus(job) {
   return String(job?.status || '').trim().toLowerCase()
@@ -157,6 +168,7 @@ export default function BackgroundImportTracker() {
   const [expanded, setExpanded] = useState(false)
   const [busyJobId, setBusyJobId] = useState('')
   const [hiddenJobIds, setHiddenJobIds] = useState(() => new Set())
+  const [pollBackoffMs, setPollBackoffMs] = useState(0)
   const aliveRef = useRef(true)
   const timerRef = useRef(null)
   const jobsSignatureRef = useRef('')
@@ -178,13 +190,22 @@ export default function BackgroundImportTracker() {
     try {
       const result = await window.api.listImportJobs?.({ limit: 8 })
       if (!aliveRef.current) return
+      if (result?.unavailable || result?.transient) {
+        setPollBackoffMs((current) => nextImportTrackerBackoff(current))
+      } else {
+        setPollBackoffMs(0)
+      }
       const nextJobs = dedupeJobsById(Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : []))
       const nextSignature = buildJobsSignature(nextJobs)
       if (nextSignature === jobsSignatureRef.current) return
       jobsSignatureRef.current = nextSignature
       startTransition(() => setJobs(nextJobs))
-    } catch (_) {
+    } catch (error) {
       if (!aliveRef.current) return
+      if (isTransientGatewayError(error?.status)) {
+        setPollBackoffMs((current) => nextImportTrackerBackoff(current))
+        return
+      }
       if (!jobsSignatureRef.current) return
       jobsSignatureRef.current = ''
       startTransition(() => setJobs([]))
@@ -194,7 +215,8 @@ export default function BackgroundImportTracker() {
   useEffect(() => {
     aliveRef.current = true
     loadJobs()
-    const intervalMs = activeJobs.length ? 5000 : 12000
+    const baseIntervalMs = activeJobs.length ? IMPORT_TRACKER_ACTIVE_POLL_MS : IMPORT_TRACKER_IDLE_POLL_MS
+    const intervalMs = Math.max(baseIntervalMs, pollBackoffMs || 0)
     timerRef.current = window.setInterval(() => {
       if (document.visibilityState === 'hidden' && !activeJobs.length) return
       loadJobs()
@@ -203,7 +225,7 @@ export default function BackgroundImportTracker() {
       aliveRef.current = false
       if (timerRef.current) window.clearInterval(timerRef.current)
     }
-  }, [activeJobs.length, loadJobs])
+  }, [activeJobs.length, loadJobs, pollBackoffMs])
 
   if (!primaryJob) return null
 

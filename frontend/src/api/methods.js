@@ -20,6 +20,7 @@ import {
   cacheClearAll,
   requireLiveServerWrite,
   isNetErr,
+  isTransientGatewayError,
   getApiVersionMismatchCooldown,
   markApiVersionMismatch,
 } from './http.js'
@@ -258,6 +259,7 @@ if (typeof window !== 'undefined') {
 
 let notificationSummaryMissingUntilMemory = 0
 let notificationSummaryRequestPromise = null
+const lastImportJobsByQuery = new Map()
 let driveSyncStatusCooldownMemory = 0
 let driveSyncStatusRequestPromise = null
 
@@ -393,6 +395,7 @@ export async function getNotificationSummary() {
         clearNotificationSummaryMissing()
         return result
       } catch (error) {
+        const transientGateway = isTransientGatewayError(error?.status)
         if (Number(error?.status) === 404) {
           markNotificationSummaryMissing()
           return getNotificationSummaryFallback({
@@ -400,13 +403,23 @@ export async function getNotificationSummary() {
             cooldownUntil: readNotificationSummaryMissingUntil(),
           })
         }
+        if (transientGateway) {
+          markNotificationSummaryMissing()
+        }
         throw error
       } finally {
         notificationSummaryRequestPromise = null
       }
     })()
     return await notificationSummaryRequestPromise
-  }, () => getNotificationSummaryFallback())
+  }, () => {
+    const cooldownUntil = readNotificationSummaryMissingUntil()
+    return getNotificationSummaryFallback({
+      unavailable: isCooldownActive(cooldownUntil),
+      transient: isCooldownActive(cooldownUntil),
+      cooldownUntil: cooldownUntil || undefined,
+    })
+  })
 }
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
@@ -768,7 +781,11 @@ async function apiFormPost(path, form, channel = 'importJobs:upload') {
 export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', d), null, true)
 export const listImportJobs = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`importJobs:list:${q}`, () => apiFetch('GET', `/api/import-jobs${q ? `?${q}` : ''}`), null)
+  return route(`importJobs:list:${q}`, async () => {
+    const result = await apiFetch('GET', `/api/import-jobs${q ? `?${q}` : ''}`)
+    lastImportJobsByQuery.set(q, result)
+    return result
+  }, () => lastImportJobsByQuery.get(q) || { jobs: [], unavailable: true, transient: true })
 }
 export const getImportJob = id => route(`importJobs:get:${id}`, () => apiFetch('GET', `/api/import-jobs/${id}`), null)
 export const getImportJobReview = (id, params = {}) => {

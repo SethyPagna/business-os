@@ -5,7 +5,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.js'
-import { cacheClearAll, startHealthCheck } from './api/http.js'
+import { cacheClearAll, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
@@ -302,6 +302,7 @@ export function AppProvider({ children }) {
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
   const writeBlockedNoticeAtRef = useRef(0)
+  const syncErrorLogAtRef = useRef({})
   const [authReady, setAuthReady] = useState(() => !getStoredAuthToken())
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
@@ -499,8 +500,20 @@ export function AppProvider({ children }) {
     const quickCheck = setTimeout(poll, 100)
     pollTimer = setInterval(poll, pollRate)
     const onError = (e) => {
-      console.error('[sync:error]', e.detail)
-      // The SyncErrorBanner in App.jsx picks this up via its own listener
+      const detail = e?.detail || {}
+      const status = Number(detail.status || 0)
+      const transient = detail.transient === true || isTransientGatewayError(status)
+      const key = `${detail.channel || 'unknown'}:${detail.error || detail.message || ''}:${status || ''}`
+      const now = Date.now()
+      const minIntervalMs = transient ? 30000 : 8000
+      if ((now - Number(syncErrorLogAtRef.current[key] || 0)) < minIntervalMs) return
+      syncErrorLogAtRef.current[key] = now
+      if (transient) {
+        console.warn('[sync:transient]', detail)
+        return
+      }
+      console.error('[sync:error]', detail)
+      // The SyncErrorBanner in App.jsx picks this up via its own listener.
     }
     const onWriteBlocked = (e) => {
       const message = e?.detail?.error || 'Server is offline. Changes are invalid until the server reconnects.'
