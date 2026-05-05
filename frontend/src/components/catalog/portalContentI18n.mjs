@@ -8,6 +8,8 @@ const TRANSLATABLE_CONFIG_FIELDS = [
   'aiDisclaimer',
   'faqTitle',
   'membershipInfoText',
+  'promotionsTitle',
+  'promotionsIntro',
   'submissionInstructions',
 ]
 
@@ -17,6 +19,7 @@ const DEFAULT_CONFIG_COPY_KEYS = {
   aiIntro: ['Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.', 'aiIntro'],
   aiDisclaimer: ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.', 'aiDisclaimer'],
   faqTitle: ['Frequently asked questions', 'faqTitle'],
+  promotionsTitle: ['Featured offers', 'promotionsSectionFallback'],
 }
 
 const PRODUCT_TRANSLATABLE_FIELDS = [
@@ -735,6 +738,7 @@ export function localizePortalConfig(config, language) {
   }
 
   next.aboutBlocks = localizeCollectionItems(source.aboutBlocks, langBlock.aboutBlocks, ['title', 'body'])
+  next.promoItems = localizeCollectionItems(source.promoItems, langBlock.promoItems, ['eyebrow', 'title', 'subtitle', 'body', 'ctaLabel'])
   next.faqItems = localizeFaqItems(source.faqItems, langBlock.faqItems, language)
 
   return next

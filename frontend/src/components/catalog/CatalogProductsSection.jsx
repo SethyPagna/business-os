@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
+import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Tag, Trophy } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
@@ -69,11 +69,15 @@ export default function CatalogProductsSection(props) {
     productGridClass,
     compactTwoColumnMobile,
     compactCatalogCards,
+    promotionItems = [],
+    promotionsTitle = '',
+    promotionsIntro = '',
     selectedStockBranch,
     getBranchQty,
     getStockStatus,
     normalizeProductGallery,
     openProductGallery,
+    openPortalImage,
     formatPortalPrice,
     replaceVars,
   } = props
@@ -112,6 +116,19 @@ export default function CatalogProductsSection(props) {
     [letterFilteredProducts, page, pageSize, serverPaged],
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
+  const quickSearchTags = useMemo(() => {
+    const pool = [
+      ...(categories || []).slice(0, 4).map((item) => String(item?.name || '').trim()),
+      ...(brands || []).slice(0, 3).map((item) => String(item || '').trim()),
+    ]
+    return [...new Set(pool.filter(Boolean))].slice(0, 6)
+  }, [brands, categories])
+  const visiblePromotionItems = useMemo(
+    () => Array.isArray(promotionItems)
+      ? promotionItems.filter((item) => item?.title || item?.subtitle || item?.body || item?.mediaUrl)
+      : [],
+    [promotionItems]
+  )
 
   return (
     <SectionShell
@@ -119,7 +136,8 @@ export default function CatalogProductsSection(props) {
       subtitle={copy('liveCatalog', 'Live inventory, customer-safe details only.')}
     >
       <div className="mb-5 space-y-3">
-        <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:flex-row sm:items-center">
+        <div className="sticky top-16 z-20 -mx-1 rounded-[26px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 sm:top-20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/80">
             <Search className="h-4 w-4 shrink-0 text-slate-400" />
             <input
@@ -151,6 +169,22 @@ export default function CatalogProductsSection(props) {
               </button>
             ) : null}
           </div>
+          </div>
+          {quickSearchTags.length ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {quickSearchTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  onClick={() => setSearch(tag)}
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  {tag}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {filtersOpen ? (
@@ -220,6 +254,57 @@ export default function CatalogProductsSection(props) {
           </span>
         </div>
       </div>
+
+      {previewConfig.showPromotions !== false && visiblePromotionItems.length ? (
+        <div className="mb-5 space-y-3">
+          <div className="flex flex-col gap-1 px-1">
+            <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400">{promotionsIntro || copy('promotionsSectionHint', 'Display offers, announcements, or editor posts ahead of searchable products.')}</div>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {visiblePromotionItems.map((item) => (
+              <article key={item.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+                <div className={`grid gap-0 ${item.mediaUrl ? 'md:grid-cols-[1.1fr,0.9fr]' : ''}`}>
+                  <div className="flex flex-col justify-between bg-gradient-to-br from-rose-600 via-rose-500 to-orange-500 p-5 text-white">
+                    <div className="space-y-3">
+                      {item.eyebrow ? (
+                        <span className="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-50">
+                          {item.eyebrow}
+                        </span>
+                      ) : null}
+                      <div className="space-y-2">
+                        {item.title ? <h3 className="text-2xl font-semibold leading-tight">{item.title}</h3> : null}
+                        {item.subtitle ? <div className="text-sm font-medium text-rose-50/95">{item.subtitle}</div> : null}
+                        {item.body ? <p className="text-sm leading-6 text-rose-50/90">{item.body}</p> : null}
+                      </div>
+                    </div>
+                    {item.linkUrl ? (
+                      <a
+                        href={item.linkUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-4 inline-flex w-fit items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                      >
+                        {item.ctaLabel || copy('open', 'Open')}
+                        <ArrowRight className="h-4 w-4" />
+                      </a>
+                    ) : null}
+                  </div>
+                  {item.mediaUrl ? (
+                    <button
+                      type="button"
+                      className="relative min-h-[220px] overflow-hidden bg-slate-100 dark:bg-slate-800"
+                      onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl])}
+                    >
+                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" />
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {initialOptions.length > 1 ? (
         <div className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900/80">

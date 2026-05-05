@@ -48,6 +48,48 @@ export function serializeAboutBlocks(value) {
   return JSON.stringify(normalizeAboutBlocks(value, { keepEmpty: true }))
 }
 
+export function createPromoItem(overrides = {}) {
+  const suffix = Math.random().toString(36).slice(2, 8)
+  return {
+    id: overrides.id || `promo-${Date.now()}-${suffix}`,
+    eyebrow: toTrimmedString(overrides.eyebrow || 'Promotion'),
+    title: toTrimmedString(overrides.title),
+    subtitle: toTrimmedString(overrides.subtitle),
+    body: String(overrides.body || ''),
+    mediaUrl: toTrimmedString(overrides.mediaUrl),
+    ctaLabel: toTrimmedString(overrides.ctaLabel || 'Learn more'),
+    linkUrl: toTrimmedString(overrides.linkUrl),
+  }
+}
+
+export function normalizePromoItems(value, options = {}) {
+  const keepEmpty = !!options.keepEmpty
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value.trim()
+      ? safeJsonParse(value, [])
+      : []
+
+  if (!Array.isArray(source)) return []
+
+  return source
+    .map((item, index) => createPromoItem({
+      id: item?.id || `promo-${index + 1}`,
+      eyebrow: item?.eyebrow,
+      title: item?.title,
+      subtitle: item?.subtitle,
+      body: item?.body,
+      mediaUrl: item?.mediaUrl,
+      ctaLabel: item?.ctaLabel,
+      linkUrl: item?.linkUrl,
+    }))
+    .filter((item) => keepEmpty || item.title || item.subtitle || item.body || item.mediaUrl || item.linkUrl)
+}
+
+export function serializePromoItems(value) {
+  return JSON.stringify(normalizePromoItems(value, { keepEmpty: true }))
+}
+
 export function moveListItem(list, startIndex, endIndex) {
   if (!Array.isArray(list)) return []
   if (startIndex === endIndex) return [...list]

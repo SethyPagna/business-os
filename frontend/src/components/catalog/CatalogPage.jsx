@@ -44,9 +44,12 @@ import {
 import { SectionShell } from './catalogUi'
 import {
   createAboutBlock,
+  createPromoItem,
   normalizeAboutBlocks,
   normalizeGoogleMapsEmbed,
+  normalizePromoItems,
   serializeAboutBlocks,
+  serializePromoItems,
 } from './portalEditorUtils.mjs'
 import {
   getPortalGridClass,
@@ -168,6 +171,22 @@ const PORTAL_TEXT = {
     showPromotionBadge: 'Show promotion badges',
     showNewArrivalBadge: 'Show new arrival badges',
     highlightRankLimit: 'Ranking badge limit',
+    showPromotions: 'Show promotions and posts',
+    promotionsTitle: 'Promotions title',
+    promotionsIntro: 'Promotions intro',
+    promotionsEditor: 'Promotions and posts',
+    promotionsEditorHint: 'Add compact promo cards or store posts that appear before the product grid.',
+    addPromotionCard: 'Add promotion card',
+    noPromotionCards: 'No promotion cards yet. Add one to feature discounts, events, or new arrivals.',
+    promotionEyebrow: 'Badge label',
+    promotionCardTitle: 'Card title',
+    promotionCardSubtitle: 'Card subtitle',
+    promotionCardBody: 'Card details',
+    promotionCtaLabel: 'Button label',
+    promotionLink: 'Button link',
+    promotionsSectionFallback: 'Featured offers',
+    promotionsSectionHint: 'Display offers, announcements, or editor posts ahead of searchable products.',
+    searchSuggestions: 'Popular searches',
     recommendedProducts: 'Recommended products',
     recommendedProductsHint: 'Select store-picked products that should always receive a recommended badge on the public portal.',
     noRecommendedProducts: 'No products loaded yet. Save products first, then come back here.',
@@ -583,6 +602,10 @@ const DEFAULT_CONFIG = {
   showPromotionBadge: true,
   showNewArrivalBadge: false,
   highlightRankLimit: 3,
+  showPromotions: true,
+  promotionsTitle: 'Featured offers',
+  promotionsIntro: '',
+  promoItems: [],
   recommendedProductIds: [],
   refreshSeconds: 20,
   stockThresholdMode: 'product',
@@ -711,6 +734,22 @@ Object.assign(PORTAL_KM_FALLBACKS, {
     showPromotionBadge: 'បង្ហាញស្លាកប្រូម៉ូសិន',
     showNewArrivalBadge: 'បង្ហាញស្លាកមកថ្មី',
     highlightRankLimit: 'ចំនួនចំណាត់ថ្នាក់ស្លាក',
+    showPromotions: 'បង្ហាញប្រូម៉ូសិន និងព័ត៌មានថ្មី',
+    promotionsTitle: 'ចំណងជើងប្រូម៉ូសិន',
+    promotionsIntro: 'សេចក្ដីណែនាំប្រូម៉ូសិន',
+    promotionsEditor: 'ប្រូម៉ូសិន និងព័ត៌មានថ្មី',
+    promotionsEditorHint: 'បន្ថែមកាតប្រូម៉ូសិន ឬព័ត៌មានហាង ដែលនឹងបង្ហាញមុនបញ្ជីផលិតផល។',
+    addPromotionCard: 'បន្ថែមកាតប្រូម៉ូសិន',
+    noPromotionCards: 'មិនទាន់មានកាតប្រូម៉ូសិនទេ។ បន្ថែមមួយសម្រាប់ការបញ្ចុះតម្លៃ ព្រឹត្តិការណ៍ ឬផលិតផលថ្មី។',
+    promotionEyebrow: 'ស្លាកខ្លី',
+    promotionCardTitle: 'ចំណងជើងកាត',
+    promotionCardSubtitle: 'ចំណងជើងរង',
+    promotionCardBody: 'ព័ត៌មានលម្អិតកាត',
+    promotionCtaLabel: 'អក្សរលើប៊ូតុង',
+    promotionLink: 'តំណប៊ូតុង',
+    promotionsSectionFallback: 'ការផ្តល់ជូនពិសេស',
+    promotionsSectionHint: 'បង្ហាញការផ្តល់ជូន ការប្រកាស ឬព័ត៌មានថ្មី មុនការស្វែងរកផលិតផល។',
+    searchSuggestions: 'ស្វែងរកពេញនិយម',
     recommendedProducts: 'ផលិតផលណែនាំ',
     recommendedProductsHint: 'ជ្រើសផលិតផលដែលហាងចង់បន្លិចថា ណែនាំ នៅលើទំព័រសាធារណៈ។',
     noRecommendedProducts: 'មិនទាន់មានផលិតផលសម្រាប់ជ្រើសទេ។ សូមរក្សាទុកផលិតផលសិន។',
@@ -1065,6 +1104,24 @@ function isReservedPortalPath(value) {
   return value === '/' || value === '/health' || value.startsWith('/api') || value.startsWith('/uploads')
 }
 
+function getPortalTabs(config, copy) {
+  const items = [
+    config?.showAbout ? { key: 'about', label: copy?.('about', 'About') || 'About', icon: Store } : null,
+    config?.showCatalog ? { key: 'products', label: copy?.('products', 'Products') || 'Products', icon: ShoppingBag } : null,
+    config?.showMembership ? { key: 'membership', label: copy?.('membership', 'Membership') || 'Membership', icon: Ticket } : null,
+    config?.showFaq ? { key: 'faq', label: copy?.('faq', 'FAQ') || 'FAQ', icon: HelpCircle } : null,
+    config?.aiEnabled ? { key: 'ai', label: config?.aiTitle || copy?.('portalAssistant', 'AI assistant') || 'AI assistant', icon: Bot } : null,
+  ]
+  return items.filter(Boolean)
+}
+
+function resolvePortalActiveTab(config, copy, current = '') {
+  const tabs = getPortalTabs(config, copy)
+  const currentKey = String(current || '').trim()
+  if (tabs.some((item) => item.key === currentKey)) return currentKey
+  return tabs[0]?.key || 'about'
+}
+
 /** Convert runtime portal config into editable key/value draft payload. */
 function buildDraft(config) {
   return {
@@ -1140,6 +1197,10 @@ function buildDraft(config) {
     customer_portal_show_promotion_badge: !!config.showPromotionBadge,
     customer_portal_show_new_arrival_badge: !!config.showNewArrivalBadge,
     customer_portal_highlight_rank_limit: String(config.highlightRankLimit ?? 3),
+    customer_portal_show_promotions: !!config.showPromotions,
+    customer_portal_promotions_title: config.promotionsTitle || '',
+    customer_portal_promotions_intro: config.promotionsIntro || '',
+    customer_portal_promo_items: serializePromoItems(config.promoItems || []),
     customer_portal_recommended_product_ids: JSON.stringify(normalizeRecommendedProductIds(config.recommendedProductIds || [])),
     customer_portal_refresh_seconds: String(config.refreshSeconds ?? 20),
     customer_portal_stock_threshold_mode: config.stockThresholdMode || 'product',
@@ -1265,6 +1326,10 @@ function applyDraft(config, draft) {
     showPromotionBadge: toBoolean(draft.customer_portal_show_promotion_badge, config.showPromotionBadge ?? true),
     showNewArrivalBadge: toBoolean(draft.customer_portal_show_new_arrival_badge, config.showNewArrivalBadge ?? false),
     highlightRankLimit: Math.max(1, Math.min(10, Math.round(toNumber(draft.customer_portal_highlight_rank_limit, config.highlightRankLimit || 3)))),
+    showPromotions: toBoolean(draft.customer_portal_show_promotions, config.showPromotions ?? true),
+    promotionsTitle: String(draft.customer_portal_promotions_title || config.promotionsTitle || 'Featured offers').trim() || 'Featured offers',
+    promotionsIntro: String(draft.customer_portal_promotions_intro || config.promotionsIntro || '').trim(),
+    promoItems: normalizePromoItems(draft.customer_portal_promo_items || config.promoItems || []),
     recommendedProductIds: normalizeRecommendedProductIds(draft.customer_portal_recommended_product_ids || config.recommendedProductIds || []),
     refreshSeconds: Math.min(120, Math.max(5, Math.round(toNumber(draft.customer_portal_refresh_seconds, config.refreshSeconds)))),
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
@@ -1603,7 +1668,10 @@ export default function CatalogPage({ publicView = false }) {
   const [categories, setCategories] = useState(() => Array.isArray(cachedPortal?.categories) ? cachedPortal.categories : [])
   const [brands, setBrands] = useState(() => Array.isArray(cachedPortal?.brands) ? cachedPortal.brands : [])
   const [branches, setBranches] = useState(() => Array.isArray(cachedPortal?.branches) ? cachedPortal.branches : [])
-  const [activeTab, setActiveTab] = useState('products')
+  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({
+    ...DEFAULT_CONFIG,
+    ...(cachedPortal?.config || {}),
+  }, null, 'about'))
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState([])
   const [brandFilter, setBrandFilter] = useState([])
@@ -1630,6 +1698,7 @@ export default function CatalogPage({ publicView = false }) {
   const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
   const [activeEditorSection, setActiveEditorSection] = useState('branding')
   const [dragAboutBlockId, setDragAboutBlockId] = useState(null)
+  const [dragPromoItemId, setDragPromoItemId] = useState(null)
   const [mediaUploadStates, setMediaUploadStates] = useState({})
   const [assistantQuestion, setAssistantQuestion] = useState('')
   const [assistantProfile, setAssistantProfile] = useState({
@@ -1671,6 +1740,9 @@ export default function CatalogPage({ publicView = false }) {
     () => (canEdit ? applyDraft(config, editorDraft) : config),
     [canEdit, config, editorDraft]
   )
+  useEffect(() => {
+    setActiveTab((current) => resolvePortalActiveTab(previewConfig, null, current))
+  }, [previewConfig])
   const recommendedProductIds = useMemo(
     () => normalizeRecommendedProductIds(
       editorDraft.customer_portal_recommended_product_ids
@@ -1786,6 +1858,10 @@ export default function CatalogPage({ publicView = false }) {
   const aboutBlocks = useMemo(
     () => normalizeAboutBlocks(editorDraft.customer_portal_about_blocks || previewConfig.aboutBlocks || [], { keepEmpty: true }),
     [editorDraft.customer_portal_about_blocks, previewConfig.aboutBlocks]
+  )
+  const promoItems = useMemo(
+    () => normalizePromoItems(editorDraft.customer_portal_promo_items || previewConfig.promoItems || [], { keepEmpty: true }),
+    [editorDraft.customer_portal_promo_items, previewConfig.promoItems]
   )
   const getMediaUploadState = (key) => mediaUploadStates[key] || createInitialUploadState()
   const updateMediaUploadState = (key, action) => {
@@ -2508,12 +2584,20 @@ export default function CatalogPage({ publicView = false }) {
     setDraft('customer_portal_about_blocks', serializeAboutBlocks(nextBlocks))
   }
 
+  function setPromoItemsDraft(nextItems) {
+    setDraft('customer_portal_promo_items', serializePromoItems(nextItems))
+  }
+
   function getPortalMediaValue(target) {
     const targetKey = String(target || '').trim()
     if (!targetKey) return ''
     if (targetKey.startsWith('about:')) {
       const blockId = targetKey.slice('about:'.length)
       return aboutBlocks.find((block) => block.id === blockId)?.mediaUrl || ''
+    }
+    if (targetKey.startsWith('promo:')) {
+      const promoId = targetKey.slice('promo:'.length)
+      return promoItems.find((item) => item.id === promoId)?.mediaUrl || ''
     }
     return editorDraft[targetKey] || ''
   }
@@ -2523,6 +2607,10 @@ export default function CatalogPage({ publicView = false }) {
     if (!targetKey) return
     if (targetKey.startsWith('about:')) {
       updateAboutBlock(targetKey.slice('about:'.length), 'mediaUrl', value)
+      return
+    }
+    if (targetKey.startsWith('promo:')) {
+      updatePromoItem(targetKey.slice('promo:'.length), 'mediaUrl', value)
       return
     }
     setDraft(targetKey, value)
@@ -2621,8 +2709,18 @@ export default function CatalogPage({ publicView = false }) {
     )))
   }
 
+  function updatePromoItem(itemId, key, value) {
+    setPromoItemsDraft(promoItems.map((item) => (
+      item.id === itemId ? { ...item, [key]: value } : item
+    )))
+  }
+
   function addAboutBlock(type) {
     setAboutBlocksDraft([...aboutBlocks, createAboutBlock(type)])
+  }
+
+  function addPromoItem() {
+    setPromoItemsDraft([...promoItems, createPromoItem()])
   }
 
   function moveAboutBlockBefore(dragId, targetId) {
@@ -2646,6 +2744,29 @@ export default function CatalogPage({ publicView = false }) {
     clearPortalUploadPreview(uploadKey)
     forgetMediaUploadState(uploadKey)
     setAboutBlocksDraft(aboutBlocks.filter((block) => block.id !== blockId))
+  }
+
+  function movePromoItemBefore(dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return
+    const nextItems = [...promoItems]
+    const dragIndex = nextItems.findIndex((item) => item.id === dragId)
+    const targetIndex = nextItems.findIndex((item) => item.id === targetId)
+    if (dragIndex < 0 || targetIndex < 0) return
+    const [draggedItem] = nextItems.splice(dragIndex, 1)
+    const insertIndex = dragIndex < targetIndex ? targetIndex - 1 : targetIndex
+    nextItems.splice(insertIndex, 0, draggedItem)
+    setPromoItemsDraft(nextItems)
+  }
+
+  function removePromoItem(itemId) {
+    const uploadKey = `promo:${itemId}`
+    const controller = mediaUploadControllersRef.current.get(uploadKey)
+    controller?.abort?.()
+    mediaUploadControllersRef.current.delete(uploadKey)
+    mediaUploadOriginalValuesRef.current.delete(uploadKey)
+    clearPortalUploadPreview(uploadKey)
+    forgetMediaUploadState(uploadKey)
+    setPromoItemsDraft(promoItems.filter((item) => item.id !== itemId))
   }
 
   function setFaqDraft(nextItems) {
@@ -2719,6 +2840,10 @@ export default function CatalogPage({ publicView = false }) {
     await uploadPortalMedia(`about:${blockId}`, accept)
   }
 
+  async function uploadPromoItemMedia(itemId) {
+    await uploadPortalMedia(`promo:${itemId}`, 'image/*')
+  }
+
   function openFilePicker(target, mediaType = 'image', title = copy('openGallery', 'Choose file')) {
     setFilePicker({ open: true, target, mediaType, title })
   }
@@ -2739,6 +2864,12 @@ export default function CatalogPage({ publicView = false }) {
     if (String(target).startsWith('about:')) {
       clearPortalUploadPreview(target)
       updateAboutBlock(String(target).slice('about:'.length), 'mediaUrl', publicPath)
+      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
+      return
+    }
+    if (String(target).startsWith('promo:')) {
+      clearPortalUploadPreview(target)
+      updatePromoItem(String(target).slice('promo:'.length), 'mediaUrl', publicPath)
       updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
     }
   }
@@ -2808,6 +2939,15 @@ export default function CatalogPage({ publicView = false }) {
           block?.mediaUrl,
           previewAboutBlockMap.get(String(block?.id || ''))?.mediaUrl || '',
         ),
+      }))
+      const previewPromoItemMap = new Map((previewConfig.promoItems || []).map((item) => [String(item?.id || ''), item]))
+      const sanitizedPromoItems = promoItems.map((item) => ({
+        ...item,
+        mediaUrl: sanitizePortalMediaValue(
+          item?.mediaUrl,
+          previewPromoItemMap.get(String(item?.id || ''))?.mediaUrl || '',
+        ),
+        linkUrl: normalizeExternalUrl(item?.linkUrl || ''),
       }))
 
       setEditorSaving(true)
@@ -2884,6 +3024,10 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_show_promotion_badge: editorDraft.customer_portal_show_promotion_badge ? 'true' : 'false',
         customer_portal_show_new_arrival_badge: editorDraft.customer_portal_show_new_arrival_badge ? 'true' : 'false',
         customer_portal_highlight_rank_limit: String(sanitizedHighlightRankLimit),
+        customer_portal_show_promotions: editorDraft.customer_portal_show_promotions ? 'true' : 'false',
+        customer_portal_promotions_title: String(editorDraft.customer_portal_promotions_title || '').trim(),
+        customer_portal_promotions_intro: String(editorDraft.customer_portal_promotions_intro || '').trim(),
+        customer_portal_promo_items: serializePromoItems(sanitizedPromoItems),
         customer_portal_recommended_product_ids: JSON.stringify(recommendedProductIds),
         customer_portal_refresh_seconds: String(sanitizedRefreshSeconds),
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
@@ -2903,12 +3047,14 @@ export default function CatalogPage({ publicView = false }) {
       setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
       setDraft('customer_portal_cover_image', sanitizedCoverImage)
       setAboutBlocksDraft(sanitizedAboutBlocks)
+      setPromoItemsDraft(sanitizedPromoItems)
       const sanitizedDraft = {
         ...editorDraft,
         customer_portal_logo_image: sanitizedLogoImage,
         customer_portal_favicon_image: sanitizedFaviconImage,
         customer_portal_cover_image: sanitizedCoverImage,
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
+        customer_portal_promo_items: serializePromoItems(sanitizedPromoItems),
       }
       setConfig((current) => applyDraft(current, sanitizedDraft))
       setEditorDirty(false)
@@ -3238,11 +3384,15 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     productGridClass,
     compactTwoColumnMobile,
     compactCatalogCards,
+    promotionItems: displayConfig.promoItems || [],
+    promotionsTitle: displayConfig.promotionsTitle,
+    promotionsIntro: displayConfig.promotionsIntro,
     selectedStockBranch,
     getBranchQty,
     getStockStatus,
     normalizeProductGallery,
     openProductGallery,
+    openPortalImage,
     formatPortalPrice,
     replaceVars,
   }
@@ -3294,6 +3444,9 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     openPortalImage,
     mapEmbedUrl,
     addressFact,
+    businessFacts,
+    socialLinks,
+    versionedBusinessLogo,
     publicFaqItems,
     expandedFaqId,
     setExpandedFaqId,
@@ -3587,6 +3740,137 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                     {products.length ? copy('searchPlaceholder', 'Search by product name, description, category, or brand') : copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{copy('promotionsEditor', 'Promotions and posts')}</div>
+                    <p className="mt-1 text-xs text-slate-500">{copy('promotionsEditorHint', 'Add compact promo cards or store posts that appear before the product grid.')}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                      <input
+                        id="portal-show-promotions"
+                        name="customer_portal_show_promotions"
+                        type="checkbox"
+                        checked={!!editorDraft.customer_portal_show_promotions}
+                        onChange={(event) => setDraft('customer_portal_show_promotions', event.target.checked)}
+                      />
+                      {copy('showPromotions', 'Show promotions and posts')}
+                    </label>
+                    <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addPromoItem}>
+                      <Plus className="h-4 w-4" />
+                      {copy('addPromotionCard', 'Add promotion card')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="portal-promotions-title" className="block text-sm font-medium text-slate-700">{copy('promotionsTitle', 'Promotions title')}</label>
+                    <input
+                      id="portal-promotions-title"
+                      name="customer_portal_promotions_title"
+                      className="input"
+                      value={editorDraft.customer_portal_promotions_title || ''}
+                      onChange={(event) => setDraft('customer_portal_promotions_title', event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="portal-promotions-intro" className="block text-sm font-medium text-slate-700">{copy('promotionsIntro', 'Promotions intro')}</label>
+                    <input
+                      id="portal-promotions-intro"
+                      name="customer_portal_promotions_intro"
+                      className="input"
+                      value={editorDraft.customer_portal_promotions_intro || ''}
+                      onChange={(event) => setDraft('customer_portal_promotions_intro', event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  {promoItems.length ? promoItems.map((item) => (
+                    <article
+                      key={item.id}
+                      draggable
+                      onDragStart={() => setDragPromoItemId(item.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        movePromoItemBefore(dragPromoItemId, item.id)
+                        setDragPromoItemId(null)
+                      }}
+                      onDragEnd={() => setDragPromoItemId(null)}
+                      className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${dragPromoItemId === item.id ? 'opacity-60' : ''}`}
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-900">{item.title || copy('promotionCardTitle', 'Card title')}</div>
+                        <button type="button" className="text-xs font-semibold text-rose-600 hover:text-rose-700" onClick={() => removePromoItem(item.id)}>
+                          {copy('remove', 'Remove')}
+                        </button>
+                      </div>
+                      <div className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+                        <div className="space-y-3">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label htmlFor={`portal-promo-eyebrow-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionEyebrow', 'Badge label')}</label>
+                              <input id={`portal-promo-eyebrow-${item.id}`} className="input" value={item.eyebrow || ''} onChange={(event) => updatePromoItem(item.id, 'eyebrow', event.target.value)} />
+                            </div>
+                            <div>
+                              <label htmlFor={`portal-promo-title-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionCardTitle', 'Card title')}</label>
+                              <input id={`portal-promo-title-${item.id}`} className="input" value={item.title || ''} onChange={(event) => updatePromoItem(item.id, 'title', event.target.value)} />
+                            </div>
+                          </div>
+                          <div>
+                            <label htmlFor={`portal-promo-subtitle-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionCardSubtitle', 'Card subtitle')}</label>
+                            <input id={`portal-promo-subtitle-${item.id}`} className="input" value={item.subtitle || ''} onChange={(event) => updatePromoItem(item.id, 'subtitle', event.target.value)} />
+                          </div>
+                          <div>
+                            <label htmlFor={`portal-promo-body-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionCardBody', 'Card details')}</label>
+                            <textarea id={`portal-promo-body-${item.id}`} className="input resize-none" rows={4} value={item.body || ''} onChange={(event) => updatePromoItem(item.id, 'body', event.target.value)} />
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label htmlFor={`portal-promo-cta-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionCtaLabel', 'Button label')}</label>
+                              <input id={`portal-promo-cta-${item.id}`} className="input" value={item.ctaLabel || ''} onChange={(event) => updatePromoItem(item.id, 'ctaLabel', event.target.value)} />
+                            </div>
+                            <div>
+                              <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
+                              <input id={`portal-promo-link-${item.id}`} className="input" value={item.linkUrl || ''} onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)} placeholder="https://..." />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <ImageField
+                            label={copy('coverImage', 'Cover image')}
+                            value={item.mediaUrl}
+                            fieldId={`portal-promo-image-${item.id}`}
+                            onUpload={() => uploadPromoItemMedia(item.id)}
+                            onCancelUpload={() => cancelPortalMediaUpload(`promo:${item.id}`)}
+                            onChooseExisting={() => openFilePicker(`promo:${item.id}`, 'image', copy('coverImage', 'Cover image'))}
+                            onChange={(value) => updatePromoItem(item.id, 'mediaUrl', value)}
+                            onClear={() => clearPortalMediaTarget(`promo:${item.id}`)}
+                            onPreview={() => openPortalImage(item.title || copy('coverImage', 'Cover image'), [item.mediaUrl])}
+                            uploadLabel={copy('uploadImage', 'Upload image')}
+                            chooseLabel={copy('openFiles', 'Files')}
+                            clearLabel={copy('clearImage', 'Clear')}
+                            previewLabel={copy('openGallery', 'Open image gallery')}
+                            hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+                            cancelLabel={copy('cancelUpload', 'Cancel upload')}
+                            uploadingLabel={copy('uploading', 'Uploading...')}
+                            uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+                            uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+                            uploadState={getMediaUploadState(`promo:${item.id}`)}
+                          />
+                        </div>
+                      </div>
+                    </article>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+                      {copy('noPromotionCards', 'No promotion cards yet. Add one to feature discounts, events, or new arrivals.')}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             <p className="mt-2 text-xs text-slate-500">{copy('syncSpeedHint', 'Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.')}</p>
@@ -3956,8 +4240,12 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                 <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-600">{`{
   "zh-CN": {
     "aboutTitle": "关于我们",
+    "promotionsTitle": "精选优惠",
     "aboutBlocks": {
       "block-id": { "title": "标题", "body": "内容" }
+    },
+    "promoItems": {
+      "promo-id": { "title": "优惠标题", "body": "优惠内容", "ctaLabel": "立即查看" }
     },
     "faqItems": {
       "faq-id": { "question": "问题", "answer": "答案" }
@@ -4460,6 +4748,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
   const previewTitleIsBusinessName = previewBusinessName
     && previewTitle
     && previewBusinessName.toLowerCase() === previewTitle.toLowerCase()
+  const portalTabs = getPortalTabs(displayConfig, copy)
   const showHeroToolsPanel = publicView
   const showPortalToolsBar = false
 
@@ -4569,43 +4858,6 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                       {displayConfig.intro}
                     </p>
 
-                    {businessFacts.length || socialLinks.length ? (
-                      <div className="mt-5 flex flex-wrap gap-2">
-                        {businessFacts.map((item) => {
-                          const Icon = item.icon
-                          const content = (
-                            <>
-                              <Icon className="h-4 w-4" />
-                              {item.value}
-                            </>
-                          )
-                          return item.href ? (
-                            <a key={item.key} href={item.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm transition hover:bg-slate-950/50">
-                              {content}
-                            </a>
-                          ) : (
-                            <span key={item.key} className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm">
-                              {content}
-                            </span>
-                          )
-                        })}
-                        {socialLinks.map((item) => {
-                          const Icon = item.icon
-                          return (
-                            <a
-                              key={item.key}
-                              href={item.value}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-slate-950/35 px-3 py-1.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm transition hover:bg-slate-950/50"
-                            >
-                              <Icon className="h-4 w-4" />
-                              {item.label}
-                            </a>
-                          )
-                        })}
-                      </div>
-                    ) : null}
                   </div>
                   {showHeroToolsPanel ? (
                     <div className="flex w-full items-start justify-end lg:w-auto">
@@ -4724,53 +4976,26 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                 </div>
               ) : null}
 
-              <div className="border-t border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-900/95 sm:px-8">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                  {displayConfig.showCatalog ? (
-                    <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'products' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                      onClick={() => setActiveTab('products')}
-                    >
-                      <ShoppingBag className="h-4 w-4" />
-                      {copy('products', 'Products')}
-                    </button>
-                  ) : null}
-                  {displayConfig.showMembership ? (
-                    <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'membership' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                      onClick={() => setActiveTab('membership')}
-                    >
-                      <Ticket className="h-4 w-4" />
-                      {copy('membership', 'Membership')}
-                    </button>
-                  ) : null}
-                  {displayConfig.showAbout ? (
-                    <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'about' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                      onClick={() => setActiveTab('about')}
-                    >
-                      <Store className="h-4 w-4" />
-                      {copy('about', 'About')}
-                    </button>
-                  ) : null}
-                  {displayConfig.showFaq ? (
-                    <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'faq' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                      onClick={() => setActiveTab('faq')}
-                    >
-                      <HelpCircle className="h-4 w-4" />
-                      {copy('faq', 'FAQ')}
-                    </button>
-                  ) : null}
-                  {displayConfig.aiEnabled ? (
-                    <button
-                      className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${activeTab === 'ai' ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'}`}
-                      onClick={() => setActiveTab('ai')}
-                    >
-                      <Bot className="h-4 w-4" />
-                      {displayConfig.aiTitle || copy('portalAssistant', 'AI assistant')}
-                    </button>
-                  ) : null}
+              <div className="sticky top-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 sm:px-8">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {portalTabs.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                          activeTab === item.key
+                            ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                        onClick={() => setActiveTab(item.key)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        <span className="whitespace-nowrap">{item.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             </section>

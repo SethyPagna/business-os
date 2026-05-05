@@ -4,8 +4,13 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
+  Facebook,
+  Globe,
   HelpCircle,
+  Instagram,
+  Mail,
   MapPin,
+  Phone,
   RotateCcw,
   Search,
   Send,
@@ -369,6 +374,9 @@ function CatalogAboutSection(props) {
     previewConfig,
     mapEmbedUrl,
     addressFact,
+    businessFacts,
+    socialLinks,
+    versionedBusinessLogo,
     openPortalImage,
   } = props
 
@@ -377,7 +385,90 @@ function CatalogAboutSection(props) {
       title={previewConfig.aboutTitle || copy('about', 'About')}
       subtitle={copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}
     >
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-4">
+        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+          <div className="grid gap-0 lg:grid-cols-[0.9fr,1.1fr]">
+            <div className="flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-700 p-6 text-white">
+              <div className="text-center">
+                <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white shadow-lg">
+                  {versionedBusinessLogo ? (
+                    <button
+                      type="button"
+                      className="flex h-full w-full items-center justify-center"
+                      onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
+                    >
+                      <img
+                        src={versionedBusinessLogo}
+                        alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
+                        className="h-full w-full"
+                        style={{
+                          objectFit: previewConfig.logoFit === 'cover' ? 'cover' : 'contain',
+                          objectPosition: `${previewConfig.logoPositionX || 50}% ${previewConfig.logoPositionY || 50}%`,
+                          transform: `scale(${Math.max(0.8, Math.min(1.8, (previewConfig.logoZoom || 100) / 100))})`,
+                          transformOrigin: 'center',
+                        }}
+                      />
+                    </button>
+                  ) : (
+                    <span className="text-2xl font-semibold">{String(previewConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
+                  )}
+                </div>
+                <div className="mt-4 text-lg font-semibold">{previewConfig.businessName || copy('about', 'About')}</div>
+                {previewConfig.businessTagline ? <div className="mt-1 text-sm text-white/80">{previewConfig.businessTagline}</div> : null}
+              </div>
+            </div>
+            <div className="space-y-4 p-6">
+              {businessFacts?.length ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {businessFacts.map((item) => {
+                    const Icon = item.icon || (item.key === 'phone'
+                      ? Phone
+                      : item.key === 'email'
+                        ? Mail
+                        : MapPin)
+                    const body = (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/70">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          <Icon className="h-3.5 w-3.5" />
+                          {item.label}
+                        </div>
+                        <div className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">{item.value}</div>
+                      </div>
+                    )
+                    return item.href ? <a key={item.key} href={item.href} target="_blank" rel="noreferrer">{body}</a> : <div key={item.key}>{body}</div>
+                  })}
+                </div>
+              ) : null}
+              {socialLinks?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {socialLinks.map((item) => {
+                    const Icon = item.key === 'facebook'
+                      ? Facebook
+                      : item.key === 'instagram'
+                        ? Instagram
+                        : item.key === 'telegram'
+                          ? Send
+                          : Globe
+                    return (
+                      <a
+                        key={item.key}
+                        href={item.value}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </a>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
         {previewConfig.aboutContent ? (
           <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
             <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{previewConfig.aboutContent}</p>
@@ -429,6 +520,7 @@ function CatalogAboutSection(props) {
             <p className="text-sm text-slate-500 dark:text-slate-400">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
           </div>
         ) : null}
+        </div>
       </div>
     </SectionShell>
   )
