@@ -63,6 +63,14 @@ runTest('product image uploads defer optimization and return cache-busting metad
   assert.match(source, /cache_version: asset\.updated_at \|\| asset\.created_at \|\| ''/, 'product upload route should return cache-busting metadata')
 })
 
+runTest('product updates only re-check uniqueness when identifier fields actually change', () => {
+  const source = readSource('src/routes/products.js')
+  assert.match(source, /const nameChanged = normalizeProductIdentifier\(merged\.name, \{ lower: true \}\) !== normalizeProductIdentifier\(prev\.name, \{ lower: true \}\)/, 'product updates should compare normalized names before running duplicate validation')
+  assert.match(source, /const skuChanged = normalizeProductIdentifier\(merged\.sku\) !== normalizeProductIdentifier\(prev\.sku\)/, 'product updates should compare SKU before duplicate validation')
+  assert.match(source, /const barcodeChanged = normalizeProductIdentifier\(merged\.barcode\) !== normalizeProductIdentifier\(prev\.barcode\)/, 'product updates should compare barcode before duplicate validation')
+  assert.match(source, /if \(nameChanged \|\| skuChanged \|\| barcodeChanged\) \{[\s\S]*checkName: nameChanged,[\s\S]*checkSku: skuChanged,[\s\S]*checkBarcode: barcodeChanged,/m, 'product updates should only validate the identifier fields that were actually edited')
+})
+
 runTest('upload path sanitization keeps canonical R2-backed media references intact', () => {
   const snapshotSource = readSource('src/settingsSnapshot.js')
   const assetSource = readSource('src/fileAssets.js')

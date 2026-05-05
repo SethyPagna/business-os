@@ -101,6 +101,7 @@ function getAboutBlockLabel(type) {
 function withAssetVersion(url, versionSeed) {
   const raw = String(url || '').trim()
   if (!raw) return ''
+  if (raw.startsWith('blob:') || raw.startsWith('data:')) return raw
   const seed = String(versionSeed || '').trim()
   if (!seed) return raw
   const separator = raw.includes('?') ? '&' : '?'

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  CheckSquare,
   Brain,
   ChevronDown,
   ChevronUp,
@@ -12,6 +13,7 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  Square,
   TestTube2,
   Trash2,
   Upload,
@@ -51,6 +53,14 @@ function formatDateTime(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0)
+  if (!Number.isFinite(size) || size <= 0) return '-'
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${size} B`
 }
 
 function ProviderStatus({ provider }) {
@@ -105,6 +115,7 @@ export default function FilesPage() {
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState(null)
+  const [selectedAssetIds, setSelectedAssetIds] = useState(() => new Set())
 
   const [providers, setProviders] = useState([])
   const [providerMeta, setProviderMeta] = useState({})
@@ -153,6 +164,11 @@ export default function FilesPage() {
 
   const providerOptions = useMemo(() => Object.entries(providerMeta || {}), [providerMeta])
   const selectedProviderMeta = providerMeta?.[providerForm.provider] || null
+  const selectableFileIds = useMemo(
+    () => files.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0),
+    [files],
+  )
+  const allFilesSelected = selectableFileIds.length > 0 && selectableFileIds.every((id) => selectedAssetIds.has(id))
 
   const buildProviderPayload = useCallback((provider = {}, overrides = {}) => ({
     name: String(overrides.name ?? provider.name ?? '').trim(),
@@ -190,7 +206,12 @@ export default function FilesPage() {
     try {
       const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
-      setFiles(Array.isArray(result) ? result : [])
+      const nextFiles = Array.isArray(result) ? result : []
+      setFiles(nextFiles)
+      setSelectedAssetIds((current) => {
+        const validIds = new Set(nextFiles.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0))
+        return new Set([...current].filter((id) => validIds.has(id)))
+      })
     } catch (error) {
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
       notify(error?.message || 'Failed to load files', 'error')
@@ -333,6 +354,24 @@ export default function FilesPage() {
     } finally {
       setDeletingAssetId(null)
     }
+  }
+
+  function toggleAssetSelection(assetId) {
+    const numericId = Number(assetId || 0)
+    if (!numericId) return
+    setSelectedAssetIds((current) => {
+      const next = new Set(current)
+      if (next.has(numericId)) next.delete(numericId)
+      else next.add(numericId)
+      return next
+    })
+  }
+
+  function toggleSelectAllAssets() {
+    setSelectedAssetIds((current) => {
+      if (allFilesSelected) return new Set()
+      return new Set(selectableFileIds)
+    })
   }
 
   function startCreateProvider() {
@@ -537,6 +576,18 @@ export default function FilesPage() {
                 <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} />
               </label>
             </div>
+            {files.length ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <button type="button" className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={toggleSelectAllAssets}>
+                    {allFilesSelected ? <CheckSquare className="h-3.5 w-3.5 text-blue-600" /> : <Square className="h-3.5 w-3.5" />}
+                    <span>{allFilesSelected ? tr('clear_selection', 'Clear selection') : tr('select_all', 'Select all')}</span>
+                  </button>
+                  <span>{selectedAssetIds.size} {tr('selected', 'selected')}</span>
+                </div>
+                <div>{files.length} {tr('files', 'files')}</div>
+              </div>
+            ) : null}
           </div>
 
           {loadingFiles ? <div className="card px-4 py-10 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : null}
@@ -544,36 +595,53 @@ export default function FilesPage() {
 
           {files.length ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {files.map((asset) => (
-                <div key={asset.id} className="card p-4">
-                  <AssetPreview asset={asset} />
-                  <div className="mt-3 min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{asset.original_name}</div>
-                    <div className="mt-1 break-all text-xs text-slate-500">{asset.public_path}</div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {asset.media_type || 'file'}{asset.byte_size ? ` · ${(asset.byte_size / 1024).toFixed(0)} KB` : ''}
+              {files.map((asset) => {
+                const assetId = Number(asset?.id || 0)
+                const selected = selectedAssetIds.has(assetId)
+                return (
+                  <div key={asset.id} className="card p-4">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                        onClick={() => toggleAssetSelection(asset.id)}
+                      >
+                        {selected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
+                        <span>{tr('select', 'Select')}</span>
+                      </button>
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${asset.usageCount ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
+                        {asset.usageCount ? `${asset.usageCount} use(s)` : tr('unused', 'Unused')}
+                      </span>
                     </div>
-                    {asset.usageCount
-                      ? <div className="mt-1 text-xs text-amber-600">{asset.usageCount} use(s)</div>
-                      : <div className="mt-1 text-xs text-emerald-600">Unused</div>}
+                    <AssetPreview asset={asset} />
+                    <div className="mt-3 min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{asset.original_name}</div>
+                      <div className="mt-1 break-all text-xs text-slate-500">{asset.public_path}</div>
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                        <span>{asset.media_type || 'file'}</span>
+                        <span className="text-right">{formatFileSize(asset.byte_size)}</span>
+                        <span>{tr('date_added', 'Date added')}</span>
+                        <span className="text-right">{formatDateTime(asset.created_at)}</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                      <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})}>
+                        <Copy className="mr-2 inline h-4 w-4" />
+                        {tr('copy_path', 'Copy path')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary shrink-0 whitespace-nowrap text-sm"
+                        onClick={() => handleDeleteAsset(asset)}
+                        disabled={!asset.canDelete || deletingAssetId != null}
+                      >
+                        <Trash2 className="mr-2 inline h-4 w-4" />
+                        {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-                    <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})}>
-                      <Copy className="mr-2 inline h-4 w-4" />
-                      {tr('copy_path', 'Copy path')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary shrink-0 whitespace-nowrap text-sm"
-                      onClick={() => handleDeleteAsset(asset)}
-                      disabled={!asset.canDelete || deletingAssetId != null}
-                    >
-                      <Trash2 className="mr-2 inline h-4 w-4" />
-                      {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : null}
         </>

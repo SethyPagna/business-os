@@ -121,21 +121,30 @@ function findProductByClientRequestId(clientRequestId) {
   `).get(clientRequestId)
 }
 
-function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allowDuplicateName = false }) {
+function assertUniqueProductFields({
+  name,
+  sku,
+  barcode,
+  excludeId = null,
+  allowDuplicateName = false,
+  checkName = true,
+  checkSku = true,
+  checkBarcode = true,
+}) {
   const trimmedName = String(name || '').trim()
-  if (!trimmedName) throw new Error('Product name required')
+  if (checkName && !trimmedName) throw new Error('Product name required')
 
   const conditions = []
   const params = []
-  if (!allowDuplicateName) {
+  if (checkName && !allowDuplicateName) {
     conditions.push('lower(trim(name)) = lower(trim(?))')
     params.push(trimmedName)
   }
-  if (String(sku || '').trim()) {
+  if (checkSku && String(sku || '').trim()) {
     conditions.push('sku = ?')
     params.push(String(sku).trim())
   }
-  if (String(barcode || '').trim()) {
+  if (checkBarcode && String(barcode || '').trim()) {
     conditions.push('barcode = ?')
     params.push(String(barcode).trim())
   }
@@ -155,9 +164,14 @@ function assertUniqueProductFields({ name, sku, barcode, excludeId = null, allow
   const conflicts = db.prepare(sql).get(...params)
 
   if (!conflicts) return
-  if (String(sku || '').trim() && conflicts.sku === String(sku).trim()) throw new Error(`Duplicate SKU "${String(sku).trim()}" is not allowed`)
-  if (String(barcode || '').trim() && conflicts.barcode === String(barcode).trim()) throw new Error(`Duplicate barcode "${String(barcode).trim()}" is not allowed`)
-  if (!allowDuplicateName && String(conflicts.name || '').trim().toLowerCase() === trimmedName.toLowerCase()) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+  if (checkSku && String(sku || '').trim() && conflicts.sku === String(sku).trim()) throw new Error(`Duplicate SKU "${String(sku).trim()}" is not allowed`)
+  if (checkBarcode && String(barcode || '').trim() && conflicts.barcode === String(barcode).trim()) throw new Error(`Duplicate barcode "${String(barcode).trim()}" is not allowed`)
+  if (checkName && !allowDuplicateName && String(conflicts.name || '').trim().toLowerCase() === trimmedName.toLowerCase()) throw new Error(`Duplicate product name "${trimmedName}" is not allowed`)
+}
+
+function normalizeProductIdentifier(value, { lower = false } = {}) {
+  const normalized = String(value || '').trim()
+  return lower ? normalized.toLowerCase() : normalized
 }
 
 function hasOwnField(source, key) {
@@ -780,8 +794,21 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         parent_id: pickField(d, 'parent_id', prev.parent_id),
       }
 
+      const nameChanged = normalizeProductIdentifier(merged.name, { lower: true }) !== normalizeProductIdentifier(prev.name, { lower: true })
+      const skuChanged = normalizeProductIdentifier(merged.sku) !== normalizeProductIdentifier(prev.sku)
+      const barcodeChanged = normalizeProductIdentifier(merged.barcode) !== normalizeProductIdentifier(prev.barcode)
       if (!String(merged.name || '').trim()) throw new Error('Product name required')
-      assertUniqueProductFields({ name: merged.name, sku: merged.sku, barcode: merged.barcode, excludeId: productId })
+      if (nameChanged || skuChanged || barcodeChanged) {
+        assertUniqueProductFields({
+          name: merged.name,
+          sku: merged.sku,
+          barcode: merged.barcode,
+          excludeId: productId,
+          checkName: nameChanged,
+          checkSku: skuChanged,
+          checkBarcode: barcodeChanged,
+        })
+      }
       const parentRecord = ensureParentProductExists(merged.parent_id, { childId: productId })
       const normalizedParentId = parentRecord?.id || null
 

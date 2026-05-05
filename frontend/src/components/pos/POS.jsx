@@ -268,8 +268,8 @@ export default function POS() {
     [debouncedProductSearch, initialFilter],
   )
   const productCountLabel = useMemo(() => {
-    if (stockFilter === 'all' && !hasProductDiscoveryQuery) return t('in_stock') || 'in-stock products'
-    if (stockFilter === 'positive' || stockFilter === 'in_stock') return t('in_stock') || 'in-stock products'
+    if (stockFilter === 'all' && !hasProductDiscoveryQuery) return t('products') || 'products'
+    if (stockFilter === 'positive' || stockFilter === 'in_stock') return t('products') || 'products'
     if (stockFilter === 'low') return t('low_stock') || 'low-stock products'
     if (stockFilter === 'out' || stockFilter === 'out_of_stock') return t('out_of_stock') || 'out-of-stock products'
     return t('products') || 'products'

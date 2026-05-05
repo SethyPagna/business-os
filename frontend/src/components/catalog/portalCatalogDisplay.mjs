@@ -82,6 +82,8 @@ export function buildPortalHighlightBadges(product, config, copy) {
   const badges = []
   const rankLimit = Math.max(1, Math.min(10, Number(config?.highlightRankLimit || 3)))
   const promotion = getPortalPromotionDetails(product)
+  const topSellerRank = Number(product?.top_seller_rank || 0)
+  const topProductRank = Number(product?.top_product_rank || 0)
 
   if (config?.showRecommendedBadge && product?.portal_recommended) {
     badges.push({
@@ -102,21 +104,26 @@ export function buildPortalHighlightBadges(product, config, copy) {
     })
   }
 
-  if (config?.showTopSellerBadge && Number(product?.top_seller_rank || 0) > 0 && Number(product.top_seller_rank) <= rankLimit) {
+  if (config?.showTopSellerBadge && topSellerRank > 0 && topSellerRank <= rankLimit) {
     badges.push({
       key: 'top-seller',
       tone: 'amber',
-      rank: Number(product.top_seller_rank),
-      label: replaceRankVars(copy('topSellerBadge', 'Top {value} Seller'), Number(product.top_seller_rank)),
+      rank: topSellerRank,
+      label: normalizeRankBadgeLabel(copy('topSellerBadge', 'Top Seller')),
     })
   }
 
-  if (config?.showTopProductBadge && Number(product?.top_product_rank || 0) > 0 && Number(product.top_product_rank) <= rankLimit) {
+  if (
+    config?.showTopProductBadge
+    && topProductRank > 0
+    && topProductRank <= rankLimit
+    && !(config?.showTopSellerBadge && topSellerRank > 0 && topSellerRank <= rankLimit)
+  ) {
     badges.push({
       key: 'top-product',
       tone: 'blue',
-      rank: Number(product.top_product_rank),
-      label: replaceRankVars(copy('topProductBadge', 'Top {value} Product'), Number(product.top_product_rank)),
+      rank: topProductRank,
+      label: normalizeRankBadgeLabel(copy('topProductBadge', 'Top Product')),
     })
   }
 
@@ -133,4 +140,11 @@ export function buildPortalHighlightBadges(product, config, copy) {
 
 function replaceRankVars(template, value) {
   return String(template || '').replace(/\{value\}/g, String(value))
+}
+
+function normalizeRankBadgeLabel(template) {
+  return String(template || '')
+    .replace(/\{value\}/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }

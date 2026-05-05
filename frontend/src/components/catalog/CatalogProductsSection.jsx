@@ -318,7 +318,7 @@ export default function CatalogProductsSection(props) {
                   <StatusPill copy={copy} status={status} />
                 </div>
                 {highlightBadges.length ? (
-                  <div className="absolute right-3 top-3 flex max-w-[78%] flex-col items-end gap-1.5">
+                  <div className="absolute right-3 top-3 flex max-w-[76%] flex-col items-end gap-1.5">
                     {highlightBadges.map((badge) => (
                       (() => {
                         const BadgeIcon = getBadgeIcon(badge)
@@ -329,14 +329,9 @@ export default function CatalogProductsSection(props) {
                           <span
                             key={badge.key}
                             style={customStyle}
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] shadow-sm backdrop-blur ${customStyle ? 'ring-1 ring-white/30' : getBadgeToneClass(badge)}`}
+                            className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] shadow-sm backdrop-blur ${customStyle ? 'ring-1 ring-white/30' : getBadgeToneClass(badge)}`}
                           >
-                            {badge.rank ? (
-                              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/90 px-1 text-[9px] font-black text-slate-900">
-                                {badge.rank}
-                              </span>
-                            ) : null}
-                            <BadgeIcon className="h-3 w-3" />
+                            <BadgeIcon className="h-3.5 w-3.5" />
                             {badge.label}
                           </span>
                         )
@@ -358,7 +353,7 @@ export default function CatalogProductsSection(props) {
                 ) : null}
               </div>
 
-              <div className={`space-y-2 ${compactCatalogCards ? 'p-3' : 'p-3.5'}`}>
+              <div className={`space-y-2.5 ${compactCatalogCards ? 'p-3' : 'p-3.5'}`}>
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   {metadataChips.map((chip) => (
                     <span key={`${product.id}-${chip}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800 dark:text-slate-200">
@@ -389,7 +384,7 @@ export default function CatalogProductsSection(props) {
                 ) : null}
 
                 <div className={`flex items-center justify-between gap-2 rounded-2xl bg-slate-50 dark:bg-slate-800/80 ${compactCatalogCards ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     {previewConfig.showPrices ? (
                       <div className={`font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                         {pricePresentation?.primaryText}
@@ -407,11 +402,11 @@ export default function CatalogProductsSection(props) {
                   </div>
                   <button
                     type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500"
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500"
                     onClick={() => openProductGallery(product, 0)}
                   >
-                    <Search className="h-3.5 w-3.5" />
-                    {copy('viewDetails', 'View')}
+                    <Search className="h-4 w-4" />
+                    <span className={compactCatalogCards ? 'hidden sm:inline' : ''}>{copy('viewDetails', 'View')}</span>
                   </button>
                 </div>
               </div>

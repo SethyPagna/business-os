@@ -11,8 +11,8 @@ assert.match(
 
 assert.match(
   inventorySource,
-  /p\.barcode \? \(\s*<div className="mt-1 text-\[10px\] font-medium leading-none text-gray-500 dark:text-gray-300">\s*\{p\.barcode\}/,
-  'Mobile inventory card should keep the barcode in the left identity block so it does not get pushed under stock controls',
+  /p\.barcode \? \(\s*<span className="min-w-0 truncate font-medium text-gray-500 dark:text-gray-300">\s*\{p\.barcode\}/,
+  'Mobile inventory card should keep the barcode inline with the identity tags so it does not get pushed under stock controls',
 )
 
 assert.match(

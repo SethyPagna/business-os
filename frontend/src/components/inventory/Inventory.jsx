@@ -2217,23 +2217,23 @@ export default function Inventory() {
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-gray-400">
-                        {productTags.length ? <span className="truncate">{productTags.join(' · ')}</span> : null}
-                        <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                      </div>
-                      {p.barcode ? (
-                        <div className="mt-1 text-[10px] font-medium leading-none text-gray-500 dark:text-gray-300">
-                          {p.barcode}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-gray-400">
+                          {productTags.length ? <span className="min-w-0 truncate">{productTags.join(' · ')}</span> : null}
+                          {p.barcode ? (
+                            <span className="min-w-0 truncate font-medium text-gray-500 dark:text-gray-300">
+                              {p.barcode}
+                            </span>
+                          ) : null}
+                          <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                         </div>
-                      ) : null}
-                    </div>
-                    <div className="flex shrink-0 items-center justify-end gap-1 text-right">
-                      <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
-                        {qty}
-                        <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
                       </div>
+                     <div className="flex shrink-0 items-center justify-end gap-1 text-right">
+                        <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
+                          {qty}
+                          <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                        </div>
                       <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
                       <button
                         onClick={e => { e.stopPropagation(); openAdjust(p) }}

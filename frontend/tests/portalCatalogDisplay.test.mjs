@@ -107,6 +107,17 @@ runTest('highlight badges stay compact and follow ranking priority', () => {
   assert.equal(badges[1].key, 'promotion')
 })
 
+runTest('ranking badges do not render numeric prefixes in compact mobile cards', () => {
+  const badges = buildPortalHighlightBadges({
+    top_seller_rank: 1,
+  }, {
+    showTopSellerBadge: true,
+    highlightRankLimit: 3,
+  }, (key, fallback) => (key === 'topSellerBadge' ? 'Top {value} Seller' : fallback))
+
+  assert.equal(badges[0].label, 'Top Seller')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

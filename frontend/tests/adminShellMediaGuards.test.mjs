@@ -62,4 +62,10 @@ assert.match(
   'Portal save should sanitize temporary preview URLs before persisting logo media',
 )
 
+assert.match(
+  catalogSource,
+  /if \(raw\.startsWith\('blob:'\) \|\| raw\.startsWith\('data:'\)\) return raw/,
+  'Portal preview cache-busting should not append version params onto temporary blob or data URLs',
+)
+
 console.log('PASS admin shell and media save guards protect Cloudflare Access and blob previews')
