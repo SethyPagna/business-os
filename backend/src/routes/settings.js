@@ -3,10 +3,11 @@ const express = require('express')
 const { db }  = require('../database')
 const { ok, err, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission } = require('../middleware')
-const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 
 const router = express.Router()
+const SETTINGS_CONFLICT_CODE = 'settings_conflict'
 
 function normalizeLookup(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -71,7 +72,10 @@ function getSettingsUpdatedAt() {
 
 // GET /api/settings
 router.get('/', authToken, (req, res) => {
-  res.json(getSettingsSnapshot())
+  res.json({
+    ...getSettingsSnapshot(),
+    updatedAt: getSettingsUpdatedAt(),
+  })
 })
 
 // GET /api/settings/meta
@@ -85,6 +89,10 @@ router.get('/meta', authToken, (req, res) => {
 router.post('/', authToken, requirePermission('settings'), (req, res) => {
   const t0      = Date.now()
   const updates = req.body || {}
+  const attempted = Object.fromEntries(
+    Object.entries(updates)
+      .filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
+  )
   const expectedUpdatedAt = getExpectedUpdatedAt(updates)
   const hasUpdatedAt = settingsHasUpdatedAt()
   const upsert  = hasUpdatedAt
@@ -103,8 +111,7 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
         throw new WriteConflictError('settings', { updated_at: currentUpdatedAt }, expectedUpdatedAt, 'updated')
       }
 
-      Object.entries(updates)
-        .filter(([k]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(k))
+      Object.entries(attempted)
         .forEach(([k, v]) => {
           const normalizedValue = k === 'product_brand_options'
             ? normalizeBrandOptionsValue(v)
@@ -118,7 +125,11 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     ok(res, { updatedAt })
   } catch (error) {
     if (error instanceof WriteConflictError) {
-      return sendWriteConflict(res, error)
+      return sendSettingsConflict(res, error, {
+        code: SETTINGS_CONFLICT_CODE,
+        currentSettings: getSettingsSnapshot(),
+        attempted,
+      })
     }
     return err(res, error?.message || 'Failed to save settings')
   }

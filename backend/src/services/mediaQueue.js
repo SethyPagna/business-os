@@ -139,7 +139,7 @@ async function enqueueMediaOptimization(payload = {}) {
       importJobId: payload.importJobId || null,
       importFileId: payload.importFileId || null,
     }, {
-      jobId: `media:${payload.importFileId || storedName}:${Date.now()}`,
+      jobId: payload.mediaJobId || `media:${payload.importFileId || storedName}:${Date.now()}`,
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
       removeOnComplete: 200,

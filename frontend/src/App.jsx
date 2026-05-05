@@ -1,5 +1,6 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useApp } from './AppContext'
 import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
@@ -16,6 +17,7 @@ import Backup from './components/utils-settings/Backup'
 import Settings from './components/utils-settings/Settings'
 import FilesPage from './components/files/FilesPage'
 import ServerPage from './components/server/ServerPage'
+import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
 
@@ -604,6 +606,43 @@ function ReadOnlyServerBanner() {
   )
 }
 
+function GlobalScrollControls() {
+  const scrollTo = (direction) => {
+    const target = getScrollTarget(window)
+    const top = getScrollToPosition(target, direction)
+    if (typeof target?.scrollTo === 'function') {
+      target.scrollTo({ top, behavior: 'smooth' })
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top, behavior: 'smooth' })
+    }
+  }
+
+  return (
+    <div className="pointer-events-none fixed bottom-20 right-3 z-[1000] flex flex-col gap-2 md:bottom-5 md:right-5">
+      <button
+        type="button"
+        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-700 shadow-lg backdrop-blur transition hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+        onClick={() => scrollTo('top')}
+        aria-label="Scroll to top"
+        title="Scroll to top"
+      >
+        <ArrowUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-700 shadow-lg backdrop-blur transition hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+        onClick={() => scrollTo('bottom')}
+        aria-label="Scroll to bottom"
+        title="Scroll to bottom"
+      >
+        <ArrowDown className="h-4 w-4" />
+      </button>
+    </div>
+  )
+}
+
 function TransientServerBanner({ outage }) {
   if (!outage) return null
   return (
@@ -1017,6 +1056,7 @@ export default function App() {
       </div>
 
       <Notification notification={notification} />
+      <GlobalScrollControls />
       <WriteConflictModal
         conflict={writeConflict}
         onClose={dismissWriteConflict}

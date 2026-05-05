@@ -631,12 +631,17 @@ export async function getSettings(options = {}) {
     cacheInvalidate('settings')
   }
   return routeMirrored('settings:get', async () => {
-    const [settings, meta] = await Promise.all([
+    const [settingsResponse, meta] = await Promise.all([
       apiFetch('GET', '/api/settings'),
       apiFetch('GET', '/api/settings/meta').catch(() => null),
     ])
-    if (meta?.updatedAt) {
-      await localSaveSettingsMeta(meta.updatedAt).catch(() => {})
+    const {
+      updatedAt: inlineUpdatedAt,
+      ...settings
+    } = settingsResponse || {}
+    const effectiveUpdatedAt = inlineUpdatedAt || meta?.updatedAt || null
+    if (effectiveUpdatedAt) {
+      await localSaveSettingsMeta(effectiveUpdatedAt).catch(() => {})
     }
     return settings
   }, localGetSettings, async (settings) => {
@@ -646,6 +651,9 @@ export async function getSettings(options = {}) {
 }
 export async function saveSettings(updates) {
   const payload = await withSettingsExpectedUpdatedAt(updates)
+  const attempted = Object.fromEntries(
+    Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
+  )
   try {
     const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
     if (result?.updatedAt) {
@@ -654,9 +662,13 @@ export async function saveSettings(updates) {
     await localSaveSettings(updates).catch(() => {})
     return result
   } catch (error) {
-    error.attempted = Object.fromEntries(
-      Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
-    )
+    error.attempted = error?.attempted || attempted
+    if (error?.actualUpdatedAt) {
+      await localSaveSettingsMeta(error.actualUpdatedAt).catch(() => {})
+    }
+    if (error?.currentSettings && typeof error.currentSettings === 'object') {
+      await localSaveSettings(error.currentSettings).catch(() => {})
+    }
     throw error
   }
 }
@@ -1021,7 +1033,7 @@ export async function getFiles(params = {}) {
   return Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : [])
 }
 
-export async function uploadFileAsset({ file, userId, userName }) {
+export async function uploadFileAsset({ file, userId, userName, signal, onProgress } = {}) {
   if (!(file instanceof File)) throw new Error('Choose a file first')
   requireLiveServerWrite('files:upload', {
     offlineMessage: 'Server is offline. File uploads are invalid until the server reconnects.',
@@ -1044,13 +1056,62 @@ export async function uploadFileAsset({ file, userId, userName }) {
   if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
   if (device.clientTime) form.append('clientTime', String(device.clientTime))
 
-  const res = await fetch(`${base}/api/files/upload`, { method: 'POST', headers, credentials: 'include', body: form })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`File upload failed: ${text || res.status}`)
-  }
-  const json = await res.json()
-  return json?.data || json
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let settled = false
+
+    const finish = (handler, value) => {
+      if (settled) return
+      settled = true
+      if (signal && abortListener) signal.removeEventListener('abort', abortListener)
+      handler(value)
+    }
+
+    const abortListener = () => {
+      try { xhr.abort() } catch (_) {}
+    }
+
+    xhr.open('POST', `${base}/api/files/upload`, true)
+    xhr.withCredentials = true
+    Object.entries(headers).forEach(([key, value]) => {
+      if (!value) return
+      xhr.setRequestHeader(key, value)
+    })
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || typeof onProgress !== 'function') return
+      onProgress({
+        loaded: event.loaded,
+        total: event.total,
+        percent: Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100))),
+      })
+    }
+
+    xhr.onerror = () => finish(reject, new Error('File upload failed. Check your server connection and try again.'))
+    xhr.onabort = () => finish(reject, new Error('Upload cancelled'))
+    xhr.onload = () => {
+      let parsed = null
+      try {
+        parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null
+      } catch (_) {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
+        finish(reject, new Error(`File upload failed: ${message}`))
+        return
+      }
+      finish(resolve, parsed?.data || parsed)
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        finish(reject, new Error('Upload cancelled'))
+        return
+      }
+      signal.addEventListener('abort', abortListener, { once: true })
+    }
+
+    xhr.send(form)
+  })
 }
 
 export async function deleteFileAsset(id, payload = {}) {
@@ -1175,6 +1236,7 @@ export { getSyncServerUrl }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
 export const adjustStock           = d         => route('products:adjustStock', () => apiFetch('POST', '/api/inventory/adjust', { ...getDeviceInfo(), ...d }), null, true)
+export const transferInventoryStock = d        => route('inventory:transfer', () => apiFetch('POST', '/api/inventory/transfer', ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'transfer')), null, true)
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
 export const getActionHistory = (scope = 'global', limit = 3, params = {}) => {
@@ -1198,10 +1260,26 @@ export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
-export const getInventoryMovements = ({ branchId, userId } = {}, limit) => {
-  const safeLimit = Math.min(Math.max(Number(limit || 50000) || 50000, 1), 50000)
-  const q = new URLSearchParams(Object.entries({ limit: safeLimit, branchId, userId }).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:movements:${q}`, () => apiFetch('GET', `/api/inventory/movements?${q}`), () => dexieDb.inventory_movements.orderBy('created_at').reverse().limit(safeLimit).toArray())
+export const getInventoryMovements = ({ branchId, userId, page = 1, pageSize = 10000 } = {}) => {
+  const safePage = Math.max(1, Number(page || 1) || 1)
+  const safePageSize = Math.min(Math.max(Number(pageSize || 10000) || 10000, 1), 50000)
+  const q = new URLSearchParams(Object.entries({
+    branchId,
+    userId,
+    page: safePage,
+    pageSize: safePageSize,
+  }).filter(([, value]) => value != null && value !== '')).toString()
+  return route(
+    `inventory:movements:${q}`,
+    () => apiFetch('GET', `/api/inventory/movements?${q}`),
+    () => ({
+      items: [],
+      total: 0,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: 1,
+    }),
+  )
 }
 
 function buildOfflineSaleReceiptNumber(payload = {}) {

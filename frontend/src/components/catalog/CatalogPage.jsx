@@ -82,6 +82,7 @@ import {
   writePortalTranslateTarget,
   clearGoogleTranslateCookies,
 } from './portalTranslateController.mjs'
+import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../../utils/mediaUpload.js'
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
 const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))
@@ -1365,33 +1366,63 @@ function ImageField({
   previewLabel = 'Preview',
   placeholder = 'https://... or upload below',
   hint = '',
+  uploadState = createInitialUploadState(),
+  onCancelUpload = null,
+  cancelLabel = 'Cancel upload',
+  uploadingLabel = 'Uploading...',
+  uploadedQueuedLabel = 'Uploaded. Background optimization is running now.',
+  uploadedReadyLabel = 'Uploaded and ready.',
 }) {
-  const displayValue = String(value || '').startsWith('data:image/')
-    ? 'uploaded-image-data'
-    : (value || '')
+  const rawValue = String(value || '')
+  const displayValue = rawValue.startsWith('data:image/') || rawValue.startsWith('blob:')
+    ? 'uploaded-image-preview'
+    : rawValue
+  const isUploading = uploadState?.status === 'uploading'
   return (
     <div className="space-y-2">
       <label htmlFor={fieldId} className="block text-sm font-medium text-slate-700">{label}</label>
       <input id={fieldId} name={fieldId} autoComplete="off" className="input" value={displayValue} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-secondary text-sm" onClick={onUpload}>
+        <button type="button" className="btn-secondary text-sm" onClick={onUpload} disabled={isUploading}>
           <Upload className="mr-2 inline h-4 w-4" />
-          {uploadLabel}
+          {isUploading ? uploadingLabel : uploadLabel}
         </button>
-        {onChooseExisting ? <button type="button" className="btn-secondary text-sm" onClick={onChooseExisting}>{chooseLabel}</button> : null}
+        {isUploading && onCancelUpload ? <button type="button" className="btn-secondary text-sm" onClick={onCancelUpload}>{cancelLabel}</button> : null}
+        {onChooseExisting ? <button type="button" className="btn-secondary text-sm" onClick={onChooseExisting} disabled={isUploading}>{chooseLabel}</button> : null}
         {value ? (
-          <button type="button" className="btn-secondary text-sm" onClick={onPreview}>
+          <button type="button" className="btn-secondary text-sm" onClick={onPreview} disabled={isUploading}>
             <Eye className="mr-2 inline h-4 w-4" />
             {previewLabel}
           </button>
         ) : null}
         {value ? (
-          <button type="button" className="btn-secondary text-sm" onClick={onClear}>
+          <button type="button" className="btn-secondary text-sm" onClick={onClear} disabled={isUploading}>
             {clearLabel}
           </button>
         ) : null}
       </div>
       {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
+      {isUploading ? (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+          <div className="flex items-center justify-between gap-3">
+            <span>{uploadState?.fileName || uploadingLabel}</span>
+            <span>{Number(uploadState?.progress || 0)}%</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+            <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(6, Number(uploadState?.progress || 0))}%` }} />
+          </div>
+        </div>
+      ) : null}
+      {uploadState?.processingStatus && uploadState.processingStatus !== 'idle' && uploadState?.status === 'uploaded' ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          {uploadState.processingStatus === 'queued' ? uploadedQueuedLabel : uploadedReadyLabel}
+        </div>
+      ) : null}
+      {uploadState?.error ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {uploadState.error}
+        </div>
+      ) : null}
       {value ? (
         <button
           type="button"
@@ -1577,6 +1608,7 @@ export default function CatalogPage({ publicView = false }) {
   const [filePicker, setFilePicker] = useState({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
   const [activeEditorSection, setActiveEditorSection] = useState('branding')
   const [dragAboutBlockId, setDragAboutBlockId] = useState(null)
+  const [mediaUploadStates, setMediaUploadStates] = useState({})
   const [assistantQuestion, setAssistantQuestion] = useState('')
   const [assistantProfile, setAssistantProfile] = useState({
     brand: '',
@@ -1607,6 +1639,9 @@ export default function CatalogPage({ publicView = false }) {
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
+  const mediaUploadControllersRef = useRef(new Map())
+  const mediaUploadPreviewUrlsRef = useRef(new Map())
+  const mediaUploadOriginalValuesRef = useRef(new Map())
   const aliveRef = useRef(true)
 
   const canEdit = !publicView && hasPermission('settings')
@@ -1730,6 +1765,18 @@ export default function CatalogPage({ publicView = false }) {
     () => normalizeAboutBlocks(editorDraft.customer_portal_about_blocks || previewConfig.aboutBlocks || [], { keepEmpty: true }),
     [editorDraft.customer_portal_about_blocks, previewConfig.aboutBlocks]
   )
+  const getMediaUploadState = (key) => mediaUploadStates[key] || createInitialUploadState()
+  const updateMediaUploadState = (key, action) => {
+    setMediaUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
+  }
+  const forgetMediaUploadState = (key) => {
+    setMediaUploadStates((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, key)) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
   const faqItems = useMemo(() => {
     const raw = editorDraft.customer_portal_faq_items || JSON.stringify(previewConfig.faqItems || [])
     try {
@@ -2126,6 +2173,13 @@ export default function CatalogPage({ publicView = false }) {
     invalidateTrackedRequest(membershipLookupRequestRef)
     invalidateTrackedRequest(assistantRequestRef)
     invalidateTrackedRequest(assistantStatusRequestRef)
+    mediaUploadControllersRef.current.forEach((controller) => controller?.abort?.())
+    mediaUploadControllersRef.current.clear()
+    mediaUploadPreviewUrlsRef.current.forEach((previewUrl) => {
+      if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
+    })
+    mediaUploadPreviewUrlsRef.current.clear()
+    mediaUploadOriginalValuesRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -2428,6 +2482,113 @@ export default function CatalogPage({ publicView = false }) {
     setDraft('customer_portal_about_blocks', serializeAboutBlocks(nextBlocks))
   }
 
+  function getPortalMediaValue(target) {
+    const targetKey = String(target || '').trim()
+    if (!targetKey) return ''
+    if (targetKey.startsWith('about:')) {
+      const blockId = targetKey.slice('about:'.length)
+      return aboutBlocks.find((block) => block.id === blockId)?.mediaUrl || ''
+    }
+    return editorDraft[targetKey] || ''
+  }
+
+  function setPortalMediaValue(target, value) {
+    const targetKey = String(target || '').trim()
+    if (!targetKey) return
+    if (targetKey.startsWith('about:')) {
+      updateAboutBlock(targetKey.slice('about:'.length), 'mediaUrl', value)
+      return
+    }
+    setDraft(targetKey, value)
+  }
+
+  function clearPortalUploadPreview(target) {
+    const previewUrl = mediaUploadPreviewUrlsRef.current.get(target)
+    if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
+    mediaUploadPreviewUrlsRef.current.delete(target)
+  }
+
+  function clearPortalMediaTarget(target) {
+    const targetKey = String(target || '').trim()
+    const controller = mediaUploadControllersRef.current.get(targetKey)
+    controller?.abort?.()
+    mediaUploadControllersRef.current.delete(targetKey)
+    mediaUploadOriginalValuesRef.current.delete(targetKey)
+    clearPortalUploadPreview(targetKey)
+    setPortalMediaValue(targetKey, '')
+    updateMediaUploadState(targetKey, { type: 'success', publicPath: '', processingStatus: 'idle' })
+  }
+
+  async function uploadPortalMedia(target, accept = 'image/*') {
+    const targetKey = String(target || '').trim()
+    if (!targetKey) return ''
+    try {
+      const file = await new Promise((resolve) => {
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = accept
+        input.onchange = () => resolve(input.files?.[0] || null)
+        input.click()
+      })
+      if (!file) return ''
+
+      const previousValue = getPortalMediaValue(targetKey)
+      mediaUploadOriginalValuesRef.current.set(targetKey, previousValue)
+      clearPortalUploadPreview(targetKey)
+
+      const localPreview = URL.createObjectURL(file)
+      mediaUploadPreviewUrlsRef.current.set(targetKey, localPreview)
+      setPortalMediaValue(targetKey, localPreview)
+
+      const controller = new AbortController()
+      mediaUploadControllersRef.current.set(targetKey, controller)
+      updateMediaUploadState(targetKey, {
+        type: 'start',
+        fileName: file.name,
+        previewUrl: localPreview,
+      })
+
+      const uploaded = await window.api.uploadFileAsset({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        signal: controller.signal,
+        onProgress: ({ percent }) => updateMediaUploadState(targetKey, { type: 'progress', progress: percent }),
+      })
+      if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
+      if (!aliveRef.current) return ''
+
+      const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
+      setPortalMediaValue(targetKey, nextPath)
+      updateMediaUploadState(targetKey, {
+        type: 'success',
+        publicPath: nextPath,
+        processingStatus: uploaded.processing_status || 'ready',
+        mediaJobId: uploaded.media_job_id || '',
+        cacheVersion: uploaded.cache_version || '',
+      })
+      return nextPath
+    } catch (error) {
+      const cancelled = /cancelled|canceled|aborted/i.test(String(error?.message || ''))
+      const previousValue = mediaUploadOriginalValuesRef.current.get(targetKey)
+      if (aliveRef.current) {
+        setPortalMediaValue(targetKey, previousValue || '')
+        updateMediaUploadState(targetKey, cancelled ? { type: 'cancel' } : { type: 'error', error: error?.message || 'Image upload failed' })
+        if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
+      }
+      return ''
+    } finally {
+      mediaUploadControllersRef.current.delete(targetKey)
+      mediaUploadOriginalValuesRef.current.delete(targetKey)
+    }
+  }
+
+  function cancelPortalMediaUpload(target) {
+    const targetKey = String(target || '').trim()
+    const controller = mediaUploadControllersRef.current.get(targetKey)
+    controller?.abort?.()
+  }
+
   function updateAboutBlock(blockId, key, value) {
     setAboutBlocksDraft(aboutBlocks.map((block) => (
       block.id === blockId ? { ...block, [key]: value } : block
@@ -2451,6 +2612,13 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   function removeAboutBlock(blockId) {
+    const uploadKey = `about:${blockId}`
+    const controller = mediaUploadControllersRef.current.get(uploadKey)
+    controller?.abort?.()
+    mediaUploadControllersRef.current.delete(uploadKey)
+    mediaUploadOriginalValuesRef.current.delete(uploadKey)
+    clearPortalUploadPreview(uploadKey)
+    forgetMediaUploadState(uploadKey)
     setAboutBlocksDraft(aboutBlocks.filter((block) => block.id !== blockId))
   }
 
@@ -2515,37 +2683,14 @@ export default function CatalogPage({ publicView = false }) {
     setAssistantRequestPolicy(null)
   }
 
-  async function uploadPortalImage(accept = 'image/*') {
-    try {
-      const file = await new Promise((resolve) => {
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = accept
-        input.onchange = () => resolve(input.files?.[0] || null)
-        input.click()
-      })
-      if (!file) return ''
-      const uploaded = await window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name })
-      if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
-      return uploaded.public_path
-    } catch (error) {
-      notify(error?.message || 'Image upload failed', 'error')
-      return ''
-    }
-  }
-
   async function uploadDraftImage(key) {
-    const path = await uploadPortalImage('image/*')
-    if (path) setDraft(key, path)
+    await uploadPortalMedia(key, 'image/*')
   }
 
   async function uploadAboutBlockMedia(blockId) {
     const block = aboutBlocks.find((entry) => entry.id === blockId)
     const accept = block?.type === 'video' ? 'video/*' : 'image/*'
-    const path = await uploadPortalImage(accept)
-    if (path) {
-      updateAboutBlock(blockId, 'mediaUrl', path)
-    }
+    await uploadPortalMedia(`about:${blockId}`, accept)
   }
 
   function openFilePicker(target, mediaType = 'image', title = copy('openGallery', 'Choose file')) {
@@ -2560,11 +2705,15 @@ export default function CatalogPage({ publicView = false }) {
       || target === 'customer_portal_favicon_image'
       || target === 'customer_portal_cover_image'
     ) {
+      clearPortalUploadPreview(target)
       setDraft(target, publicPath)
+      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
       return
     }
     if (String(target).startsWith('about:')) {
+      clearPortalUploadPreview(target)
       updateAboutBlock(String(target).slice('about:'.length), 'mediaUrl', publicPath)
+      updateMediaUploadState(target, { type: 'success', publicPath, processingStatus: 'ready' })
     }
   }
 
@@ -3485,23 +3634,62 @@ export default function CatalogPage({ publicView = false }) {
                         </div>
                       </div>
                       <div className="space-y-3">
+                        {(() => {
+                          const uploadKey = `about:${block.id}`
+                          const blockUpload = getMediaUploadState(uploadKey)
+                          const uploadLabel = block.type === 'video' ? copy('uploadVideo', 'Upload video') : copy('uploadImage', 'Upload image')
+                          return (
+                            <>
                         <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? copy('videoUrl', 'Video URL') : copy('imageUrl', 'Image URL')}</label>
                         <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)}>
+                          <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)} disabled={blockUpload.status === 'uploading'}>
                             <Upload className="mr-2 inline h-4 w-4" />
-                            {block.type === 'video' ? copy('uploadVideo', 'Upload video') : copy('uploadImage', 'Upload image')}
+                            {blockUpload.status === 'uploading' ? copy('uploading', 'Uploading...') : uploadLabel}
                           </button>
-                          <button type="button" className="btn-secondary text-sm" onClick={() => openFilePicker(`about:${block.id}`, block.type === 'video' ? 'video' : 'image', block.title || copy('about', 'About'))}>
+                          {blockUpload.status === 'uploading' ? (
+                            <button type="button" className="btn-secondary text-sm" onClick={() => cancelPortalMediaUpload(uploadKey)}>
+                              {copy('cancelUpload', 'Cancel upload')}
+                            </button>
+                          ) : null}
+                          <button type="button" className="btn-secondary text-sm" onClick={() => openFilePicker(`about:${block.id}`, block.type === 'video' ? 'video' : 'image', block.title || copy('about', 'About'))} disabled={blockUpload.status === 'uploading'}>
                             {copy('openFiles', 'Files')}
                           </button>
                           {block.mediaUrl && block.type !== 'video' ? (
-                            <button type="button" className="btn-secondary text-sm" onClick={() => openPortalImage(block.title || copy('about', 'About'), [block.mediaUrl])}>
+                            <button type="button" className="btn-secondary text-sm" onClick={() => openPortalImage(block.title || copy('about', 'About'), [block.mediaUrl])} disabled={blockUpload.status === 'uploading'}>
                               <Eye className="mr-2 inline h-4 w-4" />
                               {copy('openGallery', 'Open image gallery')}
                             </button>
                           ) : null}
+                          {block.mediaUrl ? (
+                            <button type="button" className="btn-secondary text-sm" onClick={() => clearPortalMediaTarget(uploadKey)} disabled={blockUpload.status === 'uploading'}>
+                              {copy('clearImage', 'Clear')}
+                            </button>
+                          ) : null}
                         </div>
+                        {blockUpload.status === 'uploading' ? (
+                          <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                            <div className="flex items-center justify-between gap-3">
+                              <span>{blockUpload.fileName || copy('uploading', 'Uploading...')}</span>
+                              <span>{Number(blockUpload.progress || 0)}%</span>
+                            </div>
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                              <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(6, Number(blockUpload.progress || 0))}%` }} />
+                            </div>
+                          </div>
+                        ) : null}
+                        {blockUpload.processingStatus && blockUpload.processingStatus !== 'idle' && blockUpload.status === 'uploaded' ? (
+                          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                            {blockUpload.processingStatus === 'queued'
+                              ? copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')
+                              : copy('portalUploadReady', 'Uploaded and ready.')}
+                          </div>
+                        ) : null}
+                        {blockUpload.error ? (
+                          <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                            {blockUpload.error}
+                          </div>
+                        ) : null}
                         {block.mediaUrl ? (
                           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3">
                             {block.type === 'video' ? (
@@ -3513,6 +3701,9 @@ export default function CatalogPage({ publicView = false }) {
                             )}
                           </div>
                         ) : null}
+                            </>
+                          )
+                        })()}
                       </div>
                     </div>
                   </article>
@@ -3856,30 +4047,42 @@ export default function CatalogPage({ publicView = false }) {
               value={editorDraft.customer_portal_logo_image}
               fieldId="portal-logo-image"
               onUpload={() => uploadDraftImage('customer_portal_logo_image')}
+              onCancelUpload={() => cancelPortalMediaUpload('customer_portal_logo_image')}
               onChooseExisting={() => openFilePicker('customer_portal_logo_image', 'image', copy('logoImage', 'Logo image'))}
               onChange={(value) => setDraft('customer_portal_logo_image', value)}
-              onClear={() => setDraft('customer_portal_logo_image', '')}
+              onClear={() => clearPortalMediaTarget('customer_portal_logo_image')}
               onPreview={() => openPortalImage(copy('logoImage', 'Logo image'), [editorDraft.customer_portal_logo_image])}
               uploadLabel={copy('uploadImage', 'Upload image')}
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
               previewLabel={copy('openGallery', 'Open image gallery')}
               hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+              cancelLabel={copy('cancelUpload', 'Cancel upload')}
+              uploadingLabel={copy('uploading', 'Uploading...')}
+              uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+              uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+              uploadState={getMediaUploadState('customer_portal_logo_image')}
             />
             <ImageField
               label={copy('faviconImage', 'Browser tab icon')}
               value={editorDraft.customer_portal_favicon_image}
               fieldId="portal-favicon-image"
               onUpload={() => uploadDraftImage('customer_portal_favicon_image')}
+              onCancelUpload={() => cancelPortalMediaUpload('customer_portal_favicon_image')}
               onChooseExisting={() => openFilePicker('customer_portal_favicon_image', 'image', copy('faviconImage', 'Browser tab icon'))}
               onChange={(value) => setDraft('customer_portal_favicon_image', value)}
-              onClear={() => setDraft('customer_portal_favicon_image', '')}
+              onClear={() => clearPortalMediaTarget('customer_portal_favicon_image')}
               onPreview={() => openPortalImage(copy('faviconImage', 'Browser tab icon'), [editorDraft.customer_portal_favicon_image])}
               uploadLabel={copy('uploadImage', 'Upload image')}
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
               previewLabel={copy('openGallery', 'Open image gallery')}
               hint={copy('faviconHint', 'Shown in browser tabs and saved shortcuts. If empty, the circular logo is used automatically.')}
+              cancelLabel={copy('cancelUpload', 'Cancel upload')}
+              uploadingLabel={copy('uploading', 'Uploading...')}
+              uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+              uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+              uploadState={getMediaUploadState('customer_portal_favicon_image')}
             />
             <div className="grid min-w-0 gap-4">
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-logo">
@@ -4007,15 +4210,21 @@ export default function CatalogPage({ publicView = false }) {
               value={editorDraft.customer_portal_cover_image}
               fieldId="portal-cover-image"
               onUpload={() => uploadDraftImage('customer_portal_cover_image')}
+              onCancelUpload={() => cancelPortalMediaUpload('customer_portal_cover_image')}
               onChooseExisting={() => openFilePicker('customer_portal_cover_image', 'image', copy('coverImage', 'Cover image'))}
               onChange={(value) => setDraft('customer_portal_cover_image', value)}
-              onClear={() => setDraft('customer_portal_cover_image', '')}
+              onClear={() => clearPortalMediaTarget('customer_portal_cover_image')}
               onPreview={() => openPortalImage(copy('coverImage', 'Cover image'), [editorDraft.customer_portal_cover_image])}
               uploadLabel={copy('uploadImage', 'Upload image')}
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
               previewLabel={copy('openGallery', 'Open image gallery')}
               hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+              cancelLabel={copy('cancelUpload', 'Cancel upload')}
+              uploadingLabel={copy('uploading', 'Uploading...')}
+              uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+              uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+              uploadState={getMediaUploadState('customer_portal_cover_image')}
             />
             <label className="xl:col-span-2 mt-1 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-cover">
               <span className="text-sm font-medium text-slate-700">{copy('showCover', 'Show cover image')}</span>

@@ -1255,7 +1255,8 @@ CREATE TABLE public.stock_transfers (
     notes text,
     user_id bigint,
     user_name text,
-    created_at text DEFAULT CURRENT_TIMESTAMP
+    created_at text DEFAULT CURRENT_TIMESTAMP,
+    client_request_id text
 );
 
 
@@ -1811,6 +1812,13 @@ CREATE INDEX idx_inventory_movements_product_created_pg ON public.inventory_move
 --
 
 CREATE INDEX idx_inventory_movements_user_created_pg ON public.inventory_movements USING btree (user_id, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_stock_transfers_client_request_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_stock_transfers_client_request_unique ON public.stock_transfers USING btree (client_request_id) WHERE ((client_request_id IS NOT NULL) AND (client_request_id <> ''::text));
 
 
 --

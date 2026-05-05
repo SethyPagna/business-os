@@ -497,12 +497,13 @@ async function registerStoredAsset({
   createdByName = null,
   source = 'upload',
   optimization = null,
+  deferOptimization = false,
 }) {
   const publicPath = `/uploads/${storedName}`
   const absPath = path.join(UPLOADS_PATH, storedName)
   const mediaType = getMediaType({ mimeType, fileName: storedName })
   let imageOptimization = null
-  if (mediaType === 'image' && !optimization && fs.existsSync(absPath) && shouldCompressImage(storedName, mimeType || getMimeTypeFromName(storedName))) {
+  if (!deferOptimization && mediaType === 'image' && !optimization && fs.existsSync(absPath) && shouldCompressImage(storedName, mimeType || getMimeTypeFromName(storedName))) {
     try {
       const originalBuffer = fs.readFileSync(absPath)
       imageOptimization = await compressBufferForAsset(originalBuffer, {
@@ -521,10 +522,18 @@ async function registerStoredAsset({
       }
     }
   }
-  const videoOptimization = mediaType === 'video' && !optimization
+  const videoOptimization = !deferOptimization && mediaType === 'video' && !optimization
     ? optimizeStoredVideo(absPath, { mimeType, fileName: storedName })
     : null
-  const effectiveOptimization = optimization || imageOptimization || videoOptimization
+  const deferredOptimization = deferOptimization && ['image', 'video'].includes(mediaType)
+    ? {
+        original_byte_size: fs.existsSync(absPath) ? fs.statSync(absPath).size : null,
+        optimized_byte_size: fs.existsSync(absPath) ? fs.statSync(absPath).size : null,
+        optimization_status: 'queued',
+        optimization_note: 'Stored immediately; optimization runs in the media worker.',
+      }
+    : null
+  const effectiveOptimization = optimization || imageOptimization || videoOptimization || deferredOptimization
   if (mediaType === 'image' && effectiveOptimization?.over_budget && source !== 'backfill') {
     throw new Error('Images and logos must compress to 40KB or less. Please upload a smaller or clearer source image.')
   }
@@ -556,7 +565,7 @@ async function registerStoredAsset({
   }))
 }
 
-async function registerUploadFromRequest(file, actor = {}) {
+async function registerUploadFromRequest(file, actor = {}, options = {}) {
   if (!file?.filename) throw new Error('No uploaded file to register')
   return registerStoredAsset({
     storedName: file.filename,
@@ -566,6 +575,7 @@ async function registerUploadFromRequest(file, actor = {}) {
     createdByName: actor.userName || null,
     source: 'upload',
     optimization: file.optimization || null,
+    deferOptimization: !!options.deferOptimization,
   })
 }
 

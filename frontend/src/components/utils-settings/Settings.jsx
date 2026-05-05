@@ -10,6 +10,8 @@ import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
+import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.js'
+import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../../utils/mediaUpload.js'
 
 const FALLBACK_COPY = {
   en: {
@@ -341,7 +343,7 @@ function SettingsSection({
 }
 
 export default function Settings() {
-  const { t, settings, saveSettings, user, notify, deviceTimezone } = useApp()
+  const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone } = useApp()
   const [otpStatus, setOtpStatus] = useState(false)
   const [otpModal, setOtpModal] = useState(null)
   const [pmList, setPmList] = useState([])
@@ -351,13 +353,22 @@ export default function Settings() {
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState(null)
   const [settingsSection, setSettingsSection] = useState('all')
+  const [settingsConflict, setSettingsConflict] = useState(null)
+  const [showConflictReview, setShowConflictReview] = useState(false)
+  const [uploadStates, setUploadStates] = useState(() => ({
+    ui_app_favicon_image: createInitialUploadState(),
+  }))
   const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
-  const uploadInFlightRef = useRef(false)
+  const uploadControllersRef = useRef(new Map())
+  const uploadPreviewUrlsRef = useRef(new Map())
   const aliveRef = useRef(true)
-  const [uploadingImage, setUploadingImage] = useState(false)
   const sectionStorageKey = 'business-os:settings:section'
   const showSettingsSection = (sectionId) => settingsSection === 'all' || settingsSection === sectionId
+  const uploadingImage = useMemo(
+    () => Object.values(uploadStates).some((state) => state?.status === 'uploading'),
+    [uploadStates],
+  )
 
   const uiLanguage = form.language || settings.language || 'en'
   const copy = useCopy(uiLanguage, t)
@@ -402,6 +413,12 @@ export default function Settings() {
       aliveRef.current = false
       invalidateTrackedRequest(otpStatusRequestRef)
       invalidateTrackedRequest(faviconPreviewRequestRef)
+      uploadControllersRef.current.forEach((controller) => controller?.abort?.())
+      uploadControllersRef.current.clear()
+      uploadPreviewUrlsRef.current.forEach((previewUrl) => {
+        if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
+      })
+      uploadPreviewUrlsRef.current.clear()
     }
   }, [])
 
@@ -495,6 +512,13 @@ export default function Settings() {
   }, [mobilePinned, navItems])
 
   const setValue = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const getUploadState = useCallback(
+    (key) => uploadStates[key] || createInitialUploadState(),
+    [uploadStates],
+  )
+  const updateUploadState = useCallback((key, action) => {
+    setUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
+  }, [])
   const updateStoredColorList = useCallback((key, updater) => {
     setForm((current) => {
       const currentList = parseStoredColors(current[key])
@@ -605,10 +629,14 @@ export default function Settings() {
     saveSettings({ pos_payment_methods: JSON.stringify(updated) })
   }
 
+  const cancelImageUpload = useCallback((key) => {
+    const controller = uploadControllersRef.current.get(key)
+    controller?.abort?.()
+    uploadControllersRef.current.delete(key)
+    updateUploadState(key, { type: 'cancel' })
+  }, [updateUploadState])
+
   const uploadImageSetting = async (key) => {
-    if (uploadInFlightRef.current) return
-    uploadInFlightRef.current = true
-    if (aliveRef.current) setUploadingImage(true)
     try {
       const file = await new Promise((resolve) => {
         const input = document.createElement('input')
@@ -618,34 +646,111 @@ export default function Settings() {
         input.click()
       })
       if (!file) return
-      const uploaded = await window.api.uploadFileAsset({ file, userId: user?.id, userName: user?.name })
+      const previousPreview = uploadPreviewUrlsRef.current.get(key)
+      if (previousPreview && String(previousPreview).startsWith('blob:')) {
+        URL.revokeObjectURL(previousPreview)
+      }
+      const localPreview = URL.createObjectURL(file)
+      uploadPreviewUrlsRef.current.set(key, localPreview)
+      setValue(key, localPreview)
+
+      const controller = new AbortController()
+      uploadControllersRef.current.set(key, controller)
+      updateUploadState(key, {
+        type: 'start',
+        fileName: file.name,
+        previewUrl: localPreview,
+      })
+      const uploaded = await window.api.uploadFileAsset({
+        file,
+        userId: user?.id,
+        userName: user?.name,
+        signal: controller.signal,
+        onProgress: ({ percent }) => updateUploadState(key, { type: 'progress', progress: percent }),
+      })
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current) return
-      setValue(key, uploaded.public_path)
+      const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
+      setValue(key, nextPath)
+      updateUploadState(key, {
+        type: 'success',
+        publicPath: nextPath,
+        processingStatus: uploaded.processing_status || 'ready',
+        mediaJobId: uploaded.media_job_id || '',
+        cacheVersion: uploaded.cache_version || '',
+      })
     } catch (error) {
       if (aliveRef.current) {
-        notify(error?.message || 'Image upload failed', 'error')
+        const cancelled = /cancelled/i.test(String(error?.message || ''))
+        updateUploadState(key, cancelled ? { type: 'cancel' } : { type: 'error', error: error?.message || 'Image upload failed' })
+        if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
       }
     } finally {
-      uploadInFlightRef.current = false
-      if (aliveRef.current) setUploadingImage(false)
+      uploadControllersRef.current.delete(key)
     }
   }
 
   const handleSaveSettings = async () => {
     const result = await saveSettings(form)
     if (result?.conflict) {
-      if (result.latestSettings && typeof result.latestSettings === 'object') {
-        setForm({ ...result.latestSettings })
-      }
-      notify(
-        uiLanguage === 'km'
-          ? 'ការកំណត់ត្រូវបានផ្លាស់ប្តូរនៅកន្លែងផ្សេង។ យើងកំពុងបង្ហាញតម្លៃថ្មីបំផុត។ សូមពិនិត្យ ហើយរក្សាទុកម្តងទៀត។'
-          : 'Settings changed somewhere else. The latest values are now shown. Please review and save again.',
-        'warning',
-      )
+      setSettingsConflict(buildSettingsConflictState({
+        attempted: result?.attempted || form,
+        currentSettings: result?.currentSettings || {},
+        actualUpdatedAt: result?.actualUpdatedAt || null,
+        expectedUpdatedAt: result?.expectedUpdatedAt || null,
+      }))
+      setShowConflictReview(false)
+      return
     }
+    setSettingsConflict(null)
+    setShowConflictReview(false)
   }
+
+  const conflictFieldRows = useMemo(() => (
+    settingsConflict
+      ? diffSettingsConflictFields({
+          localDraft: settingsConflict.localDraft || form,
+          serverSettings: settingsConflict.serverSettings || {},
+        })
+      : []
+  ), [form, settingsConflict])
+
+  const reloadLatestSettings = useCallback(async () => {
+    const latest = await loadSettings({ force: true }).catch(() => null)
+    const nextSettings = latest && typeof latest === 'object'
+      ? latest
+      : (settingsConflict?.serverSettings || {})
+    setForm({ ...nextSettings })
+    setSettingsConflict(null)
+    setShowConflictReview(false)
+  }, [loadSettings, settingsConflict])
+
+  const keepServerSettings = useCallback(() => {
+    setForm({ ...(settingsConflict?.serverSettings || {}) })
+    setSettingsConflict(null)
+    setShowConflictReview(false)
+  }, [settingsConflict])
+
+  const retrySaveWithLatest = useCallback(async () => {
+    const mergedDraft = {
+      ...(settingsConflict?.serverSettings || {}),
+      ...form,
+    }
+    setForm(mergedDraft)
+    const result = await saveSettings(mergedDraft)
+    if (result?.conflict) {
+      setSettingsConflict(buildSettingsConflictState({
+        attempted: result?.attempted || mergedDraft,
+        currentSettings: result?.currentSettings || {},
+        actualUpdatedAt: result?.actualUpdatedAt || null,
+        expectedUpdatedAt: result?.expectedUpdatedAt || null,
+      }))
+      setShowConflictReview(true)
+      return
+    }
+    setSettingsConflict(null)
+    setShowConflictReview(false)
+  }, [form, saveSettings, settingsConflict])
 
   const notificationRealertValue = String(form.notifications_realert_minutes || '10')
   const notificationRealertPreset = ['5', '10', '30', '60'].includes(notificationRealertValue)
@@ -685,6 +790,69 @@ export default function Settings() {
         className="mx-auto mb-4 max-w-[96rem]"
       />
 
+      {settingsConflict ? (
+        <div className="mx-auto mb-4 max-w-[96rem] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="font-semibold">
+                {uiLanguage === 'km' ? 'ការកំណត់ត្រូវបានផ្លាស់ប្តូរនៅឧបករណ៍ផ្សេង។' : 'Settings changed on another device.'}
+              </div>
+              <div className="mt-1 text-xs text-amber-800/90 dark:text-amber-100/80">
+                {uiLanguage === 'km'
+                  ? 'សូមទាញយកតម្លៃថ្មី ប្រៀបធៀបការផ្លាស់ប្តូរ ឬព្យាយាមរក្សាទុកម្តងទៀតជាមួយកំណែចុងក្រោយ។'
+                  : 'Reload the latest values, compare changed fields, or retry your save with the newest version.'}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-secondary text-xs" onClick={reloadLatestSettings}>
+                {uiLanguage === 'km' ? 'ទាញយកថ្មី' : 'Reload latest'}
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={() => setShowConflictReview((current) => !current)}>
+                {uiLanguage === 'km' ? 'ពិនិត្យការផ្លាស់ប្តូរ' : 'Review changes'}
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={() => { setSettingsConflict(null); setShowConflictReview(false) }}>
+                {uiLanguage === 'km' ? 'បិទ' : 'Dismiss'}
+              </button>
+            </div>
+          </div>
+
+          {showConflictReview ? (
+            <div className="mt-3 rounded-lg border border-amber-200/80 bg-white/80 dark:border-amber-900/60 dark:bg-slate-900/40">
+              <div className="border-b border-amber-200/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-900/60 dark:text-amber-100">
+                {uiLanguage === 'km' ? 'ការផ្លាស់ប្តូរដែលខុសគ្នា' : 'Changed fields'}
+              </div>
+              <div className="divide-y divide-amber-100 dark:divide-amber-900/40">
+                {conflictFieldRows.length ? conflictFieldRows.map((row) => (
+                  <div key={row.key} className="grid gap-3 px-3 py-3 md:grid-cols-[11rem_minmax(0,1fr)_minmax(0,1fr)]">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">{row.key.replace(/_/g, ' ')}</div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">{uiLanguage === 'km' ? 'របស់អ្នក' : 'Your draft'}</div>
+                      <div className="mt-1 break-words text-sm text-gray-900 dark:text-white">{String(row.localValue ?? '') || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">{uiLanguage === 'km' ? 'ម៉ាស៊ីនមេ' : 'Server'}</div>
+                      <div className="mt-1 break-words text-sm text-gray-900 dark:text-white">{String(row.serverValue ?? '') || '—'}</div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="px-3 py-3 text-xs text-gray-600 dark:text-gray-300">
+                    {uiLanguage === 'km' ? 'មិនមានវាលខុសគ្នាដែលត្រូវបង្ហាញទេ។' : 'No changed fields to compare.'}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2 border-t border-amber-200/80 px-3 py-3 sm:flex-row sm:justify-end dark:border-amber-900/60">
+                <button type="button" className="btn-secondary text-xs" onClick={keepServerSettings}>
+                  {uiLanguage === 'km' ? 'រក្សាតម្លៃម៉ាស៊ីនមេ' : 'Keep server'}
+                </button>
+                <button type="button" className="btn-primary text-xs" onClick={retrySaveWithLatest}>
+                  {uiLanguage === 'km' ? 'រក្សាទុកម្តងទៀតជាមួយកំណែចុងក្រោយ' : 'Retry save with latest'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mx-auto max-w-[96rem] space-y-4">
         {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('business_info')} defaultOpen>
@@ -703,6 +871,10 @@ export default function Settings() {
           title="Browser tab icon"
           description="Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page."
         >
+          {(() => {
+            const faviconUpload = getUploadState('ui_app_favicon_image')
+            return (
+              <>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
             </div>
@@ -732,16 +904,60 @@ export default function Settings() {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={() => uploadImageSetting('ui_app_favicon_image')} disabled={uploadingImage}>
+              <button type="button" className="btn-secondary text-sm" onClick={() => uploadImageSetting('ui_app_favicon_image')} disabled={faviconUpload.status === 'uploading'}>
                 <ImagePlus className="h-4 w-4" />
-                <span>{uploadingImage ? (t('uploading') || 'Uploading...') : (t('upload_image') || 'Upload Image')}</span>
+                <span>{faviconUpload.status === 'uploading' ? (t('uploading') || 'Uploading...') : (t('upload_image') || 'Upload Image')}</span>
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setValue('ui_app_favicon_image', '')} disabled={uploadingImage}>
+              {faviconUpload.status === 'uploading' ? (
+                <button type="button" className="btn-secondary text-sm" onClick={() => cancelImageUpload('ui_app_favicon_image')}>
+                  <span>{uiLanguage === 'km' ? 'បោះបង់' : 'Cancel upload'}</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={() => {
+                  const previewUrl = uploadPreviewUrlsRef.current.get('ui_app_favicon_image')
+                  if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
+                  uploadPreviewUrlsRef.current.delete('ui_app_favicon_image')
+                  setValue('ui_app_favicon_image', '')
+                  updateUploadState('ui_app_favicon_image', { type: 'success', publicPath: '', processingStatus: 'idle' })
+                }}
+                disabled={faviconUpload.status === 'uploading'}
+              >
                 <Trash2 className="h-4 w-4" />
                 <span>{t('clear_btn') || 'Clear'}</span>
               </button>
             </div>
           </div>
+          <div className="mt-3 space-y-2 text-xs">
+            {faviconUpload.status === 'uploading' ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                <div className="flex items-center justify-between gap-3">
+                  <span>{faviconUpload.fileName || (uiLanguage === 'km' ? 'កំពុងផ្ទុកឡើង' : 'Uploading')}</span>
+                  <span>{Number(faviconUpload.progress || 0)}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/60">
+                  <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(6, Number(faviconUpload.progress || 0))}%` }} />
+                </div>
+              </div>
+            ) : null}
+            {faviconUpload.processingStatus && faviconUpload.processingStatus !== 'idle' && faviconUpload.status === 'uploaded' ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+                {faviconUpload.processingStatus === 'queued'
+                  ? (uiLanguage === 'km' ? 'បានផ្ទុកឡើង ហើយកំពុងបង្កើតកំណែបង្កើនប្រសិទ្ធភាពនៅផ្ទៃក្រោយ។' : 'Uploaded. Background optimization is running now.')
+                  : (uiLanguage === 'km' ? 'រូបភាពត្រូវបានផ្ទុកឡើងរួចរាល់។' : 'Image uploaded and ready.')}
+              </div>
+            ) : null}
+            {faviconUpload.error ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                {faviconUpload.error}
+              </div>
+            ) : null}
+          </div>
+              </>
+            )
+          })()}
         </SettingsSection>
         ) : null}
 

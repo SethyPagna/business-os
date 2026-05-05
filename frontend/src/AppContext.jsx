@@ -529,9 +529,14 @@ export function AppProvider({ children }) {
       let message = detail.message || 'This item changed on another device. Refresh and try again.'
       let entityLabel = 'Item'
       if (entity === 'settings') {
-        message = t('settings_write_conflict') || 'Settings changed on another device. Latest values have been reloaded.'
+        message = t('settings_write_conflict') || 'Settings changed on another device. Review the latest values before saving again.'
         entityLabel = 'Settings'
-        loadSettings({ force: true }).catch(() => {})
+        const noticeId = Date.now()
+        setNotification({ message, type: 'warning', id: noticeId })
+        window.setTimeout(() => {
+          setNotification((current) => (current?.id === noticeId ? null : current))
+        }, 8000)
+        return
       } else if (entity === 'sale') {
         message = 'This sale changed on another device. Latest data is loading now.'
         entityLabel = 'Sale'
@@ -1190,14 +1195,21 @@ export function AppProvider({ children }) {
       notify(t('settings_saved'))
       return { success: true }
     } catch (error) {
-      if (error?.conflict || error?.code === 'write_conflict') {
-        const latestSettings = await loadSettings().catch(() => null)
-        return { success: false, conflict: true, latestSettings }
+      if (error?.conflict || error?.code === 'write_conflict' || error?.code === 'settings_conflict') {
+        return {
+          success: false,
+          conflict: true,
+          code: error?.code || 'settings_conflict',
+          currentSettings: error?.currentSettings || error?.current || {},
+          actualUpdatedAt: error?.actualUpdatedAt || null,
+          expectedUpdatedAt: error?.expectedUpdatedAt || null,
+          attempted: error?.attempted || newSettings || {},
+        }
       }
       notify(error?.message || 'Failed to save settings', 'error')
       return { success: false, error }
     }
-  }, [applyDeviceSettings, loadSettings, notify, user]) // eslint-disable-line
+  }, [applyDeviceSettings, notify, t, user]) // eslint-disable-line
 
   const toggleTheme = useCallback(() => {
     applyDeviceSettings({ theme: theme === 'dark' ? 'light' : 'dark' })

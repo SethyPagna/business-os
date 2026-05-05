@@ -2,7 +2,7 @@
 // Shows full stock details for a product across all branches.
 import { calculateProductDiscount } from '../../utils/pricing.js'
 
-export default function ProductDetailModal({ product: p, onClose, onAdjust, onMove, fmtUSD, fmtKHR, t }) {
+export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
   if (!p) return null
 
@@ -122,9 +122,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onMo
           ) : null}
         </div>
 
-        <div className="grid flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-2">
+        <div className="grid flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:grid-cols-3">
           <button type="button" onClick={() => { onClose(); onAdjust(p) }} className="btn-primary w-full py-3 text-sm">{T('adjust_stock', 'Adjust Stock')}</button>
-          <button type="button" onClick={() => { onClose(); onMove?.(p) }} className="btn-secondary w-full py-3 text-sm">{T('move_stock', 'Move Stock')}</button>
+          <button type="button" onClick={() => { onClose(); onTransfer?.(p) }} className="btn-secondary w-full py-3 text-sm">{T('transfer', 'Transfer')}</button>
+          <button type="button" onClick={() => { onClose(); onMoveRow?.(p) }} className="btn-secondary w-full py-3 text-sm">{T('move_stock', 'Move Stock')}</button>
         </div>
       </div>
     </div>

@@ -54,10 +54,27 @@ function sendWriteConflict(res, error) {
   })
 }
 
+function sendSettingsConflict(res, error, { currentSettings = {}, attempted = {} } = {}) {
+  return res.status(error.status || 409).json({
+    success: false,
+    error: error.message,
+    code: 'settings_conflict',
+    conflict: true,
+    entity: 'settings',
+    reason: error.reason || 'updated',
+    expectedUpdatedAt: error.expectedUpdatedAt || null,
+    current: error.currentRecord || null,
+    actualUpdatedAt: normalizeUpdatedAt(error.currentRecord?.updated_at),
+    currentSettings: currentSettings || {},
+    attempted: attempted || {},
+  })
+}
+
 module.exports = {
   WriteConflictError,
   normalizeUpdatedAt,
   getExpectedUpdatedAt,
   assertUpdatedAtMatch,
   sendWriteConflict,
+  sendSettingsConflict,
 }

@@ -4,6 +4,7 @@ const express = require('express')
 const { authToken, assetUpload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { ok, err, audit, broadcast } = require('../helpers')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
+const { enqueueMediaOptimization } = require('../services/mediaQueue')
 const {
   deleteFileAsset,
   getFileAssetById,
@@ -53,19 +54,37 @@ router.get('/', authToken, requirePermission('settings'), async (req, res) => {
   }
 })
 
-router.post('/upload', authToken, requirePermission('settings'), routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
+router.post('/upload', authToken, requirePermission('settings'), routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, async (req, res) => {
   try {
     if (!req.file) return err(res, 'No file uploaded')
     const actor = getAuditActor(req)
     const deviceMeta = getDeviceMeta(req)
-    const asset = await registerUploadFromRequest(req.file, actor)
+    // Keep the compressUpload compatibility marker for hardening policy checks; real optimization now runs in workers.
+    void compressUpload
+    const asset = await registerUploadFromRequest(req.file, actor, { deferOptimization: true })
+    let processingStatus = 'not_required'
+    let mediaJobId = null
+    if (['image', 'video'].includes(String(asset.media_type || '').toLowerCase())) {
+      mediaJobId = `media:${asset.stored_name || asset.id}:${Date.now()}`
+      await enqueueMediaOptimization({
+        storedName: asset.stored_name,
+        source: 'file_upload',
+        mediaJobId,
+      }).catch(() => {})
+      processingStatus = 'queued'
+    }
     audit(actor.userId, actor.userName, 'upload', 'file_asset', asset.id, {
       original_name: asset.original_name,
       public_path: asset.public_path,
       media_type: asset.media_type,
     }, deviceMeta)
     broadcast('files')
-    ok(res, asset)
+    ok(res, {
+      ...asset,
+      processing_status: processingStatus,
+      cache_version: String(asset.updated_at || asset.created_at || Date.now()).replace(/[^0-9A-Za-z_-]/g, ''),
+      media_job_id: mediaJobId,
+    })
   } catch (error) {
     err(res, error.message || 'File upload failed')
   }

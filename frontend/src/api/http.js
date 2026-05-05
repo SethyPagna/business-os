@@ -192,6 +192,8 @@ function createApiError(status, parsed, text) {
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
   error.current = parsed?.current || null
+  error.currentSettings = parsed?.currentSettings || null
+  error.attempted = parsed?.attempted || null
   error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
   error.actualUpdatedAt = parsed?.actualUpdatedAt || null
   return error

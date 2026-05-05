@@ -166,6 +166,8 @@ class PostgresCompatDatabase {
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_groups_org_slug_unique ON organization_groups(organization_id, slug)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_branch_stock_product_branch_unique ON branch_stock(product_id, branch_id)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_public_path_unique ON file_assets(public_path)',
+      'ALTER TABLE stock_transfers ADD COLUMN IF NOT EXISTS client_request_id TEXT',
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_transfers_client_request_unique ON stock_transfers(client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id <> ''",
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_google_drive_sync_entries_path_unique ON google_drive_sync_entries(relative_path)',
       'ALTER TABLE google_drive_sync_entries ADD COLUMN IF NOT EXISTS upload_session_url TEXT',
       'ALTER TABLE google_drive_sync_entries ADD COLUMN IF NOT EXISTS upload_offset BIGINT DEFAULT 0',

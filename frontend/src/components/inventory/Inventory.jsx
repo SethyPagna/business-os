@@ -2,7 +2,7 @@
 // Main Inventory page ??sub-components imported from sibling files.
 
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
-import { Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
+import { ArrowRightLeft, Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
@@ -18,7 +18,7 @@ import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import DualMoney from './DualMoney'
 import ProductDetailModal from './ProductDetailModal'
 import InventoryImportModal from './InventoryImportModal'
-import { buildMovementGroups, movementGroupHaystack } from './movementGroups'
+import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
@@ -112,6 +112,7 @@ export default function Inventory() {
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
   const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState([])
+  const [movementMeta,  setMovementMeta]  = useState({ total: 0, page: 1, pageSize: 10000, totalPages: 1 })
   const [branches,      setBranches]      = useState([])
   const [returnStats,   setReturnStats]   = useState(null)
   const [taxDelivery,   setTaxDelivery]   = useState({ tax: 0, delivery: 0, deliveryCount: 0 })
@@ -120,6 +121,8 @@ export default function Inventory() {
   const [adjustForm,    setAdjustForm]    = useState({ type:'add', quantity:1, unit_cost_usd:0, unit_cost_khr:0, reason:'', branch_id:'' })
   const [moveModal,     setMoveModal]     = useState(null)
   const [moveForm,      setMoveForm]      = useState({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
+  const [transferModal, setTransferModal] = useState(null)
+  const [transferForm,  setTransferForm]  = useState({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
   const [search,        setSearch]        = useState('')
   const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
   const deferredSearch = useDeferredValue(search)
@@ -146,11 +149,13 @@ export default function Inventory() {
   const [selectedMovementIds, setSelectedMovementIds] = useState(() => new Set())
   const [detailProduct, setDetailProduct] = useState(null)
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
+  const [expandedMovementPages, setExpandedMovementPages] = useState({})
   const [collapsedMovementSections, setCollapsedMovementSections] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [moveSaving,    setMoveSaving]    = useState(false)
+  const [transferSaving, setTransferSaving] = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
   const movementSelectAllRef = useRef(null)
@@ -234,7 +239,11 @@ export default function Inventory() {
         const result = await settleLoaderMap({
           stats: () => window.api.getInventoryStats(branchOpts),
           summary: () => window.api.searchInventoryProducts(productQuery),
-          movements: () => window.api.getInventoryMovements(branchOpts),
+          movements: () => window.api.getInventoryMovements({
+            ...branchOpts,
+            page: movementMeta.page,
+            pageSize: movementMeta.pageSize,
+          }),
           rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
           branches: () => window.api.getBranches(),
           returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
@@ -276,7 +285,22 @@ export default function Inventory() {
         } else if (loadedOnceRef.current) {
           setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្ថិតិស្តុកបានទេ។ កំពុងបង្ហាញតម្លៃចុងក្រោយដែលបានបញ្ជាក់។'))
         }
-        if (Array.isArray(movs)) setMovements(movs || [])
+        if (Array.isArray(movs)) {
+          setMovements(movs || [])
+          setMovementMeta((current) => ({
+            ...current,
+            total: movs.length,
+            totalPages: 1,
+          }))
+        } else if (movs && typeof movs === 'object') {
+          setMovements(Array.isArray(movs.items) ? movs.items : [])
+          setMovementMeta({
+            total: Number(movs.total || 0),
+            page: Number(movs.page || movementMeta.page) || 1,
+            pageSize: Number(movs.pageSize || movementMeta.pageSize) || movementMeta.pageSize,
+            totalPages: Number(movs.totalPages || 1) || 1,
+          })
+        }
         if (rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
         if (dash && typeof dash === 'object') {
@@ -336,6 +360,8 @@ export default function Inventory() {
     inventoryProductPageSize,
     isAdmin,
     movementUserFilter,
+    movementMeta.page,
+    movementMeta.pageSize,
     searchMode,
     stockFilter,
     tr,
@@ -378,19 +404,30 @@ export default function Inventory() {
       .map((product) => Number(product?.parent_id || 0))
       .filter(Boolean),
   ), [summary])
+  const adjustTargetOptions = useMemo(() => {
+    if (!adjustModal) return []
+    const selectedId = Number(adjustModal.id || 0)
+    const familyRootId = Number(adjustModal.parent_id || selectedId)
+    return summary.filter((product) => {
+      const productId = Number(product?.id || 0)
+      const parentId = Number(product?.parent_id || 0)
+      return productId === selectedId || productId === familyRootId || parentId === familyRootId
+    })
+  }, [adjustModal, summary])
 
   const handleAdjust = async () => {
     if (adjustSaving) return
     const qty = parseFloat(adjustForm.quantity)
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
-    const previousSnapshot = cloneHistorySnapshot(adjustModal)
+    const selectedAdjustProduct = summary.find((product) => Number(product.id) === Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
+    const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
     const numericBranchId = adjustForm.branch_id ? parseInt(adjustForm.branch_id, 10) : null
     const previousQuantity = numericBranchId
-      ? Number((adjustModal.branch_stock || []).find((entry) => Number(entry?.branch_id || 0) === numericBranchId)?.quantity || 0)
-      : Number(getStockQty(adjustModal) || 0)
+      ? Number((selectedAdjustProduct?.branch_stock || []).find((entry) => Number(entry?.branch_id || 0) === numericBranchId)?.quantity || 0)
+      : Number(getStockQty(selectedAdjustProduct) || 0)
     const adjustmentRequest = {
-      productId: adjustModal.id,
-      productName: adjustModal.name,
+      productId: selectedAdjustProduct.id,
+      productName: selectedAdjustProduct.name,
       type: adjustForm.type,
       quantity: qty,
       unitCostUsd: parseFloat(adjustForm.unit_cost_usd) || 0,
@@ -446,7 +483,7 @@ export default function Inventory() {
   const openAdjust = (p) => {
     setAdjustModal(p)
     const defaultBranchId = branches.find(branch => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
-    setAdjustForm({ type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
+    setAdjustForm({ product_id: p.id, type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
   }
 
   const openMove = (p) => {
@@ -468,6 +505,26 @@ export default function Inventory() {
       discount_type: 'percent',
       discount_percent: '',
       discount_amount_usd: '',
+    })
+  }
+
+  const openTransfer = (p) => {
+    const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
+    const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
+    const defaultSourceId = branchFilter !== 'all'
+      ? String(branchFilter)
+      : String(firstStockBranch || branches.find((branch) => branch.is_default)?.id || branches[0]?.id || '')
+    const defaultDestinationId = String(
+      branches.find((branch) => String(branch.id) !== defaultSourceId)?.id
+      || branches[0]?.id
+      || '',
+    )
+    setTransferModal(p)
+    setTransferForm({
+      from_branch_id: defaultSourceId,
+      to_branch_id: defaultDestinationId !== defaultSourceId ? defaultDestinationId : '',
+      quantity: 1,
+      reason: '',
     })
   }
 
@@ -567,6 +624,48 @@ export default function Inventory() {
     }
   }
 
+  const handleTransferStock = async () => {
+    if (transferSaving || !transferModal) return
+    const quantity = Number.parseFloat(transferForm.quantity)
+    if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
+      notify(tr('select_transfer_branches', 'Choose both source and destination branches.', 'សូមជ្រើសរើសទាំងសាខាដើម និងសាខាគោលដៅ។'), 'error')
+      return
+    }
+    if (transferForm.from_branch_id === transferForm.to_branch_id) {
+      notify(tr('transfer_branch_must_differ', 'Source and destination branches must be different.', 'សាខាដើម និងសាខាគោលដៅ ត្រូវតែខុសគ្នា។'), 'error')
+      return
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      notify(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'), 'error')
+      return
+    }
+    if (!String(transferForm.reason || '').trim()) {
+      notify(tr('transfer_reason_required', 'A transfer reason is required.', 'ត្រូវការមូលហេតុសម្រាប់ការផ្ទេរ។'), 'error')
+      return
+    }
+
+    setTransferSaving(true)
+    try {
+      const result = await window.api.transferInventoryStock({
+        productId: transferModal.id,
+        fromBranchId: transferForm.from_branch_id,
+        toBranchId: transferForm.to_branch_id,
+        quantity,
+        reason: transferForm.reason,
+        userId: user?.id,
+        userName: user?.name || user?.username,
+      })
+      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed', 'ការផ្ទេរស្តុកបានបរាជ័យ'))
+      notify(tr('stock_transferred', 'Stock transferred', 'បានផ្ទេរស្តុក'))
+      setTransferModal(null)
+      await load(true)
+    } catch (error) {
+      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed', 'ការផ្ទេរស្តុកបានបរាជ័យ'), 'error')
+    } finally {
+      setTransferSaving(false)
+    }
+  }
+
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
   const searchTerms = deferredSearch.trim()
     ? deferredSearch.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
@@ -604,6 +703,10 @@ export default function Inventory() {
   useEffect(() => {
     setInventoryProductPage(1)
   }, [branchFilter, brandFilter, deferredSearch, groupFilter, inventoryInitialFilter, searchMode, stockFilter, tab])
+
+  useEffect(() => {
+    setMovementMeta((current) => ({ ...current, page: 1 }))
+  }, [branchFilter, movementUserFilter])
 
   const pagedSummary = useMemo(
     () => filteredSummary,
@@ -651,6 +754,12 @@ export default function Inventory() {
   }, [visibleMovementGroups])
 
   useEffect(() => {
+    setExpandedMovementPages((current) => Object.fromEntries(
+      Object.entries(current).filter(([groupId]) => visibleMovementGroups.some((group) => group.id === groupId)),
+    ))
+  }, [visibleMovementGroups])
+
+  useEffect(() => {
     const validIds = new Set(visibleMovementGroups.map((group) => group.id))
     setSelectedMovementIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
   }, [visibleMovementGroups])
@@ -667,6 +776,11 @@ export default function Inventory() {
       else next.add(groupId)
       return next
     })
+    setExpandedMovementPages((current) => ({ ...current, [groupId]: current[groupId] || 1 }))
+  }, [])
+
+  const setExpandedMovementGroupPage = useCallback((groupId, page) => {
+    setExpandedMovementPages((current) => ({ ...current, [groupId]: Math.max(1, Number(page || 1) || 1) }))
   }, [])
 
   const toggleMovementSelection = useCallback((groupId) => {
@@ -2102,30 +2216,29 @@ export default function Inventory() {
               const slbl  = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
               const soldQty = Math.max(0, p.qty_sold || 0)
               const revenue = Math.max(0, p.revenue_usd || 0)
+              const productTags = [p.brand, p.category, p.is_group ? 'Group' : (p.parent_id ? 'Variant' : ''), p.barcode].filter(Boolean)
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                      {p.category && <div className="text-xs text-gray-400">{p.category}</div>}
-                      <div className="mt-1">
+                      {productTags.length ? <div className="mt-0.5 truncate text-[11px] text-gray-400">{productTags.join(' · ')}</div> : null}
+                      <div className="mt-1 flex flex-wrap gap-1">
                         <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                       </div>
                     </div>
+                    <div className="flex min-w-[6.25rem] flex-col items-end gap-1 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
+                      <div className="text-lg font-bold text-gray-900 dark:text-white">{qty}</div>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); openAdjust(p) }}
+                        className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                      >
+                        {t('adjust')}
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    <span className={`font-semibold ${isOut ? 'text-red-600' : isLow ? 'text-yellow-600' : 'text-green-600'}`}>{qty}</span>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <span className={`rounded-full px-1.5 py-0.5 font-medium ${scls}`}>{slbl}</span>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <button
-                      onClick={e => { e.stopPropagation(); openAdjust(p) }}
-                      className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
-                    >
-                      {t('adjust')}
-                    </button>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
                     <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
                     <span className="text-gray-300 dark:text-gray-600">|</span>
                     <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
@@ -2184,8 +2297,14 @@ export default function Inventory() {
                       <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
                         <td className="px-3 py-1">
                           <div className="font-medium text-gray-900 dark:text-white leading-tight">{p.name}</div>
-                          {p.category && <div className="text-gray-400 text-[10px]">{p.category}</div>}
-                          <div className="mt-1">
+                          <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-gray-400">
+                            {p.brand ? <span>{p.brand}</span> : null}
+                            {p.category ? <span>{p.category}</span> : null}
+                            {p.is_group ? <span>Group</span> : null}
+                            {p.parent_id ? <span>Variant</span> : null}
+                            {p.barcode ? <span>{p.barcode}</span> : null}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
                             <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                           </div>
                         </td>
@@ -2259,6 +2378,17 @@ export default function Inventory() {
               </div>
             </div>
           </div>
+
+          <PaginationControls
+            className="mb-3"
+            page={movementMeta.page}
+            pageSize={movementMeta.pageSize}
+            totalItems={movementMeta.total}
+            label={t('movements') || 'movements'}
+            t={t}
+            onPageChange={(page) => setMovementMeta((current) => ({ ...current, page }))}
+            onPageSizeChange={(pageSize) => setMovementMeta((current) => ({ ...current, page: 1, pageSize }))}
+          />
 
           <div className="space-y-2 sm:hidden">
             {loading ? (
@@ -2352,6 +2482,13 @@ export default function Inventory() {
                           </button>
                           {isExpanded ? (
                             <div className="border-t border-gray-200 p-3 dark:border-gray-700">
+                              {(() => {
+                                const groupPage = getMovementGroupPage(group, {
+                                  page: expandedMovementPages[group.id] || 1,
+                                  pageSize: 10,
+                                })
+                                return (
+                                  <>
                               <div className="grid grid-cols-2 gap-3">
                                 <div>
                                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Records</div>
@@ -2369,7 +2506,7 @@ export default function Inventory() {
                                 </div>
                               ) : null}
                               <div className="mt-3 space-y-2">
-                                {group.items.map((movement) => (
+                                {groupPage.items.map((movement) => (
                                   <div key={movement.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="min-w-0 flex-1">
@@ -2397,6 +2534,22 @@ export default function Inventory() {
                                   </div>
                                 ))}
                               </div>
+                              {groupPage.totalPages > 1 ? (
+                                <PaginationControls
+                                  className="mt-3"
+                                  page={groupPage.page}
+                                  pageSize={groupPage.pageSize}
+                                  totalItems={groupPage.total}
+                                  label={t('records') || 'records'}
+                                  t={t}
+                                  onPageChange={(page) => setExpandedMovementGroupPage(group.id, page)}
+                                  onPageSizeChange={() => {}}
+                                  pageSizeOptions={[10]}
+                                />
+                              ) : null}
+                                  </>
+                                )
+                              })()}
                             </div>
                           ) : null}
                         </div>
@@ -2525,6 +2678,13 @@ export default function Inventory() {
                                 {isExpanded ? (
                                   <tr className="bg-gray-50/80 dark:bg-gray-900/30">
                                     <td colSpan={9} className="px-4 py-3">
+                                      {(() => {
+                                        const groupPage = getMovementGroupPage(group, {
+                                          page: expandedMovementPages[group.id] || 1,
+                                          pageSize: 10,
+                                        })
+                                        return (
+                                          <>
                                       <div className="grid gap-3 lg:grid-cols-[220px,1fr]">
                                         <div className="space-y-3">
                                           <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
@@ -2537,7 +2697,7 @@ export default function Inventory() {
                                           </div>
                                         </div>
                                         <div className="space-y-2">
-                                          {group.items.map((movement) => (
+                                          {groupPage.items.map((movement) => (
                                             <div key={movement.id} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
                                               <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
@@ -2567,6 +2727,22 @@ export default function Inventory() {
                                           ))}
                                         </div>
                                       </div>
+                                      {groupPage.totalPages > 1 ? (
+                                        <PaginationControls
+                                          className="mt-3"
+                                          page={groupPage.page}
+                                          pageSize={groupPage.pageSize}
+                                          totalItems={groupPage.total}
+                                          label={t('records') || 'records'}
+                                          t={t}
+                                          onPageChange={(page) => setExpandedMovementGroupPage(group.id, page)}
+                                          onPageSizeChange={() => {}}
+                                          pageSizeOptions={[10]}
+                                        />
+                                      ) : null}
+                                          </>
+                                        )
+                                      })()}
                                     </td>
                                   </tr>
                                 ) : null}
@@ -2729,13 +2905,29 @@ export default function Inventory() {
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {getStockQty(adjustModal)} {adjustModal.unit}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {getStockQty(summary.find((product) => Number(product.id) === Number(adjustForm.product_id || adjustModal.id)) || adjustModal)} {adjustModal.unit}</div>
               </div>
               <button onClick={() => setAdjustModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="modal-scroll p-4 space-y-3">
+              {adjustTargetOptions.length > 1 ? (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target', 'គោលដៅកែសម្រួល')}</label>
+                  <select
+                    className="input text-sm"
+                    value={adjustForm.product_id || adjustModal.id}
+                    onChange={(event) => setAdjustForm((current) => ({ ...current, product_id: event.target.value }))}
+                  >
+                    {adjustTargetOptions.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}{product.parent_id ? ' (Variant)' : product.is_group ? ' (Group)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="grid grid-cols-3 gap-2">
                 {[[`add`, t('adjust_add')], [`remove`, t('adjust_remove')], [`set`, t('adjust_set')]].map(([v,lbl]) => (
                   <button key={v} onClick={() => setAdjustForm(f=>({...f, type:v}))}
@@ -2811,6 +3003,59 @@ export default function Inventory() {
               <div className="flex gap-2 pt-1">
                 <button onClick={handleAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
                 <button onClick={() => setAdjustModal(null)} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transferModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setTransferModal(null)}>
+          <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer', 'ផ្ទេរ')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
+              </div>
+              <button type="button" onClick={() => setTransferModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="modal-scroll space-y-3 p-4">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', 'សាខាដើម')}</span>
+                <select className="input text-sm" value={transferForm.from_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, from_branch_id: event.target.value }))}>
+                  <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                  {branches.map((branch) => {
+                    const branchQty = Number((transferModal.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
+                    return <option key={branch.id} value={branch.id}>{branch.name} ({branchQty})</option>
+                  })}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', 'សាខាគោលដៅ')}</span>
+                <select className="input text-sm" value={transferForm.to_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, to_branch_id: event.target.value }))}>
+                  <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
+                <input className="input text-sm" type="number" min="0" step="any" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
+                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder', 'Why is this stock moving between branches?', 'ហេតុអ្វីបានជាត្រូវផ្ទេរស្តុករវាងសាខា?')} />
+              </label>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={handleTransferStock} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
+                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer', 'ផ្ទេរ')}
+                </button>
+                <button type="button" onClick={() => setTransferModal(null)} className="btn-secondary text-sm" disabled={transferSaving}>
+                  {t('cancel') || 'Cancel'}
+                </button>
               </div>
             </div>
           </div>
@@ -2935,7 +3180,8 @@ export default function Inventory() {
           product={detailProduct}
           onClose={() => setDetailProduct(null)}
           onAdjust={openAdjust}
-          onMove={openMove}
+          onTransfer={openTransfer}
+          onMoveRow={openMove}
           fmtUSD={fmtUSD}
           fmtKHR={fmtKHR}
           usdSymbol={usdSymbol}

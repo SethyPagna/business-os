@@ -7,6 +7,7 @@ const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const { getStockMetrics } = require('../businessMetrics')
+const { normalizeClientRequestId } = require('../idempotency')
 
 const router = express.Router()
 
@@ -25,6 +26,20 @@ function recalcProductStock(productId) {
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(productId, productId)
+}
+
+function findTransferByClientRequestId(clientRequestId) {
+  if (!clientRequestId) return null
+  try {
+    return db.prepare(`
+      SELECT id, product_id, product_name, from_branch_id, to_branch_id, quantity, client_request_id
+      FROM stock_transfers
+      WHERE client_request_id = ?
+      LIMIT 1
+    `).get(clientRequestId)
+  } catch (_) {
+    return null
+  }
 }
 
 function cleanMoveReason(value) {
@@ -252,6 +267,166 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
     ok(res, {})
   } catch (e) {
     err(res, e.message || 'Stock adjustment failed')
+  }
+})
+
+// POST /api/inventory/transfer
+router.post('/transfer', authToken, requirePermission('inventory'), (req, res) => {
+  const t0 = Date.now()
+  const body = req.body || {}
+  const actor = getAuditActor(req, body)
+  const productId = Number.parseInt(body.productId || body.product_id, 10)
+  const fromBranchId = Number.parseInt(body.fromBranchId || body.from_branch_id || body.sourceBranchId || body.source_branch_id, 10)
+  const toBranchId = Number.parseInt(body.toBranchId || body.to_branch_id || body.destinationBranchId || body.destination_branch_id, 10)
+  const qty = Number.parseFloat(body.quantity)
+  const reason = String(body.reason || body.note || '').trim()
+  const clientRequestId = normalizeClientRequestId(body.clientRequestId || body.client_request_id)
+  const deviceName = body.deviceName || null
+  const deviceTz = body.deviceTz || null
+  const clientTime = body.clientTime || null
+
+  if (!Number.isFinite(productId) || productId <= 0) return err(res, 'Product is required')
+  if (!Number.isFinite(fromBranchId) || fromBranchId <= 0) return err(res, 'Source branch is required')
+  if (!Number.isFinite(toBranchId) || toBranchId <= 0) return err(res, 'Destination branch is required')
+  if (fromBranchId === toBranchId) return err(res, 'Source and destination cannot be the same')
+  if (!Number.isFinite(qty) || qty <= 0) return err(res, 'Transfer quantity must be greater than zero')
+  if (!reason) return err(res, 'Transfer reason is required')
+
+  try {
+    const previousTransfer = findTransferByClientRequestId(clientRequestId)
+    if (previousTransfer) {
+      return ok(res, {
+        idempotent: true,
+        transferId: previousTransfer.id,
+        referenceId: previousTransfer.client_request_id || clientRequestId,
+        productName: previousTransfer.product_name,
+        productId: previousTransfer.product_id,
+        fromBranchId: previousTransfer.from_branch_id,
+        toBranchId: previousTransfer.to_branch_id,
+        quantity: previousTransfer.quantity,
+      })
+    }
+    const result = db.transaction(() => {
+      const product = db.prepare(`
+        SELECT id, name, unit, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr
+        FROM products
+        WHERE id = ?
+      `).get(productId)
+      if (!product) throw new Error('Product not found')
+
+      const fromBranch = db.prepare('SELECT id, name FROM branches WHERE id = ? AND is_active = 1').get(fromBranchId)
+      const toBranch = db.prepare('SELECT id, name FROM branches WHERE id = ? AND is_active = 1').get(toBranchId)
+      if (!fromBranch) throw new Error('Source branch is not active')
+      if (!toBranch) throw new Error('Destination branch is not active')
+
+      const fromStock = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, fromBranchId)
+      const available = Number(fromStock?.quantity || 0)
+      if (available < qty) throw new Error(`Insufficient stock in source branch. Available: ${available}`)
+
+      db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
+        .run(qty, productId, fromBranchId)
+      db.prepare(`
+        INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
+        ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity
+      `).run(productId, toBranchId, qty)
+
+      const note = reason
+      const transferColumns = ['product_id', 'product_name', 'from_branch_id', 'to_branch_id', 'quantity', 'user_id', 'user_name']
+      const transferValues = [productId, product.name, fromBranchId, toBranchId, qty, actor.userId, actor.userName]
+      if (clientRequestId) {
+        transferColumns.push('client_request_id')
+        transferValues.push(clientRequestId)
+      }
+      try {
+        const noteColumn = db.prepare(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'stock_transfers'
+            AND column_name IN ('note', 'notes', 'reason')
+          ORDER BY CASE column_name WHEN 'note' THEN 0 WHEN 'notes' THEN 1 ELSE 2 END
+          LIMIT 1
+        `).get()?.column_name
+        if (noteColumn) {
+          transferColumns.splice(5, 0, noteColumn)
+          transferValues.splice(5, 0, note)
+        }
+      } catch (_) {}
+      const placeholders = transferColumns.map(() => '?').join(',')
+      const quotedColumns = transferColumns.map((column) => `"${column}"`).join(', ')
+      const transferId = db.prepare(`INSERT INTO stock_transfers (${quotedColumns}) VALUES (${placeholders})`)
+        .run(...transferValues).lastInsertRowid
+      const referenceId = clientRequestId || `transfer:${transferId}`
+
+      const unitCostUsd = Number(product.cost_price_usd || product.purchase_price_usd || 0)
+      const unitCostKhr = Number(product.cost_price_khr || product.purchase_price_khr || 0)
+      const insertMovement = db.prepare(`
+        INSERT INTO inventory_movements
+          (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+           reason, reference_id, user_id, user_name)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
+      insertMovement.run(
+        productId,
+        product.name,
+        fromBranchId,
+        fromBranch.name,
+        'transfer_out',
+        qty,
+        unitCostUsd,
+        unitCostKhr,
+        unitCostUsd * qty,
+        unitCostKhr * qty,
+        `Transfer to ${toBranch.name}: ${reason}`,
+        referenceId,
+        actor.userId,
+        actor.userName,
+      )
+      insertMovement.run(
+        productId,
+        product.name,
+        toBranchId,
+        toBranch.name,
+        'transfer_in',
+        qty,
+        unitCostUsd,
+        unitCostKhr,
+        unitCostUsd * qty,
+        unitCostKhr * qty,
+        `Transfer from ${fromBranch.name}: ${reason}`,
+        referenceId,
+        actor.userId,
+        actor.userName,
+      )
+      recalcProductStock(productId)
+      audit(actor.userId, actor.userName, 'transfer', 'stock', transferId, {
+        productId,
+        productName: product.name,
+        quantity: qty,
+        fromBranchId,
+        toBranchId,
+        reason,
+        clientRequestId: clientRequestId || null,
+      }, { deviceName, deviceTz, clientTime })
+      return {
+        idempotent: false,
+        transferId,
+        referenceId,
+        productName: product.name,
+        productId,
+        fromBranchId,
+        toBranchId,
+        quantity: qty,
+      }
+    })()
+    logOp('inventory:transfer', Date.now() - t0)
+    broadcast('branches')
+    broadcast('products')
+    broadcast('inventory')
+    ok(res, result)
+  } catch (error) {
+    err(res, error?.message || 'Stock transfer failed')
   }
 })
 
@@ -1047,27 +1222,50 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
 
 // GET /api/inventory/movements
 router.get('/movements', authToken, requirePermission('inventory'), (req, res) => {
-  const branchId = req.query.branchId ? parseInt(req.query.branchId) : null
-  const userId = req.query.userId ? String(req.query.userId).trim() : ''
-  const limit = Math.min(Math.max(parseInt(req.query.limit || '50000', 10) || 50000, 1), 50000)
-  const where = []
-  const params = []
-  if (branchId) {
-    where.push('branch_id = ?')
-    params.push(branchId)
+  try {
+    const branchId = req.query.branchId ? parseInt(req.query.branchId, 10) : null
+    const userId = req.query.userId ? String(req.query.userId).trim() : ''
+    const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
+    const legacyLimit = req.query.limit || '50000'
+    const requestedPageSize = req.query.pageSize || req.query.page_size || legacyLimit
+    const pageSize = Math.min(normalizePositiveInt(requestedPageSize, 50000), 50000)
+    const offset = (page - 1) * pageSize
+    const where = []
+    const params = {}
+    if (branchId) {
+      where.push('branch_id = @branchId')
+      params.branchId = branchId
+    }
+    if (userId) {
+      if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for movement user filters.', 403)
+      // Keep parity with the legacy SQLite activity filter contract: user_id = ?
+      where.push('user_id = @userId')
+      params.userId = parseInt(userId, 10) || userId
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM inventory_movements
+      ${whereSql}
+    `).get(params)?.count || 0
+    const rows = db.prepare(`
+      SELECT im.*,
+        COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
+      FROM inventory_movements im
+      ${whereSql}
+      ORDER BY COALESCE(im.created_at, CURRENT_TIMESTAMP) DESC, im.id DESC
+      LIMIT @pageSize OFFSET @offset
+    `).all({ ...params, pageSize, offset })
+    ok(res, {
+      items: rows,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load inventory movements')
   }
-  if (userId) {
-    if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for movement user filters.', 403)
-    where.push('user_id = ?')
-    params.push(parseInt(userId, 10) || userId)
-  }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const rows = db.prepare(`
-    SELECT * FROM inventory_movements
-    ${whereSql}
-    ORDER BY created_at DESC LIMIT ?
-  `).all(...params, limit)
-  res.json(rows)
 })
 
 module.exports = router

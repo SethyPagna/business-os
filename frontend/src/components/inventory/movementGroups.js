@@ -11,19 +11,26 @@ function normalizeText(value) {
   return String(value || '').trim()
 }
 
+function canonicalMovementType(type) {
+  const key = String(type || '').toLowerCase()
+  if (key === 'transfer_in' || key === 'transfer_out') return 'transfer'
+  return key
+}
+
 function buildGroupKey(movement) {
+  const normalizedType = canonicalMovementType(movement.movement_type)
   const referenceId = movement.reference_id ? `ref:${movement.reference_id}` : ''
-  if (referenceId) return `${movement.movement_type}|${referenceId}`
+  if (referenceId) return `${normalizedType}|${referenceId}`
 
   const reason = normalizeText(movement.reason)
   const user = normalizeText(movement.user_id || movement.user_name)
   const time = minuteBucket(movement.created_at)
 
-  if (reason) return `${movement.movement_type}|reason:${reason}|user:${user}|time:${time}`
-  if (['purchase', 'adjustment', 'supplier_return', 'return_reversal', 'transfer'].includes(String(movement.movement_type || '').toLowerCase())) {
-    return `${movement.movement_type}|user:${user}|time:${time}`
+  if (reason) return `${normalizedType}|reason:${reason}|user:${user}|time:${time}`
+  if (['purchase', 'adjustment', 'supplier_return', 'return_reversal', 'transfer'].includes(normalizedType)) {
+    return `${normalizedType}|user:${user}|time:${time}`
   }
-  return `${movement.movement_type}|id:${movement.id}`
+  return `${normalizedType}|id:${movement.id}`
 }
 
 function describeMovementType(type) {
@@ -56,45 +63,64 @@ function parseMovementTime(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+export function normalizeMovementTimestamp(movement = {}) {
+  const candidates = [
+    movement.movement_date,
+    movement.date,
+    movement.imported_at,
+    movement.created_at,
+  ]
+  for (const candidate of candidates) {
+    const raw = String(candidate || '').trim()
+    if (!raw || raw.toLowerCase() === 'invalid date') continue
+    if (parseMovementTime(raw)) return raw
+  }
+  return String(movement.created_at || '').trim() || null
+}
+
 export function buildMovementGroups(movements = []) {
   const groups = new Map()
 
   for (const movement of Array.isArray(movements) ? movements : []) {
-    const key = buildGroupKey(movement)
+    const normalizedMovement = {
+      ...movement,
+      created_at: normalizeMovementTimestamp(movement),
+    }
+    const key = buildGroupKey(normalizedMovement)
     const existing = groups.get(key)
     if (!existing) {
       groups.set(key, {
         id: key,
-        movement_type: movement.movement_type || 'adjustment',
-        movementLabel: describeMovementType(movement.movement_type),
-        created_at: movement.created_at,
-        latest_at: movement.created_at,
-        reference_id: movement.reference_id || null,
-        reason: normalizeText(movement.reason),
-        branch_name: normalizeText(movement.branch_name),
-        user_name: normalizeText(movement.user_name),
-        totalQuantity: movementSignedValue(movement, 'quantity'),
-        totalCostUsd: movementSignedValue(movement, 'total_cost_usd'),
-        totalCostKhr: movementSignedValue(movement, 'total_cost_khr'),
-        items: [movement],
+        movement_type: canonicalMovementType(normalizedMovement.movement_type) || 'adjustment',
+        movementLabel: describeMovementType(canonicalMovementType(normalizedMovement.movement_type)),
+        created_at: normalizedMovement.created_at,
+        latest_at: normalizedMovement.created_at,
+        reference_id: normalizedMovement.reference_id || null,
+        reason: normalizeText(normalizedMovement.reason),
+        branch_name: normalizeText(normalizedMovement.branch_name),
+        user_name: normalizeText(normalizedMovement.user_name),
+        totalQuantity: movementSignedValue(normalizedMovement, 'quantity'),
+        totalCostUsd: movementSignedValue(normalizedMovement, 'total_cost_usd'),
+        totalCostKhr: movementSignedValue(normalizedMovement, 'total_cost_khr'),
+        items: [normalizedMovement],
       })
       continue
     }
 
-    existing.items.push(movement)
-    existing.totalQuantity += movementSignedValue(movement, 'quantity')
-    existing.totalCostUsd += movementSignedValue(movement, 'total_cost_usd')
-    existing.totalCostKhr += movementSignedValue(movement, 'total_cost_khr')
+    existing.items.push(normalizedMovement)
+    existing.totalQuantity += movementSignedValue(normalizedMovement, 'quantity')
+    existing.totalCostUsd += movementSignedValue(normalizedMovement, 'total_cost_usd')
+    existing.totalCostKhr += movementSignedValue(normalizedMovement, 'total_cost_khr')
 
-    const created = parseMovementTime(movement.created_at)
+    const created = parseMovementTime(normalizedMovement.created_at)
     const earliest = parseMovementTime(existing.created_at)
     const latest = parseMovementTime(existing.latest_at)
-    if (created && (!earliest || created < earliest)) existing.created_at = movement.created_at
-    if (created && (!latest || created > latest)) existing.latest_at = movement.created_at
+    if (created && (!earliest || created < earliest)) existing.created_at = normalizedMovement.created_at
+    if (created && (!latest || created > latest)) existing.latest_at = normalizedMovement.created_at
 
-    if (!existing.reason && movement.reason) existing.reason = normalizeText(movement.reason)
-    if (!existing.branch_name && movement.branch_name) existing.branch_name = normalizeText(movement.branch_name)
-    if (!existing.user_name && movement.user_name) existing.user_name = normalizeText(movement.user_name)
+    if (!existing.reason && normalizedMovement.reason) existing.reason = normalizeText(normalizedMovement.reason)
+    if (!existing.branch_name && normalizedMovement.branch_name) existing.branch_name = normalizeText(normalizedMovement.branch_name)
+    if (!existing.user_name && normalizedMovement.user_name) existing.user_name = normalizeText(normalizedMovement.user_name)
   }
 
   return Array.from(groups.values())
@@ -120,6 +146,22 @@ export function buildMovementGroups(movements = []) {
       const right = parseMovementTime(b.latest_at)?.getTime() || 0
       return right - left
     })
+}
+
+export function getMovementGroupPage(group, { page = 1, pageSize = 10 } = {}) {
+  const safePage = Math.max(1, Number(page || 1) || 1)
+  const safePageSize = Math.max(1, Number(pageSize || 10) || 10)
+  const items = Array.isArray(group?.items) ? group.items : []
+  const totalPages = Math.max(1, Math.ceil(items.length / safePageSize))
+  const currentPage = Math.min(safePage, totalPages)
+  const offset = (currentPage - 1) * safePageSize
+  return {
+    items: items.slice(offset, offset + safePageSize),
+    page: currentPage,
+    pageSize: safePageSize,
+    total: items.length,
+    totalPages,
+  }
 }
 
 export function movementGroupHaystack(group) {
