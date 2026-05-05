@@ -167,10 +167,6 @@ async function applyCloudflareAutomation({ token, zone, accountId, adminHost, pu
   const accessApp = await upsertAccessApp({ token, accountId, adminHost, emails })
   console.log(`Access admin app: ${accessApp.created ? 'created' : 'updated'} (${accessApp.domain})`)
 
-  const allowedCountries = (policy.cloudflare?.allowedCountries || ['KH', 'HK', 'AU'])
-    .map((country) => String(country || '').trim().toUpperCase())
-    .filter(Boolean)
-  const countrySet = allowedCountries.map((country) => `"${country}"`).join(' ')
   const hostSet = [adminHost, publicHost].map((host) => `"${host}"`).join(' ')
 
   await tryApplyRuleset('WAF custom rules', () => upsertEntrypointRuleset({
@@ -179,12 +175,6 @@ async function applyCloudflareAutomation({ token, zone, accountId, adminHost, pu
     phase: 'http_request_firewall_custom',
     name: 'Business OS custom WAF',
     rules: [
-      {
-        action: 'managed_challenge',
-        expression: `(http.host eq "${adminHost}" and not ip.geoip.country in {${countrySet}})`,
-        description: 'Business OS admin country challenge',
-        enabled: true,
-      },
       {
         action: 'block',
         expression: `(http.host in {${hostSet}} and (lower(http.request.uri.query) contains "<script" or lower(http.request.uri.query) contains "union select" or lower(http.request.uri.query) contains "../" or lower(http.request.uri.path) contains "../"))`,

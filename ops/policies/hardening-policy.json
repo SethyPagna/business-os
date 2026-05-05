@@ -147,7 +147,8 @@
       "files": [
         {
           "path": "ops/scripts/runtime/verify-cloudflare-automation.mjs",
-          "mustContain": ["upsertAccessApp", "http_request_firewall_custom", "http_ratelimit", "cf.colo.id", "Business OS Admin", "managed_challenge"]
+          "mustContain": ["upsertAccessApp", "http_request_firewall_custom", "http_ratelimit", "cf.colo.id", "Business OS Admin", "Business OS obvious injection block"],
+          "mustNotContain": ["managed_challenge"]
         },
         {
           "path": "ops/scripts/runtime/verify-r2-object-store.mjs",
