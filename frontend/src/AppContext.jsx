@@ -859,9 +859,12 @@ export function AppProvider({ children }) {
     root.style.setProperty('--ui-accent',       ac)
     root.style.setProperty('--ui-accent-hover', ac + 'dd')
     root.style.setProperty('--ui-radius',       radii[br] || '8px')
-    root.style.setProperty('--ui-font-family',  fonts[ff] || fonts.system)
+    const resolvedFontFamily = (language || 'en') === 'km' && ff === 'system'
+      ? fonts.battambang
+      : (fonts[ff] || fonts.system)
+    root.style.setProperty('--ui-font-family',  resolvedFontFamily)
     root.style.fontSize = '16px'
-    document.body.style.fontFamily = fonts[ff] || fonts.system
+    document.body.style.fontFamily = resolvedFontFamily
     document.body.style.fontSize   = `${baseSize}px`
     document.body.setAttribute('data-ui-font-family', ff)
     document.body.setAttribute('data-ui-language', language || 'en')

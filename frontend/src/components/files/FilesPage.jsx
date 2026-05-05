@@ -111,6 +111,17 @@ function compactTabLabel(label) {
   return label
 }
 
+function downloadAssetFile(asset) {
+  if (!asset?.public_path || typeof document === 'undefined') return
+  const link = document.createElement('a')
+  link.href = asset.public_path
+  link.download = asset.original_name || ''
+  link.rel = 'noreferrer'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 export default function FilesPage() {
   const { notify, user, t } = useApp()
   const { syncChannel } = useSync()
@@ -177,6 +188,14 @@ export default function FilesPage() {
     [files],
   )
   const allFilesSelected = selectableFileIds.length > 0 && selectableFileIds.every((id) => selectedAssetIds.has(id))
+  const selectedAssets = useMemo(
+    () => files.filter((asset) => selectedAssetIds.has(Number(asset?.id || 0))),
+    [files, selectedAssetIds],
+  )
+  const bulkDeletableAssets = useMemo(
+    () => selectedAssets.filter((asset) => asset?.canDelete),
+    [selectedAssets],
+  )
 
   const buildProviderPayload = useCallback((provider = {}, overrides = {}) => ({
     name: String(overrides.name ?? provider.name ?? '').trim(),
@@ -380,6 +399,61 @@ export default function FilesPage() {
       if (allFilesSelected) return new Set()
       return new Set(selectableFileIds)
     })
+  }
+
+  async function handleCopySelectedPaths() {
+    if (!selectedAssets.length) return
+    try {
+      await navigator.clipboard?.writeText(selectedAssets.map((asset) => asset.public_path).filter(Boolean).join('\n'))
+      notify(tr('copied', 'Copied'), 'success')
+    } catch {
+      notify(tr('copy_failed', 'Copy failed'), 'error')
+    }
+  }
+
+  function handleDownloadSelected() {
+    if (!selectedAssets.length) return
+    selectedAssets.forEach((asset, index) => {
+      window.setTimeout(() => downloadAssetFile(asset), index * 140)
+    })
+    notify(tr('download_started', 'Download started'), 'success')
+  }
+
+  async function handleDeleteSelectedAssets() {
+    if (!bulkDeletableAssets.length || deletingAssetId != null) return
+    const blockedCount = selectedAssets.length - bulkDeletableAssets.length
+    const confirmMessage = blockedCount > 0
+      ? tr(
+        'delete_selected_partial_confirm',
+        `Delete ${bulkDeletableAssets.length} selected files? ${blockedCount} file(s) are still in use and will be skipped.`,
+        `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ? មាន ${blockedCount} ឯកសារកំពុងត្រូវបានប្រើ ហើយនឹងត្រូវរំលង។`,
+      )
+      : tr(
+        'delete_selected_confirm',
+        `Delete ${bulkDeletableAssets.length} selected file(s)?`,
+        `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ?`,
+      )
+    if (!window.confirm(confirmMessage)) return
+    setDeletingAssetId('bulk')
+    try {
+      for (const asset of bulkDeletableAssets) {
+        await window.api.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined })
+      }
+      notify(
+        tr(
+          'selected_files_deleted',
+          `${bulkDeletableAssets.length} file(s) deleted`,
+          `បានលុបឯកសារ ${bulkDeletableAssets.length}`,
+        ),
+        'success',
+      )
+      setSelectedAssetIds(new Set())
+      await loadFiles()
+    } catch (error) {
+      notify(error?.message || 'Bulk delete failed', 'error')
+    } finally {
+      setDeletingAssetId(null)
+    }
   }
 
   function startCreateProvider() {
@@ -589,11 +663,43 @@ export default function FilesPage() {
                 <div className="flex items-center gap-2">
                   <button type="button" className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={toggleSelectAllAssets}>
                     {allFilesSelected ? <CheckSquare className="h-3.5 w-3.5 text-blue-600" /> : <Square className="h-3.5 w-3.5" />}
-                    <span>{allFilesSelected ? tr('clear_selection', 'Clear selection') : tr('select_all', 'Select all')}</span>
+                    <span>{tr('select_all', 'Select all')}</span>
                   </button>
                   <span>{selectedAssetIds.size} {tr('selected', 'selected')}</span>
                 </div>
                 <div>{files.length} {tr('files', 'files')}</div>
+              </div>
+            ) : null}
+            {selectedAssets.length ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                <button type="button" className="btn-secondary px-3 py-1.5 text-xs sm:text-sm" onClick={handleCopySelectedPaths}>
+                  <Copy className="mr-1.5 inline h-3.5 w-3.5" />
+                  {tr('copy_links', 'Copy links', 'ចម្លងតំណ')}
+                </button>
+                <button type="button" className="btn-secondary px-3 py-1.5 text-xs sm:text-sm" onClick={handleDownloadSelected}>
+                  <Save className="mr-1.5 inline h-3.5 w-3.5" />
+                  {tr('download', 'Download', 'ទាញយក')}
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger px-3 py-1.5 text-xs sm:text-sm"
+                  onClick={handleDeleteSelectedAssets}
+                  disabled={!bulkDeletableAssets.length || deletingAssetId != null}
+                >
+                  <Trash2 className="mr-1.5 inline h-3.5 w-3.5" />
+                  {deletingAssetId === 'bulk'
+                    ? tr('deleting', 'Deleting...')
+                    : tr('delete_selected', 'Delete selected', 'លុបដែលបានជ្រើស')}
+                </button>
+                {bulkDeletableAssets.length !== selectedAssets.length ? (
+                  <span className="text-[11px] text-amber-600 dark:text-amber-300">
+                    {tr(
+                      'some_files_in_use',
+                      `${selectedAssets.length - bulkDeletableAssets.length} in use`,
+                      `${selectedAssets.length - bulkDeletableAssets.length} កំពុងប្រើ`,
+                    )}
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>
