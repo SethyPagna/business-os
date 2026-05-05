@@ -1228,7 +1228,7 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
     const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
     const legacyLimit = req.query.limit || '50000'
     const requestedPageSize = req.query.pageSize || req.query.page_size || legacyLimit
-    const pageSize = Math.min(normalizePositiveInt(requestedPageSize, 50000), 50000)
+    const pageSize = normalizePositiveInt(requestedPageSize, 50000, { min: 1, max: 50000 })
     const offset = (page - 1) * pageSize
     const where = []
     const params = {}
@@ -1253,7 +1253,7 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
         COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
       FROM inventory_movements im
       ${whereSql}
-      ORDER BY COALESCE(im.created_at, CURRENT_TIMESTAMP) DESC, im.id DESC
+      ORDER BY COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text) DESC, im.id DESC
       LIMIT @pageSize OFFSET @offset
     `).all({ ...params, pageSize, offset })
     ok(res, {

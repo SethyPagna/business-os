@@ -50,7 +50,7 @@ runTest('inventory movement history allows large import batches', () => {
   const path = require('path')
   const source = fs.readFileSync(path.join(__dirname, '../src/routes/inventory.js'), 'utf8')
   assert.match(source, /req\.query\.limit \|\| '50000'/)
-  assert.match(source, /,\s*50000\)/)
+  assert.match(source, /normalizePositiveInt\(requestedPageSize,\s*50000,\s*\{\s*min:\s*1,\s*max:\s*50000\s*\}\)/)
 })
 
 runTest('portal router registers required public catalog search route', () => {

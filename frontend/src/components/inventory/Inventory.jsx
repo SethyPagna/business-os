@@ -2216,20 +2216,28 @@ export default function Inventory() {
               const slbl  = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
               const soldQty = Math.max(0, p.qty_sold || 0)
               const revenue = Math.max(0, p.revenue_usd || 0)
-              const productTags = [p.brand, p.category, p.is_group ? 'Group' : (p.parent_id ? 'Variant' : ''), p.barcode].filter(Boolean)
+              const productTags = [p.brand, p.category, p.is_group ? 'Group' : (p.parent_id ? 'Variant' : '')].filter(Boolean)
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                      {productTags.length ? <div className="mt-0.5 truncate text-[11px] text-gray-400">{productTags.join(' · ')}</div> : null}
-                      <div className="mt-1 flex flex-wrap gap-1">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-gray-400">
+                        {productTags.length ? <span className="truncate">{productTags.join(' · ')}</span> : null}
+                        {p.barcode ? (
+                          <span className="max-w-[8.5rem] truncate rounded-md bg-gray-100 px-1.5 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                            {p.barcode}
+                          </span>
+                        ) : null}
                         <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                       </div>
                     </div>
-                    <div className="flex min-w-[6.25rem] flex-col items-end gap-1 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
-                      <div className="text-lg font-bold text-gray-900 dark:text-white">{qty}</div>
-                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                    <div className="flex min-w-0 shrink-0 items-center justify-end gap-1.5 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
+                      <div className="whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
+                        {qty}
+                        <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                      </div>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap ${scls}`}>{slbl}</span>
                       <button
                         onClick={e => { e.stopPropagation(); openAdjust(p) }}
                         className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"

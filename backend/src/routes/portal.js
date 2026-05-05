@@ -1023,6 +1023,35 @@ router.get('/membership/:membershipNumber', (req, res) => {
       customerPhoneNormalized: normalizePhone(customer.phone),
       membershipNumber: customer.membership_number || membershipNumber,
     }
+    const salesWhere = []
+    const returnsWhere = []
+    const submissionWhere = []
+
+    if (params.customerId) {
+      salesWhere.push('s.customer_id = @customerId')
+      returnsWhere.push('r.customer_id = @customerId')
+      submissionWhere.push('customer_id = @customerId')
+    }
+
+    if (params.customerName) {
+      salesWhere.push(`(
+        lower(trim(COALESCE(s.customer_name, ''))) = lower(trim(@customerName))
+        AND (
+          @customerPhoneNormalized = ''
+          OR replace(replace(replace(replace(replace(COALESCE(s.customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE @customerPhoneNormalized || '%'
+        )
+      )`)
+      returnsWhere.push(`(
+        lower(trim(COALESCE(r.customer_name, ''))) = lower(trim(@customerName))
+      )`)
+    }
+
+    if (params.membershipNumber) {
+      submissionWhere.push("lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))")
+    }
+    const salesWhereSql = salesWhere.length ? salesWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
+    const returnsWhereSql = returnsWhere.length ? returnsWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
+    const submissionWhereSql = submissionWhere.length ? submissionWhere.map((clause) => `(${clause})`).join(' OR ') : 'FALSE'
 
     const sales = db.prepare(`
     SELECT
@@ -1046,15 +1075,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       STRING_AGG(si.product_name || ' x' || si.quantity, ', ' ORDER BY si.id) FILTER (WHERE si.id IS NOT NULL) AS items_summary
     FROM sales s
     LEFT JOIN sale_items si ON si.sale_id = s.id
-    WHERE
-      (@customerId IS NOT NULL AND s.customer_id = @customerId)
-      OR (
-        lower(trim(COALESCE(s.customer_name, ''))) = lower(trim(@customerName))
-        AND (
-          @customerPhoneNormalized = ''
-          OR replace(replace(replace(replace(replace(COALESCE(s.customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE @customerPhoneNormalized || '%'
-        )
-      )
+    WHERE ${salesWhereSql}
     GROUP BY s.id
     ORDER BY s.created_at DESC
     LIMIT 100
@@ -1075,11 +1096,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       STRING_AGG(ri.product_name || ' x' || ri.quantity, ', ' ORDER BY ri.id) FILTER (WHERE ri.id IS NOT NULL) AS items_summary
     FROM returns r
     LEFT JOIN return_items ri ON ri.return_id = r.id
-    WHERE
-      (@customerId IS NOT NULL AND r.customer_id = @customerId)
-      OR (
-        lower(trim(COALESCE(r.customer_name, ''))) = lower(trim(@customerName))
-      )
+    WHERE ${returnsWhereSql}
     GROUP BY r.id
     ORDER BY r.created_at DESC
     LIMIT 100
@@ -1100,9 +1117,7 @@ router.get('/membership/:membershipNumber', (req, res) => {
       reviewed_at,
       created_at
     FROM customer_share_submissions
-    WHERE
-      (customer_id IS NOT NULL AND customer_id = @customerId)
-      OR lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))
+    WHERE ${submissionWhereSql}
     ORDER BY created_at DESC
     LIMIT 100
     `).all(params).map((entry) => ({
