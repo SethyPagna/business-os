@@ -67,22 +67,23 @@ export function useContactSelection(rows = []) {
  * 2.1 Reusable row-action popup for customer/supplier/delivery lists.
  */
 export function ThreeDotMenu({ onDetails, onEdit, onDelete }) {
+  const { t } = useApp()
   const items = [
-    onDetails && { label: 'Details', onClick: onDetails },
-    onEdit && { label: 'Edit', onClick: onEdit, color: 'blue' },
+    onDetails && { label: t('details') || 'Details', onClick: onDetails },
+    onEdit && { label: t('edit') || 'Edit', onClick: onEdit, color: 'blue' },
     onDelete && 'divider',
-    onDelete && { label: 'Delete', onClick: onDelete, color: 'red' },
+    onDelete && { label: t('delete') || 'Delete', onClick: onDelete, color: 'red' },
   ].filter(Boolean)
 
   const menuContent = ({ closeMenu }) => (
     <>
       <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
-        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Actions</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t('actions') || 'Actions'}</div>
         <button
           type="button"
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
           onClick={closeMenu}
-          aria-label="Close actions menu"
+          aria-label={t('close') || 'Close'}
         >
           <X className="h-4 w-4" />
         </button>
@@ -120,7 +121,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }) {
       trigger={(
         <button
           type="button"
-          aria-label="Open actions"
+          aria-label={t('actions') || 'Actions'}
           name="contact_row_actions"
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:border-zinc-700 dark:text-gray-400 dark:hover:bg-zinc-800 dark:hover:text-gray-200"
         >
@@ -155,9 +156,9 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t })
           ))}
         </div>
         <div className="flex gap-2">
-          <button type="button" className="btn-secondary flex-1" onClick={onEdit}>Edit</button>
-          <button type="button" className="btn-secondary flex-1 border-red-300 text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>Delete</button>
-          <button type="button" className="btn-primary flex-1" onClick={onClose}>Close</button>
+          <button type="button" className="btn-secondary flex-1" onClick={onEdit}>{t?.('edit') || 'Edit'}</button>
+          <button type="button" className="btn-secondary flex-1 border-red-300 text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button>
+          <button type="button" className="btn-primary flex-1" onClick={onClose}>{t?.('close') || 'Close'}</button>
         </div>
       </div>
     </Modal>

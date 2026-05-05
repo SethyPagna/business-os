@@ -38,14 +38,15 @@ runTest('settings conflicts return settings-specific structured payload with cur
   assert.match(conflictSource, /settings_conflict/, 'shared conflict helper must understand settings_conflict')
 })
 
-runTest('file upload route registers quickly and enqueues media optimization', () => {
+runTest('file upload route compresses images immediately and only defers video optimization', () => {
   const routeSource = readSource('src/routes/files.js')
   const assetSource = readSource('src/fileAssets.js')
-  assert.doesNotMatch(routeSource, /validateUploadedFile,\s*compressUpload/, 'upload route must not run synchronous compression middleware')
+  assert.match(routeSource, /validateUploadedFile,\s*compressUpload/, 'upload route must run synchronous image compression middleware')
   assert.match(routeSource, /enqueueMediaOptimization/, 'upload route must enqueue optimization')
   assert.match(routeSource, /processing_status/, 'upload response must expose processing status')
   assert.match(routeSource, /cache_version/, 'upload response must expose cache busting version')
   assert.match(assetSource, /deferOptimization/, 'asset registration must support deferred optimization')
+  assert.match(routeSource, /const shouldDeferOptimization = mediaType === 'video'/, 'video uploads alone should stay deferred')
 })
 
 runTest('movement route keeps pagination metadata and safe created_at fallback', () => {

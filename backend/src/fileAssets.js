@@ -4,8 +4,9 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { spawnSync } = require('child_process')
+const { pipeline } = require('stream/promises')
 const { UPLOADS_PATH } = require('./config')
-const { deleteObject, isObjectStorageEnabled, putObject } = require('./objectStore')
+const { deleteObject, getObjectStream, isObjectStorageEnabled, putObject } = require('./objectStore')
 const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
@@ -253,16 +254,35 @@ function getFfmpegPath() {
 }
 
 function buildVideoOptimizationArgs({ inputPath, outputPath } = {}) {
-  return [
+  const outputExt = String(path.extname(String(outputPath || '')).toLowerCase() || '.mp4')
+  const baseArgs = [
     '-y',
     '-i', inputPath,
     '-map', '0:v:0?',
     '-map', '0:a?',
     '-map_metadata', '-1',
     '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'",
+  ]
+  if (outputExt === '.webm') {
+    return [
+      ...baseArgs,
+      '-c:v', 'libvpx-vp9',
+      '-crf', '34',
+      '-b:v', '0',
+      '-deadline', 'good',
+      '-cpu-used', '2',
+      '-row-mt', '1',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'libopus',
+      '-b:a', '80k',
+      outputPath,
+    ]
+  }
+  return [
+    ...baseArgs,
     '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '24',
+    '-preset', 'slow',
+    '-crf', '26',
     '-pix_fmt', 'yuv420p',
     '-c:a', 'aac',
     '-b:a', '96k',
@@ -271,7 +291,7 @@ function buildVideoOptimizationArgs({ inputPath, outputPath } = {}) {
   ]
 }
 
-function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
+function optimizeStoredVideo(filePath, { mimeType = '', fileName = '', force = false } = {}) {
   const originalSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : null
   const baseResult = {
     original_byte_size: originalSize,
@@ -282,8 +302,10 @@ function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
   }
   const ext = String(path.extname(String(fileName || filePath)).toLowerCase())
   if (getMediaType({ mimeType, fileName }) !== 'video') return { ...baseResult, optimization_status: 'not_applicable' }
-  if (ext !== '.mp4') return { ...baseResult, optimization_status: 'not_applicable', optimization_note: 'Video format is stored without recompression' }
-  if (Number(originalSize || 0) > MAX_SYNC_VIDEO_OPTIMIZATION_BYTES) {
+  if (!['.mp4', '.mov', '.webm'].includes(ext)) {
+    return { ...baseResult, optimization_status: 'not_applicable', optimization_note: 'Video format is stored without recompression' }
+  }
+  if (!force && Number(originalSize || 0) > MAX_SYNC_VIDEO_OPTIMIZATION_BYTES) {
     return {
       ...baseResult,
       optimization_status: 'deferred',
@@ -298,7 +320,7 @@ function optimizeStoredVideo(filePath, { mimeType = '', fileName = '' } = {}) {
     const result = spawnSync(ffmpeg, buildVideoOptimizationArgs({
       inputPath: filePath,
       outputPath: tempPath,
-    }), { encoding: 'utf8', timeout: 120000, windowsHide: true })
+    }), { encoding: 'utf8', timeout: force ? 15 * 60 * 1000 : 120000, windowsHide: true })
     if (result.status !== 0 || !fs.existsSync(tempPath)) {
       try { fs.unlinkSync(tempPath) } catch (_) {}
       return {
@@ -445,6 +467,34 @@ function listAssetRows(search = '', mediaType = 'all') {
     )
     ORDER BY created_at DESC, id DESC
   `).all(params)
+}
+
+async function writeObjectBodyToFile(body, filePath) {
+  if (!body) throw new Error('Object storage read returned no body')
+  if (Buffer.isBuffer(body)) {
+    fs.writeFileSync(filePath, body)
+    return
+  }
+  if (typeof body.pipe === 'function') {
+    await pipeline(body, fs.createWriteStream(filePath))
+    return
+  }
+  if (typeof body.transformToByteArray === 'function') {
+    const bytes = await body.transformToByteArray()
+    fs.writeFileSync(filePath, Buffer.from(bytes))
+    return
+  }
+  throw new Error('Unsupported object storage body type')
+}
+
+async function ensureStoredAssetAvailableLocally(storedName) {
+  ensureUploadsDirectory()
+  const absPath = path.join(UPLOADS_PATH, storedName)
+  if (fs.existsSync(absPath)) return absPath
+  if (!isObjectStorageEnabled()) return absPath
+  const object = await getObjectStream(`uploads/${storedName}`)
+  await writeObjectBodyToFile(object?.body, absPath)
+  return absPath
 }
 
 function collectUploadPathsFromValue(value, referenced) {
@@ -659,6 +709,38 @@ async function registerUploadFromRequest(file, actor = {}, options = {}) {
   })
 }
 
+async function optimizeStoredAssetFromQueue({
+  storedName,
+  originalName,
+  mimeType,
+  createdById = null,
+  createdByName = null,
+  source = 'upload',
+} = {}) {
+  if (!storedName) throw new Error('No stored asset name provided')
+  const absPath = await ensureStoredAssetAvailableLocally(storedName)
+  const mediaType = getMediaType({ mimeType, fileName: storedName })
+  let optimization = null
+  if (mediaType === 'image') {
+    const originalBuffer = fs.readFileSync(absPath)
+    optimization = await compressBufferForAsset(originalBuffer, { fileName: storedName, mimeType })
+    if (optimization?.buffer && optimization.buffer !== originalBuffer) {
+      fs.writeFileSync(absPath, optimization.buffer)
+    }
+  } else if (mediaType === 'video') {
+    optimization = optimizeStoredVideo(absPath, { mimeType, fileName: storedName, force: true })
+  }
+  return registerStoredAsset({
+    storedName,
+    originalName: originalName || storedName,
+    mimeType,
+    createdById,
+    createdByName,
+    source,
+    optimization,
+  })
+}
+
 async function storeDataUrlAsset({ dataUrl, fileName, createdById = null, createdByName = null, source = 'upload' }) {
   const match = String(dataUrl || '').match(/^data:([^;]+);base64,(.+)$/)
   if (!match) throw new Error('Invalid data URL')
@@ -740,6 +822,7 @@ module.exports = {
   getMimeTypeFromName,
   getMediaType,
   listFileAssets,
+  optimizeStoredAssetFromQueue,
   registerStoredAsset,
   registerUploadFromRequest,
   sanitizeOriginalFileName,

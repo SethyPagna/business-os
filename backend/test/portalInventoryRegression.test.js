@@ -55,12 +55,12 @@ runTest('sales and returns stock upserts qualify branch_stock quantity for Postg
   assert.doesNotMatch(returnsSource, /SET quantity = quantity \+ \?/, 'returns stock restoration should not use ambiguous bare quantity references')
 })
 
-runTest('product image uploads defer optimization and return cache-busting metadata', () => {
+runTest('product image uploads compress immediately and return cache-busting metadata', () => {
   const source = readSource('src/routes/products.js')
-  assert.match(source, /void compressUpload/, 'product upload route should keep the compression compatibility marker')
-  assert.match(source, /registerUploadFromRequest\(req\.file, getAuditActor\(req\), \{ deferOptimization: true \}\)/, 'product upload route should defer optimization to workers')
+  assert.match(source, /validateUploadedFile,\s*compressUpload/, 'product upload route should run synchronous image compression')
+  assert.match(source, /registerUploadFromRequest\(req\.file, getAuditActor\(req\), \{ deferOptimization: false \}\)/, 'product upload route should register images after immediate compression')
   assert.match(source, /public_path: asset\.public_path/, 'product upload route should return the public asset path directly')
-  assert.match(source, /cache_version: asset\.updated_at \|\| asset\.created_at \|\| ''/, 'product upload route should return cache-busting metadata')
+  assert.match(source, /cache_version: String\(asset\.updated_at \|\| asset\.created_at \|\| Date\.now\(\)\)\.replace/, 'product upload route should return sanitized cache-busting metadata')
 })
 
 runTest('product updates only re-check uniqueness when identifier fields actually change', () => {

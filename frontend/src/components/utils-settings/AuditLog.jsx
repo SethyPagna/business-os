@@ -49,7 +49,9 @@ function formatDateTime(raw) {
   const iso = toIso(raw)
   if (!iso) return '--'
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return raw
+    return date.toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -317,13 +319,19 @@ export default function AuditLog() {
       return
     }
     aliveRef.current = true
+    const needsVisibleReload = !loadedOnceRef.current || logs.length === 0 || !!error
     if (pageLoadRequestedRef.current) {
-      load(true)
+      load(needsVisibleReload ? false : true)
+      return
+    }
+    if (needsVisibleReload) {
+      pageLoadRequestedRef.current = true
+      load(false)
       return
     }
     pageLoadRequestedRef.current = true
     load(false)
-  }, [isActive, load])
+  }, [error, isActive, load, logs.length])
 
   useEffect(() => {
     setPage(1)
@@ -353,28 +361,7 @@ export default function AuditLog() {
     return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
   }, [actionLabel, logs])
 
-  const query = search.trim().toLowerCase()
-  const filtered = useMemo(() => logs.filter((log) => {
-    if (yearFilter !== 'all' || monthFilter !== 'all') {
-      const date = new Date(log?.client_time || log?.created_at || '')
-      if (yearFilter !== 'all' && String(date.getFullYear()) !== String(yearFilter)) return false
-      if (monthFilter !== 'all' && String(date.getMonth() + 1) !== String(monthFilter)) return false
-    }
-    const logAction = String(log?.action || '').toLowerCase()
-    if (actionFilter !== 'all' && logAction !== actionFilter) return false
-    if (!query) return true
-    return [
-      log.user_name,
-      log.action,
-      log.table_name,
-      log.device_tz,
-      log.device_name,
-      log.entity,
-      readableSummary(log),
-    ]
-      .map((value) => String(value || '').toLowerCase())
-      .some((value) => value.includes(query))
-  }), [actionFilter, logs, monthFilter, query, yearFilter])
+  const filtered = useMemo(() => logs, [logs])
 
   const orderedLogs = useMemo(() => {
     const next = [...filtered]

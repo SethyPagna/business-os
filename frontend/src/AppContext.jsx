@@ -293,6 +293,7 @@ export function AppProvider({ children }) {
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
   const writeBlockedNoticeAtRef = useRef(0)
+  const lastNotificationRef = useRef({ message: '', type: '', at: 0 })
   const syncErrorLogAtRef = useRef({})
   const [authReady, setAuthReady] = useState(() => !getStoredUserPayload())
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
@@ -507,7 +508,6 @@ export function AppProvider({ children }) {
       // The SyncErrorBanner in App.jsx picks this up via its own listener.
     }
     const onWriteBlocked = (e) => {
-      const message = e?.detail?.error || 'Server is offline. Changes are invalid until the server reconnects.'
       setSyncServerUnreachable(true)
       if (e?.detail?.reason !== 'server_not_configured') {
         setSyncConnected(false)
@@ -515,7 +515,6 @@ export function AppProvider({ children }) {
       const now = Date.now()
       if ((now - writeBlockedNoticeAtRef.current) < 4000) return
       writeBlockedNoticeAtRef.current = now
-      setNotification({ message, type: 'error', id: now })
     }
     const onRuntimeMismatch = (e) => {
       const message = e?.detail?.message
@@ -1021,8 +1020,22 @@ export function AppProvider({ children }) {
 
   // ?? Notifications ?????????????????????????????????????????????????????????
   const notify = useCallback((message, type = 'success', duration = 3500) => {
-    setNotification({ message, type, id: Date.now() })
-    setTimeout(() => setNotification(null), duration)
+    const normalizedMessage = String(message || '').trim()
+    const now = Date.now()
+    const last = lastNotificationRef.current
+    if (
+      normalizedMessage
+      && last.message === normalizedMessage
+      && last.type === type
+      && (now - last.at) < 2500
+    ) {
+      return
+    }
+    lastNotificationRef.current = { message: normalizedMessage, type, at: now }
+    setNotification({ message: normalizedMessage, type, id: now })
+    setTimeout(() => {
+      setNotification((current) => (current?.id === now ? null : current))
+    }, duration)
   }, [])
 
   const dismissWriteConflict = useCallback(() => {

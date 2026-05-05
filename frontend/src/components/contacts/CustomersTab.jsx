@@ -251,6 +251,11 @@ function CustomersTab({ t, notify, active = true }) {
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const customerQuery = useMemo(() => ({
+    search: deferredSearch.trim() || undefined,
+    year: yearFilter !== 'all' ? yearFilter : undefined,
+    month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
+  }), [deferredSearch, monthFilter, yearFilter])
 
   const filteredBySearch = useMemo(() => customers.filter((customer) => {
     const query = deferredSearch.toLowerCase().trim()
@@ -403,7 +408,7 @@ function CustomersTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getCustomers(), label, 20000)
+        const data = await withLoaderTimeout(() => window.api.getCustomers(customerQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setCustomers(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -432,7 +437,7 @@ function CustomersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, t])
+  }, [customerQuery, notify, t])
 
   useEffect(() => {
     if (!active) {

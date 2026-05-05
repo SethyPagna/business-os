@@ -2,7 +2,7 @@
 // Main Inventory page ??sub-components imported from sibling files.
 
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
-import { ArrowRightLeft, Boxes, ChevronDown, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
+import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
@@ -12,7 +12,7 @@ import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import PaginationControls from '../shared/PaginationControls.jsx'
+import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import DualMoney from './DualMoney'
@@ -131,10 +131,14 @@ export default function Inventory() {
   const [groupFilter,   setGroupFilter]   = useState('all') // all | grouped | parent | variant | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
+  const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
   const [inventoryInitials, setInventoryInitials] = useState([])
   const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
+  const [selectedProductIds, setSelectedProductIds] = useState(() => new Set())
+  const [inventoryBatch, setInventoryBatch] = useState(null)
+  const [batchApplying, setBatchApplying] = useState(false)
   const [rfidStatus, setRfidStatus] = useState(null)
   const [tab,           setTab]           = useState('products')
   const [inventorySection, setInventorySection] = useState('all')
@@ -142,6 +146,8 @@ export default function Inventory() {
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState([])
+  const [movementStartDate, setMovementStartDate] = useState('')
+  const [movementEndDate, setMovementEndDate] = useState('')
   const [movementYearFilter, setMovementYearFilter] = useState('all')
   const [movementMonthFilter, setMovementMonthFilter] = useState('all')
   const [movementGroupMode, setMovementGroupMode] = useState('time')
@@ -158,7 +164,12 @@ export default function Inventory() {
   const [transferSaving, setTransferSaving] = useState(false)
   const [statDetail,    setStatDetail]    = useState(null)
   const [showImport, setShowImport] = useState(false)
+  const [inventoryReasons, setInventoryReasons] = useState([])
+  const [reasonManager, setReasonManager] = useState({ open: false, type: 'adjust' })
+  const [reasonDraft, setReasonDraft] = useState('')
+  const [savingReasons, setSavingReasons] = useState(false)
   const movementSelectAllRef = useRef(null)
+  const inventorySelectAllRef = useRef(null)
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
@@ -204,6 +215,22 @@ export default function Inventory() {
     }))
   ), [tr])
 
+  const reasonsByType = useMemo(() => ({
+    adjust: inventoryReasons.filter((item) => item?.type === 'adjust'),
+    transfer: inventoryReasons.filter((item) => item?.type === 'transfer'),
+    move: inventoryReasons.filter((item) => item?.type === 'move'),
+  }), [inventoryReasons])
+
+  const loadInventoryReasons = useCallback(async () => {
+    try {
+      const result = await window.api.getInventoryReasons?.()
+      const items = Array.isArray(result?.items) ? result.items : []
+      setInventoryReasons(items)
+    } catch {
+      setInventoryReasons([])
+    }
+  }, [])
+
   const load = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -241,6 +268,8 @@ export default function Inventory() {
           summary: () => window.api.searchInventoryProducts(productQuery),
           movements: () => window.api.getInventoryMovements({
             ...branchOpts,
+            startDate: movementStartDate || undefined,
+            endDate: movementEndDate || undefined,
             page: movementMeta.page,
             pageSize: movementMeta.pageSize,
           }),
@@ -359,6 +388,8 @@ export default function Inventory() {
     inventoryProductPageSize,
     isAdmin,
     movementUserFilter,
+    movementStartDate,
+    movementEndDate,
     movementMeta.page,
     movementMeta.pageSize,
     searchMode,
@@ -377,10 +408,47 @@ export default function Inventory() {
     load(loadedOnceRef.current)
   }, [isActive, load])
   useEffect(() => {
+    if (!isActive) return
+    loadInventoryReasons()
+  }, [isActive, loadInventoryReasons])
+  useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
     if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
+
+  const saveReasonCatalog = useCallback(async (nextItems) => {
+    setSavingReasons(true)
+    try {
+      const result = await window.api.saveInventoryReasons?.(nextItems)
+      const items = Array.isArray(result?.items) ? result.items : []
+      setInventoryReasons(items)
+      return items
+    } finally {
+      setSavingReasons(false)
+    }
+  }, [])
+
+  const addSavedReason = useCallback(async () => {
+    const label = reasonDraft.trim()
+    if (!label) return
+    const next = [...inventoryReasons, { id: `${reasonManager.type}:${Date.now()}`, type: reasonManager.type, label }]
+    await saveReasonCatalog(next)
+    setReasonDraft('')
+  }, [inventoryReasons, reasonDraft, reasonManager.type, saveReasonCatalog])
+
+  const renameSavedReason = useCallback(async (entry) => {
+    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason', 'ប្ដូរឈ្មោះមូលហេតុដែលបានរក្សាទុក'), entry?.label || '')
+    if (!nextLabel) return
+    const next = inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: nextLabel.trim() } : item)
+    await saveReasonCatalog(next)
+  }, [inventoryReasons, saveReasonCatalog, tr])
+
+  const deleteSavedReason = useCallback(async (entry) => {
+    if (!window.confirm(tr('delete_saved_reason_confirm', `Delete saved reason "${entry?.label || ''}"?`, `លុបមូលហេតុ "${entry?.label || ''}"?`))) return
+    const next = inventoryReasons.filter((item) => item.id !== entry.id)
+    await saveReasonCatalog(next)
+  }, [inventoryReasons, saveReasonCatalog, tr])
   useEffect(() => {
     if (!isActive || !isAdmin) return
     window.api.getUsers()
@@ -705,12 +773,207 @@ export default function Inventory() {
 
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
-  }, [branchFilter, movementUserFilter])
+  }, [branchFilter, movementEndDate, movementStartDate, movementUserFilter])
 
   const pagedSummary = useMemo(
     () => filteredSummary,
     [filteredSummary],
   )
+
+  useEffect(() => {
+    const validIds = new Set(filteredSummary.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)))
+    setSelectedProductIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
+  }, [filteredSummary])
+
+  useEffect(() => {
+    if (!inventorySelectAllRef.current) return
+    inventorySelectAllRef.current.indeterminate = selectedProductIds.size > 0 && selectedProductIds.size < filteredSummary.length
+  }, [filteredSummary.length, selectedProductIds.size])
+
+  const toggleSelectedProduct = useCallback((productId) => {
+    const numericId = Number(productId)
+    if (!Number.isFinite(numericId)) return
+    setSelectedProductIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
+  }, [])
+
+  const toggleSelectAllProducts = useCallback((checked) => {
+    if (!checked) {
+      setSelectedProductIds(new Set())
+      return
+    }
+    setSelectedProductIds(new Set(filteredSummary.map((product) => Number(product.id)).filter((id) => Number.isFinite(id))))
+  }, [filteredSummary])
+
+  const selectedProducts = useMemo(
+    () => filteredSummary.filter((product) => selectedProductIds.has(Number(product.id))),
+    [filteredSummary, selectedProductIds],
+  )
+  const hasSelectedProducts = selectedProducts.length > 0
+
+  const buildBatchDraft = useCallback((product) => {
+    const defaultBranchId = branchFilter !== 'all'
+      ? String(branchFilter)
+      : branches.find((branch) => branch.is_default)?.id?.toString() || branches[0]?.id?.toString() || ''
+    const branchStock = Array.isArray(product?.branch_stock) ? product.branch_stock : []
+    const firstStockBranch = branchStock.find((item) => Number(item?.quantity || 0) > 0)?.branch_id
+    const defaultSourceId = branchFilter !== 'all'
+      ? String(branchFilter)
+      : String(firstStockBranch || branches.find((branch) => branch.is_default)?.id || branches[0]?.id || '')
+    const defaultDestinationId = String(
+      branches.find((branch) => String(branch.id) !== defaultSourceId)?.id
+      || branches[0]?.id
+      || '',
+    )
+    return {
+      id: Number(product.id),
+      productId: Number(product.id),
+      productName: product.name,
+      unit: product.unit || '',
+      quantity: '1',
+      action: 'adjust',
+      adjustType: 'add',
+      branchId: defaultBranchId,
+      fromBranchId: defaultSourceId,
+      toBranchId: defaultDestinationId !== defaultSourceId ? defaultDestinationId : '',
+      reason: '',
+      note: '',
+      moveMode: 'existing',
+      destinationProductId: '',
+      destinationName: `${product.name} - ${tr('damaged', 'Damaged', 'ខូច')}`,
+      sellingPriceUsd: product.selling_price_usd || '',
+      specialPriceUsd: product.special_price_usd || '',
+      discountEnabled: false,
+      discountType: 'percent',
+      discountPercent: '',
+      discountAmountUsd: '',
+      unitCostUsd: product.purchase_price_usd || product.cost_price_usd || 0,
+      unitCostKhr: product.purchase_price_khr || 0,
+      stockQty: getStockQty(product),
+      error: '',
+    }
+  }, [branchFilter, branches, getStockQty, tr])
+
+  const openInventoryBatchSession = useCallback(() => {
+    if (!selectedProducts.length) return
+    setInventoryBatch({
+      items: selectedProducts.map((product) => buildBatchDraft(product)),
+    })
+  }, [buildBatchDraft, selectedProducts])
+
+  const updateInventoryBatchLine = useCallback((productId, patch) => {
+    setInventoryBatch((current) => {
+      if (!current?.items?.length) return current
+      return {
+        ...current,
+        items: current.items.map((item) => (
+          Number(item.productId) === Number(productId)
+            ? { ...item, ...patch, error: patch?.error ?? '' }
+            : item
+        )),
+      }
+    })
+  }, [])
+
+  const removeInventoryBatchLine = useCallback((productId) => {
+    const numericId = Number(productId)
+    setInventoryBatch((current) => {
+      if (!current?.items?.length) return current
+      const nextItems = current.items.filter((item) => Number(item.productId) !== numericId)
+      return nextItems.length ? { ...current, items: nextItems } : null
+    })
+    setSelectedProductIds((current) => {
+      const next = new Set(current)
+      next.delete(numericId)
+      return next
+    })
+  }, [])
+
+  const applyInventoryBatchSession = useCallback(async () => {
+    if (batchApplying || !inventoryBatch?.items?.length) return
+    setBatchApplying(true)
+    const failedItems = []
+    let successCount = 0
+    try {
+      for (const item of inventoryBatch.items) {
+        const quantity = Number.parseFloat(item.quantity)
+        try {
+          if (!Number.isFinite(quantity) || quantity <= 0) {
+            throw new Error(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'))
+          }
+          if (item.action === 'adjust') {
+            const result = await window.api.adjustStock({
+              productId: item.productId,
+              productName: item.productName,
+              type: item.adjustType,
+              quantity,
+              reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', 'កែសម្រួលស្តុក'),
+              branchId: item.branchId,
+              unitCostUsd: item.unitCostUsd,
+              unitCostKhr: item.unitCostKhr,
+            })
+            if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', 'ការកែសម្រួលបានបរាជ័យ'))
+          } else if (item.action === 'transfer') {
+            const result = await window.api.transferInventoryStock({
+              productId: item.productId,
+              fromBranchId: item.fromBranchId,
+              toBranchId: item.toBranchId,
+              quantity,
+              reason: item.reason,
+            })
+            if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', 'ការផ្ទេរបានបរាជ័យ'))
+          } else if (item.action === 'move') {
+            const request = {
+              sourceProductId: item.productId,
+              destinationProductId: item.moveMode === 'existing' ? Number(item.destinationProductId || 0) : null,
+              branchId: item.branchId,
+              quantity,
+              reason: item.reason || 'broken',
+              note: item.note || '',
+            }
+            if (item.moveMode === 'new') {
+              request.destinationProduct = {
+                name: item.destinationName,
+                selling_price_usd: item.sellingPriceUsd,
+                special_price_usd: item.specialPriceUsd,
+                discount_enabled: !!item.discountEnabled,
+                discount_type: item.discountType,
+                discount_percent: item.discountPercent,
+                discount_amount_usd: item.discountAmountUsd,
+              }
+            }
+            const result = await window.api.moveStockRow(request)
+            if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
+          }
+          successCount += 1
+        } catch (error) {
+          failedItems.push({ ...item, error: error?.message || tr('save_failed', 'Save failed', 'ការរក្សាទុកបានបរាជ័យ') })
+        }
+      }
+      await load(true)
+      if (!failedItems.length) {
+        setInventoryBatch(null)
+        setSelectedProductIds(new Set())
+        notify(
+          successCount === 1
+            ? tr('batch_inventory_done_one', 'Applied inventory update.', 'បានអនុវត្តបច្ចុប្បន្នភាពស្តុក។')
+            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`, `${successCount} បច្ចុប្បន្នភាពស្តុកត្រូវបានអនុវត្ត។`),
+        )
+        return
+      }
+      setInventoryBatch({ items: failedItems })
+      setSelectedProductIds(new Set(failedItems.map((item) => Number(item.productId)).filter((id) => Number.isFinite(id))))
+      notify(
+        tr(
+          'batch_inventory_partial_failure',
+          `${successCount} applied, ${failedItems.length} need review.`,
+          `${successCount} បានអនុវត្ត ហើយ ${failedItems.length} ត្រូវពិនិត្យឡើងវិញ។`,
+        ),
+        'warning',
+      )
+    } finally {
+      setBatchApplying(false)
+    }
+  }, [batchApplying, inventoryBatch, load, notify, tr])
 
   const filteredMovements = movements.filter(m => {
     if (movFilter !== 'all' && m.movement_type !== movFilter) return false
@@ -849,6 +1112,39 @@ export default function Inventory() {
   const totalStoreDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.store_discount_usd || 0), 0)
   const totalMembershipDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.membership_discount_usd || 0), 0)
   const totalProfit   = totalRevenue - totalCOGS
+  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[0]))
+  const inventoryProductSafePage = clampPage(inventoryProductPage, totalProducts, inventoryProductSafePageSize)
+  const inventoryProductTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalProducts || 0)) / inventoryProductSafePageSize))
+  const inventoryProductStart = totalProducts ? (((inventoryProductSafePage - 1) * inventoryProductSafePageSize) + 1) : 0
+  const inventoryProductEnd = totalProducts ? Math.min(totalProducts, inventoryProductSafePage * inventoryProductSafePageSize) : 0
+  const inventoryProductSummaryLabel = totalProducts
+    ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
+    : '0 / 0'
+  const inventoryControlLabels = useMemo(() => ({
+    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} បានជ្រើស`),
+    selectAll: `${t('select_all') || 'Select all'} (${filteredSummary.length})`,
+    batch: tr('inventory_batch_session', 'Batch', 'សម័យបាច់'),
+    reasons: tr('saved_reasons', 'Reasons', 'មូលហេតុ'),
+  }), [filteredSummary.length, selectedProducts.length, t, tr])
+  useEffect(() => {
+    setInventoryProductPageDraft(String(inventoryProductSafePage))
+  }, [inventoryProductSafePage])
+  const commitInventoryProductPageDraft = useCallback(() => {
+    const parsed = Number.parseInt(String(inventoryProductPageDraft || '').trim(), 10)
+    if (!Number.isFinite(parsed)) {
+      setInventoryProductPageDraft(String(inventoryProductSafePage))
+      return
+    }
+    const nextPage = Math.min(inventoryProductTotalPages, Math.max(1, parsed))
+    setInventoryProductPage(nextPage)
+    setInventoryProductPageDraft(String(nextPage))
+  }, [inventoryProductPageDraft, inventoryProductSafePage, inventoryProductTotalPages])
+  const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds', 'ចំនួនស្តុកទាប និងអស់ស្តុក ត្រូវបានគណនាពីកម្រិតកំណត់ស្តុក។')
+  const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page', 'តម្លៃស្តុក = បរិមាណវិជ្ជមាន x ថ្លៃដើមជាក់ស្តែង សម្រាប់ស្តុកដែលត្រូវគ្នាទាំងអស់ មិនមែនតែទំព័រដែលមើលឃើញទេ។')
+  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity', 'លក់សុទ្ធ = បរិមាណដែលបានលក់ - បរិមាណដែលបានត្រឡប់')
+  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds', 'ចំណូលដែលបង្ហាញ គឺជាចំណូលសុទ្ធ បន្ទាប់ពីបញ្ចុះតម្លៃ និងការសងប្រាក់ត្រឡប់។')
+  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS មិនរាប់បញ្ចូលបរិមាណដែលត្រូវបានស្តារវិញពីការត្រឡប់ដែលបានដាក់ចូលស្តុកឡើងវិញទេ។')
+  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS', 'ប្រាក់ចំណេញ = ចំណូល - COGS')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const primaryStats = [
     {
@@ -861,7 +1157,7 @@ export default function Inventory() {
         { label: t('products') || 'Products', value: totalProducts },
         { label: t('low_stock') || 'Low stock', value: lowStockCount },
         { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
-        { label: t('formula') || 'Formula', value: 'Low/Out counts are derived from stock thresholds' },
+        { label: t('formula') || 'Formula', value: inventoryThresholdFormulaText },
       ],
     },
     {
@@ -872,7 +1168,7 @@ export default function Inventory() {
       details: [
         { label: t('stock_value') || 'Stock value', value: fmtUSD(totalValue) },
         { label: t('products') || 'Products', value: totalProducts },
-        { label: t('formula') || 'Formula', value: 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page' },
+        { label: t('formula') || 'Formula', value: inventoryStockValueFormulaText },
       ],
     },
     {
@@ -885,7 +1181,7 @@ export default function Inventory() {
         { label: t('net_sold') || 'Net sold', value: totalQtySold },
         { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
         { label: t('items') || 'Returned items', value: returnStats?.items ?? 0 },
-        { label: t('formula') || 'Formula', value: 'Net sold = sold quantity - returned quantity' },
+        { label: t('formula') || 'Formula', value: inventoryNetSoldFormulaText },
       ],
     },
     {
@@ -898,7 +1194,7 @@ export default function Inventory() {
         { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
         { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
         { label: t('tax_collected') || 'Tax', value: fmtUSD(taxDelivery.tax || 0) },
-        { label: t('formula') || 'Formula', value: 'Revenue shown is net after discounts and refunds' },
+        { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
       ],
     },
     {
@@ -911,7 +1207,7 @@ export default function Inventory() {
         { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
         { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
         { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
-        { label: t('formula') || 'Formula', value: 'COGS excludes quantities restored by restocked returns' },
+        { label: t('formula') || 'Formula', value: inventoryCogsFormulaText },
       ],
     },
     {
@@ -923,7 +1219,7 @@ export default function Inventory() {
         { label: t('gross_profit') || 'Gross profit', value: fmtUSD(totalProfit) },
         { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
         { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
-        { label: t('formula') || 'Formula', value: 'Profit = Revenue - COGS' },
+        { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
       ],
     },
   ]
@@ -1035,13 +1331,16 @@ export default function Inventory() {
       .filter(Boolean)
       .sort((left, right) => left.getTime() - right.getTime())
     if (!timestamps.length) {
+      if (movementStartDate || movementEndDate) {
+        return `${movementStartDate || '...'} - ${movementEndDate || '...'}`
+      }
       if (movementYearFilter !== 'all' || movementMonthFilter !== 'all') {
         return `${movementYearFilter === 'all' ? 'All years' : movementYearFilter} / ${movementMonthFilter === 'all' ? 'All months' : movementMonthFilter}`
       }
       return 'All available movement dates'
     }
     return `${timestamps[0].toLocaleDateString()} - ${timestamps[timestamps.length - 1].toLocaleDateString()}`
-  }, [movementMonthFilter, movementYearFilter, visibleMovementGroups])
+  }, [movementEndDate, movementMonthFilter, movementStartDate, movementYearFilter, visibleMovementGroups])
 
   const visibleMovementQuantity = useMemo(
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.totalQuantity || 0), 0),
@@ -2171,7 +2470,7 @@ export default function Inventory() {
         </div>
       ) : null}
 
-      {showInventorySections ? (
+      {showInventorySections && !showProductsSection ? (
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
           ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
@@ -2186,19 +2485,120 @@ export default function Inventory() {
       ???????????????????????????????????????? */}
       {showProductsSection && (
         <>
-          <PaginationControls
-            className="mb-3"
-            page={inventoryProductPage}
-            pageSize={inventoryProductPageSize}
-            totalItems={totalProducts}
-            label={t('products') || 'products'}
-            t={t}
-            onPageChange={setInventoryProductPage}
-            onPageSizeChange={(size) => {
-              setInventoryProductPageSize(size)
-              setInventoryProductPage(1)
-            }}
-          />
+          <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
+                  {t('products') || 'Products'}
+                </span>
+                <span className="min-w-0 truncate whitespace-nowrap text-[11px] font-medium text-blue-700/90 dark:text-blue-200/80">
+                  {inventoryProductSummaryLabel}
+                </span>
+              </div>
+            </div>
+            <div className="overflow-x-auto border-t border-blue-200/70 px-3 py-2 dark:border-blue-900/60">
+              <div className="flex min-w-max items-center gap-1.5">
+              <label className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-blue-200 bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                <input
+                  ref={inventorySelectAllRef}
+                  type="checkbox"
+                  className="h-4 w-4 rounded"
+                  checked={filteredSummary.length > 0 && selectedProductIds.size === filteredSummary.length}
+                  onChange={(event) => toggleSelectAllProducts(event.target.checked)}
+                />
+                <span className="truncate whitespace-nowrap">
+                  {hasSelectedProducts
+                    ? inventoryControlLabels.selected
+                    : inventoryControlLabels.selectAll}
+                </span>
+              </label>
+              <label className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                <span className="hidden sm:inline">{t('per_page') || 'per page'}</span>
+                <select
+                  className="bg-transparent text-[11px] font-semibold outline-none"
+                  value={inventoryProductSafePageSize}
+                  onChange={(event) => {
+                    setInventoryProductPageSize(Number(event.target.value))
+                    setInventoryProductPage(1)
+                  }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="inline-flex items-center overflow-hidden rounded-full border border-blue-200 bg-white/85 dark:border-blue-800 dark:bg-blue-950/50">
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  disabled={inventoryProductSafePage <= 1}
+                  onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="hidden pl-1 text-[11px] font-semibold text-blue-700 sm:inline dark:text-blue-200">
+                  {t('page') || 'Page'}
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={t('page') || 'Page'}
+                  className="h-7 w-10 border-0 bg-transparent px-1 text-center text-[11px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  value={inventoryProductPageDraft}
+                  onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                  onBlur={commitInventoryProductPageDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      commitInventoryProductPageDraft()
+                      event.currentTarget.blur()
+                    } else if (event.key === 'Escape') {
+                      setInventoryProductPageDraft(String(inventoryProductSafePage))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+                <span className="pr-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200">
+                  / {inventoryProductTotalPages}
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  disabled={inventoryProductSafePage >= inventoryProductTotalPages}
+                  onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              </div>
+            </div>
+            <div className="overflow-x-auto border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
+              <div className="flex min-w-max items-center gap-1.5">
+                <button
+                  type="button"
+                  className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700 transition hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200 whitespace-nowrap"
+                  disabled={!hasSelectedProducts}
+                  onClick={openInventoryBatchSession}
+                  title={tr(
+                    'inventory_batch_hint',
+                    'Select products, review each line in one session, then apply all stock changes together.',
+                    'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                  )}
+                >
+                  {inventoryControlLabels.batch}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700 transition hover:border-blue-400 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200 whitespace-nowrap"
+                  onClick={() => setReasonManager({ open: true, type: 'adjust' })}
+                >
+                  {inventoryControlLabels.reasons}
+                </button>
+              </div>
+            </div>
+          </div>
           {/* Mobile cards */}
           <div className="space-y-2 sm:hidden">
             {loading ? (
@@ -2217,23 +2617,37 @@ export default function Inventory() {
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-gray-400">
-                          {productTags.length ? <span className="min-w-0 truncate">{productTags.join(' · ')}</span> : null}
-                          {p.barcode ? (
-                            <span className="min-w-0 truncate font-medium text-gray-500 dark:text-gray-300">
-                              {p.barcode}
-                            </span>
-                          ) : null}
-                          <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 rounded"
+                          checked={selectedProductIds.has(Number(p.id))}
+                          onChange={(event) => {
+                            event.stopPropagation()
+                            toggleSelectedProduct(p.id)
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={`${t('select') || 'Select'} ${p.name}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
+                          <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-gray-400">
+                            <span className="min-w-0 flex-1 truncate">{productTags.join(' · ') || (t('product') || 'Product')}</span>
+                            {p.barcode ? (
+                              <span className="shrink-0 whitespace-nowrap font-medium text-gray-500 dark:text-gray-300">
+                                {p.barcode}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
-                     <div className="flex shrink-0 items-center justify-end gap-1 text-right">
-                        <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
-                          {qty}
-                          <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
-                        </div>
+                    </div>
+                    <div className="flex shrink-0 items-center justify-end gap-1 text-right">
+                      <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
+                        {qty}
+                        <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                      </div>
                       <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
                       <button
                         onClick={e => { e.stopPropagation(); openAdjust(p) }}
@@ -2241,6 +2655,11 @@ export default function Inventory() {
                       >
                         {t('adjust')}
                       </button>
+                    </div>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -2267,6 +2686,9 @@ export default function Inventory() {
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0 z-10">
                   <tr>
+                    <th className="px-3 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">
+                      <span className="sr-only">{t('select') || 'Select'}</span>
+                    </th>
                     <th className="text-left px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 min-w-[140px]">{t('product_name')}</th>
                     <th className="text-right px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('current_stock')}</th>
                     {branches.length > 1 && (
@@ -2285,9 +2707,9 @@ export default function Inventory() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={12} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
+                    <tr><td colSpan={13} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
                   ) : filteredSummary.length === 0 ? (
-                    <tr><td colSpan={12} className="text-center py-8 text-gray-400">{t('no_data')}</td></tr>
+                    <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t('no_data')}</td></tr>
                   ) : pagedSummary.map(p => {
                     const qty    = getStockQty(p)
                     const isLow  = qty > 0 && qty <= p.low_stock_threshold
@@ -2300,6 +2722,15 @@ export default function Inventory() {
                     const profit  = netRev - netCogs
                     return (
                       <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
+                        <td className="px-3 py-1" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={selectedProductIds.has(Number(p.id))}
+                            onChange={() => toggleSelectedProduct(p.id)}
+                            aria-label={`${t('select') || 'Select'} ${p.name}`}
+                          />
+                        </td>
                         <td className="px-3 py-1">
                           <div className="font-medium text-gray-900 dark:text-white leading-tight">{p.name}</div>
                           <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-gray-400">
@@ -2380,6 +2811,47 @@ export default function Inventory() {
                   items={inventoryExportItems}
                   compact
                 />
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:max-w-xl">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', 'កាលបរិច្ឆេទចាប់ផ្តើម')}</span>
+                  <input
+                    type="date"
+                    className="input text-sm"
+                    value={movementStartDate}
+                    onChange={(event) => setMovementStartDate(event.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date', 'កាលបរិច្ឆេទបញ្ចប់')}</span>
+                  <input
+                    type="date"
+                    className="input text-sm"
+                    value={movementEndDate}
+                    min={movementStartDate || undefined}
+                    onChange={(event) => setMovementEndDate(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-xs text-gray-500 dark:text-gray-400">{movementDateRangeLabel}</div>
+                {(movementStartDate || movementEndDate) ? (
+                  <button
+                    type="button"
+                    className="btn-secondary px-3 py-1 text-xs"
+                    onClick={() => {
+                      setMovementStartDate('')
+                      setMovementEndDate('')
+                    }}
+                  >
+                    {t('clear') || 'Clear'}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2997,7 +3469,26 @@ export default function Inventory() {
                 </div>
               )}
               <div>
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('reason')}</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">{t('reason')}</label>
+                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
+                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                  </button>
+                </div>
+                {reasonsByType.adjust.length ? (
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {reasonsByType.adjust.map((entry) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${adjustForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                        onClick={() => setAdjustForm((current) => ({ ...current, reason: entry.label }))}
+                      >
+                        {entry.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <input
                   id="inventory-adjust-reason"
                   name="inventory_adjust_reason"
@@ -3051,7 +3542,26 @@ export default function Inventory() {
                 <input className="input text-sm" type="number" min="0" step="any" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} />
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
+                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'transfer' })}>
+                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                  </button>
+                </div>
+                {reasonsByType.transfer.length ? (
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {reasonsByType.transfer.map((entry) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${transferForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                        onClick={() => setTransferForm((current) => ({ ...current, reason: entry.label }))}
+                      >
+                        {entry.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder', 'Why is this stock moving between branches?', 'ហេតុអ្វីបានជាត្រូវផ្ទេរស្តុករវាងសាខា?')} />
               </label>
               <div className="flex gap-2 pt-1">
@@ -3147,8 +3657,16 @@ export default function Inventory() {
                 </label>
               </div>
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
+                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'move' })}>
+                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                  </button>
+                </div>
                 <select className="input text-sm" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))}>
+                  {reasonsByType.move.map((entry) => (
+                    <option key={entry.id} value={entry.label}>{entry.label}</option>
+                  ))}
                   <option value="broken">{tr('reason_broken', 'Broken', 'ខូច')}</option>
                   <option value="open">{tr('reason_opened', 'Opened', 'បានបើក')}</option>
                   <option value="loose">{tr('reason_loose', 'Loose', 'រាយ')}</option>
@@ -3169,6 +3687,246 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {reasonManager.open ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setReasonManager((current) => ({ ...current, open: false }))}>
+          <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons', 'មូលហេតុដែលបានរក្សាទុក')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, and row moves.', 'ប្រើមូលហេតុទូទៅឡើងវិញសម្រាប់ការកែសម្រួលស្តុក ការផ្ទេរ និងការផ្លាស់ទីជួរ។')}</div>
+              </div>
+              <button type="button" onClick={() => setReasonManager((current) => ({ ...current, open: false }))} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="modal-scroll space-y-4 p-4">
+              <div className="grid grid-cols-3 gap-2">
+                {['adjust', 'transfer', 'move'].map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`rounded-xl border px-3 py-2 text-xs font-semibold ${reasonManager.type === type ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
+                    onClick={() => setReasonManager((current) => ({ ...current, type }))}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1 text-sm"
+                  value={reasonDraft}
+                  onChange={(event) => setReasonDraft(event.target.value)}
+                  placeholder={tr('new_reason_placeholder', 'Add a reusable reason', 'បន្ថែមមូលហេតុដែលអាចប្រើឡើងវិញ')}
+                  autoComplete="off"
+                />
+                <button type="button" className="btn-primary px-3 text-sm" onClick={addSavedReason} disabled={savingReasons || !reasonDraft.trim()}>
+                  {t('add') || 'Add'}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {reasonsByType[reasonManager.type]?.length ? reasonsByType[reasonManager.type].map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/40">
+                    <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">{entry.label}</span>
+                    <div className="flex items-center gap-1">
+                      <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/30" onClick={() => renameSavedReason(entry)}>{t('edit') || 'Edit'}</button>
+                      <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/30" onClick={() => deleteSavedReason(entry)}>{t('delete') || 'Delete'}</button>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-xl border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">
+                    {tr('no_saved_reasons', 'No saved reasons yet for this workflow.', 'មិនទាន់មានមូលហេតុដែលបានរក្សាទុកសម្រាប់ដំណើរការនេះទេ។')}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {inventoryBatch?.items?.length ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => !batchApplying && setInventoryBatch(null)}>
+          <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-5xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session', 'សម័យបាច់')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">
+                  {tr(
+                    'inventory_batch_session_desc',
+                    'Review each selected product, then apply all stock changes together.',
+                    'ពិនិត្យមើលផលិតផលដែលបានជ្រើសរើសនីមួយៗ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                  )}
+                </div>
+              </div>
+              <button type="button" onClick={() => !batchApplying && setInventoryBatch(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" disabled={batchApplying}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="modal-scroll space-y-3 p-4">
+              {inventoryBatch.items.map((item) => (
+                <div key={item.productId} className="rounded-2xl border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {tr('current_stock', 'Current stock', 'ស្តុកបច្ចុប្បន្ន')} {item.stockQty} {item.unit || ''}
+                      </div>
+                      {item.error ? (
+                        <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
+                          {item.error}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select className="input text-xs" value={item.action} onChange={(event) => updateInventoryBatchLine(item.productId, { action: event.target.value, reason: '' })}>
+                        <option value="adjust">{tr('adjust_stock', 'Adjust stock', 'កែសម្រួលស្តុក')}</option>
+                        <option value="transfer">{tr('transfer', 'Transfer', 'ផ្ទេរ')}</option>
+                        <option value="move">{tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</option>
+                      </select>
+                      <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" onClick={() => removeInventoryBatchLine(item.productId)} disabled={batchApplying}>
+                        {t('remove') || 'Remove'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-12">
+                    <label className="block lg:col-span-2">
+                      <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'}</span>
+                      <input className="input text-sm" type="number" min="0" step="any" value={item.quantity} onChange={(event) => updateInventoryBatchLine(item.productId, { quantity: event.target.value })} autoComplete="off" />
+                    </label>
+
+                    {item.action === 'adjust' ? (
+                      <>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('action') || 'Action'}</span>
+                          <select className="input text-sm" value={item.adjustType} onChange={(event) => updateInventoryBatchLine(item.productId, { adjustType: event.target.value })}>
+                            <option value="add">{t('add') || 'Add'}</option>
+                            <option value="remove">{t('remove') || 'Remove'}</option>
+                            <option value="set">{t('set') || 'Set'}</option>
+                          </select>
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
+                          <select className="input text-sm" value={item.branchId} onChange={(event) => updateInventoryBatchLine(item.productId, { branchId: event.target.value })}>
+                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                          </select>
+                        </label>
+                      </>
+                    ) : null}
+
+                    {item.action === 'transfer' ? (
+                      <>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', 'សាខាដើម')}</span>
+                          <select className="input text-sm" value={item.fromBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { fromBranchId: event.target.value })}>
+                            <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                          </select>
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', 'សាខាគោលដៅ')}</span>
+                          <select className="input text-sm" value={item.toBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { toBranchId: event.target.value })}>
+                            <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                          </select>
+                        </label>
+                      </>
+                    ) : null}
+
+                    {item.action === 'move' ? (
+                      <>
+                        <div className="lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_row', 'Destination row', 'ជួរគោលដៅ')}</span>
+                          <div className="flex gap-1">
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'existing' })}>{tr('existing_row', 'Existing', 'មានស្រាប់')}</button>
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'new' })}>{tr('new_row', 'New row', 'ជួរថ្មី')}</button>
+                          </div>
+                        </div>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
+                          <select className="input text-sm" value={item.branchId} onChange={(event) => updateInventoryBatchLine(item.productId, { branchId: event.target.value })}>
+                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                          </select>
+                        </label>
+                        {item.moveMode === 'existing' ? (
+                          <label className="block lg:col-span-4">
+                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', 'ជួរផលិតផលគោលដៅ')}</span>
+                            <select className="input text-sm" value={item.destinationProductId} onChange={(event) => updateInventoryBatchLine(item.productId, { destinationProductId: event.target.value })}>
+                              <option value="">{tr('choose_destination_product', 'Choose a destination product row', 'ជ្រើសរើសជួរផលិតផលគោលដៅ')}</option>
+                              {summary.filter((product) => Number(product.id) !== Number(item.productId)).map((product) => (
+                                <option key={product.id} value={product.id}>{product.name}</option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <label className="block lg:col-span-4">
+                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('name') || 'Name'}</span>
+                            <input className="input text-sm" value={item.destinationName} onChange={(event) => updateInventoryBatchLine(item.productId, { destinationName: event.target.value })} autoComplete="off" />
+                          </label>
+                        )}
+                      </>
+                    ) : null}
+
+                    <label className="block lg:col-span-4">
+                      <span className="mb-1 flex items-center justify-between gap-2 text-[11px] font-medium text-gray-600 dark:text-gray-400">
+                        <span>{t('reason') || 'Reason'}</span>
+                        <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: item.action === 'move' ? 'move' : item.action === 'transfer' ? 'transfer' : 'adjust' })}>
+                          {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                        </button>
+                      </span>
+                      <div className="space-y-2">
+                        {(item.action === 'move' ? reasonsByType.move : item.action === 'transfer' ? reasonsByType.transfer : reasonsByType.adjust).length ? (
+                          <div className="flex flex-wrap gap-1">
+                            {(item.action === 'move' ? reasonsByType.move : item.action === 'transfer' ? reasonsByType.transfer : reasonsByType.adjust).map((entry) => (
+                              <button
+                                key={entry.id}
+                                type="button"
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${item.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                                onClick={() => updateInventoryBatchLine(item.productId, { reason: entry.label })}
+                              >
+                                {entry.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        {item.action === 'move' ? (
+                          <select className="input text-sm" value={item.reason} onChange={(event) => updateInventoryBatchLine(item.productId, { reason: event.target.value })}>
+                            {reasonsByType.move.map((entry) => (
+                              <option key={entry.id} value={entry.label}>{entry.label}</option>
+                            ))}
+                            <option value="broken">{tr('reason_broken', 'Broken', 'ខូច')}</option>
+                            <option value="open">{tr('reason_opened', 'Opened', 'បានបើក')}</option>
+                            <option value="loose">{tr('reason_loose', 'Loose', 'រាយ')}</option>
+                            <option value="discount">{tr('reason_discount', 'Discount / promotion', 'បញ្ចុះតម្លៃ / ប្រូម៉ូសិន')}</option>
+                            <option value="special_price">{tr('reason_special_price', 'Special price', 'តម្លៃពិសេស')}</option>
+                            <option value="other">{t('other') || 'Other'}</option>
+                          </select>
+                        ) : (
+                          <textarea className="input min-h-[80px] text-sm" value={item.reason} onChange={(event) => updateInventoryBatchLine(item.productId, { reason: event.target.value })} placeholder={t('reason') || 'Reason'} />
+                        )}
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-gray-200 p-4 dark:border-gray-700">
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {inventoryBatch.items.length} {t('products') || 'products'}
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary text-sm" onClick={() => setInventoryBatch(null)} disabled={batchApplying}>
+                  {t('cancel') || 'Cancel'}
+                </button>
+                <button type="button" className="btn-primary text-sm" onClick={applyInventoryBatchSession} disabled={batchApplying || !inventoryBatch.items.length}>
+                  {batchApplying ? (t('saving') || 'Saving...') : tr('apply_changes', 'Apply changes', 'អនុវត្តការផ្លាស់ប្តូរ')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showImport ? (
         <InventoryImportModal

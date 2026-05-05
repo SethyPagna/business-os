@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useDeferredValue } from 'react'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
@@ -166,12 +167,18 @@ function SuppliersTab({ t, notify, active = true }) {
   const [sortDirection, setSortDirection] = useState('desc')
   const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const supplierQuery = useMemo(() => ({
+    search: deferredSearch.trim() || undefined,
+    year: yearFilter !== 'all' ? yearFilter : undefined,
+    month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
+  }), [deferredSearch, monthFilter, yearFilter])
 
   const filteredBySearch = suppliers.filter((supplier) => {
-    const query = search.toLowerCase().trim()
+    const query = deferredSearch.toLowerCase().trim()
     if (!query) return true
     return (
       String(supplier.name || '').toLowerCase().includes(query)
@@ -319,7 +326,7 @@ function SuppliersTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getSuppliers(), label, 20000)
+        const data = await withLoaderTimeout(() => window.api.getSuppliers(supplierQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setSuppliers(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -348,7 +355,7 @@ function SuppliersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, t, tr])
+  }, [notify, supplierQuery, t, tr])
 
   useEffect(() => {
     if (!active) {

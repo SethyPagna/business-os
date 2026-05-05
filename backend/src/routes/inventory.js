@@ -54,6 +54,52 @@ function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
   return Math.max(min, Math.min(max, parsed))
 }
 
+function cleanInventoryReasonEntry(entry = {}, fallbackType = 'adjust') {
+  const id = String(entry.id || `${fallbackType}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`).trim()
+  const type = ['adjust', 'transfer', 'move'].includes(String(entry.type || fallbackType).trim().toLowerCase())
+    ? String(entry.type || fallbackType).trim().toLowerCase()
+    : fallbackType
+  const label = String(entry.label || entry.reason || '').trim().replace(/\s+/g, ' ')
+  if (!label) return null
+  return {
+    id,
+    type,
+    label,
+  }
+}
+
+function loadSavedInventoryReasons() {
+  const raw = db.prepare('SELECT value FROM settings WHERE key = ? LIMIT 1').get('inventory_saved_reasons')?.value
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((entry) => cleanInventoryReasonEntry(entry, entry?.type || 'adjust'))
+      .filter(Boolean)
+  } catch (_) {
+    return []
+  }
+}
+
+function persistSavedInventoryReasons(reasons = []) {
+  const normalized = Array.from(new Map(
+    (Array.isArray(reasons) ? reasons : [])
+      .map((entry) => cleanInventoryReasonEntry(entry, entry?.type || 'adjust'))
+      .filter(Boolean)
+      .map((entry) => [`${entry.type}:${String(entry.label || '').toLowerCase()}`, entry]),
+  ).values()).sort((left, right) => {
+    if (left.type !== right.type) return left.type.localeCompare(right.type)
+    return left.label.localeCompare(right.label)
+  })
+  db.prepare(`
+    INSERT INTO settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `).run('inventory_saved_reasons', JSON.stringify(normalized))
+  return normalized
+}
+
 function splitSearchTerms(value = '') {
   return String(value || '')
     .normalize('NFC')
@@ -427,6 +473,26 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
     ok(res, result)
   } catch (error) {
     err(res, error?.message || 'Stock transfer failed')
+  }
+})
+
+router.get('/reasons', authToken, requirePermission('inventory'), (_req, res) => {
+  try {
+    ok(res, { items: loadSavedInventoryReasons() })
+  } catch (error) {
+    err(res, error?.message || 'Failed to load inventory reasons')
+  }
+})
+
+router.put('/reasons', authToken, requirePermission('inventory'), (req, res) => {
+  try {
+    const actor = getAuditActor(req, req.body || {})
+    const reasons = persistSavedInventoryReasons(req.body?.items || req.body?.reasons || [])
+    audit(actor.userId, actor.userName, 'update', 'inventory_reason', null, { count: reasons.length })
+    broadcast('inventory')
+    ok(res, { items: reasons })
+  } catch (error) {
+    err(res, error?.message || 'Failed to save inventory reasons')
   }
 })
 
@@ -1221,6 +1287,8 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
   try {
     const branchId = req.query.branchId ? parseInt(req.query.branchId, 10) : null
     const userId = req.query.userId ? String(req.query.userId).trim() : ''
+    const startDate = String(req.query.startDate || req.query.start_date || '').trim()
+    const endDate = String(req.query.endDate || req.query.end_date || '').trim()
     const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
     const legacyLimit = req.query.limit || '50000'
     const requestedPageSize = req.query.pageSize || req.query.page_size || legacyLimit
@@ -1238,10 +1306,18 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
       where.push('user_id = @userId')
       params.userId = parseInt(userId, 10) || userId
     }
+    if (startDate) {
+      where.push(`date(COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text)) >= @startDate`)
+      params.startDate = startDate
+    }
+    if (endDate) {
+      where.push(`date(COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text)) <= @endDate`)
+      params.endDate = endDate
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const total = db.prepare(`
       SELECT COUNT(*) AS count
-      FROM inventory_movements
+      FROM inventory_movements im
       ${whereSql}
     `).get(params)?.count || 0
     const rows = db.prepare(`

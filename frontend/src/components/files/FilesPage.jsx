@@ -33,13 +33,21 @@ import {
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
-    return <img src={asset.public_path} alt={asset.original_name} className="h-32 w-full rounded-2xl object-cover" loading="lazy" decoding="async" />
+    return (
+      <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
+        <img src={asset.public_path} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+      </div>
+    )
   }
   if (asset?.media_type === 'video') {
-    return <video src={asset.public_path} className="h-32 w-full rounded-2xl object-cover" controls preload="none" />
+    return (
+      <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
+        <video src={asset.public_path} className="h-full w-full object-cover" controls preload="none" />
+      </div>
+    )
   }
   return (
-    <div className="flex h-32 w-full items-center justify-center rounded-2xl bg-slate-100 text-xs text-slate-500">
+    <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-xs text-slate-500">
       {asset?.mime_type || 'File'}
     </div>
   )
@@ -594,49 +602,51 @@ export default function FilesPage() {
           {!loadingFiles && !files.length ? <div className="card px-4 py-10 text-center text-sm text-slate-500">{tr('no_files_yet', 'No files yet.')}</div> : null}
 
           {files.length ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {files.map((asset) => {
                 const assetId = Number(asset?.id || 0)
                 const selected = selectedAssetIds.has(assetId)
                 return (
-                  <div key={asset.id} className="card p-4">
-                    <div className="mb-3 flex items-center justify-between gap-2">
+                  <div key={asset.id} className="card min-w-0 overflow-hidden p-3 sm:p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
-                        className="inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                        className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                         onClick={() => toggleAssetSelection(asset.id)}
                       >
                         {selected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
                         <span>{tr('select', 'Select')}</span>
                       </button>
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${asset.usageCount ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
+                      <span className={`max-w-full rounded-full px-2 py-1 text-[10px] font-semibold ${asset.usageCount ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
                         {asset.usageCount ? `${asset.usageCount} use(s)` : tr('unused', 'Unused')}
                       </span>
                     </div>
                     <AssetPreview asset={asset} />
                     <div className="mt-3 min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{asset.original_name}</div>
-                      <div className="mt-1 break-all text-xs text-slate-500">{asset.public_path}</div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                      <div className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name}>{asset.original_name}</div>
+                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={asset.public_path}>{asset.public_path}</div>
+                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
                         <span className="text-right">{formatFileSize(asset.byte_size)}</span>
                         <span>{tr('date_added', 'Date added')}</span>
                         <span className="text-right">{formatDateTime(asset.created_at)}</span>
                       </div>
                     </div>
-                    <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-                      <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})}>
-                        <Copy className="mr-2 inline h-4 w-4" />
-                        {tr('copy_path', 'Copy path')}
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                        <Copy className="inline h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       </button>
                       <button
                         type="button"
-                        className="btn-secondary shrink-0 whitespace-nowrap text-sm"
+                        className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3"
                         onClick={() => handleDeleteAsset(asset)}
                         disabled={!asset.canDelete || deletingAssetId != null}
+                        title={tr('delete', 'Delete')}
                       >
-                        <Trash2 className="mr-2 inline h-4 w-4" />
-                        {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
+                        <Trash2 className="inline h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">{deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}</span>
+                        <span className="sm:hidden">{deletingAssetId === asset.id ? '...' : null}</span>
                       </button>
                     </div>
                   </div>

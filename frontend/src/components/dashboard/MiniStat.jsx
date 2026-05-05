@@ -8,14 +8,14 @@ export default function MiniStat({ label, value, sub, color, trend, onClick }) {
     <Wrapper
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`card p-4 flex flex-col gap-1 text-left ${onClick ? 'transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/60' : ''}`}
+      className={`card flex flex-col gap-0.5 px-3 py-2.5 text-left sm:px-3.5 sm:py-3 ${onClick ? 'transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/60' : ''}`}
     >
-      <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">{label}</div>
-      <div className={`text-xl font-bold tracking-tight ${color || 'text-gray-900 dark:text-white'}`}>{value}</div>
-      {sub ? <div className="truncate text-xs text-gray-400" title={sub}>{sub}</div> : null}
+      <div className="text-[11px] font-medium leading-4 text-gray-500 dark:text-gray-400">{label}</div>
+      <div className={`text-lg font-bold leading-6 tracking-tight sm:text-[1.2rem] ${color || 'text-gray-900 dark:text-white'}`}>{value}</div>
+      {sub ? <div className="truncate text-[11px] leading-4 text-gray-400" title={sub}>{sub}</div> : null}
       {!trendNone ? (
-        <div className={`text-xs font-semibold flex items-center gap-1 mt-0.5 ${trendUp ? 'text-green-600' : trend < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-          <span>{trendUp ? '↗' : trend < 0 ? '↘' : '→'}</span>
+        <div className={`mt-0.5 flex items-center gap-1 text-[11px] font-semibold leading-4 ${trendUp ? 'text-green-600' : trend < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+          <span>{trendUp ? '->' : trend < 0 ? '<-' : '--'}</span>
           <span>{Math.abs(trend).toFixed(1)}% vs prev period</span>
         </div>
       ) : null}

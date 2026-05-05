@@ -10,12 +10,24 @@ import {
 
 function AssetPreview({ asset }) {
   if (asset?.media_type === 'image') {
-    return <img src={asset.public_path} alt={asset.original_name} className="h-24 w-full rounded-xl object-cover" />
+    return (
+      <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100">
+        <img src={asset.public_path} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+      </div>
+    )
   }
   if (asset?.media_type === 'video') {
-    return <video src={asset.public_path} className="h-24 w-full rounded-xl object-cover" muted />
+    return (
+      <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100">
+        <video src={asset.public_path} className="h-full w-full object-cover" muted preload="metadata" />
+      </div>
+    )
   }
-  return <div className="flex h-24 w-full items-center justify-center rounded-xl bg-slate-100 text-xs text-slate-500">{asset?.mime_type || 'File'}</div>
+  return (
+    <div className="flex aspect-[4/3] w-full items-center justify-center rounded-xl bg-slate-100 px-3 text-center text-xs text-slate-500">
+      {asset?.mime_type || 'File'}
+    </div>
+  )
 }
 
 export default function FilePickerModal({
@@ -167,31 +179,33 @@ export default function FilePickerModal({
             {files.map((asset) => {
               const isSelected = selectedPaths.includes(asset.public_path)
               return (
-                <div key={asset.id} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div key={asset.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                   <AssetPreview asset={asset} />
                   <div className="mt-3 min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-900">{asset.original_name}</div>
+                    <div className="truncate text-sm font-semibold text-slate-900" title={asset.original_name}>{asset.original_name}</div>
                     <div className="mt-1 text-xs text-slate-500">{asset.media_type || 'file'}{asset.byte_size ? ` · ${(asset.byte_size / 1024).toFixed(0)} KB` : ''}</div>
                     {asset.usageCount ? <div className="mt-1 text-[11px] text-amber-600">{asset.usageCount} use(s)</div> : <div className="mt-1 text-[11px] text-emerald-600">Unused</div>}
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 grid grid-cols-2 gap-2">
                     {multiple ? (
-                      <button type="button" className={`text-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`} onClick={() => toggleSelectedPath(asset)}>
+                      <button type="button" className={`min-w-0 justify-center px-2.5 text-sm sm:px-3 ${isSelected ? 'btn-primary' : 'btn-secondary'}`} onClick={() => toggleSelectedPath(asset)}>
                         {isSelected ? tr('selected', 'Selected') : tr('select', 'Select')}
                       </button>
                     ) : (
-                      <button type="button" className="btn-primary text-sm" onClick={() => { onSelect?.(asset.public_path, asset); onClose() }}>
+                      <button type="button" className="btn-primary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => { onSelect?.(asset.public_path, asset); onClose() }}>
                         {tr('select', 'Select')}
                       </button>
                     )}
-                    <button type="button" className="btn-secondary text-sm" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})}>
-                      {tr('copy', 'Copy')}
+                    <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                      <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
+                      <span className="sm:hidden">{tr('copy', 'Copy').slice(0, 4)}</span>
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary text-sm"
+                      className="btn-secondary col-span-2 min-w-0 justify-center px-2.5 text-sm sm:px-3"
                       onClick={() => handleDelete(asset)}
                       disabled={!asset.canDelete || deletingAssetId != null}
+                      title={tr('delete', 'Delete')}
                     >
                       {deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
                     </button>

@@ -283,8 +283,14 @@ export default function Dashboard() {
   const chartData = analytics?.periodData || []
   const chartRenderData = useMemo(() => downsampleChartRows(chartData), [chartData])
   const topList   = topMode === 'qty' ? (analytics?.topProductsQty || []) : (analytics?.topProducts || [])
-  const revenueFormulaText = 'Net revenue = Gross sales - Discounts - Refunds'
-  const collectedFormulaText = 'Collected total = Net revenue + Tax + Delivery'
+  const stockValueFormulaText = translateOr('dashboard_formula_stock_value', 'Stock value = quantity on hand x unit cost', 'តម្លៃស្តុក = បរិមាណនៅក្នុងដៃ x ថ្លៃដើមក្នុងមួយឯកតា')
+  const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds', 'ចំណូលសុទ្ធ = ចំណូលមុនបញ្ចុះតម្លៃ - បញ្ចុះតម្លៃ - ប្រាក់សងត្រឡប់')
+  const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery', 'ប្រាក់ប្រមូលសរុប = ចំណូលសុទ្ធ + ពន្ធ + ថ្លៃដឹកជញ្ជូន')
+  const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.', 'បញ្ចុះតម្លៃហាង គឺជាបញ្ចុះតម្លៃដែលអ្នកគិតលុយបញ្ចូល និងប្រម៉ូសិនលើផលិតផល។')
+  const cogsFormulaText = translateOr('dashboard_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS មិនរាប់បញ្ចូលបរិមាណដែលត្រូវបានស្តារវិញពីការត្រឡប់ដែលបានដាក់ចូលស្តុកឡើងវិញទេ។')
+  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS', 'ប្រាក់ចំណេញ = ចំណូលសុទ្ធ - COGS')
+  const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count', 'ការបញ្ជាទិញមធ្យម = ចំណូលសុទ្ធ / ចំនួនប្រតិបត្តិការ')
+  const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points', 'ការត្រឡប់កាត់បន្ថយចំណូលសុទ្ធ និងពិន្ទុសមាជិកភាព។')
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
   const rangeLabel = (() => {
@@ -320,7 +326,7 @@ export default function Dashboard() {
       details: [
         { label: t('stock_value') || 'Stock value', value: fmtUSD(aStockValue) },
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
-        { label: t('formula') || 'Formula', value: 'Stock value = quantity on hand x unit cost' },
+        { label: t('formula') || 'Formula', value: stockValueFormulaText },
       ],
     },
     {
@@ -363,7 +369,7 @@ export default function Dashboard() {
       color: aStoreDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
       details: [
         { label: t('store_discounts') || 'Store discounts', value: fmtUSD(aStoreDiscounts) },
-        { label: t('formula') || 'Formula', value: 'Store discounts are the cashier-entered sale discounts and product promotions.' },
+        { label: t('formula') || 'Formula', value: storeDiscountFormulaText },
       ],
     },
     {
@@ -373,7 +379,7 @@ export default function Dashboard() {
       color: 'text-red-600',
       details: [
         { label: t('cogs') || 'COGS', value: fmtUSD(aCost) },
-        { label: t('formula') || 'Formula', value: 'COGS excludes quantities restored by restocked returns' },
+        { label: t('formula') || 'Formula', value: cogsFormulaText },
       ],
     },
     {
@@ -387,19 +393,19 @@ export default function Dashboard() {
         { label: t('revenue') || 'Revenue', value: fmtUSD(aRevenue) },
         { label: t('cogs') || 'COGS', value: fmtUSD(aCost) },
         { label: t('profit_margin') || 'Profit margin', value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
-        { label: t('formula') || 'Formula', value: 'Profit = Net revenue - COGS' },
+        { label: t('formula') || 'Formula', value: profitFormulaText },
       ],
     },
     {
       id: 'transactions',
       label: t('transactions'),
       value: aTxCount,
-      sub: `avg ${fmtUSD(aAvgOrder)} / ${t('sale')}`,
+      sub: `${translateOr('avg_short', 'Avg', 'មធ្យម')} ${fmtUSD(aAvgOrder)} / ${t('sale')}`,
       trend: calcTrend(aTxCount, aPrevTxCount),
       details: [
         { label: t('transactions') || 'Transactions', value: aTxCount },
         { label: t('avg_order_value') || 'Avg order', value: fmtUSD(aAvgOrder) },
-        { label: t('formula') || 'Formula', value: 'Average order = Net revenue / transaction count' },
+        { label: t('formula') || 'Formula', value: avgOrderFormulaText },
       ],
     },
     {
@@ -414,7 +420,7 @@ export default function Dashboard() {
         { label: t('items') || 'Items', value: aItemsRet },
         { label: t('supplier_returns') || 'Supplier returns', value: aSupplierReturns },
         { label: t('business_loss') || 'Business loss', value: fmtUSD(aSupplierLossUsd) },
-        { label: t('formula') || 'Formula', value: 'Returns decrease net revenue and loyalty points' },
+        { label: t('formula') || 'Formula', value: returnsFormulaText },
       ],
     },
   ]
@@ -934,25 +940,25 @@ export default function Dashboard() {
       </div>
 
       {/* Period KPI cards */}
-      <div className="rounded-xl border-2 border-blue-100 dark:border-blue-900/40 p-2 sm:p-3 bg-blue-50/40 dark:bg-blue-950/20">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">{t('period_stats')}</span>
-          <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">{periodShort}</span>
-          <span className="text-xs text-gray-400 ml-auto hidden sm:inline">{rangeLabel}</span>
-        </div>
-        {!aLoading ? (
-          <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
-        ) : null}
-        {aLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3">
-            {[...Array(7)].map((_, i) => <div key={i} className="card p-4 h-20 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" />)}
+        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">{t('period_stats')}</span>
+            <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">{periodShort}</span>
+            <span className="text-xs text-gray-400 ml-auto hidden sm:inline">{rangeLabel}</span>
           </div>
-        ) : (
-          <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3">
-            {periodKpis.map((kpi) => (
-              <MiniStat
-                key={kpi.id}
+          {!aLoading ? (
+            <p className="mb-1.5 text-[11px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
+          ) : null}
+          {aLoading ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
+              {[...Array(7)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
+            </div>
+          ) : (
+            <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
+              {periodKpis.map((kpi) => (
+                <MiniStat
+                  key={kpi.id}
                 label={kpi.label}
                 value={kpi.value}
                 sub={kpi.sub}

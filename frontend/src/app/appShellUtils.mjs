@@ -5,6 +5,9 @@ const STATIC_ASSET_RE = /\.[a-z0-9]+$/i
 // Keep a small working set of pages mounted so tab switches still feel quick
 // without letting the shell drag around every hidden page forever.
 export const MAX_MOUNTED_PAGES = 8
+export const MOBILE_MAX_MOUNTED_PAGES = 3
+export const MOBILE_SHELL_BREAKPOINT = 768
+export const DESKTOP_WARMUP_BREAKPOINT = 1024
 
 export function isPublicCatalogPath(pathname) {
   const value = String(pathname || '/')
@@ -24,6 +27,22 @@ export function updateMountedPages(previousPages, activePage, maxPages = MAX_MOU
   }
   const unchanged = next.length === list.length && next.every((page, index) => page === list[index])
   return unchanged ? list : next
+}
+
+export function getMountedPageLimit({ viewportWidth = 0, coarsePointer = false, maxPages = MAX_MOUNTED_PAGES } = {}) {
+  const width = Number(viewportWidth || 0)
+  if (coarsePointer) return Math.min(maxPages, MOBILE_MAX_MOUNTED_PAGES)
+  if (Number.isFinite(width) && width > 0 && width < MOBILE_SHELL_BREAKPOINT) {
+    return Math.min(maxPages, MOBILE_MAX_MOUNTED_PAGES)
+  }
+  return maxPages
+}
+
+export function shouldWarmPageEntries({ viewportWidth = 0, coarsePointer = false } = {}) {
+  const width = Number(viewportWidth || 0)
+  if (coarsePointer) return false
+  if (Number.isFinite(width) && width > 0 && width < DESKTOP_WARMUP_BREAKPOINT) return false
+  return true
 }
 
 export function getNotificationPrefix(type) {

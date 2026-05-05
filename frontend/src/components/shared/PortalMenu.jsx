@@ -177,20 +177,27 @@ export default function PortalMenu({
  * 2.1 Provides a consistent "..." row-action trigger used across list tables.
  * 2.2 Keeps caller code small by converting optional handlers into menu items.
  */
-export function ThreeDotPortal({ onDetails, onEdit, onDelete, onAddVariant, extraItems = [] }) {
+export function ThreeDotPortal({
+  onDetails,
+  onEdit,
+  onDelete,
+  onAddVariant,
+  extraItems = [],
+  labels = {},
+}) {
   const items = [
-    onDetails && { label: 'View Details', onClick: onDetails },
-    onEdit && { label: 'Edit', onClick: onEdit, color: 'blue' },
-    onAddVariant && { label: 'Add Variant', onClick: onAddVariant, color: 'purple' },
+    onDetails && { label: labels.details || labels.viewDetails || 'View Details', onClick: onDetails },
+    onEdit && { label: labels.edit || 'Edit', onClick: onEdit, color: 'blue' },
+    onAddVariant && { label: labels.addVariant || 'Add Variant', onClick: onAddVariant, color: 'purple' },
     ...(extraItems || []),
     onDelete && 'divider',
-    onDelete && { label: 'Delete', onClick: onDelete, color: 'red' },
+    onDelete && { label: labels.delete || 'Delete', onClick: onDelete, color: 'red' },
   ].filter(Boolean)
 
   return (
     <PortalMenu
       trigger={(
-        <button type="button" className="three-dot-btn" aria-label="Open actions menu">
+        <button type="button" className="three-dot-btn" aria-label={labels.ariaLabel || 'Open actions menu'}>
           <MoreHorizontal className="h-4 w-4" />
         </button>
       )}

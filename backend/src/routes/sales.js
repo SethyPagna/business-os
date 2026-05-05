@@ -467,7 +467,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
       const willStockBeDeducted = statusesWithStockDeducted.includes(sale_status)
 
       // Handle stock adjustments based on transition
-      if (oldStatus === 'awaiting_payment' && willStockBeDeducted) {
+      if (!wasStockDeducted && willStockBeDeducted) {
         // Transition: awaiting_payment â†’ {completed, awaiting_delivery}
         // Stock needs to be deducted now (it was held, not deducted)
         assertSaleStockAvailable(items, sale.branch_id || null)
@@ -495,7 +495,7 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
             item.cost_price_khr || 0,
             (item.cost_price_usd || 0) * item.quantity,
             (item.cost_price_khr || 0) * item.quantity,
-            `Sale status changed from awaiting_payment to ${sale_status}`,
+            `Sale status changed from ${oldStatus} to ${sale_status}`,
             id,
             actor.userId,
             actor.userName,
@@ -661,6 +661,7 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
 // GET /api/sales
 router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, cashier, branchId, status, userId, limit = 100 } = req.query
+  const search = String(req.query.search || req.query.q || '').trim().toLowerCase()
   // Fetch sales with all items in a single query (avoids N+1 problem)
   let q = `SELECT s.*,
              MAX(c.membership_number) AS customer_membership_number,
@@ -713,6 +714,29 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
     params.push(branchId, branchId)
   }
   if (status)    { q += ' AND s.sale_status = ?';       params.push(status) }
+  if (search) {
+    const terms = search.split(/\s+/).filter(Boolean)
+    for (const term of terms) {
+      const like = `%${term}%`
+      q += ` AND (
+        lower(COALESCE(s.receipt_number, '')) LIKE ?
+        OR lower(COALESCE(s.cashier_name, '')) LIKE ?
+        OR lower(COALESCE(s.customer_name, '')) LIKE ?
+        OR lower(COALESCE(s.customer_phone, '')) LIKE ?
+        OR lower(COALESCE(s.customer_membership_number, '')) LIKE ?
+        OR lower(COALESCE(s.branch_name, '')) LIKE ?
+        OR lower(COALESCE(s.payment_method, '')) LIKE ?
+        OR lower(COALESCE(s.notes, '')) LIKE ?
+        OR EXISTS (
+          SELECT 1
+          FROM sale_items sis
+          WHERE sis.sale_id = s.id
+            AND lower(COALESCE(sis.product_name, '')) LIKE ?
+        )
+      )`
+      params.push(like, like, like, like, like, like, like, like, like)
+    }
+  }
   q += ' GROUP BY s.id ORDER BY s.created_at DESC LIMIT ?'
   params.push(Math.min(parseInt(limit) || 100, 500))  // Cap limit at 500
 

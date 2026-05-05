@@ -141,12 +141,40 @@ function assertReturnableItems(saleId, items = [], excludeReturnId = null) {
 router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, saleId, limit = 500 } = req.query
   const scope = normalizeScope(req.query.scope, CUSTOMER_SCOPE)
+  const search = String(req.query.search || req.query.q || '').trim().toLowerCase()
+  const type = String(req.query.type || req.query.returnType || '').trim().toLowerCase()
   let q = `SELECT r.* FROM returns r WHERE 1=1`
   const params = []
   if (startDate) { q += ' AND date(r.created_at) >= ?'; params.push(startDate) }
   if (endDate)   { q += ' AND date(r.created_at) <= ?'; params.push(endDate) }
   if (saleId)    { q += ' AND r.sale_id = ?';           params.push(saleId) }
   if (scope !== 'all') { q += ` AND COALESCE(r.return_scope, 'customer') = ?`; params.push(scope) }
+  if (type && type !== 'all') {
+    if (scope === SUPPLIER_SCOPE) {
+      q += ` AND lower(COALESCE(r.supplier_settlement, 'refund')) = ?`
+    } else {
+      q += ` AND lower(COALESCE(r.return_type, 'manual')) = ?`
+    }
+    params.push(type)
+  }
+  if (search) {
+    const terms = search.split(/\s+/).filter(Boolean)
+    for (const term of terms) {
+      const like = `%${term}%`
+      q += ` AND (
+        lower(COALESCE(r.return_number, '')) LIKE ?
+        OR lower(COALESCE(r.receipt_number, '')) LIKE ?
+        OR lower(COALESCE(r.cashier_name, '')) LIKE ?
+        OR lower(COALESCE(r.customer_name, '')) LIKE ?
+        OR lower(COALESCE(r.supplier_name, '')) LIKE ?
+        OR lower(COALESCE(r.reason, '')) LIKE ?
+        OR lower(COALESCE(r.notes, '')) LIKE ?
+        OR lower(COALESCE(r.return_type, '')) LIKE ?
+        OR lower(COALESCE(r.supplier_settlement, '')) LIKE ?
+      )`
+      params.push(like, like, like, like, like, like, like, like, like)
+    }
+  }
   q += ' ORDER BY r.created_at DESC LIMIT ?'
   params.push(parseInt(limit))
 

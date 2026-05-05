@@ -110,6 +110,56 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback
 }
 
+function parseDateFilterParams(query = {}) {
+  const startDate = cleanText(query.startDate || query.start_date)
+  const endDate = cleanText(query.endDate || query.end_date)
+  const year = cleanText(query.year)
+  const month = cleanText(query.month)
+  if (startDate || endDate) return { startDate, endDate }
+  if (!year || year === 'all') return { startDate: '', endDate: '' }
+  const numericYear = Number.parseInt(year, 10)
+  if (!Number.isFinite(numericYear) || numericYear < 1900) return { startDate: '', endDate: '' }
+  const numericMonth = month && month !== 'all' ? Number.parseInt(month, 10) : null
+  if (Number.isFinite(numericMonth) && numericMonth >= 1 && numericMonth <= 12) {
+    const start = new Date(Date.UTC(numericYear, numericMonth - 1, 1))
+    const end = new Date(Date.UTC(numericYear, numericMonth, 0))
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+    }
+  }
+  return {
+    startDate: `${numericYear}-01-01`,
+    endDate: `${numericYear}-12-31`,
+  }
+}
+
+function buildContactListFilters(query = {}, {
+  alias = 'c',
+  searchableFields = [],
+} = {}) {
+  const where = ['1=1']
+  const params = []
+  const search = String(cleanText(query.search || query.q) || '').toLowerCase()
+  const { startDate, endDate } = parseDateFilterParams(query)
+  if (startDate) {
+    where.push(`date(COALESCE(NULLIF(${alias}.created_at::text, ''), CURRENT_TIMESTAMP::text)) >= ?`)
+    params.push(startDate)
+  }
+  if (endDate) {
+    where.push(`date(COALESCE(NULLIF(${alias}.created_at::text, ''), CURRENT_TIMESTAMP::text)) <= ?`)
+    params.push(endDate)
+  }
+  if (search) {
+    const haystack = searchableFields.length
+      ? searchableFields.map((field) => `coalesce(${alias}.${field}, '')`).join(` || ' ' || `)
+      : `coalesce(${alias}.name, '')`
+    where.push(`lower(${haystack}) LIKE ?`)
+    params.push(`%${search}%`)
+  }
+  return { whereSql: `WHERE ${where.join(' AND ')}`, params }
+}
+
 function loadPointPolicy() {
   const rows = db.prepare(`
     SELECT key, value
@@ -143,7 +193,17 @@ function calculatePolicyPoints(amountUsd, amountKhr, policy) {
 
 // â”€â”€ Customers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/customers', authToken, requirePermission('contacts'), (req, res) => {
-  const customers = db.prepare('SELECT * FROM customers ORDER BY name').all()
+  const { whereSql, params } = buildContactListFilters(req.query, {
+    alias: 'c',
+    searchableFields: ['name', 'membership_number', 'phone', 'email', 'company', 'notes'],
+  })
+  const customers = db.prepare(`
+    SELECT c.*,
+      COALESCE(NULLIF(c.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
+    FROM customers c
+    ${whereSql}
+    ORDER BY c.name
+  `).all(...params)
   if (!customers.length) return res.json([])
 
   const pointsPolicy = loadPointPolicy()
@@ -415,7 +475,17 @@ router.post('/customers/bulk-import', authToken, requirePermission('contacts'), 
 
 // â”€â”€ Suppliers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all())
+  const { whereSql, params } = buildContactListFilters(req.query, {
+    alias: 's',
+    searchableFields: ['name', 'phone', 'email', 'company', 'contact_person', 'notes'],
+  })
+  res.json(db.prepare(`
+    SELECT s.*,
+      COALESCE(NULLIF(s.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
+    FROM suppliers s
+    ${whereSql}
+    ORDER BY s.name
+  `).all(...params))
 })
 
 router.post('/suppliers', authToken, requirePermission('contacts'), (req, res) => {
@@ -607,7 +677,17 @@ router.post('/suppliers/bulk-import', authToken, requirePermission('contacts'), 
 
 // â”€â”€ Delivery contacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM delivery_contacts ORDER BY name').all())
+  const { whereSql, params } = buildContactListFilters(req.query, {
+    alias: 'd',
+    searchableFields: ['name', 'phone', 'area', 'notes'],
+  })
+  res.json(db.prepare(`
+    SELECT d.*,
+      COALESCE(NULLIF(d.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
+    FROM delivery_contacts d
+    ${whereSql}
+    ORDER BY d.name
+  `).all(...params))
 })
 
 router.post('/delivery-contacts', authToken, requirePermission('contacts'), (req, res) => {

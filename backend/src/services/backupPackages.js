@@ -3,10 +3,15 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const { PassThrough, Writable } = require('stream')
 const { pipeline } = require('stream/promises')
 const { BACKUP_TABLES, BACKUP_VERSION, buildBackupSummaryFromCounts } = require('../backupSchema')
 const { DATA_ROOT, S3_BUCKET, OBJECT_STORAGE_DRIVER } = require('../config')
 const { putObject, listObjects, getObjectStorageDriver, getObjectStream } = require('../objectStore')
+
+const OBJECT_COPY_CONCURRENCY = 2
+const PROGRESS_MIN_INTERVAL_MS = 350
+const PROGRESS_PERCENT_STEP = 2
 
 function getDb() {
   return require('../database').db
@@ -78,6 +83,45 @@ function closeWriteStream(stream) {
   })
 }
 
+function createProgressReporter(progress) {
+  if (typeof progress !== 'function') {
+    return () => {}
+  }
+  let lastReport = {
+    at: 0,
+    phase: '',
+    message: '',
+    progress: -1,
+    retryCount: -1,
+  }
+  return (patch = {}, options = {}) => {
+    const now = Date.now()
+    const phase = String(patch.phase || '')
+    const message = String(patch.message || '')
+    const progressValue = Number.isFinite(Number(patch.progress)) ? Number(patch.progress) : lastReport.progress
+    const retryCount = Number(patch.retry_count || patch.metrics?.retryCount || 0) || 0
+    const force = options.force === true
+      || ['completed', 'failed', 'cancelled'].includes(phase)
+      || progressValue >= 100
+    const shouldSend = force
+      || !lastReport.at
+      || phase !== lastReport.phase
+      || message !== lastReport.message
+      || retryCount !== lastReport.retryCount
+      || Math.abs(progressValue - lastReport.progress) >= PROGRESS_PERCENT_STEP
+      || (now - lastReport.at) >= PROGRESS_MIN_INTERVAL_MS
+    if (!shouldSend) return
+    lastReport = {
+      at: now,
+      phase,
+      message,
+      progress: progressValue,
+      retryCount,
+    }
+    progress(patch)
+  }
+}
+
 function getSafeTableCount(tableName) {
   try {
     return Number(getDb().prepare(`SELECT COUNT(*) AS count FROM ${q(tableName)}`).get()?.count || 0)
@@ -87,6 +131,7 @@ function getSafeTableCount(tableName) {
 }
 
 async function streamBackupDataFile(filePath, { progress, signal, throwIfCancelled } = {}) {
+  const reportProgress = createProgressReporter(progress)
   const hash = createSha256()
   const stream = fs.createWriteStream(filePath, { encoding: 'utf8' })
   const tableCounts = {}
@@ -118,7 +163,7 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
         rowsProcessed += 1
       }
       offset += rows.length
-      progress?.({
+      reportProgress({
         phase: 'database',
         progress: 10 + Math.round(((tableIndex + Math.min(1, offset / Math.max(1, totalRows))) / totalTables) * 32),
         message: `Streaming ${tableName} (${Math.min(offset, totalRows)} of ${totalRows})`,
@@ -239,12 +284,13 @@ async function uploadPackageFile({ packageId, localPath, fileName, contentType }
 }
 
 async function writeAndUploadMetadataFiles({ files, packageId, localPath, progress, signal, throwIfCancelled } = {}) {
+  const reportProgress = createProgressReporter(progress)
   const entries = Object.entries(files || {})
   for (let index = 0; index < entries.length; index += 1) {
     throwIfAborted(signal)
     throwIfCancelled?.()
     const [fileName, contents] = entries[index]
-    progress?.({
+    reportProgress({
       phase: 'writing',
       progress: 45 + Math.round(((index + 1) / Math.max(1, entries.length)) * 30),
       message: `Writing ${fileName}`,
@@ -276,7 +322,44 @@ async function retryOperation(operation, { retries = 3, onRetry = null } = {}) {
   throw lastError
 }
 
-async function copyOnePackageObject({ item, packageId, localPath }) {
+function writeDestinationChunk(destination, chunk) {
+  if (destination.write(chunk)) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    destination.once('drain', resolve)
+    destination.once('error', reject)
+  })
+}
+
+function endDestination(destination) {
+  return new Promise((resolve, reject) => {
+    destination.end(resolve)
+    destination.once('error', reject)
+  })
+}
+
+function createDualWriteStream(primary, secondary) {
+  return new Writable({
+    write(chunk, _encoding, callback) {
+      Promise.all([
+        writeDestinationChunk(primary, chunk),
+        writeDestinationChunk(secondary, chunk),
+      ]).then(() => callback(), callback)
+    },
+    final(callback) {
+      Promise.all([
+        endDestination(primary),
+        endDestination(secondary),
+      ]).then(() => callback(), callback)
+    },
+    destroy(error, callback) {
+      try { primary.destroy(error || undefined) } catch (_) {}
+      try { secondary.destroy(error || undefined) } catch (_) {}
+      callback(error)
+    },
+  })
+}
+
+async function copyOnePackageObject({ item, packageId, localPath, signal, throwIfCancelled }) {
   const sourceKey = String(item.object_key || '').replace(/^\/+/, '')
   if (!sourceKey) return false
   const prefix = `backups/${packageId}/objects`
@@ -286,14 +369,35 @@ async function copyOnePackageObject({ item, packageId, localPath }) {
   fs.mkdirSync(path.dirname(localObjectPath), { recursive: true })
   const object = await getObjectStream(sourceKey)
   if (!object?.body) throw new Error('Object returned no data')
-  await pipeline(object.body, fs.createWriteStream(localObjectPath))
-  await putObject(`${prefix}/${relativeKey}`, fs.createReadStream(localObjectPath), {
+  throwIfCancelled?.()
+  const localStream = fs.createWriteStream(localObjectPath)
+  const remoteStream = new PassThrough()
+  const uploadPromise = putObject(`${prefix}/${relativeKey}`, remoteStream, {
     contentType: object.contentType || item.mime_type || 'application/octet-stream',
   })
+  const fanoutStream = createDualWriteStream(localStream, remoteStream)
+  const abortCopy = () => {
+    const error = new Error('Job cancelled')
+    error.code = 'job_cancelled'
+    try { object.body?.destroy?.(error) } catch (_) {}
+    try { localStream.destroy(error) } catch (_) {}
+    try { remoteStream.destroy(error) } catch (_) {}
+    try { fanoutStream.destroy(error) } catch (_) {}
+  }
+  if (signal) signal.addEventListener('abort', abortCopy, { once: true })
+  try {
+    await Promise.all([
+      pipeline(object.body, fanoutStream),
+      uploadPromise,
+    ])
+  } finally {
+    if (signal) signal.removeEventListener('abort', abortCopy)
+  }
   return true
 }
 
 async function copyPackageObjects({ objectManifest = [], packageId, localPath, progress, signal, throwIfCancelled } = {}) {
+  const reportProgress = createProgressReporter(progress)
   const safeObjects = Array.isArray(objectManifest) ? objectManifest : []
   if (!safeObjects.length) return { copied: 0, failed: 0, errors: [] }
   const objectRoot = path.join(localPath, 'objects')
@@ -310,7 +414,7 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
       const item = safeObjects[index] || {}
       const sourceKey = String(item.object_key || '').replace(/^\/+/, '')
       if (!sourceKey) continue
-      progress?.({
+      reportProgress({
         phase: 'objects',
         progress: 76 + Math.round(((index + 1) / safeObjects.length) * 19),
         message: `Copying object ${index + 1} of ${safeObjects.length}`,
@@ -318,9 +422,9 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
       })
       await yieldToEventLoop()
       try {
-        await retryOperation(() => copyOnePackageObject({ item, packageId, localPath }), {
+        await retryOperation(() => copyOnePackageObject({ item, packageId, localPath, signal, throwIfCancelled }), {
           retries: 3,
-          onRetry: (attempt) => progress?.({ retry_count: attempt, metrics: { currentFile: sourceKey, retryCount: attempt } }),
+          onRetry: (attempt) => reportProgress({ retry_count: attempt, metrics: { currentFile: sourceKey, retryCount: attempt } }, { force: true }),
         })
         copied += 1
       } catch (error) {
@@ -332,7 +436,7 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
       }
     }
   }
-  await Promise.all([worker(), worker()])
+  await Promise.all(Array.from({ length: OBJECT_COPY_CONCURRENCY }, () => worker()))
   if (errors.length) {
     fs.writeFileSync(
       path.join(localPath, 'objects-errors.json'),
@@ -344,8 +448,9 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
 }
 
 async function createFinalBackupPackage({ destinationDir = '', actor = {}, progress = null, signal = null, throwIfCancelled = null } = {}) {
+  const reportProgress = createProgressReporter(progress)
   const packageId = `datasync-${nowSafeId()}`
-  progress?.({ phase: 'starting', progress: 5, message: 'Preparing final backup package' })
+  reportProgress({ phase: 'starting', progress: 5, message: 'Preparing final backup package' }, { force: true })
   const localPath = destinationDir
     ? path.join(path.resolve(destinationDir), packageId)
     : path.join(DATA_ROOT, 'backups', packageId)
@@ -408,7 +513,16 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
     signal,
     throwIfCancelled,
   })
-  progress?.({ phase: 'completed', progress: 100, message: 'Backup package created' })
+  reportProgress({
+    phase: 'completed',
+    progress: 100,
+    message: 'Backup package created',
+    metrics: {
+      filesProcessed: objectCopy.copied,
+      filesTotal: objectManifest.length,
+      failedObjects: objectCopy.failed,
+    },
+  }, { force: true })
   return {
     packageId,
     manifest: payload.manifest,

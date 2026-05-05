@@ -3,6 +3,8 @@
 const crypto = require('crypto')
 
 const MAX_COMPLETED_JOBS = 100
+const JOB_PERSIST_MIN_INTERVAL_MS = 750
+const JOB_PROGRESS_PERSIST_STEP = 5
 const jobs = new Map()
 let tableReady = false
 
@@ -164,7 +166,68 @@ function cleanupJobs() {
   } catch (_) {}
 }
 
-function updateJob(job, patch = {}) {
+function buildPersistSignature(job) {
+  return JSON.stringify({
+    status: job.status || '',
+    phase: job.phase || '',
+    progress: Number(job.progress || 0) || 0,
+    message: job.message || '',
+    retry_count: Number(job.retry_count || 0) || 0,
+    cancel_requested_at: job.cancel_requested_at || '',
+    error: job.error || '',
+    metrics: job.metrics || {},
+    hasResult: !!job.result,
+    finished_at: job.finished_at || '',
+  })
+}
+
+function markPersisted(job) {
+  job._persistedAt = Date.now()
+  job._persistedSignature = buildPersistSignature(job)
+}
+
+function flushPersistJob(job) {
+  if (!job) return
+  if (job._persistTimer) {
+    clearTimeout(job._persistTimer)
+    job._persistTimer = null
+  }
+  try {
+    persistJob(job)
+    markPersisted(job)
+  } catch (_) {}
+}
+
+function shouldPersistJob(job, patch = {}, options = {}) {
+  if (options.forcePersist) return true
+  if (!job._persistedAt || !job._persistedSignature) return true
+  const nextSignature = buildPersistSignature(job)
+  if (nextSignature === job._persistedSignature) return false
+  const previous = safeJsonParse(job._persistedSignature, {})
+  if (String(job.status || '') !== String(previous.status || '')) return true
+  if (String(job.phase || '') !== String(previous.phase || '')) return true
+  if (String(job.message || '') !== String(previous.message || '')) return true
+  if (String(job.error || '') !== String(previous.error || '')) return true
+  if ((patch.result && typeof patch.result === 'object') || patch.finished_at || patch.cancel_requested_at) return true
+  const currentProgress = Number(job.progress || 0) || 0
+  const previousProgress = Number(previous.progress || 0) || 0
+  if (Math.abs(currentProgress - previousProgress) >= JOB_PROGRESS_PERSIST_STEP) return true
+  if ((Date.now() - Number(job._persistedAt || 0)) >= JOB_PERSIST_MIN_INTERVAL_MS) return true
+  return false
+}
+
+function schedulePersistJob(job) {
+  if (!job || job._persistTimer) return
+  const elapsed = Date.now() - Number(job._persistedAt || 0)
+  const delayMs = Math.max(50, JOB_PERSIST_MIN_INTERVAL_MS - elapsed)
+  job._persistTimer = setTimeout(() => {
+    job._persistTimer = null
+    flushPersistJob(job)
+  }, delayMs)
+  job._persistTimer.unref?.()
+}
+
+function updateJob(job, patch = {}, options = {}) {
   const nextPatch = { ...patch }
   if (patch.metrics && typeof patch.metrics === 'object') {
     nextPatch.metrics = {
@@ -173,7 +236,11 @@ function updateJob(job, patch = {}) {
     }
   }
   Object.assign(job, nextPatch, { updated_at: nowIso() })
-  try { persistJob(job) } catch (_) {}
+  if (shouldPersistJob(job, patch, options)) {
+    flushPersistJob(job)
+  } else {
+    schedulePersistJob(job)
+  }
   return job
 }
 
@@ -212,7 +279,7 @@ function startSystemJob(type, worker, options = {}) {
     updated_at: nowIso(),
   }
   jobs.set(job.id, job)
-  try { persistJob(job) } catch (_) {}
+  flushPersistJob(job)
 
   const runWorker = async () => {
     if (job.cancel_requested_at) {
@@ -222,7 +289,7 @@ function startSystemJob(type, worker, options = {}) {
         progress: Math.max(0, Math.min(99, Number(job.progress || 0))),
         message: 'Job cancelled before it started',
         finished_at: nowIso(),
-      })
+      }, { forcePersist: true })
       cleanupJobs()
       return
     }
@@ -232,7 +299,7 @@ function startSystemJob(type, worker, options = {}) {
       progress: Math.max(0, Math.min(99, Number(options.initialProgress || 1))),
       message: options.runningMessage || 'Running',
       started_at: nowIso(),
-    })
+    }, { forcePersist: true })
     const isCancelled = () => !!job.cancel_requested_at || job.abort_controller?.signal?.aborted
     const throwIfCancelled = () => {
       if (isCancelled()) throw new SystemJobCancelledError()
@@ -257,7 +324,7 @@ function startSystemJob(type, worker, options = {}) {
         message: options.completedMessage || 'Completed',
         result: result || null,
         finished_at: nowIso(),
-      })
+      }, { forcePersist: true })
     } catch (error) {
       if (error?.code === 'job_cancelled' || error?.name === 'AbortError' || isCancelled()) {
         updateJob(job, {
@@ -267,7 +334,7 @@ function startSystemJob(type, worker, options = {}) {
           message: 'Job cancelled',
           error: '',
           finished_at: nowIso(),
-        })
+        }, { forcePersist: true })
         return
       }
       updateJob(job, {
@@ -277,7 +344,7 @@ function startSystemJob(type, worker, options = {}) {
         message: error?.message || 'Job failed',
         error: error?.message || String(error),
         finished_at: nowIso(),
-      })
+      }, { forcePersist: true })
     } finally {
       cleanupJobs()
     }
@@ -302,7 +369,7 @@ function cancelSystemJob(id, reason = 'Cancelled by user') {
     message: reason || 'Cancellation requested',
     cancel_requested_at: job.cancel_requested_at || cancelledAt,
     finished_at: job.status === 'queued' ? cancelledAt : job.finished_at,
-  })
+  }, { forcePersist: true })
   try { job.abort_controller?.abort?.() } catch (_) {}
   return publicJob(job)
 }

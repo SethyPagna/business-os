@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useApp } from './AppContext'
-import { getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.mjs'
+import { getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
@@ -262,13 +262,42 @@ function getPageEntryWarmupLoaders(pageId, canAccessPage) {
 function useMountedPages(activePage) {
   // Keep only a bounded set of mounted screens alive to preserve local state
   // without letting the app accumulate every page forever.
+  const [shellProfile, setShellProfile] = useState(() => ({
+    viewportWidth: typeof window === 'undefined' ? 1280 : Number(window.innerWidth || 1280),
+    coarsePointer: typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? !!window.matchMedia('(pointer: coarse)').matches
+      : false,
+  }))
   const [mountedPages, setMountedPages] = useState(() => [activePage])
 
   useEffect(() => {
-    setMountedPages((previousPages) => {
-      return updateMountedPages(previousPages, activePage, MAX_MOUNTED_PAGES)
+    if (typeof window === 'undefined') return undefined
+    const coarseMedia = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null
+    const syncProfile = () => {
+      setShellProfile({
+        viewportWidth: Number(window.innerWidth || 1280),
+        coarsePointer: !!coarseMedia?.matches,
+      })
+    }
+    syncProfile()
+    window.addEventListener('resize', syncProfile)
+    coarseMedia?.addEventListener?.('change', syncProfile)
+    return () => {
+      window.removeEventListener('resize', syncProfile)
+      coarseMedia?.removeEventListener?.('change', syncProfile)
+    }
+  }, [])
+
+  useEffect(() => {
+    const pageLimit = getMountedPageLimit({
+      viewportWidth: shellProfile.viewportWidth,
+      coarsePointer: shellProfile.coarsePointer,
+      maxPages: MAX_MOUNTED_PAGES,
     })
-  }, [activePage])
+    setMountedPages((previousPages) => {
+      return updateMountedPages(previousPages, activePage, pageLimit)
+    })
+  }, [activePage, shellProfile.coarsePointer, shellProfile.viewportWidth])
 
   return mountedPages
 }
@@ -474,6 +503,12 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
   // "first app login" warmup and "I navigated here much later" cold starts.
   useEffect(() => {
     if (!user || !ADMIN_PAGE_SEQUENCE.includes(activePageId) || typeof window === 'undefined') return undefined
+    if (!shouldWarmPageEntries({
+      viewportWidth: Number(window.innerWidth || 0),
+      coarsePointer: typeof window.matchMedia === 'function' ? !!window.matchMedia('(pointer: coarse)').matches : false,
+    })) {
+      return undefined
+    }
 
     let cancelled = false
     let idleId = null
@@ -762,6 +797,15 @@ function PageLoader() {
     const timer = window.setTimeout(() => {
       setStalled(true)
       console.warn('[PageLoader] Page bundle is still loading. If this repeats, reload to fetch the current build assets.')
+      try {
+        const key = `business_os_page_loader_retry:${window.location.pathname}`
+        if (!window.sessionStorage.getItem(key)) {
+          window.sessionStorage.setItem(key, String(Date.now()))
+          window.setTimeout(() => window.location.reload(), 1800)
+        }
+      } catch {
+        // Ignore storage access problems and keep the manual reload button available.
+      }
     }, 6000)
     return () => window.clearTimeout(timer)
   }, [])

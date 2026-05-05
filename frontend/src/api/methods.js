@@ -1260,12 +1260,14 @@ export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
-export const getInventoryMovements = ({ branchId, userId, page = 1, pageSize = 10000 } = {}) => {
+export const getInventoryMovements = ({ branchId, userId, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
   const safePage = Math.max(1, Number(page || 1) || 1)
   const safePageSize = Math.min(Math.max(Number(pageSize || 10000) || 10000, 1), 50000)
   const q = new URLSearchParams(Object.entries({
     branchId,
     userId,
+    startDate,
+    endDate,
     page: safePage,
     pageSize: safePageSize,
   }).filter(([, value]) => value != null && value !== '')).toString()
@@ -1281,6 +1283,10 @@ export const getInventoryMovements = ({ branchId, userId, page = 1, pageSize = 1
     }),
   )
 }
+export const getInventoryReasons = () =>
+  route('inventory:reasons:get', () => apiFetch('GET', '/api/inventory/reasons'), () => ({ items: [] }))
+export const saveInventoryReasons = (items = []) =>
+  route('inventory:reasons:save', () => apiFetch('PUT', '/api/inventory/reasons', { ...getDeviceInfo(), items }), null, true)
 
 function buildOfflineSaleReceiptNumber(payload = {}) {
   const clientRequestId = String(payload.client_request_id || createClientRequestId('sale')).trim()
@@ -1553,7 +1559,11 @@ export const getAnalytics = (params) => {
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-export const getCustomers        = ()       => routeMirrored('customers:get',        () => apiFetch('GET', '/api/customers'),                     () => dexieDb.customers.orderBy('name').toArray(), mirrorTable('customers'))
+export const getCustomers = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const mirror = q ? null : mirrorTable('customers')
+  return routeMirrored(`customers:get:${q}`, () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`), () => dexieDb.customers.orderBy('name').toArray(), mirror)
+}
 export async function createCustomer(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
   return route('customers:create', () => apiFetch('POST', '/api/customers', payload), null, true)
@@ -1576,7 +1586,11 @@ export const downloadCustomerTemplate = ()  => buildCSVTemplate([
 ], 'customers-template.csv')
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-export const getSuppliers        = ()       => routeMirrored('suppliers:get',        () => apiFetch('GET', '/api/suppliers'),                      () => dexieDb.suppliers.orderBy('name').toArray(), mirrorTable('suppliers'))
+export const getSuppliers = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const mirror = q ? null : mirrorTable('suppliers')
+  return routeMirrored(`suppliers:get:${q}`, () => apiFetch('GET', `/api/suppliers${q ? `?${q}` : ''}`), () => dexieDb.suppliers.orderBy('name').toArray(), mirror)
+}
 export async function createSupplier(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier')
   return route('suppliers:create', () => apiFetch('POST', '/api/suppliers', payload), null, true)
@@ -1599,7 +1613,11 @@ export const downloadSupplierTemplate = ()  => buildCSVTemplate([
 ], 'suppliers-template.csv')
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
-export const getDeliveryContacts   = ()       => routeMirrored('deliveryContacts:get',    () => apiFetch('GET', '/api/delivery-contacts'),               () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirrorTable('delivery_contacts'))
+export const getDeliveryContacts = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  const mirror = q ? null : mirrorTable('delivery_contacts')
+  return routeMirrored(`deliveryContacts:get:${q}`, () => apiFetch('GET', `/api/delivery-contacts${q ? `?${q}` : ''}`), () => dexieDb.delivery_contacts.orderBy('name').toArray(), mirror)
+}
 export async function createDeliveryContact(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'delivery_contact')
   return route('deliveryContacts:create', () => apiFetch('POST', '/api/delivery-contacts', payload), null, true)

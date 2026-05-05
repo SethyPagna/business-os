@@ -93,6 +93,24 @@ export default function Returns() {
   const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const returnsDateRange = useMemo(() => {
+    if (yearFilter === 'all') return {}
+    const year = Number(yearFilter)
+    if (!Number.isFinite(year)) return {}
+    const month = monthFilter !== 'all' ? Number(monthFilter) : null
+    if (month && Number.isFinite(month)) {
+      const start = new Date(Date.UTC(year, month - 1, 1))
+      const end = new Date(Date.UTC(year, month, 0))
+      return {
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+      }
+    }
+    return {
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`,
+    }
+  }, [monthFilter, yearFilter])
 
   const loadReturns = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -111,7 +129,12 @@ export default function Returns() {
         }
       }
       try {
-        const params = { scope }
+        const params = {
+          scope,
+          ...(search.trim() ? { search: search.trim() } : {}),
+          ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
+          ...returnsDateRange,
+        }
         const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns', 20000)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         setRows(Array.isArray(result) ? result : [])
@@ -137,7 +160,7 @@ export default function Returns() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [scope])
+  }, [returnsDateRange, scope, search, tr, typeFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -197,11 +220,6 @@ export default function Returns() {
 
   const searchTerms = search.trim().split(/\s+/).filter(Boolean)
   const filtered = useMemo(() => rows.filter((ret) => {
-    if (yearFilter !== 'all' || monthFilter !== 'all') {
-      const createdDate = new Date(ret?.created_at || '')
-      if (yearFilter !== 'all' && String(createdDate.getFullYear()) !== String(yearFilter)) return false
-      if (monthFilter !== 'all' && String(createdDate.getMonth() + 1) !== String(monthFilter)) return false
-    }
     if (typeFilter !== 'all' && getReturnTypeKey(ret) !== typeFilter) return false
     if (!searchTerms.length) return true
     const hay = [
@@ -215,7 +233,7 @@ export default function Returns() {
       ret.supplier_settlement,
     ].join(' ').toLowerCase()
     return searchTerms.every((term) => hay.includes(term.toLowerCase()))
-  }), [monthFilter, rows, searchTerms, typeFilter, yearFilter])
+  }), [rows, searchTerms, typeFilter])
 
   const allReturnSections = useMemo(() => buildTimeActionSections(filtered, {
     getDate: (ret) => ret?.created_at,

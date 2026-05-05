@@ -84,6 +84,24 @@ export default function Sales() {
     return settings?.language === 'km' ? fallbackKm : fallbackEn
   }, [settings?.language, t])
   const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
+  const salesDateRange = useMemo(() => {
+    if (yearFilter === 'all') return {}
+    const year = Number(yearFilter)
+    if (!Number.isFinite(year)) return {}
+    const month = monthFilter !== 'all' ? Number(monthFilter) : null
+    if (month && Number.isFinite(month)) {
+      const start = new Date(Date.UTC(year, month - 1, 1))
+      const end = new Date(Date.UTC(year, month, 0))
+      return {
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+      }
+    }
+    return {
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`,
+    }
+  }, [monthFilter, yearFilter])
 
   const loadSales = useCallback(async (silent = false) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -102,7 +120,13 @@ export default function Sales() {
         }
       }
       try {
-        const result = await withLoaderTimeout(() => window.api.getSales(isAdmin && userFilter !== 'all' ? { userId: userFilter } : undefined), 'Sales', 20000)
+        const params = {
+          ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
+          ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+          ...(search.trim() ? { search: search.trim() } : {}),
+          ...salesDateRange,
+        }
+        const result = await withLoaderTimeout(() => window.api.getSales(params), 'Sales', 20000)
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         if (Array.isArray(result)) {
           setSales(result)
@@ -129,7 +153,7 @@ export default function Sales() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [isAdmin, translateOr, userFilter])
+  }, [isAdmin, salesDateRange, search, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -166,6 +190,12 @@ export default function Sales() {
     if (statusActionRef.current.has(numericId)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
     const previousStatus = previousSale?.sale_status || 'completed'
+    if (recordHistory) {
+      const warningText = ['cancelled', 'awaiting_payment', 'completed', 'awaiting_delivery'].includes(newStatus)
+        ? translateOr('confirm_sale_status_change_stock', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}? This can change stock totals.`)
+        : translateOr('confirm_sale_status_change', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}?`)
+      if (!window.confirm(warningText)) return false
+    }
     statusActionRef.current.add(numericId)
     try {
       await window.api.updateSaleStatus(saleId, newStatus, notes)
@@ -277,10 +307,6 @@ export default function Sales() {
   const searchTerms = search.trim().split(/\s+/).filter(Boolean)
   const filtered = useMemo(() => sales.filter((sale) => {
     if (statusFilter !== 'all' && (sale.sale_status || 'completed') !== statusFilter) return false
-    const createdAt = sale?.created_at || ''
-    const createdDate = new Date(createdAt)
-    if (yearFilter !== 'all' && String(createdDate.getFullYear()) !== String(yearFilter)) return false
-    if (monthFilter !== 'all' && String(createdDate.getMonth() + 1) !== String(monthFilter)) return false
     if (!searchTerms.length) return true
     const haystack = `${sale.receipt_number || ''} ${sale.cashier_name || ''} ${sale.payment_method || ''} ${sale.notes || ''} ${sale.customer_name || ''} ${sale.customer_membership_number || ''} ${getSaleBranchLabel(sale) || ''}`
     return multiMatch(haystack, searchTerms)

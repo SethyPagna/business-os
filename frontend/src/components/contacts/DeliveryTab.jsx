@@ -1,6 +1,7 @@
 ﻿// ?? DeliveryTab ???????????????????????????????????????????????????????????????
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import { useDeferredValue } from 'react'
 import { useRef } from 'react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
@@ -218,12 +219,18 @@ function DeliveryTab({ t, notify, active = true }) {
   const [sortDirection, setSortDirection] = useState('desc')
   const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const deliveryQuery = useMemo(() => ({
+    search: deferredSearch.trim() || undefined,
+    year: yearFilter !== 'all' ? yearFilter : undefined,
+    month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
+  }), [deferredSearch, monthFilter, yearFilter])
 
   const filteredBySearch = contacts.filter(c => {
-    const q = search.toLowerCase()
+    const q = deferredSearch.toLowerCase()
     return !q || c.name.toLowerCase().includes(q) || (c.phone||'').includes(q) || (c.area||'').toLowerCase().includes(q)
   })
 
@@ -357,7 +364,7 @@ function DeliveryTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, 20000)
+        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(deliveryQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setContacts(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -386,7 +393,7 @@ function DeliveryTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, t, tr])
+  }, [deliveryQuery, notify, t, tr])
   useEffect(() => {
     if (!active) {
       window.clearTimeout(loadWatchdogRef.current)

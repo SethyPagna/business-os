@@ -36,6 +36,7 @@ function getS3Client() {
       endpoint: S3_ENDPOINT,
       region: S3_REGION || (isR2Enabled() ? 'auto' : 'us-east-1'),
       forcePathStyle: true,
+      requestChecksumCalculation: 'WHEN_REQUIRED',
       credentials: {
         accessKeyId: S3_ACCESS_KEY_ID,
         secretAccessKey: S3_SECRET_ACCESS_KEY,

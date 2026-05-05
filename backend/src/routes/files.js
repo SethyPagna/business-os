@@ -8,6 +8,7 @@ const { enqueueMediaOptimization } = require('../services/mediaQueue')
 const {
   deleteFileAsset,
   getFileAssetById,
+  getMediaType,
   listFileAssets,
   registerUploadFromRequest,
 } = require('../fileAssets')
@@ -54,17 +55,20 @@ router.get('/', authToken, requirePermission('settings'), async (req, res) => {
   }
 })
 
-router.post('/upload', authToken, requirePermission('settings'), routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, async (req, res) => {
+router.post('/upload', authToken, requirePermission('settings'), routeRateLimit({ name: 'files:upload', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many file uploads.' }), assetUpload.single('file'), validateUploadedFile, compressUpload, async (req, res) => {
   try {
     if (!req.file) return err(res, 'No file uploaded')
     const actor = getAuditActor(req)
     const deviceMeta = getDeviceMeta(req)
-    // Keep the compressUpload compatibility marker for hardening policy checks; real optimization now runs in workers.
-    void compressUpload
-    const asset = await registerUploadFromRequest(req.file, actor, { deferOptimization: true })
+    const mediaType = getMediaType({
+      mimeType: req.file?.mimetype || '',
+      fileName: req.file?.originalname || req.file?.filename || '',
+    })
+    const shouldDeferOptimization = mediaType === 'video'
+    const asset = await registerUploadFromRequest(req.file, actor, { deferOptimization: shouldDeferOptimization })
     let processingStatus = 'not_required'
     let mediaJobId = null
-    if (['image', 'video'].includes(String(asset.media_type || '').toLowerCase())) {
+    if (shouldDeferOptimization && String(asset.media_type || '').toLowerCase() === 'video') {
       mediaJobId = `media:${asset.stored_name || asset.id}:${Date.now()}`
       await enqueueMediaOptimization({
         storedName: asset.stored_name,
@@ -72,6 +76,8 @@ router.post('/upload', authToken, requirePermission('settings'), routeRateLimit(
         mediaJobId,
       }).catch(() => {})
       processingStatus = 'queued'
+    } else if (String(asset.media_type || '').toLowerCase() === 'image') {
+      processingStatus = 'ready'
     }
     audit(actor.userId, actor.userName, 'upload', 'file_asset', asset.id, {
       original_name: asset.original_name,

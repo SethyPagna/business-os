@@ -2,7 +2,7 @@
 // Main Products page ??all sub-modals imported from sibling files.
 
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { ChevronDown, ChevronRight, PackageSearch } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
@@ -10,7 +10,7 @@ import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
 import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls from '../shared/PaginationControls.jsx'
+import { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
 import ManageCategoriesModal from './ManageCategoriesModal'
 import ManageBrandsModal from './ManageBrandsModal'
@@ -51,6 +51,13 @@ function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdj
       onEdit={onEdit}
       onDelete={onDelete}
       onAddVariant={onAddVariant}
+      labels={{
+        details: label('view_details', label('details', 'View Details')),
+        edit: label('edit', 'Edit'),
+        addVariant: label('add_variant', 'Add Variant'),
+        delete: label('delete', 'Delete'),
+        ariaLabel: label('actions', 'Open actions menu'),
+      }}
       extraItems={[
         onDiscount && { label: label('discounts', 'Discounts'), onClick: onDiscount, color: 'orange' },
         onAdjustStock && { label: label('adjust_stock', 'Adjust stock'), onClick: onAdjustStock, color: 'green' },
@@ -186,6 +193,7 @@ export default function Products() {
   const [searchMode,   setSearchMode]   = useState('AND') // 'AND' | 'OR'
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(20)
+  const [productPageDraft, setProductPageDraft] = useState('1')
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState({ brands: [], categories: [], suppliers: [], initials: [] })
   const [initialFilter, setInitialFilter] = useState('all')
@@ -905,7 +913,22 @@ export default function Products() {
     [selectedVisibleIds],
   )
   const selectedVisibleCount = selectedVisibleIds.length
-
+  const productSafePageSize = Math.max(1, Number(productPageSize || PAGE_SIZE_OPTIONS[0]))
+  const productSafePage = clampPage(productPage, productTotal, productSafePageSize)
+  const productTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(productTotal || 0)) / productSafePageSize))
+  const productStart = productTotal ? (((productSafePage - 1) * productSafePageSize) + 1) : 0
+  const productEnd = productTotal ? Math.min(productTotal, productSafePage * productSafePageSize) : 0
+  const productSummaryLabel = productTotal
+    ? `${productStart.toLocaleString()}-${productEnd.toLocaleString()} / ${Number(productTotal || 0).toLocaleString()}`
+    : '0 / 0'
+  const productChipLabels = useMemo(() => ({
+    info: tr('basic_info_short', 'Info', 'ទូទៅ'),
+    pricing: tr('pricing_short', 'Price', 'តម្លៃ'),
+    stock: tr('stock_short', 'Stock', 'ស្តុក'),
+    branch: tr('branch_short', 'Branch', 'សាខា'),
+    out: tr('out_short', 'Out', 'អស់'),
+    delete: tr('delete_short', 'Delete', 'លុប'),
+  }), [tr])
   const selectedProducts = useMemo(
     () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
     [selectedVisibleIdsSet, visibleProducts],
@@ -963,9 +986,24 @@ export default function Products() {
     if (mobileSelectAllRef.current) mobileSelectAllRef.current.indeterminate = indeterminate
   }, [selectedVisibleCount, visibleIds.length])
 
+  useEffect(() => {
+    setProductPageDraft(String(productSafePage))
+  }, [productSafePage])
+
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
+
+  const commitProductPageDraft = useCallback(() => {
+    const parsed = Number.parseInt(String(productPageDraft || '').trim(), 10)
+    if (!Number.isFinite(parsed)) {
+      setProductPageDraft(String(productSafePage))
+      return
+    }
+    const nextPage = Math.min(productTotalPages, Math.max(1, parsed))
+    setProductPage(nextPage)
+    setProductPageDraft(String(nextPage))
+  }, [productPageDraft, productSafePage, productTotalPages])
 
   const isSelectionScopeFullySelected = useCallback(
     (ids = []) => ids.length > 0 && ids.every((id) => selectedVisibleIdsSet.has(Number(id))),
@@ -1835,70 +1873,154 @@ export default function Products() {
         </div>
       ) : null}
 
-      {/* Bulk action bar */}
-      {hasSelected && (
-        <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
-          {/* Primary action row */}
-          <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
-            <span className="mr-1 w-full text-sm font-semibold text-blue-700 dark:text-blue-300 sm:w-auto">{selectedVisibleCount} selected</span>
-            {/* Collapsible edit options */}
+      <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+              {t('products') || 'Products'}
+            </span>
+            <span className="min-w-0 truncate whitespace-nowrap text-[11px] font-medium text-blue-700/90 dark:text-blue-200/80">
+              {productSummaryLabel}
+            </span>
+          </div>
+        </div>
+        <div className="overflow-x-auto border-t border-blue-200/70 px-3 py-2 dark:border-blue-700/80">
+          <div className="flex min-w-max items-center gap-1.5">
+          <label className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-blue-200 bg-white/90 px-2 py-1 text-[11px] font-medium text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded"
+              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
+              ref={mobileSelectAllRef}
+              onChange={(event) => toggleSelectAll(event.target.checked)}
+            />
+            <span className="truncate whitespace-nowrap">
+              {hasSelected
+                ? `${selectedVisibleCount} ${t('selected') || 'selected'}`
+                : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
+            </span>
+          </label>
+          <label className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-2 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+            <span className="hidden sm:inline">{t('per_page') || 'per page'}</span>
+            <select
+              className="bg-transparent text-[11px] font-semibold outline-none"
+              value={productSafePageSize}
+              onChange={(event) => {
+                setProductPageSize(Number(event.target.value))
+                setProductPage(1)
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+          <div className="inline-flex items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              disabled={productSafePage <= 1}
+              onClick={() => setProductPage(productSafePage - 1)}
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <span className="hidden pl-1 text-[11px] font-semibold text-blue-700 sm:inline dark:text-blue-200">
+              {t('page') || 'Page'}
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label={t('page') || 'Page'}
+              className="h-7 w-10 border-0 bg-transparent px-1 text-center text-[11px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+              value={productPageDraft}
+              onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+              onBlur={commitProductPageDraft}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitProductPageDraft()
+                  event.currentTarget.blur()
+                } else if (event.key === 'Escape') {
+                  setProductPageDraft(String(productSafePage))
+                  event.currentTarget.blur()
+                }
+              }}
+            />
+            <span className="pr-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200">
+              / {productTotalPages}
+            </span>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              disabled={productSafePage >= productTotalPages}
+              onClick={() => setProductPage(productSafePage + 1)}
+              aria-label="Next page"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
+          <div className="flex min-w-max items-center gap-1.5">
             {[
-              { id:'info', icon:'Edit', label:'Edit Info' },
-              { id:'pricing', icon:'Price', label:'Pricing' },
-              { id:'stock', icon:'Stock', label:'Stock' },
-              { id:'branch', icon:'Branch', label:'Branch' },
+              { id: 'info', label: productChipLabels.info },
+              { id: 'pricing', label: productChipLabels.pricing },
+              { id: 'stock', label: productChipLabels.stock },
+              { id: 'branch', label: productChipLabels.branch },
             ].map(opt => (
               <button key={opt.id}
-                disabled={bulkActionBusy}
+                disabled={bulkActionBusy || !hasSelected}
                 onClick={() => { setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({}) }}
-                className={`text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
-                {opt.icon} {opt.label}
+                className={`whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
+                {opt.label}
               </button>
             ))}
-            <button disabled={bulkActionBusy} onClick={handleBulkOutOfStock} className="btn-secondary text-xs py-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-60">Out of Stock</button>
-            <button disabled={bulkActionBusy} onClick={handleBulkDelete} className="btn-danger text-xs py-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-60">Delete</button>
-            <button disabled={bulkActionBusy} onClick={() => { setSelectedIds(new Set()); setBulkEditMode(null) }} className="text-xs text-blue-500 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 sm:ml-auto">Clear</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkOutOfStock} className="btn-secondary whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.out}</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="btn-danger whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.delete}</button>
           </div>
+        </div>
 
-          {/* Expanded edit panel */}
-          {bulkEditMode === 'info' && (
-            <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
-              <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <div><label className="text-xs text-gray-500 block mb-1">Category</label>
-                  <select className="input text-xs py-1" value={bulkEditForm.category||''} onChange={e=>setBulkEditForm(f=>({...f,category:e.target.value}))}>
-                    <option value="">Keep current</option>
-                    {categories.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
-                  <select className="input text-xs py-1" value={bulkEditForm.unit||''} onChange={e=>setBulkEditForm(f=>({...f,unit:e.target.value}))}>
-                    <option value="">Keep current</option>
-                    {units.map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
-                  </select>
-                </div>
-                <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
-                  <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
-                </div>
-                <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
-                  <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder="Leave blank to keep" />
-                </div>
-                <div className="flex gap-2 items-center mt-1">
-                  <label className="text-xs text-gray-500">Low Stock Threshold</label>
-                  <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
-                </div>
+        {/* Expanded edit panel */}
+        {bulkEditMode === 'info' && (
+          <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
+            <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div><label className="text-xs text-gray-500 block mb-1">Category</label>
+                <select className="input text-xs py-1" value={bulkEditForm.category||''} onChange={e=>setBulkEditForm(f=>({...f,category:e.target.value}))}>
+                  <option value="">Keep current</option>
+                  {categories.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
               </div>
-              <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
-                const updates = {}
-                if (bulkEditForm.category) updates.category = bulkEditForm.category
-                if (bulkEditForm.unit) updates.unit = bulkEditForm.unit
-                if (bulkEditForm.supplier) updates.supplier = bulkEditForm.supplier
-                if (bulkEditForm.brand) updates.brand = bulkEditForm.brand
-                if (bulkEditForm.low_stock_threshold !== undefined && bulkEditForm.low_stock_threshold !== '') updates.low_stock_threshold = parseInt(bulkEditForm.low_stock_threshold)
-                await runBulkProductUpdates(updates)
-              }}>Apply to {selectedVisibleCount} products</button>
+              <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
+                <select className="input text-xs py-1" value={bulkEditForm.unit||''} onChange={e=>setBulkEditForm(f=>({...f,unit:e.target.value}))}>
+                  <option value="">Keep current</option>
+                  {units.map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
+                </select>
+              </div>
+              <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
+                <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
+              </div>
+              <div><label className="text-xs text-gray-500 block mb-1">{t('brand')||'Brand'}</label>
+                <input className="input text-xs py-1" value={bulkEditForm.brand||''} onChange={e=>setBulkEditForm(f=>({...f,brand:e.target.value}))} placeholder="Leave blank to keep" />
+              </div>
+              <div className="flex gap-2 items-center mt-1">
+                <label className="text-xs text-gray-500">Low Stock Threshold</label>
+                <input className="input text-xs py-1 w-20" type="number" min="0" value={bulkEditForm.low_stock_threshold??''} onChange={e=>setBulkEditForm(f=>({...f,low_stock_threshold:e.target.value}))} placeholder="Keep" />
+              </div>
             </div>
-          )}
+            <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
+              const updates = {}
+              if (bulkEditForm.category) updates.category = bulkEditForm.category
+              if (bulkEditForm.unit) updates.unit = bulkEditForm.unit
+              if (bulkEditForm.supplier) updates.supplier = bulkEditForm.supplier
+              if (bulkEditForm.brand) updates.brand = bulkEditForm.brand
+              if (bulkEditForm.low_stock_threshold !== undefined && bulkEditForm.low_stock_threshold !== '') updates.low_stock_threshold = parseInt(bulkEditForm.low_stock_threshold)
+              await runBulkProductUpdates(updates)
+            }}>Apply to {selectedVisibleCount} products</button>
+          </div>
+        )}
 
             {bulkEditMode === 'pricing' && (
               <div className="px-4 py-3 border-t border-blue-200 dark:border-blue-700 bg-white dark:bg-zinc-800">
@@ -1963,22 +2085,7 @@ export default function Products() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      <PaginationControls
-        className="mb-3"
-        page={productPage}
-        pageSize={productPageSize}
-        totalItems={productTotal}
-        label={t('products') || 'products'}
-        t={t}
-        onPageChange={setProductPage}
-        onPageSizeChange={(size) => {
-          setProductPageSize(size)
-          setProductPage(1)
-        }}
-      />
+      </div>
 
       {/* Desktop table */}
       <div className="card sm:flex-1 sm:overflow-hidden flex-col hidden sm:flex">
@@ -2098,29 +2205,6 @@ export default function Products() {
 
       {/* Mobile card list */}
       <div className="flex-1 overflow-auto space-y-2 sm:hidden">
-        {/* Mobile select-all bar */}
-        {!loading && visibleProducts.length > 0 && (
-          <div className="flex items-center gap-3 px-1 py-2 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700">
-            <input
-              type="checkbox"
-              className="w-4 h-4 cursor-pointer rounded flex-shrink-0"
-              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
-              ref={mobileSelectAllRef}
-              onChange={(event) => toggleSelectAll(event.target.checked)}
-            />
-            <span className="text-sm text-gray-600 dark:text-gray-400">
-              {hasSelected
-                ? `${selectedVisibleCount} / ${visibleProducts.length} ${t('selected')||'selected'}`
-                : `${t('select_all')||'Select all'} (${visibleProducts.length})`}
-            </span>
-            {hasSelected && (
-              <button
-                className="ml-auto text-xs text-blue-500 hover:text-blue-700"
-                onClick={() => { setSelectedIds(new Set()); setBulkEditMode(null) }}
-              >{t('cancel')}</button>
-            )}
-          </div>
-        )}
         {loading ? <div className="text-center py-10 text-gray-400">{t('loading')}</div>
         : visibleProducts.length===0 ? <div className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</div>
         : productSections.map((section) => {

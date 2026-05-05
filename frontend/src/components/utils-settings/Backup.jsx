@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { ArchiveRestore, CheckCircle2, Cloud, FolderInput, FolderOutput, HardDriveDownload, Link2, Link2Off, RefreshCw, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { ResetData, FactoryReset } from './ResetData'
@@ -327,6 +327,25 @@ function yieldToBrowser() {
   return new Promise((resolve) => window.setTimeout(resolve, 0))
 }
 
+function getJobSignature(job) {
+  if (!job || typeof job !== 'object') return ''
+  const metrics = job.metrics || {}
+  return JSON.stringify({
+    id: job.id || '',
+    status: job.status || '',
+    phase: job.phase || '',
+    progress: Number(job.progress || 0) || 0,
+    message: job.message || '',
+    error: job.error || '',
+    updated_at: job.updated_at || '',
+    filesProcessed: Number(metrics.filesProcessed || 0) || 0,
+    filesTotal: Number(metrics.filesTotal || 0) || 0,
+    currentTableRows: Number(metrics.currentTableRows || 0) || 0,
+    retryCount: Number(metrics.retryCount || 0) || 0,
+    uploadedBytes: Number(metrics.uploadedBytes || 0) || 0,
+  })
+}
+
 function startJobWatcher(jobId, {
   reason = 'System job',
   pollMs = 1200,
@@ -338,6 +357,8 @@ function startJobWatcher(jobId, {
   let stopped = false
   let inFlight = false
   let timer = null
+  let lastSignature = ''
+  let changedOnLastTick = true
   const basePollMs = Math.max(1000, Number(pollMs || 1200))
 
   const stop = () => {
@@ -363,7 +384,11 @@ function startJobWatcher(jobId, {
       const result = await window.api.getSystemJob?.(jobId)
       const job = result?.item || result
       if (stopped) return
-      if (job && typeof onUpdate === 'function') onUpdate(job)
+      const signature = getJobSignature(job)
+      const changed = signature !== lastSignature
+      changedOnLastTick = changed
+      if (changed) lastSignature = signature
+      if (changed && job && typeof onUpdate === 'function') onUpdate(job)
       const status = String(job?.status || '').toLowerCase()
       if (status === 'completed') {
         stop()
@@ -379,8 +404,11 @@ function startJobWatcher(jobId, {
     } finally {
       inFlight = false
       if (!stopped) {
-        const hiddenDelay = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? basePollMs * 3 : basePollMs
-        scheduleTick(hiddenDelay)
+        const hiddenDelay = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+          ? basePollMs * 4
+          : basePollMs
+        const sameStateDelay = !changedOnLastTick && lastSignature ? Math.round(basePollMs * 1.35) : basePollMs
+        scheduleTick(hiddenDelay > basePollMs ? hiddenDelay : sameStateDelay)
       }
     }
   }
@@ -450,6 +478,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const loadRef = useRef(null)
   const isMountedRef = useRef(true)
   const jobStopRef = useRef(null)
+  const activeJobSignatureRef = useRef('')
   const dirtyFieldsRef = useRef(new Set())
   const actionLockRef = useRef('')
 
@@ -568,22 +597,32 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     const jobId = queued?.job_id || queued?.item?.id
     if (!jobId) return queued
     jobStopRef.current?.()
-    setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: reason })
+    const queuedJob = queued.item || { id: jobId, status: 'queued', progress: 0, message: reason }
+    activeJobSignatureRef.current = getJobSignature(queuedJob)
+    setActiveJob(queuedJob)
     jobStopRef.current = startJobWatcher(jobId, {
       reason,
       pollMs: DRIVE_SYNC_JOB_POLL_MS,
       onUpdate: (job) => {
-        if (isMountedRef.current && job) setActiveJob(job)
+        if (!isMountedRef.current || !job) return
+        const signature = getJobSignature(job)
+        if (signature === activeJobSignatureRef.current) return
+        activeJobSignatureRef.current = signature
+        setActiveJob(job)
       },
       onComplete: (job) => {
         if (!isMountedRef.current) return
+        activeJobSignatureRef.current = getJobSignature(job)
         setActiveJob(job || null)
         load({ force: true })
         handlers.onComplete?.(job)
       },
       onError: (error, job) => {
         if (!isMountedRef.current) return
-        if (job) setActiveJob(job)
+        if (job) {
+          activeJobSignatureRef.current = getJobSignature(job)
+          setActiveJob(job)
+        }
         handlers.onError?.(error, job)
       },
     })
@@ -608,7 +647,10 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     try {
       const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
       const nextJob = result?.item || result
-      if (nextJob && isMountedRef.current) setActiveJob(nextJob)
+      if (nextJob && isMountedRef.current) {
+        activeJobSignatureRef.current = getJobSignature(nextJob)
+        setActiveJob(nextJob)
+      }
       notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
     } catch (error) {
       notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -1026,6 +1068,10 @@ function BackupOverview({ copy, onSelect }) {
   )
 }
 
+const MemoIntegrationDoctorCard = memo(IntegrationDoctorCard)
+const MemoGoogleDriveSyncSection = memo(GoogleDriveSyncSection)
+const MemoBackupOverview = memo(BackupOverview)
+
 
 export default function Backup() {
   const { t, notify, hasPermission } = useApp()
@@ -1040,6 +1086,7 @@ export default function Backup() {
   const [backupSection, setBackupSection] = useState('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef(null)
+  const activeJobSignatureRef = useRef('')
   const actionLockRef = useRef('')
   const showBackupSection = (sectionId) => backupSection === sectionId
 
@@ -1073,7 +1120,11 @@ export default function Backup() {
       await yieldToBrowser()
       const queued = await window.api.queueBackupFolderExport?.(exportDestination)
       const jobId = queued?.job_id || queued?.item?.id
-      if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') })
+      if (jobId) {
+        const queuedJob = queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_export_queued', 'Backup export queued') }
+        activeJobSignatureRef.current = getJobSignature(queuedJob)
+        setActiveJob(queuedJob)
+      }
       if (jobId) {
         notify(copy('backup_export_queued', 'Backup export queued'), 'info')
         jobStopRef.current?.()
@@ -1082,11 +1133,18 @@ export default function Backup() {
             reason: 'backup export',
             pollMs: 2000,
             onUpdate: (job) => {
-              if (aliveRef.current && job) setActiveJob(job)
+              if (!aliveRef.current || !job) return
+              const signature = getJobSignature(job)
+              if (signature === activeJobSignatureRef.current) return
+              activeJobSignatureRef.current = signature
+              setActiveJob(job)
             },
             onComplete: (job) => {
               if (!aliveRef.current) return
-              if (job) setActiveJob(job)
+              if (job) {
+                activeJobSignatureRef.current = getJobSignature(job)
+                setActiveJob(job)
+              }
               const result = job?.result || {}
               actionHistory.pushAction({
                 scope: 'backup',
@@ -1099,7 +1157,10 @@ export default function Backup() {
               setLoading('')
             },
             onError: (error, job) => {
-              if (job && aliveRef.current) setActiveJob(job)
+              if (job && aliveRef.current) {
+                activeJobSignatureRef.current = getJobSignature(job)
+                setActiveJob(job)
+              }
               if (aliveRef.current) notify(`${copy('export_failed', 'Export failed')}: ${error.message}`, 'error')
               if (aliveRef.current) setLoading('')
             },
@@ -1126,7 +1187,11 @@ export default function Backup() {
       await yieldToBrowser()
       const queued = await window.api.queueBackupFolderRestore?.(folderImportPath)
       const jobId = queued?.job_id || queued?.item?.id
-      if (jobId) setActiveJob(queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') })
+      if (jobId) {
+        const queuedJob = queued.item || { id: jobId, status: 'queued', progress: 0, message: copy('backup_restore_queued', 'Backup restore queued') }
+        activeJobSignatureRef.current = getJobSignature(queuedJob)
+        setActiveJob(queuedJob)
+      }
       if (jobId) {
         notify(copy('backup_restore_queued', 'Backup restore queued'), 'info')
         jobStopRef.current?.()
@@ -1135,11 +1200,18 @@ export default function Backup() {
             reason: 'backup restore',
             pollMs: 2000,
             onUpdate: (job) => {
-              if (aliveRef.current && job) setActiveJob(job)
+              if (!aliveRef.current || !job) return
+              const signature = getJobSignature(job)
+              if (signature === activeJobSignatureRef.current) return
+              activeJobSignatureRef.current = signature
+              setActiveJob(job)
             },
             onComplete: (job) => {
               if (!aliveRef.current) return
-              if (job) setActiveJob(job)
+              if (job) {
+                activeJobSignatureRef.current = getJobSignature(job)
+                setActiveJob(job)
+              }
               const result = job?.result || {}
               actionHistory.pushAction({
                 scope: 'backup',
@@ -1151,7 +1223,10 @@ export default function Backup() {
               setLoading('')
             },
             onError: (error, job) => {
-              if (job && aliveRef.current) setActiveJob(job)
+              if (job && aliveRef.current) {
+                activeJobSignatureRef.current = getJobSignature(job)
+                setActiveJob(job)
+              }
               if (aliveRef.current) notify(`${copy('import_failed', 'Import failed')}: ${error.message}`, 'error')
               if (aliveRef.current) setLoading('')
             },
@@ -1175,7 +1250,10 @@ export default function Backup() {
     try {
       const result = await window.api.cancelSystemJob?.(job.id, 'Cancelled from Backup page')
       const nextJob = result?.item || result
-      if (nextJob && aliveRef.current) setActiveJob(nextJob)
+      if (nextJob && aliveRef.current) {
+        activeJobSignatureRef.current = getJobSignature(nextJob)
+        setActiveJob(nextJob)
+      }
       notify(copy('job_cancel_requested', 'Cancel requested'), 'info')
     } catch (error) {
       notify(`${copy('job_cancel_failed', 'Cancel failed')}: ${error?.message || copy('unknown_error', 'Unknown error')}`, 'error')
@@ -1208,10 +1286,10 @@ export default function Backup() {
         />
         <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} onCancel={cancelActiveBackupJob} />
-        {backupSection === 'all' ? <BackupOverview copy={copy} onSelect={setBackupSection} /> : null}
-        {showBackupSection('doctor') ? (
-        <IntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
-        ) : null}
+          {backupSection === 'all' ? <MemoBackupOverview copy={copy} onSelect={setBackupSection} /> : null}
+          {showBackupSection('doctor') ? (
+          <MemoIntegrationDoctorCard copy={copy} notify={notify} active={isActive} />
+          ) : null}
         {showBackupSection('export') ? (
         <div className="card p-5 sm:p-6" data-testid="backup-export-section">
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
@@ -1315,7 +1393,7 @@ export default function Backup() {
         </div>
         ) : null}
 
-        {isActive && showBackupSection('drive') ? <GoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {isActive && showBackupSection('drive') ? <MemoGoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
         {showBackupSection('maintenance') ? (
         <details
           className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"

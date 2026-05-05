@@ -509,6 +509,34 @@ Object.entries(FAQ_VOCABULARY_EXTENSIONS_BY_LANGUAGE).forEach(([language, vocabu
   }
 })
 
+const FAQ_FUTURE_EDIT_VOCABULARY_BY_LANGUAGE = {
+  km: { 'social media': 'បណ្ដាញសង្គម', screenshot: 'រូបថតអេក្រង់', gift: 'អំណោយ', bundles: 'កញ្ចប់', 'oily skin': 'ស្បែកខ្លាញ់', 'dry skin': 'ស្បែកស្ងួត', 'combination skin': 'ស្បែកចម្រុះ', morning: 'ពេលព្រឹក', night: 'ពេលយប់', 'for reference only': 'សម្រាប់យោងប៉ុណ្ណោះ', 'medical advice': 'ដំបូន្មានវេជ្ជសាស្ត្រ' },
+  'zh-CN': { 'social media': '社交媒体', screenshot: '截图', gift: '礼物', bundles: '套装', 'oily skin': '油性肌肤', 'dry skin': '干性肌肤', 'combination skin': '混合性肌肤', morning: '早间', night: '夜间', 'for reference only': '仅供参考', 'medical advice': '医疗建议' },
+  'zh-TW': { 'social media': '社群媒體', screenshot: '截圖', gift: '禮物', bundles: '套組', 'oily skin': '油性肌膚', 'dry skin': '乾性肌膚', 'combination skin': '混合性肌膚', morning: '早晨', night: '夜間', 'for reference only': '僅供參考', 'medical advice': '醫療建議' },
+  vi: { 'social media': 'mạng xã hội', screenshot: 'ảnh chụp màn hình', gift: 'quà tặng', bundles: 'bộ sản phẩm', 'oily skin': 'da dầu', 'dry skin': 'da khô', 'combination skin': 'da hỗn hợp', morning: 'buổi sáng', night: 'buổi tối', 'for reference only': 'chỉ để tham khảo', 'medical advice': 'tư vấn y khoa' },
+  th: { 'social media': 'โซเชียลมีเดีย', screenshot: 'ภาพหน้าจอ', gift: 'ของขวัญ', bundles: 'ชุดสินค้า', 'oily skin': 'ผิวมัน', 'dry skin': 'ผิวแห้ง', 'combination skin': 'ผิวผสม', morning: 'ตอนเช้า', night: 'ตอนกลางคืน', 'for reference only': 'ใช้เพื่ออ้างอิงเท่านั้น', 'medical advice': 'คำแนะนำทางการแพทย์' },
+  ru: { 'social media': 'социальные сети', screenshot: 'снимок экрана', gift: 'подарок', bundles: 'наборы', 'oily skin': 'жирная кожа', 'dry skin': 'сухая кожа', 'combination skin': 'комбинированная кожа', morning: 'утро', night: 'ночь', 'for reference only': 'только для справки', 'medical advice': 'медицинский совет' },
+  fr: { 'social media': 'réseaux sociaux', screenshot: 'capture d’écran', gift: 'cadeau', bundles: 'coffrets', 'oily skin': 'peau grasse', 'dry skin': 'peau sèche', 'combination skin': 'peau mixte', morning: 'matin', night: 'soir', 'for reference only': 'à titre indicatif seulement', 'medical advice': 'avis médical' },
+  es: { 'social media': 'redes sociales', screenshot: 'captura de pantalla', gift: 'regalo', bundles: 'paquetes', 'oily skin': 'piel grasa', 'dry skin': 'piel seca', 'combination skin': 'piel mixta', morning: 'mañana', night: 'noche', 'for reference only': 'solo como referencia', 'medical advice': 'consejo médico' },
+  de: { 'social media': 'soziale Medien', screenshot: 'Screenshot', gift: 'Geschenk', bundles: 'Sets', 'oily skin': 'fettige Haut', 'dry skin': 'trockene Haut', 'combination skin': 'Mischhaut', morning: 'Morgen', night: 'Nacht', 'for reference only': 'nur zur Orientierung', 'medical advice': 'medizinischer Rat' },
+  ja: { 'social media': 'SNS', screenshot: 'スクリーンショット', gift: 'ギフト', bundles: 'セット', 'oily skin': '脂性肌', 'dry skin': '乾燥肌', 'combination skin': '混合肌', morning: '朝', night: '夜', 'for reference only': '参考用のみ', 'medical advice': '医療アドバイス' },
+  ko: { 'social media': '소셜 미디어', screenshot: '스크린샷', gift: '선물', bundles: '세트', 'oily skin': '지성 피부', 'dry skin': '건성 피부', 'combination skin': '복합성 피부', morning: '아침', night: '밤', 'for reference only': '참고용으로만', 'medical advice': '의료 조언' },
+  pt: { 'social media': 'redes sociais', screenshot: 'captura de tela', gift: 'presente', bundles: 'kits', 'oily skin': 'pele oleosa', 'dry skin': 'pele seca', 'combination skin': 'pele mista', morning: 'manhã', night: 'noite', 'for reference only': 'apenas para referência', 'medical advice': 'orientação médica' },
+  it: { 'social media': 'social media', screenshot: 'schermata', gift: 'regalo', bundles: 'set', 'oily skin': 'pelle grassa', 'dry skin': 'pelle secca', 'combination skin': 'pelle mista', morning: 'mattina', night: 'sera', 'for reference only': 'solo come riferimento', 'medical advice': 'consiglio medico' },
+  ar: { 'social media': 'وسائل التواصل الاجتماعي', screenshot: 'لقطة شاشة', gift: 'هدية', bundles: 'حزم', 'oily skin': 'بشرة دهنية', 'dry skin': 'بشرة جافة', 'combination skin': 'بشرة مختلطة', morning: 'الصباح', night: 'الليل', 'for reference only': 'للاطلاع فقط', 'medical advice': 'نصيحة طبية' },
+  hi: { 'social media': 'सोशल मीडिया', screenshot: 'स्क्रीनशॉट', gift: 'उपहार', bundles: 'सेट', 'oily skin': 'तैलीय त्वचा', 'dry skin': 'शुष्क त्वचा', 'combination skin': 'मिश्रित त्वचा', morning: 'सुबह', night: 'रात', 'for reference only': 'केवल संदर्भ के लिए', 'medical advice': 'चिकित्सकीय सलाह' },
+  id: { 'social media': 'media sosial', screenshot: 'tangkapan layar', gift: 'hadiah', bundles: 'paket', 'oily skin': 'kulit berminyak', 'dry skin': 'kulit kering', 'combination skin': 'kulit kombinasi', morning: 'pagi', night: 'malam', 'for reference only': 'hanya untuk referensi', 'medical advice': 'saran medis' },
+  ms: { 'social media': 'media sosial', screenshot: 'tangkapan skrin', gift: 'hadiah', bundles: 'set', 'oily skin': 'kulit berminyak', 'dry skin': 'kulit kering', 'combination skin': 'kulit kombinasi', morning: 'pagi', night: 'malam', 'for reference only': 'untuk rujukan sahaja', 'medical advice': 'nasihat perubatan' },
+  tr: { 'social media': 'sosyal medya', screenshot: 'ekran görüntüsü', gift: 'hediye', bundles: 'setler', 'oily skin': 'yağlı cilt', 'dry skin': 'kuru cilt', 'combination skin': 'karma cilt', morning: 'sabah', night: 'gece', 'for reference only': 'yalnızca referans için', 'medical advice': 'tıbbi tavsiye' },
+}
+
+Object.entries(FAQ_FUTURE_EDIT_VOCABULARY_BY_LANGUAGE).forEach(([language, vocabulary]) => {
+  FAQ_VOCABULARY_BY_LANGUAGE[language] = {
+    ...(FAQ_VOCABULARY_BY_LANGUAGE[language] || {}),
+    ...vocabulary,
+  }
+})
+
 const PUBLIC_COPY_PROTECTED_TERMS = [
   'Leang Cosmetics',
   'Leang Cosmetic',

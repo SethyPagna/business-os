@@ -43,6 +43,18 @@ runTest('backup package validation uses streaming checksums for package files', 
   assert.match(source, /async\s+function\s+validateLocalBackupPackage/)
   assert.doesNotMatch(source, /sha256\(fs\.readFileSync\(filePath\)\)/)
   assert.match(source, /writeJsonLinesFileWithChecksum/)
+  assert.match(source, /function\s+createDualWriteStream\(/)
+  assert.match(source, /const\s+remoteStream\s*=\s*new\s+PassThrough\(\)/)
+  assert.match(source, /await\s+Promise\.all\(\[\s*pipeline\(object\.body,\s*fanoutStream\),\s*uploadPromise,\s*\]\)/)
+})
+
+runTest('system jobs throttle noisy persistence while forcing major state changes', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.js'), 'utf8')
+  assert.match(source, /JOB_PERSIST_MIN_INTERVAL_MS\s*=\s*750/)
+  assert.match(source, /JOB_PROGRESS_PERSIST_STEP\s*=\s*5/)
+  assert.match(source, /function\s+schedulePersistJob\(/)
+  assert.match(source, /function\s+flushPersistJob\(/)
+  assert.match(source, /forcePersist:\s*true/)
 })
 
 runTest('drive sync snapshot work avoids synchronous copies and double hashing', () => {

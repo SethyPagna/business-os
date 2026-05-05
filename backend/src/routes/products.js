@@ -989,19 +989,17 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
 })
 
 // ?? POST /api/products/upload-image ??????????????????????????????????????????
-// Keep the compressUpload compatibility marker for hardening checks; real optimization now runs in workers.
-void compressUpload
-router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, async (req, res) => {
+router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, async (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   try {
-    const asset = await registerUploadFromRequest(req.file, getAuditActor(req), { deferOptimization: true })
+    const asset = await registerUploadFromRequest(req.file, getAuditActor(req), { deferOptimization: false })
     return ok(res, {
       path: asset.public_path,
       public_path: asset.public_path,
       asset,
-      processing_status: asset.optimization_status === 'queued' ? 'queued' : 'ready',
-      media_job_id: asset.optimization_job_id || null,
-      cache_version: asset.updated_at || asset.created_at || '',
+      processing_status: 'ready',
+      media_job_id: null,
+      cache_version: String(asset.updated_at || asset.created_at || Date.now()).replace(/[^0-9A-Za-z_-]/g, ''),
     })
   } catch (error) {
     return err(res, error.message || 'Image upload failed')
@@ -1038,7 +1036,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     const resolved = []
     for (const [filename, dataUrl] of imgEntries) {
       const baseName = filename.replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim().toLowerCase()
-      const match    = allProducts.find(p => p.name.trim().toLowerCase() === baseName)
+      const match = allProducts.find((p) => String(p?.name || '').trim().toLowerCase() === baseName)
       if (!match) { errors.push(`No product matched for "${filename}"`); continue }
       try {
         const sourceValue = String(dataUrl || '').trim()
@@ -1199,7 +1197,8 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   const determineBranch = (branchName) => {
     let mb = null
     if (branchName?.trim()) {
-      mb = activeBranches.find(b => b.name.toLowerCase() === branchName.trim().toLowerCase())
+      const normalizedBranchName = String(branchName || '').trim().toLowerCase()
+      mb = activeBranches.find((b) => String(b?.name || '').trim().toLowerCase() === normalizedBranchName)
       if (!mb) {
         const nb  = db.prepare('INSERT OR IGNORE INTO branches (name,is_default,is_active) VALUES (?,0,1)').run(branchName.trim())
         const nid = nb.lastInsertRowid || db.prepare('SELECT id FROM branches WHERE name=?').get(branchName.trim())?.id
