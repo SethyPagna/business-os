@@ -8,6 +8,10 @@ const contactsShared = fs.readFileSync(new URL('../src/components/contacts/share
 const customers = fs.readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
 const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersTab.jsx', import.meta.url), 'utf8')
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.jsx', import.meta.url), 'utf8')
+const sales = fs.readFileSync(new URL('../src/components/sales/Sales.jsx', import.meta.url), 'utf8')
+const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx', import.meta.url), 'utf8')
+const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
+const loaders = fs.readFileSync(new URL('../src/utils/loaders.mjs', import.meta.url), 'utf8')
 
 assert.match(app, /const WARMUP_PAGE_IDS = \[\]/, 'background chunk warmup should stay disabled to protect INP')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
@@ -27,6 +31,7 @@ assert.doesNotMatch(backup, /backupSection === 'all' \|\|/, 'Backup sections sho
 assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use retryable loading watchdog UI')
 assert.match(customers, /generateCustomerMembershipNumber/, 'customer form should auto-generate membership numbers')
 assert.match(customers, /Regenerate/, 'customer form should let staff regenerate membership numbers')
+assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
 for (const [name, source] of [
   ['Customers', customers],
   ['Suppliers', suppliers],
@@ -34,6 +39,15 @@ for (const [name, source] of [
 ]) {
   assert.match(source, /onRetry=\{\(\) => load\(\{ silent: false/, `${name} contacts should pass retry to the table`)
   assert.match(source, /autoComplete=/, `${name} contacts should define autocomplete hints`)
+  assert.doesNotMatch(source, /if \(!loadedOnceRef\.current\) \{[\s\S]{0,240}loadedOnceRef\.current = true/, `${name} contacts should not lock in a failed first load as a completed render`)
+}
+for (const [name, source] of [
+  ['Inventory', inventory],
+  ['Sales', sales],
+  ['Returns', returns],
+  ['Branches', branches],
+]) {
+  assert.doesNotMatch(source, /set(?:Summary|Movements|Rows|Sales)\(\[\]\)[\s\S]{0,120}loadedOnceRef\.current = true/, `${name} should preserve the previous dataset when a refresh fails`)
 }
 
 console.log('PASS performance loading UX guards')

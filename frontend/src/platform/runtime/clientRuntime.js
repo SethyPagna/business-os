@@ -161,7 +161,7 @@ export async function resetClientRuntimeState(options = {}) {
   const preserveSessionDuration = options.preserveSessionDuration !== false
   const preserveRuntimeMeta = options.preserveRuntimeMeta === true
   const preserveOrganization = options.preserveOrganization === true
-  const preserveAuth = options.preserveAuth === true
+  const preserveAuth = options.preserveAuth === true || options.clearAuth === false
 
   const localPreserveKeys = new Set()
   const sessionPreserveKeys = new Set()

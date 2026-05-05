@@ -353,10 +353,10 @@ function DeliveryTab({ t, notify, active = true }) {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setLoading(false)
           setLoadError(tr('delivery_contacts_load_slow', 'Delivery contacts are taking longer than expected. Tap Retry or revisit the page in a moment.'))
-        }, 10000)
+        }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, 8000)
+        const data = await withLoaderTimeout(() => window.api.getDeliveryContacts(), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setContacts(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -365,10 +365,8 @@ function DeliveryTab({ t, notify, active = true }) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = error?.message || 'Failed to load delivery contacts'
         if (!loadedOnceRef.current) {
-          setContacts([])
           setLoadError(message)
           notify(message, 'error')
-          loadedOnceRef.current = true
         } else {
           const refreshMessage = tr('delivery_contacts_refresh_failed', 'Unable to refresh delivery contacts right now. Showing the latest loaded data.')
           setLoadError((current) => current || refreshMessage)

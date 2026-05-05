@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { isPublicCatalogPath, updateMountedPages } from '../src/app/appShellUtils.mjs'
 
 let failed = 0
+const appContextSource = readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
 
 function runTest(name, fn) {
   try {
@@ -57,6 +58,15 @@ runTest('service worker serves cached app shell for offline navigations only', (
   assert.match(source, /isNeverCachedPath/)
   assert.match(source, /\/api\//)
   assert.match(source, /\/uploads\//)
+})
+
+runTest('successful login reconnects websocket writes immediately', () => {
+  assert.match(appContextSource, /import \{ isWSConnected, reconnectWS \} from '\.\/api\/websocket\.js'/)
+  assert.match(appContextSource, /cacheClearAll\(\)\s+reconnectWS\(\)\s+startHealthCheck\(\)/)
+})
+
+runTest('guest startup ignores expected unauthorized websocket probes', () => {
+  assert.match(appContextSource, /if \(!hasRecoverableSession\) \{\s+return\s+\}/)
 })
 
 runTest('Khmer buttons use a stronger but not extra-bold weight', () => {

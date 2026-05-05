@@ -88,7 +88,7 @@ export default function Branches() {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setLoading(false)
           setLoadError(t('branches_load_slow') || 'Branches are taking longer than expected. Tap Retry or revisit in a moment.')
-        }, 10_000)
+        }, 15_000)
       }
 
       try {
@@ -115,8 +115,8 @@ export default function Branches() {
         const message = error?.message || (t('failed_to_load_data') || 'Failed to load data')
         if (!silent && !loadedOnceRef.current) {
           setLoadError(message)
-          loadedOnceRef.current = true
         } else if (!silent) {
+          setLoadError(t('branches_refresh_failed') || 'Branches could not refresh right now. Showing the latest loaded data.')
           notify(message, 'warning')
         }
         return null

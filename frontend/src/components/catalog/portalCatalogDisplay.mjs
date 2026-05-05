@@ -24,14 +24,16 @@ export function normalizeRecommendedProductIds(value) {
 }
 
 export function getPortalGridClass(desktopColumns) {
-  const normalized = Math.min(8, Math.max(2, Math.round(Number(desktopColumns || 4))))
+  const normalized = Math.min(10, Math.max(2, Math.round(Number(desktopColumns || 4))))
   if (normalized === 2) return 'lg:grid-cols-2'
   if (normalized === 3) return 'lg:grid-cols-2 xl:grid-cols-3'
   if (normalized === 4) return 'lg:grid-cols-2 xl:grid-cols-4'
   if (normalized === 5) return 'lg:grid-cols-3 xl:grid-cols-5'
   if (normalized === 6) return 'lg:grid-cols-3 xl:grid-cols-6'
   if (normalized === 7) return 'lg:grid-cols-4 xl:grid-cols-7'
-  return 'lg:grid-cols-4 xl:grid-cols-8'
+  if (normalized === 8) return 'lg:grid-cols-4 xl:grid-cols-8'
+  if (normalized === 9) return 'lg:grid-cols-5 xl:grid-cols-9'
+  return 'lg:grid-cols-5 xl:grid-cols-10'
 }
 
 export function getPortalMobileGridClass(mobileColumns) {

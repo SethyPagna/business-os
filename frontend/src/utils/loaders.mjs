@@ -47,7 +47,7 @@ export function invalidateTrackedRequest(ref) {
   return ref.current
 }
 
-const DEFAULT_LOADER_TIMEOUT_MS = 12_000
+const DEFAULT_LOADER_TIMEOUT_MS = 20_000
 
 export function createLoaderTimeoutError(label, timeoutMs = DEFAULT_LOADER_TIMEOUT_MS) {
   const error = new Error(`${label || 'Request'} took longer than ${Math.round(timeoutMs / 1000)}s. Please try again.`)

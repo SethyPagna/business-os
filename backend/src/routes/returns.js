@@ -11,7 +11,8 @@ const router = express.Router()
 function deductBranchStock(productId, branchId, quantity) {
   db.prepare(`
     INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)
-    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST(? AS numeric))
+    ON CONFLICT(product_id, branch_id) DO UPDATE
+    SET quantity = GREATEST(0, branch_stock.quantity - CAST(? AS numeric))
   `).run(productId, branchId, quantity)
 }
 const CUSTOMER_SCOPE = 'customer'
@@ -296,8 +297,9 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         if (itemBranchId) {
           db.prepare(`
             INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + ?
-          `).run(item.product_id, itemBranchId, item.quantity, item.quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE
+            SET quantity = branch_stock.quantity + excluded.quantity
+          `).run(item.product_id, itemBranchId, item.quantity)
         }
         touchedProductIds.add(item.product_id)
 
@@ -673,8 +675,9 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
         if (bid) {
           db.prepare(`
             INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + ?
-          `).run(item.product_id, bid, item.quantity, item.quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE
+            SET quantity = branch_stock.quantity + excluded.quantity
+          `).run(item.product_id, bid, item.quantity)
         }
         touchedProductIds.add(item.product_id)
         db.prepare(`

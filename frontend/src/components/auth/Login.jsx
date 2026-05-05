@@ -873,7 +873,7 @@ export default function Login() {
               <label htmlFor="email-reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('username_name_email_phone', 'Username, name, email, or phone')}
               </label>
-              <input id="email-reset-identifier" name="email_reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+              <input id="email-reset-identifier" name="email_reset_identifier" autoComplete="username" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
             </div>
 
             {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
@@ -896,7 +896,7 @@ export default function Login() {
               <label htmlFor="reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('username_name_email_phone', 'Username, name, email, or phone')}
               </label>
-              <input id="reset-identifier" name="reset_identifier" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+              <input id="reset-identifier" name="reset_identifier" autoComplete="username" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
             </div>
             <div>
               <label htmlFor="reset-otp" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

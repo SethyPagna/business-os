@@ -7,7 +7,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 import './web-api.js'
 import { cacheClearAll, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
-import { isWSConnected } from './api/websocket.js'
+import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
 import { normalizePriceValue } from './utils/pricing.js'
 import { withLoaderTimeout } from './utils/loaders.mjs'
@@ -611,6 +611,9 @@ export function AppProvider({ children }) {
       const message = e?.detail?.error || 'Please sign in again to continue.'
       const recentAuthEstablished = Date.now() - authEstablishedAtRef.current < 8000
       const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
+      if (!hasRecoverableSession) {
+        return
+      }
       if (hasRecoverableSession && !authRecoveryRef.current && recentAuthEstablished) {
         authRecoveryRef.current = true
         window.setTimeout(async () => {
@@ -960,6 +963,7 @@ export function AppProvider({ children }) {
 
     setAuthReady(false)
     cacheClearAll()
+    reconnectWS()
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()
     setUser(nextUser)

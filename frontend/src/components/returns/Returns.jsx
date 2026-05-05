@@ -107,12 +107,12 @@ export default function Returns() {
             if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
             setLoading(false)
             setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'ការបង្វិលត្រឡប់កំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
-          }, 10000)
+          }, 15000)
         }
       }
       try {
         const params = { scope }
-        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns')
+        const result = await withLoaderTimeout(() => window.api.getReturns(params), 'Returns', 20000)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         setRows(Array.isArray(result) ? result : [])
         loadedOnceRef.current = true
@@ -121,9 +121,9 @@ export default function Returns() {
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         console.error('[Returns] load failed:', error?.message)
         if (!silent && !loadedOnceRef.current) {
-          setRows([])
           setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
-          loadedOnceRef.current = true
+        } else if (!silent) {
+          setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពការបង្វិលត្រឡប់បានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)

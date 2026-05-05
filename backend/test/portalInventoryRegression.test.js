@@ -42,6 +42,19 @@ runTest('inventory movements accept large page sizes and use text-safe created_a
   assert.match(source, /ORDER BY COALESCE\(NULLIF\(im\.created_at::text,\s*''\), CURRENT_TIMESTAMP::text\) DESC, im\.id DESC/, 'movement ordering should avoid timestamp/text COALESCE mismatches')
 })
 
+runTest('sales and returns stock upserts qualify branch_stock quantity for Postgres', () => {
+  const salesSource = readSource('src/routes/sales.js')
+  const returnsSource = readSource('src/routes/returns.js')
+
+  assert.match(salesSource, /GREATEST\(0,\s*branch_stock\.quantity\s*-\s*CAST\(\?\s+AS numeric\)\)/, 'sales stock deduction should qualify branch_stock.quantity')
+  assert.match(salesSource, /SET quantity = branch_stock\.quantity \+ excluded\.quantity/, 'sales stock restoration should use excluded.quantity')
+  assert.doesNotMatch(salesSource, /SET quantity = quantity \+ \?/, 'sales stock restoration should not use ambiguous bare quantity references')
+
+  assert.match(returnsSource, /GREATEST\(0,\s*branch_stock\.quantity\s*-\s*CAST\(\?\s+AS numeric\)\)/, 'returns stock deduction should qualify branch_stock.quantity')
+  assert.match(returnsSource, /SET quantity = branch_stock\.quantity \+ excluded\.quantity/, 'returns stock restoration should use excluded.quantity')
+  assert.doesNotMatch(returnsSource, /SET quantity = quantity \+ \?/, 'returns stock restoration should not use ambiguous bare quantity references')
+})
+
 runTest('product image uploads defer optimization and return cache-busting metadata', () => {
   const source = readSource('src/routes/products.js')
   assert.match(source, /void compressUpload/, 'product upload route should keep the compression compatibility marker')

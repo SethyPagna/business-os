@@ -217,7 +217,7 @@ export default function Inventory() {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             setLoading(false)
             setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.', 'ស្តុកកំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
-          }, 10000)
+          }, 15000)
         }
       }
       const branchOpts = {
@@ -335,10 +335,9 @@ export default function Inventory() {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.warn('[Inventory] load failed:', e.message)
         if (!silent && !loadedOnceRef.current) {
-          setSummary([])
-          setMovements([])
           setLoadError(e.message || 'Failed to load inventory')
-          loadedOnceRef.current = true
+        } else if (!silent) {
+          setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្តុកបានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)

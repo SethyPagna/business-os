@@ -257,6 +257,7 @@ export default function AuditLog() {
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
+    let didLoadRows = false
     if (!silent && aliveRef.current) {
       setLoading(true)
       setError(null)
@@ -265,7 +266,7 @@ export default function AuditLog() {
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId) || loadedOnceRef.current) return
         setLoading(false)
         setError('Audit log is taking longer than expected. Tap Refresh to try again.')
-      }, 15000)
+      }, 20000)
     }
     try {
       const params = {
@@ -276,18 +277,20 @@ export default function AuditLog() {
         userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
         ...auditDateRange,
       }
-      const data = await withLoaderTimeout(() => window.api.getAuditLogs(params), 'Audit log')
+      const data = await withLoaderTimeout(() => window.api.getAuditLogs(params), 'Audit log', 20000)
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       const rows = Array.isArray(data) ? data : (data?.items || [])
       setLogs(rows)
       setTotalLogs(Number(Array.isArray(data) ? rows.length : data?.total || rows.length))
       setAuditUsers(Array.isArray(data?.filters?.users) ? data.filters.users : [])
+      didLoadRows = true
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       console.error('Failed to load audit logs:', err)
       if (!silent && !loadedOnceRef.current) {
-        setLogs([])
         setError(err?.message || 'Failed to load audit logs.')
+      } else if (!silent) {
+        setError('Audit log could not refresh right now. Showing the latest loaded data.')
       }
     } finally {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -295,7 +298,9 @@ export default function AuditLog() {
         window.clearTimeout(loadWatchdogRef.current)
         loadWatchdogRef.current = null
       }
-      loadedOnceRef.current = true
+      if (didLoadRows) {
+        loadedOnceRef.current = true
+      }
       if (!silent) setLoading(false)
     }
   }, [actionFilter, auditDateRange, isAdmin, page, pageSize, search, userFilter])

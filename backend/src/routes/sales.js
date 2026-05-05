@@ -219,7 +219,8 @@ function refreshProductStockQuantities(productIds) {
 function deductBranchStock(productId, branchId, quantity) {
   db.prepare(`
     INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)
-    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = GREATEST(0, quantity - CAST(? AS numeric))
+    ON CONFLICT(product_id, branch_id) DO UPDATE
+    SET quantity = GREATEST(0, branch_stock.quantity - CAST(? AS numeric))
   `).run(productId, branchId, quantity)
 }
 
@@ -509,8 +510,9 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
           if (item.branch_id) {
             db.prepare(`
               INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + ?
-            `).run(item.product_id, item.branch_id, item.quantity, item.quantity)
+              ON CONFLICT(product_id, branch_id) DO UPDATE
+              SET quantity = branch_stock.quantity + excluded.quantity
+            `).run(item.product_id, item.branch_id, item.quantity)
           }
           touchedProductIds.add(item.product_id)
 

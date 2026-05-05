@@ -98,11 +98,11 @@ export default function Sales() {
             if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
             setLoading(false)
             setLoadError(translateOr('sales_load_slow', 'Sales are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
-          }, 10000)
+          }, 15000)
         }
       }
       try {
-        const result = await withLoaderTimeout(() => window.api.getSales(isAdmin && userFilter !== 'all' ? { userId: userFilter } : undefined), 'Sales')
+        const result = await withLoaderTimeout(() => window.api.getSales(isAdmin && userFilter !== 'all' ? { userId: userFilter } : undefined), 'Sales', 20000)
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         if (Array.isArray(result)) {
           setSales(result)
@@ -113,9 +113,9 @@ export default function Sales() {
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.error('[Sales] load failed:', error.message)
         if (!silent && !loadedOnceRef.current) {
-          setSales([])
           setLoadError(error?.message || translateOr('sales_load_failed', 'Failed to load sales'))
-          loadedOnceRef.current = true
+        } else if (!silent) {
+          setLoadError(translateOr('sales_refresh_failed', 'Sales could not refresh right now. Showing the latest loaded data.'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)

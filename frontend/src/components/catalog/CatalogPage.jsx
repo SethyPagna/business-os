@@ -571,6 +571,10 @@ const DEFAULT_CONFIG = {
   showMembership: true,
   showPrices: true,
   showOutOfStockProducts: true,
+  showProductBrand: true,
+  showProductCategory: true,
+  showProductDescription: true,
+  showProductDiscount: true,
   priceDisplay: 'USD',
   showTopSellerBadge: true,
   showTopProductBadge: true,
@@ -1124,6 +1128,10 @@ function buildDraft(config) {
     customer_portal_show_membership: !!config.showMembership,
     customer_portal_show_prices: !!config.showPrices,
     customer_portal_show_out_of_stock_products: !!config.showOutOfStockProducts,
+    customer_portal_show_product_brand: !!config.showProductBrand,
+    customer_portal_show_product_category: !!config.showProductCategory,
+    customer_portal_show_product_description: !!config.showProductDescription,
+    customer_portal_show_product_discount: !!config.showProductDiscount,
     customer_portal_price_display: config.priceDisplay || 'USD',
     customer_portal_show_top_seller_badge: !!config.showTopSellerBadge,
     customer_portal_show_top_product_badge: !!config.showTopProductBadge,
@@ -1245,6 +1253,10 @@ function applyDraft(config, draft) {
     showMembership: toBoolean(draft.customer_portal_show_membership, config.showMembership),
     showPrices: toBoolean(draft.customer_portal_show_prices, config.showPrices),
     showOutOfStockProducts: toBoolean(draft.customer_portal_show_out_of_stock_products, config.showOutOfStockProducts ?? true),
+    showProductBrand: toBoolean(draft.customer_portal_show_product_brand, config.showProductBrand ?? true),
+    showProductCategory: toBoolean(draft.customer_portal_show_product_category, config.showProductCategory ?? true),
+    showProductDescription: toBoolean(draft.customer_portal_show_product_description, config.showProductDescription ?? true),
+    showProductDiscount: toBoolean(draft.customer_portal_show_product_discount, config.showProductDiscount ?? true),
     priceDisplay: normalizePriceDisplay(draft.customer_portal_price_display || config.priceDisplay),
     showTopSellerBadge: toBoolean(draft.customer_portal_show_top_seller_badge, config.showTopSellerBadge ?? true),
     showTopProductBadge: toBoolean(draft.customer_portal_show_top_product_badge, config.showTopProductBadge ?? true),
@@ -1258,7 +1270,7 @@ function applyDraft(config, draft) {
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
     gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)))),
-    gridColumnsDesktop: Math.min(8, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
+    gridColumnsDesktop: Math.min(10, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
     pointsPerUsd: toNumber(draft.customer_portal_points_per_usd, config.pointsPerUsd),
     pointsPerKhr: toNumber(draft.customer_portal_points_per_khr, config.pointsPerKhr),
@@ -2856,11 +2868,15 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_path: normalizedPath,
         customer_portal_language: editorDraft.customer_portal_language || 'auto',
         customer_portal_translate_widget_enabled: editorDraft.customer_portal_translate_widget_enabled ? 'true' : 'false',
-        customer_portal_show_catalog: editorDraft.customer_portal_show_catalog ? 'true' : 'false',
-        customer_portal_show_membership: editorDraft.customer_portal_show_membership ? 'true' : 'false',
-        customer_portal_show_prices: editorDraft.customer_portal_show_prices ? 'true' : 'false',
-        customer_portal_show_out_of_stock_products: editorDraft.customer_portal_show_out_of_stock_products ? 'true' : 'false',
-        customer_portal_price_display: editorDraft.customer_portal_price_display || 'USD',
+    customer_portal_show_catalog: editorDraft.customer_portal_show_catalog ? 'true' : 'false',
+    customer_portal_show_membership: editorDraft.customer_portal_show_membership ? 'true' : 'false',
+    customer_portal_show_prices: editorDraft.customer_portal_show_prices ? 'true' : 'false',
+    customer_portal_show_out_of_stock_products: editorDraft.customer_portal_show_out_of_stock_products ? 'true' : 'false',
+    customer_portal_show_product_brand: editorDraft.customer_portal_show_product_brand ? 'true' : 'false',
+    customer_portal_show_product_category: editorDraft.customer_portal_show_product_category ? 'true' : 'false',
+    customer_portal_show_product_description: editorDraft.customer_portal_show_product_description ? 'true' : 'false',
+    customer_portal_show_product_discount: editorDraft.customer_portal_show_product_discount ? 'true' : 'false',
+    customer_portal_price_display: editorDraft.customer_portal_price_display || 'USD',
         customer_portal_show_top_seller_badge: editorDraft.customer_portal_show_top_seller_badge ? 'true' : 'false',
         customer_portal_show_top_product_badge: editorDraft.customer_portal_show_top_product_badge ? 'true' : 'false',
         customer_portal_show_recommended_badge: editorDraft.customer_portal_show_recommended_badge ? 'true' : 'false',
@@ -3153,7 +3169,7 @@ export default function CatalogPage({ publicView = false }) {
     }
   )
   const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
-  const desktopGridColumns = Math.min(8, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
+const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
@@ -3394,6 +3410,22 @@ export default function CatalogPage({ publicView = false }) {
                 <span className="text-sm font-medium text-slate-700">{copy('showOutOfStockProducts', 'Show out-of-stock products')}</span>
                 <input id="portal-show-out-of-stock-products" name="customer_portal_show_out_of_stock_products" type="checkbox" checked={editorDraft.customer_portal_show_out_of_stock_products !== false} onChange={(event) => setDraft('customer_portal_show_out_of_stock_products', event.target.checked)} />
               </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('showProductBrand', 'Show brand tags')}</span>
+                <input id="portal-show-product-brand" name="customer_portal_show_product_brand" type="checkbox" checked={editorDraft.customer_portal_show_product_brand !== false} onChange={(event) => setDraft('customer_portal_show_product_brand', event.target.checked)} />
+              </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('showProductCategory', 'Show category tags')}</span>
+                <input id="portal-show-product-category" name="customer_portal_show_product_category" type="checkbox" checked={editorDraft.customer_portal_show_product_category !== false} onChange={(event) => setDraft('customer_portal_show_product_category', event.target.checked)} />
+              </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('showProductDescription', 'Show short descriptions')}</span>
+                <input id="portal-show-product-description" name="customer_portal_show_product_description" type="checkbox" checked={editorDraft.customer_portal_show_product_description !== false} onChange={(event) => setDraft('customer_portal_show_product_description', event.target.checked)} />
+              </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{copy('showProductDiscount', 'Show discount details')}</span>
+                <input id="portal-show-product-discount" name="customer_portal_show_product_discount" type="checkbox" checked={editorDraft.customer_portal_show_product_discount !== false} onChange={(event) => setDraft('customer_portal_show_product_discount', event.target.checked)} />
+              </label>
             </div>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
@@ -3430,7 +3462,7 @@ export default function CatalogPage({ publicView = false }) {
                   className="input"
                   type="number"
                   min="2"
-                  max="8"
+                  max="10"
                   step="1"
                   value={editorDraft.customer_portal_grid_columns_desktop ?? '4'}
                   onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}

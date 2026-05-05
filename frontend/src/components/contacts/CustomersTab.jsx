@@ -399,10 +399,10 @@ function CustomersTab({ t, notify, active = true }) {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setLoading(false)
           setLoadError(tr(t, 'customers_load_slow', 'Customers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
-        }, 10000)
+        }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getCustomers(), label, 8000)
+        const data = await withLoaderTimeout(() => window.api.getCustomers(), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setCustomers(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -411,10 +411,8 @@ function CustomersTab({ t, notify, active = true }) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = error?.message || 'Failed to load customers'
         if (!loadedOnceRef.current) {
-          setCustomers([])
           setLoadError(message)
           notify(message, 'error')
-          loadedOnceRef.current = true
         } else {
           const refreshMessage = tr(t, 'customers_refresh_failed', 'Unable to refresh customers right now. Showing the latest loaded data.')
           setLoadError((current) => current || refreshMessage)

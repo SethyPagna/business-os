@@ -291,9 +291,16 @@ export default function CatalogProductsSection(props) {
           const pricePresentation = previewConfig.showPrices
             ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice)
             : null
+          const metadataChips = [
+            previewConfig.showProductCategory !== false ? product.category : '',
+            previewConfig.showProductBrand !== false ? product.brand : '',
+          ].filter(Boolean)
+          const showDescription = previewConfig.showProductDescription !== false
+          const showDiscountDetails = previewConfig.showProductDiscount !== false
+          const promotion = pricePresentation?.promotion
 
           return (
-            <article key={product.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/90">
+            <article key={product.id} className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/90">
               <div
                 className={`relative ${compactTwoColumnMobile ? 'aspect-[5/4] sm:aspect-[4/3]' : 'aspect-[5/4]'} overflow-hidden bg-slate-100 dark:bg-slate-800 ${gallery.length ? 'cursor-zoom-in' : ''}`}
                 onClick={() => {
@@ -351,37 +358,61 @@ export default function CatalogProductsSection(props) {
                 ) : null}
               </div>
 
-              <div className={`space-y-2.5 ${compactCatalogCards ? 'p-3.5' : 'p-4'}`}>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  {product.category ? <span className="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-slate-800 dark:text-slate-200">{product.category}</span> : null}
-                  {product.brand ? <span className="rounded-full bg-cyan-50 px-2.5 py-1 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200">{product.brand}</span> : null}
+              <div className={`space-y-2 ${compactCatalogCards ? 'p-3' : 'p-3.5'}`}>
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                  {metadataChips.map((chip) => (
+                    <span key={`${product.id}-${chip}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800 dark:text-slate-200">
+                      {chip}
+                    </span>
+                  ))}
                 </div>
-                <div className={`${compactCatalogCards ? 'text-sm' : 'text-base'} font-semibold text-slate-900 dark:text-slate-100`}>{product.name}</div>
-                <p className={`${compactCatalogCards ? 'min-h-[2.9rem] text-[11px] leading-5' : 'min-h-[3.2rem] text-xs leading-5'} text-slate-600 dark:text-slate-300`}>
-                  {product.description || copy('noDescription', 'No description available.')}
-                </p>
+                <div className={`${compactCatalogCards ? 'text-sm' : 'text-[15px]'} font-semibold leading-tight text-slate-900 dark:text-slate-100`}>
+                  {product.name}
+                </div>
+                {showDescription ? (
+                  <p className={`${compactCatalogCards ? 'line-clamp-2 min-h-[2.4rem] text-[11px] leading-[1.15rem]' : 'line-clamp-3 min-h-[2.8rem] text-xs leading-5'} text-slate-600 dark:text-slate-300`}>
+                    {product.description || copy('noDescription', 'No description available.')}
+                  </p>
+                ) : null}
+                {showDiscountDetails && promotion?.active ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/20 dark:text-rose-200">
+                      <BadgePercent className="h-3 w-3" />
+                      {product.discount_label || copy('discounts', 'Discount')}
+                    </span>
+                    {pricePresentation?.originalText ? (
+                      <span className="text-[11px] text-slate-400 line-through dark:text-slate-500">
+                        {pricePresentation.originalText}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
 
-                <div className={`flex items-center justify-between rounded-2xl bg-slate-50 dark:bg-slate-800/80 ${compactCatalogCards ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('price', 'Price')}</div>
+                <div className={`flex items-center justify-between gap-2 rounded-2xl bg-slate-50 dark:bg-slate-800/80 ${compactCatalogCards ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
+                  <div className="min-w-0">
                     {previewConfig.showPrices ? (
-                      <div className="mt-1 space-y-0.5">
-                        <div className={`font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
-                          {pricePresentation?.primaryText}
-                        </div>
-                        {pricePresentation?.originalText ? (
-                          <div className="text-[11px] text-slate-400 line-through dark:text-slate-500">
-                            {pricePresentation.originalText}
-                          </div>
-                        ) : null}
+                      <div className={`font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                        {pricePresentation?.primaryText}
                       </div>
                     ) : (
-                      <div className={`mt-1 font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                      <div className={`font-semibold text-slate-900 dark:text-slate-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                         {copy('priceHidden', 'Price hidden')}
                       </div>
                     )}
+                    {showDiscountDetails && !promotion?.active && pricePresentation?.originalText ? (
+                      <div className="text-[11px] text-slate-400 line-through dark:text-slate-500">
+                        {pricePresentation.originalText}
+                      </div>
+                    ) : null}
                   </div>
-                  {!compactCatalogCards ? <span className="text-xs text-slate-500 dark:text-slate-400">{copy('readOnly', 'Read-only for customers')}</span> : null}
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500"
+                    onClick={() => openProductGallery(product, 0)}
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {copy('viewDetails', 'View')}
+                  </button>
                 </div>
               </div>
             </article>

@@ -210,14 +210,17 @@ export async function replaceTableContents(tableName, rows) {
 }
 
 export async function resetLocalMirrorDb() {
+  const tables = Array.isArray(dexieDb.tables) ? dexieDb.tables.filter(Boolean) : []
+  if (!tables.length) return
   try {
-    dexieDb.close()
-  } catch (_) {}
-  try {
-    await dexieDb.delete()
-  } catch (_) {}
-  try {
-    await dexieDb.open()
+    if (!dexieDb.isOpen()) {
+      await dexieDb.open()
+    }
+    await dexieDb.transaction('rw', ...tables, async () => {
+      for (const table of tables) {
+        await table.clear().catch(() => {})
+      }
+    })
   } catch (_) {}
 }
 

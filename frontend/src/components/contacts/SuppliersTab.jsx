@@ -94,29 +94,36 @@ function SupplierForm({ supplier, onSave, onClose, t }) {
           <div className="max-h-64 space-y-2 overflow-y-auto pr-0.5">
             {options.map((option, index) => (
               <div key={`supplier-option-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2 dark:border-zinc-600 dark:bg-zinc-800/60">
+                {(() => {
+                  const fieldId = (suffix) => `supplier-option-${index}-${suffix}`
+                  return (
+                    <>
                 <div className="flex items-center gap-2">
                   <span className="w-5 flex-shrink-0 text-xs font-bold text-gray-400">#{index + 1}</span>
-                  <input className="input flex-1 text-xs py-1" autoComplete="off" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
+                  <input id={fieldId('label')} name={fieldId('label')} className="input flex-1 text-xs py-1" autoComplete="off" placeholder="Option label" value={option.label || ''} onChange={(event) => updateOption(index, { ...option, label: event.target.value })} />
                   {options.length > 1 ? <button type="button" onClick={() => removeOption(index)} className="rounded px-1.5 py-1 text-xs text-red-500 hover:text-red-700">Remove</button> : null}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="mb-0.5 block text-xs text-gray-400">Name</label>
-                    <input className="input text-xs py-1" autoComplete="name" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
+                    <label htmlFor={fieldId('name')} className="mb-0.5 block text-xs text-gray-400">Name</label>
+                    <input id={fieldId('name')} name={fieldId('name')} className="input text-xs py-1" autoComplete="name" placeholder="Contact name" value={option.name || ''} onChange={(event) => updateOption(index, { ...option, name: event.target.value })} />
                   </div>
                   <div>
-                    <label className="mb-0.5 block text-xs text-gray-400">Phone</label>
-                    <input className="input text-xs py-1" autoComplete="tel" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
+                    <label htmlFor={fieldId('phone')} className="mb-0.5 block text-xs text-gray-400">Phone</label>
+                    <input id={fieldId('phone')} name={fieldId('phone')} className="input text-xs py-1" autoComplete="tel" placeholder="Phone number" value={option.phone || ''} onChange={(event) => updateOption(index, { ...option, phone: event.target.value })} />
                   </div>
                 </div>
                 <div>
-                  <label className="mb-0.5 block text-xs text-gray-400">Email</label>
-                  <input className="input text-xs py-1" autoComplete="email" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
+                  <label htmlFor={fieldId('email')} className="mb-0.5 block text-xs text-gray-400">Email</label>
+                  <input id={fieldId('email')} name={fieldId('email')} className="input text-xs py-1" autoComplete="email" type="email" placeholder="Email address" value={option.email || ''} onChange={(event) => updateOption(index, { ...option, email: event.target.value })} />
                 </div>
                 <div>
-                  <label className="mb-0.5 block text-xs text-gray-400">Address</label>
-                  <input className="input text-xs py-1" autoComplete="street-address" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
+                  <label htmlFor={fieldId('address')} className="mb-0.5 block text-xs text-gray-400">Address</label>
+                  <input id={fieldId('address')} name={fieldId('address')} className="input text-xs py-1" autoComplete="street-address" placeholder="Office or pickup address" value={option.address || ''} onChange={(event) => updateOption(index, { ...option, address: event.target.value })} />
                 </div>
+                    </>
+                  )
+                })()}
               </div>
             ))}
           </div>
@@ -308,10 +315,10 @@ function SuppliersTab({ t, notify, active = true }) {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setLoading(false)
           setLoadError(tr('suppliers_load_slow', 'Suppliers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
-        }, 10000)
+        }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getSuppliers(), label, 8000)
+        const data = await withLoaderTimeout(() => window.api.getSuppliers(), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setSuppliers(Array.isArray(data) ? data : [])
         loadedOnceRef.current = true
@@ -320,10 +327,8 @@ function SuppliersTab({ t, notify, active = true }) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = error?.message || 'Failed to load suppliers'
         if (!loadedOnceRef.current) {
-          setSuppliers([])
           setLoadError(message)
           notify(message, 'error')
-          loadedOnceRef.current = true
         } else {
           const refreshMessage = tr('suppliers_refresh_failed', 'Unable to refresh suppliers right now. Showing the latest loaded data.')
           setLoadError((current) => current || refreshMessage)
