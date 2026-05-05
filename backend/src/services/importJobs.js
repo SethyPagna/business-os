@@ -2172,14 +2172,25 @@ function parseFieldRules(row = {}) {
 }
 
 function generateCustomerMembershipNumber(row = {}) {
-  const namePart = normalizeLookup(row?.name || 'customer').replace(/[^a-z0-9]+/g, '').slice(0, 4).toUpperCase() || 'CUS'
+  void row
+  const prefix = 'LCMN'
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const suffix = `${Date.now().toString(36)}${attempt.toString(36)}`.toUpperCase().slice(-7)
-    const candidate = `${namePart}-${suffix}`
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`
+      .replace(/[^a-z0-9]/gi, '')
+      .toUpperCase()
+      .slice(-8)
+      .padStart(8, '0')
+    const candidate = `${prefix}-${suffix}`
     const exists = db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1').get(candidate)
     if (!exists) return candidate
   }
   throw new Error('Could not generate a unique membership number')
+}
+
+function normalizeImportedMembershipNumber(value) {
+  const normalized = cleanText(value)
+  if (!normalized) return ''
+  return normalized.replace(/^(?:CUST|LCM)-/i, 'LCMN-')
 }
 
 async function processContactRowBatches({ jobId, rowBatches, totalRows = null, actor, type }) {
@@ -2235,7 +2246,7 @@ async function processContactRowBatches({ jobId, rowBatches, totalRows = null, a
           if (isCustomer) {
             incoming = {
               name: cleanText(row.name),
-              membership_number: cleanText(row.membership_number) || generateCustomerMembershipNumber(row),
+              membership_number: normalizeImportedMembershipNumber(row.membership_number) || generateCustomerMembershipNumber(row),
               phone: cleanText(contactState.primary.phone || row.phone),
               email: cleanText(contactState.primary.email || row.email),
               address: contactState.serialized || cleanText(row.address),

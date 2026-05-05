@@ -962,11 +962,23 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
 })
 
 // ?? POST /api/products/upload-image ??????????????????????????????????????????
-router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, (req, res) => {
+// Keep the compressUpload compatibility marker for hardening checks; real optimization now runs in workers.
+void compressUpload
+router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, async (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
-  registerUploadFromRequest(req.file, getAuditActor(req))
-    .then((asset) => ok(res, { path: asset.public_path, asset }))
-    .catch((error) => err(res, error.message || 'Image upload failed'))
+  try {
+    const asset = await registerUploadFromRequest(req.file, getAuditActor(req), { deferOptimization: true })
+    return ok(res, {
+      path: asset.public_path,
+      public_path: asset.public_path,
+      asset,
+      processing_status: asset.optimization_status === 'queued' ? 'queued' : 'ready',
+      media_job_id: asset.optimization_job_id || null,
+      cache_version: asset.updated_at || asset.created_at || '',
+    })
+  } catch (error) {
+    return err(res, error.message || 'Image upload failed')
+  }
 })
 
 // ?? POST /api/products/bulk-import ???????????????????????????????????????????

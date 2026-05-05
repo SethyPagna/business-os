@@ -12,6 +12,18 @@ export function createInitialUploadState() {
   }
 }
 
+export function isTemporaryPreviewUrl(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  return raw.startsWith('blob:') || raw.startsWith('data:')
+}
+
+export function sanitizePersistedMediaPath(value, fallback = '') {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (isTemporaryPreviewUrl(raw)) return String(fallback || '').trim()
+  return raw
+}
+
 export function buildCacheBustedMediaPath(path, version) {
   const rawPath = String(path || '').trim()
   const rawVersion = String(version || '').trim()

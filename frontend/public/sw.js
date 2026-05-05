@@ -6,10 +6,10 @@
  * cannot be silently replaced by stale HTTP responses.
  */
 
-const APP_SHELL_VERSION = 'business-os-app-shell-v2'
+const APP_SHELL_VERSION = 'business-os-app-shell-v3'
 const APP_SHELL_CACHE = APP_SHELL_VERSION
-const STATIC_CACHE = 'business-os-static-v5'
-const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/icon.png']
+const STATIC_CACHE = 'business-os-static-v6'
+const APP_SHELL_URLS = ['/', '/index.html', '/icon.png']
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const DB_NAME = 'BusinessOS'
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
@@ -361,7 +361,6 @@ function isNeverCachedPath(pathname) {
 
 function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
-    || pathname === '/manifest.json'
     || pathname === '/icon.png'
     || pathname === '/runtime-noise-guard.js'
     || pathname === '/theme-bootstrap.js'

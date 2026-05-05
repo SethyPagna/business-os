@@ -38,11 +38,8 @@ function tr(t, key, fallback) {
 }
 
 export function generateCustomerMembershipNumber(seed = '') {
-  const prefix = String(seed || 'customer')
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}]+/gu, '')
-    .slice(0, 4)
-    .toUpperCase() || 'CUS'
+  void seed
+  const prefix = 'LCMN'
   const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
     .replace(/[^a-z0-9]/gi, '')
     .toUpperCase()
@@ -159,7 +156,7 @@ function CustomerForm({ customer, onSave, onClose, t }) {
               className="input min-w-0 flex-1"
               value={form.membership_number || ''}
               onChange={(event) => setField('membership_number', event.target.value.toUpperCase())}
-              placeholder="MEM-00000000-ABCD"
+              placeholder="LCMN-00000000"
             />
             <button
               type="button"

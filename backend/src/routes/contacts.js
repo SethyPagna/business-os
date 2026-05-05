@@ -15,10 +15,16 @@ const {
 } = require('../contactOptions')
 
 const router = express.Router()
-const MEMBERSHIP_NUMBER_PREFIX = 'LCM'
+const MEMBERSHIP_NUMBER_PREFIX = 'LCMN'
+
+function normalizeLegacyMembershipNumber(value) {
+  const normalized = cleanText(value)
+  if (!normalized) return ''
+  return normalized.replace(/^(?:CUST|LCM)-/i, `${MEMBERSHIP_NUMBER_PREFIX}-`)
+}
 
 function cleanMembershipNumber(value) {
-  return cleanText(value)
+  return normalizeLegacyMembershipNumber(value)
 }
 
 function requireMembershipNumber(value) {

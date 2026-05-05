@@ -11,7 +11,12 @@ import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.mjs'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.js'
-import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../../utils/mediaUpload.js'
+import {
+  buildCacheBustedMediaPath,
+  createInitialUploadState,
+  reduceUploadState,
+  sanitizePersistedMediaPath,
+} from '../../utils/mediaUpload.js'
 
 const FALLBACK_COPY = {
   en: {
@@ -361,6 +366,7 @@ export default function Settings() {
   const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
   const uploadControllersRef = useRef(new Map())
+  const uploadOriginalValuesRef = useRef(new Map())
   const uploadPreviewUrlsRef = useRef(new Map())
   const aliveRef = useRef(true)
   const sectionStorageKey = 'business-os:settings:section'
@@ -646,6 +652,8 @@ export default function Settings() {
         input.click()
       })
       if (!file) return
+      const previousValue = String(form[key] || settings[key] || '').trim()
+      uploadOriginalValuesRef.current.set(key, previousValue)
       const previousPreview = uploadPreviewUrlsRef.current.get(key)
       if (previousPreview && String(previousPreview).startsWith('blob:')) {
         URL.revokeObjectURL(previousPreview)
@@ -681,20 +689,31 @@ export default function Settings() {
       })
     } catch (error) {
       if (aliveRef.current) {
-        const cancelled = /cancelled/i.test(String(error?.message || ''))
+        const cancelled = /cancelled|canceled|aborted/i.test(String(error?.message || ''))
+        const previousValue = uploadOriginalValuesRef.current.get(key)
+        setValue(key, previousValue || '')
         updateUploadState(key, cancelled ? { type: 'cancel' } : { type: 'error', error: error?.message || 'Image upload failed' })
         if (!cancelled) notify(error?.message || 'Image upload failed', 'error')
       }
     } finally {
       uploadControllersRef.current.delete(key)
+      uploadOriginalValuesRef.current.delete(key)
     }
   }
 
   const handleSaveSettings = async () => {
-    const result = await saveSettings(form)
+    if (uploadingImage) {
+      notify(uiLanguage === 'km' ? 'សូមរង់ចាំឱ្យការផ្ទុករូបភាពបញ្ចប់សិន។' : 'Wait for the image upload to finish before saving settings.', 'error')
+      return
+    }
+    const sanitizedForm = {
+      ...form,
+      ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, settings.ui_app_favicon_image || ''),
+    }
+    const result = await saveSettings(sanitizedForm)
     if (result?.conflict) {
       setSettingsConflict(buildSettingsConflictState({
-        attempted: result?.attempted || form,
+        attempted: result?.attempted || sanitizedForm,
         currentSettings: result?.currentSettings || {},
         actualUpdatedAt: result?.actualUpdatedAt || null,
         expectedUpdatedAt: result?.expectedUpdatedAt || null,
@@ -702,6 +721,10 @@ export default function Settings() {
       setShowConflictReview(false)
       return
     }
+    setForm((current) => ({
+      ...current,
+      ui_app_favicon_image: sanitizedForm.ui_app_favicon_image,
+    }))
     setSettingsConflict(null)
     setShowConflictReview(false)
   }

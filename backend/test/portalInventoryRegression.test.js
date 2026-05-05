@@ -42,6 +42,14 @@ runTest('inventory movements accept large page sizes and use text-safe created_a
   assert.match(source, /ORDER BY COALESCE\(NULLIF\(im\.created_at::text,\s*''\), CURRENT_TIMESTAMP::text\) DESC, im\.id DESC/, 'movement ordering should avoid timestamp/text COALESCE mismatches')
 })
 
+runTest('product image uploads defer optimization and return cache-busting metadata', () => {
+  const source = readSource('src/routes/products.js')
+  assert.match(source, /void compressUpload/, 'product upload route should keep the compression compatibility marker')
+  assert.match(source, /registerUploadFromRequest\(req\.file, getAuditActor\(req\), \{ deferOptimization: true \}\)/, 'product upload route should defer optimization to workers')
+  assert.match(source, /public_path: asset\.public_path/, 'product upload route should return the public asset path directly')
+  assert.match(source, /cache_version: asset\.updated_at \|\| asset\.created_at \|\| ''/, 'product upload route should return cache-busting metadata')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

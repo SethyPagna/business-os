@@ -2224,15 +2224,15 @@ export default function Inventory() {
                       <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-gray-400">
                         {productTags.length ? <span className="truncate">{productTags.join(' · ')}</span> : null}
-                        {p.barcode ? (
-                          <span className="max-w-[8.5rem] truncate rounded-md bg-gray-100 px-1.5 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-                            {p.barcode}
-                          </span>
-                        ) : null}
                         <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                       </div>
                     </div>
-                    <div className="flex min-w-0 shrink-0 items-center justify-end gap-1.5 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
+                    <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
+                      {p.barcode ? (
+                        <span className="max-w-[7.25rem] truncate rounded-md bg-white px-1.5 py-0.5 font-medium text-[10px] text-gray-500 shadow-sm dark:bg-gray-900 dark:text-gray-300">
+                          {p.barcode}
+                        </span>
+                      ) : null}
                       <div className="whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
                         {qty}
                         <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>

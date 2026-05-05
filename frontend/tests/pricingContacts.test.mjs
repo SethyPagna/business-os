@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../src/utils/pricing.js'
 import {
   CONTACT_OPTION_LIMIT,
@@ -86,6 +87,12 @@ await runTest('serializeContactOptions round-trips structured contact options', 
   assert.equal(parsed.length, 2)
   assert.equal(parsed[0].name, 'Alice')
   assert.equal(parsed[1].phone, '456')
+})
+
+await runTest('customer membership generation always uses the LCMN prefix', () => {
+  const source = readFileSync(new URL('../src/components/contacts/CustomersTab.jsx', import.meta.url), 'utf8')
+  assert.match(source, /const prefix = 'LCMN'/)
+  assert.match(source, /return `\$\{prefix\}-\$\{entropy\.slice\(-8\)\.padStart\(8, '0'\)\}`/)
 })
 
 if (failed > 0) {

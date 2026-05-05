@@ -6,19 +6,19 @@ const inventorySource = readFileSync(new URL('../src/components/inventory/Invent
 assert.match(
   inventorySource,
   /const productTags = \[p\.brand, p\.category, p\.is_group \? 'Group' : \(p\.parent_id \? 'Variant' : ''\)\]\.filter\(Boolean\)/,
-  'Mobile inventory card should keep brand, category, and group tags separate from the barcode pill',
+  'Mobile inventory card should keep brand, category, and group tags visible in the identity area',
 )
 
 assert.match(
   inventorySource,
-  /p\.barcode \? \(\s*<span className="max-w-\[8\.5rem\] truncate rounded-md bg-gray-100 px-1\.5 py-0\.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-300">/,
-  'Mobile inventory card should render barcode as a compact inline pill',
+  /p\.barcode \? \(\s*<span className="max-w-\[7\.25rem\] truncate rounded-md bg-white px-1\.5 py-0\.5 font-medium text-\[10px\] text-gray-500 shadow-sm dark:bg-gray-900 dark:text-gray-300">/,
+  'Mobile inventory card should render barcode as a compact header pill next to stock controls',
 )
 
 assert.match(
   inventorySource,
-  /className="flex min-w-0 shrink-0 items-center justify-end gap-1\.5 rounded-xl bg-gray-50 px-2 py-1\.5 text-right dark:bg-gray-800\/70"/,
-  'Quantity, stock status, and Adjust should share one compact inline control strip',
+  /className="flex min-w-0 shrink-0 items-center justify-end gap-1 rounded-xl bg-gray-50 px-2 py-1\.5 text-right dark:bg-gray-800\/70"/,
+  'Barcode, quantity, stock status, and Adjust should share one compact inline control strip',
 )
 
 assert.doesNotMatch(

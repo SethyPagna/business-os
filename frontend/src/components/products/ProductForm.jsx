@@ -6,6 +6,7 @@ import BranchStockAdjuster from './BranchStockAdjuster'
 import FilePickerModal from '../files/FilePickerModal'
 import BarcodeScannerModal from './BarcodeScannerModal'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
+import { buildCacheBustedMediaPath } from '../../utils/mediaUpload.js'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -236,7 +237,8 @@ export default function ProductForm({
           file,
           fileName: file.name || 'product.jpg',
         })
-        const publicPath = uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
+        const rawPath = uploaded?.public_path || uploaded?.path || uploaded?.asset?.public_path || uploaded?.data?.path || ''
+        const publicPath = buildCacheBustedMediaPath(rawPath, uploaded?.cache_version || uploaded?.asset?.updated_at || uploaded?.asset?.created_at || '')
         if (publicPath) stagedImages.push(publicPath)
       }
       setImageList((current) => {

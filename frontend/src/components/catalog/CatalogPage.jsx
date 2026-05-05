@@ -82,7 +82,12 @@ import {
   writePortalTranslateTarget,
   clearGoogleTranslateCookies,
 } from './portalTranslateController.mjs'
-import { buildCacheBustedMediaPath, createInitialUploadState, reduceUploadState } from '../../utils/mediaUpload.js'
+import {
+  buildCacheBustedMediaPath,
+  createInitialUploadState,
+  reduceUploadState,
+  sanitizePersistedMediaPath,
+} from '../../utils/mediaUpload.js'
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
 const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))
@@ -100,6 +105,10 @@ function withAssetVersion(url, versionSeed) {
   if (!seed) return raw
   const separator = raw.includes('?') ? '&' : '?'
   return `${raw}${separator}v=${encodeURIComponent(seed)}`
+}
+
+function sanitizePortalMediaValue(value, fallback = '') {
+  return sanitizePersistedMediaPath(value, fallback)
 }
 
 /**
@@ -1769,6 +1778,10 @@ export default function CatalogPage({ publicView = false }) {
   const updateMediaUploadState = (key, action) => {
     setMediaUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
   }
+  const hasActiveMediaUpload = useMemo(
+    () => Object.values(mediaUploadStates).some((state) => state?.status === 'uploading'),
+    [mediaUploadStates],
+  )
   const forgetMediaUploadState = (key) => {
     setMediaUploadStates((current) => {
       if (!Object.prototype.hasOwnProperty.call(current, key)) return current
@@ -2719,6 +2732,10 @@ export default function CatalogPage({ publicView = false }) {
 
   async function savePortalDraft() {
     try {
+      if (hasActiveMediaUpload) {
+        notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the portal.'), 'error')
+        return
+      }
       const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/customer-portal')
       if (isReservedPortalPath(normalizedPath)) {
         notify(copy('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.'), 'error')
@@ -2768,8 +2785,20 @@ export default function CatalogPage({ publicView = false }) {
         return
       }
 
+      const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
+      const sanitizedFaviconImage = sanitizePortalMediaValue(editorDraft.customer_portal_favicon_image, previewConfig.faviconImage || '')
+      const sanitizedCoverImage = sanitizePortalMediaValue(editorDraft.customer_portal_cover_image, previewConfig.coverImage || '')
+      const previewAboutBlockMap = new Map((previewConfig.aboutBlocks || []).map((block) => [String(block?.id || ''), block]))
+      const sanitizedAboutBlocks = aboutBlocks.map((block) => ({
+        ...block,
+        mediaUrl: sanitizePortalMediaValue(
+          block?.mediaUrl,
+          previewAboutBlockMap.get(String(block?.id || ''))?.mediaUrl || '',
+        ),
+      }))
+
       setEditorSaving(true)
-      await saveSettings({
+      const result = await saveSettings({
         business_name: editorDraft.business_name || '',
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
@@ -2778,14 +2807,14 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_business_tagline: editorDraft.customer_portal_business_tagline || '',
         customer_portal_google_maps_embed: sanitizedGoogleMapEmbed,
         customer_portal_show_google_map: editorDraft.customer_portal_show_google_map ? 'true' : 'false',
-        customer_portal_logo_image: editorDraft.customer_portal_logo_image || '',
-        customer_portal_favicon_image: editorDraft.customer_portal_favicon_image || '',
+        customer_portal_logo_image: sanitizedLogoImage,
+        customer_portal_favicon_image: sanitizedFaviconImage,
         customer_portal_logo_size: String(sanitizedLogoSize),
         customer_portal_logo_fit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
         customer_portal_logo_zoom: String(sanitizedLogoZoom),
         customer_portal_logo_position_x: String(sanitizedLogoPositionX),
         customer_portal_logo_position_y: String(sanitizedLogoPositionY),
-        customer_portal_cover_image: editorDraft.customer_portal_cover_image || '',
+        customer_portal_cover_image: sanitizedCoverImage,
         customer_portal_show_logo: editorDraft.customer_portal_show_logo ? 'true' : 'false',
         customer_portal_show_cover: editorDraft.customer_portal_show_cover ? 'true' : 'false',
         customer_portal_show_phone: editorDraft.customer_portal_show_phone ? 'true' : 'false',
@@ -2819,7 +2848,7 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_show_about: editorDraft.customer_portal_show_about ? 'true' : 'false',
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
-        customer_portal_about_blocks: serializeAboutBlocks(aboutBlocks),
+        customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
         customer_portal_translations: sanitizedTranslations,
         customer_portal_hero_gradient_start: normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a'),
         customer_portal_hero_gradient_mid: normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d'),
@@ -2849,7 +2878,22 @@ export default function CatalogPage({ publicView = false }) {
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
       })
-      setConfig((current) => applyDraft(current, editorDraft))
+      if (result?.conflict) {
+        notify(copy('portalSettingsConflict', 'Portal settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
+        return
+      }
+      setDraft('customer_portal_logo_image', sanitizedLogoImage)
+      setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
+      setDraft('customer_portal_cover_image', sanitizedCoverImage)
+      setAboutBlocksDraft(sanitizedAboutBlocks)
+      const sanitizedDraft = {
+        ...editorDraft,
+        customer_portal_logo_image: sanitizedLogoImage,
+        customer_portal_favicon_image: sanitizedFaviconImage,
+        customer_portal_cover_image: sanitizedCoverImage,
+        customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
+      }
+      setConfig((current) => applyDraft(current, sanitizedDraft))
       setEditorDirty(false)
       await loadPortal()
     } catch (error) {

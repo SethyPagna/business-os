@@ -17,11 +17,11 @@ function runTest(name, fn) {
   }
 }
 
-runTest('customer membership auto-generation uses the LCM prefix', () => {
+runTest('customer membership auto-generation uses the LCMN prefix', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/routes/contacts.js'), 'utf8')
-  assert.match(source, /MEMBERSHIP_NUMBER_PREFIX\s*=\s*'LCM'/)
+  assert.match(source, /MEMBERSHIP_NUMBER_PREFIX\s*=\s*'LCMN'/)
   assert.match(source, /`\$\{MEMBERSHIP_NUMBER_PREFIX\}-\$\{entropy\.slice\(-8\)\}`/)
-  assert.doesNotMatch(source, /const prefix = source[\s\S]*?slice\(0,\s*4\)/)
+  assert.doesNotMatch(source, /normalize\('NFKD'\)/)
 })
 
 runTest('portal membership lookup handles new members without raw route failures', () => {

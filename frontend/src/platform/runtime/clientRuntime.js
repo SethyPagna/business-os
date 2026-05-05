@@ -73,7 +73,7 @@ export function shouldResetForRuntimeChange(currentInput = {}, nextInput = {}) {
     return true
   }
 
-  return !!(current.serverStartTime && next.serverStartTime && current.serverStartTime !== next.serverStartTime)
+  return false
 }
 
 export function buildQueuedOperationScope(extra = {}) {
