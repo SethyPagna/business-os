@@ -1008,22 +1008,23 @@ router.post('/ai/chat', async (req, res) => {
 })
 
 router.get('/membership/:membershipNumber', (req, res) => {
-  if (!applyPortalRateLimit(req, res, { name: 'portal:membership_lookup', max: 45, windowMs: 60 * 1000 })) return
-  const membershipNumber = String(req.params.membershipNumber || '').trim()
-  if (!membershipNumber) return res.status(400).json({ error: 'Membership number is required' })
+  try {
+    if (!applyPortalRateLimit(req, res, { name: 'portal:membership_lookup', max: 45, windowMs: 60 * 1000 })) return
+    const membershipNumber = String(req.params.membershipNumber || '').trim()
+    if (!membershipNumber) return res.status(400).json({ error: 'Membership number is required' })
 
-  const customer = findCustomerByMembership(membershipNumber)
-  if (!customer) return res.status(404).json({ error: 'Membership not found' })
+    const customer = findCustomerByMembership(membershipNumber)
+    if (!customer) return res.status(404).json({ error: 'Membership not found' })
 
-  const params = {
-    customerId: customer.id || null,
-    customerName: customer.name || '',
-    customerPhone: customer.phone || '',
-    customerPhoneNormalized: normalizePhone(customer.phone),
-    membershipNumber: customer.membership_number || membershipNumber,
-  }
+    const params = {
+      customerId: customer.id || null,
+      customerName: customer.name || '',
+      customerPhone: customer.phone || '',
+      customerPhoneNormalized: normalizePhone(customer.phone),
+      membershipNumber: customer.membership_number || membershipNumber,
+    }
 
-  const sales = db.prepare(`
+    const sales = db.prepare(`
     SELECT
       s.id,
       s.receipt_number,
@@ -1057,9 +1058,9 @@ router.get('/membership/:membershipNumber', (req, res) => {
     GROUP BY s.id
     ORDER BY s.created_at DESC
     LIMIT 100
-  `).all(params)
+    `).all(params)
 
-  const returns = db.prepare(`
+    const returns = db.prepare(`
     SELECT
       r.id,
       r.return_number,
@@ -1082,9 +1083,9 @@ router.get('/membership/:membershipNumber', (req, res) => {
     GROUP BY r.id
     ORDER BY r.created_at DESC
     LIMIT 100
-  `).all(params)
+    `).all(params)
 
-  const submissions = db.prepare(`
+    const submissions = db.prepare(`
     SELECT
       id,
       membership_number,
@@ -1104,50 +1105,54 @@ router.get('/membership/:membershipNumber', (req, res) => {
       OR lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))
     ORDER BY created_at DESC
     LIMIT 100
-  `).all(params).map((entry) => ({
-    ...entry,
-    screenshots: tryParse(entry.screenshots_json, []),
-  })).map(({ screenshots_json, ...entry }) => entry)
+    `).all(params).map((entry) => ({
+      ...entry,
+      screenshots: tryParse(entry.screenshots_json, []),
+    })).map(({ screenshots_json, ...entry }) => entry)
 
-  const config = buildPortalConfig()
-  const points = summarizePoints(sales, returns, submissions, config)
+    const config = buildPortalConfig()
+    const points = summarizePoints(sales, returns, submissions, config)
 
-  const totals = {
-    totalSalesUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_usd), 0).toFixed(2)),
-    totalSalesKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_khr), 0).toFixed(0)),
-    totalReturnsUsd: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_usd), 0).toFixed(2)),
-    totalReturnsKhr: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_khr), 0).toFixed(0)),
-    membershipDiscountUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_usd), 0).toFixed(2)),
-    membershipDiscountKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_khr), 0).toFixed(0)),
+    const totals = {
+      totalSalesUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_usd), 0).toFixed(2)),
+      totalSalesKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.total_khr), 0).toFixed(0)),
+      totalReturnsUsd: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_usd), 0).toFixed(2)),
+      totalReturnsKhr: Number(returns.reduce((sum, ret) => sum + toNumber(ret.total_refund_khr), 0).toFixed(0)),
+      membershipDiscountUsd: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_usd), 0).toFixed(2)),
+      membershipDiscountKhr: Number(sales.reduce((sum, sale) => sum + toNumber(sale.membership_discount_khr), 0).toFixed(0)),
+    }
+
+    res.json({
+      customer,
+      sales,
+      returns,
+      submissions,
+      totals,
+      points,
+      config: {
+        publicUrl: config.publicUrl,
+        priceDisplay: config.priceDisplay,
+        translateWidgetEnabled: config.translateWidgetEnabled,
+        refreshSeconds: config.refreshSeconds,
+        stockThresholdMode: config.stockThresholdMode,
+        lowStockThreshold: config.lowStockThreshold,
+        outOfStockThreshold: config.outOfStockThreshold,
+        redeemPoints: config.redeemPoints,
+        redeemValueUsd: config.redeemValueUsd,
+        redeemValueKhr: config.redeemValueKhr,
+        membershipInfoText: config.membershipInfoText,
+        submissionEnabled: config.submissionEnabled,
+        submissionRewardPoints: config.submissionRewardPoints,
+        submissionInstructions: config.submissionInstructions,
+        googleMapsEmbed: config.googleMapsEmbed,
+        showGoogleMap: config.showGoogleMap,
+        publicPath: config.publicPath,
+      },
+    })
+  } catch (error) {
+    console.error('Portal membership lookup failed', error)
+    res.status(500).json({ error: 'Membership lookup failed' })
   }
-
-  res.json({
-    customer,
-    sales,
-    returns,
-    submissions,
-    totals,
-    points,
-    config: {
-      publicUrl: config.publicUrl,
-      priceDisplay: config.priceDisplay,
-      translateWidgetEnabled: config.translateWidgetEnabled,
-      refreshSeconds: config.refreshSeconds,
-      stockThresholdMode: config.stockThresholdMode,
-      lowStockThreshold: config.lowStockThreshold,
-      outOfStockThreshold: config.outOfStockThreshold,
-      redeemPoints: config.redeemPoints,
-      redeemValueUsd: config.redeemValueUsd,
-      redeemValueKhr: config.redeemValueKhr,
-      membershipInfoText: config.membershipInfoText,
-      submissionEnabled: config.submissionEnabled,
-      submissionRewardPoints: config.submissionRewardPoints,
-      submissionInstructions: config.submissionInstructions,
-      googleMapsEmbed: config.googleMapsEmbed,
-      showGoogleMap: config.showGoogleMap,
-      publicPath: config.publicPath,
-    },
-  })
 })
 
 router.post('/submissions', async (req, res) => {

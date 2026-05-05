@@ -146,7 +146,7 @@ export default function ProductDetailModal({
               </Row>
             ) : null}
             {promotion.active ? (
-              <Row label={T('product_discount', 'Promotion')}>
+              <Row label={T('product_discount', 'Discounts')}>
                 <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
                 {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
                 <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
@@ -204,7 +204,7 @@ export default function ProductDetailModal({
 
         <div className="flex flex-wrap gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
           {onAddVariant ? <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAddVariant}>{T('add_variant', 'Add variant')}</button> : null}
-          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onDiscount}>{T('product_discount', 'Discount')}</button>
+          <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onDiscount}>{T('product_discount', 'Discounts')}</button>
           <button className="btn-secondary flex-1 px-3 py-2 text-xs" onClick={onAdjustStock}>{T('adjust_stock', 'Adjust stock')}</button>
           <button className="btn-primary flex-1 px-3 py-2 text-xs" onClick={onEdit}>{T('edit', 'Edit')}</button>
           <button className="btn-danger px-3 py-2 text-xs" onClick={onDelete}>{T('delete', 'Delete')}</button>

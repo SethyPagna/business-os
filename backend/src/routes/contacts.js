@@ -15,6 +15,7 @@ const {
 } = require('../contactOptions')
 
 const router = express.Router()
+const MEMBERSHIP_NUMBER_PREFIX = 'LCM'
 
 function cleanMembershipNumber(value) {
   return cleanText(value)
@@ -52,15 +53,9 @@ function ensureOrGenerateMembershipNumber(value, row = {}, reserved = new Set(),
 }
 
 function generateCustomerMembershipNumber(row = {}, reserved = new Set()) {
-  const source = cleanText(row?.name) || 'customer'
-  const prefix = source
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}]+/gu, '')
-    .slice(0, 4)
-    .toUpperCase() || 'CUS'
   for (let attempt = 0; attempt < 250; attempt += 1) {
     const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-    const candidate = `${prefix}-${entropy.slice(-8)}`
+    const candidate = `${MEMBERSHIP_NUMBER_PREFIX}-${entropy.slice(-8)}`
     if (reserved.has(candidate.toLowerCase())) continue
     const existing = db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(?)) LIMIT 1').get(candidate)
     if (!existing) {

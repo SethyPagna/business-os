@@ -876,7 +876,8 @@ function Invoke-Update {
   Invoke-Compose -ComposeArgs (@('pull') + (Get-BaseDataServices $envMap) + @('cloudflared')) -AllowFailure | Out-Null
   Write-Step 'Restarting release runtime...'
   Invoke-Start
-  $code = Invoke-Compose -ComposeArgs @('ps') -AllowFailure
+  Invoke-Compose -ComposeArgs @('ps') -AllowFailure | Out-Host
+  $code = $LASTEXITCODE
   if ($code -ne 0) {
     $previous = Get-Content -Raw $previousFile
     Write-Warn "Update health failed. Rolling back to $previous"
