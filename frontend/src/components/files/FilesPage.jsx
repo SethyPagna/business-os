@@ -190,7 +190,7 @@ export default function FilesPage() {
     try {
       const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
-      setFiles(Array.isArray(result) ? result : (result?.data || []))
+      setFiles(Array.isArray(result) ? result : [])
     } catch (error) {
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
       notify(error?.message || 'Failed to load files', 'error')

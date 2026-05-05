@@ -44,7 +44,6 @@ function getDefaultBranch() {
 function getSellableProductWhere() {
   return [
     'p.is_active = 1',
-    'NOT (COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)',
   ]
 }
 

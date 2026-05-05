@@ -570,7 +570,7 @@ function Notification({ notification }) {
 
   const colorClass = getNotificationColor(notification.type)
   const prefix = getNotificationPrefix(notification.type)
-  const classes = `fixed right-3 top-20 md:right-5 md:top-5 z-[1100] ${colorClass} text-white px-4 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-xs`
+  const classes = `fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] ${colorClass} text-white px-4 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-[min(20rem,calc(100vw-1.5rem))]`
 
   const node = <div className={classes}>{prefix}{notification.message}</div>
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
@@ -620,24 +620,24 @@ function GlobalScrollControls() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-20 right-3 z-[1000] flex flex-col gap-2 md:bottom-5 md:right-5">
+    <div className="pointer-events-none fixed bottom-20 right-2.5 z-[1000] flex flex-col gap-1.5 md:bottom-4 md:right-4">
       <button
         type="button"
-        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-700 shadow-lg backdrop-blur transition hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
         onClick={() => scrollTo('top')}
         aria-label="Scroll to top"
         title="Scroll to top"
       >
-        <ArrowUp className="h-4 w-4" />
+        <ArrowUp className="h-3.5 w-3.5" />
       </button>
       <button
         type="button"
-        className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-700 shadow-lg backdrop-blur transition hover:border-blue-300 hover:text-blue-700 dark:border-gray-700 dark:bg-gray-900/90 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+        className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
         onClick={() => scrollTo('bottom')}
         aria-label="Scroll to bottom"
         title="Scroll to bottom"
       >
-        <ArrowDown className="h-4 w-4" />
+        <ArrowDown className="h-3.5 w-3.5" />
       </button>
     </div>
   )

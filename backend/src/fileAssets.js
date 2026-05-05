@@ -9,6 +9,7 @@ const { deleteObject, isObjectStorageEnabled, putObject } = require('./objectSto
 const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
+const { isUploadPublicPath, normalizeUploadPublicPath } = require('./settingsSnapshot')
 
 const sharp = loadSharp()
 
@@ -431,7 +432,8 @@ function listAssetRows(search = '', mediaType = 'all') {
   return getDb().prepare(`
     SELECT *
     FROM file_assets
-    WHERE (
+    WHERE public_path LIKE '/uploads/%'
+    AND (
       @search = '%%'
       OR lower(coalesce(original_name, '')) LIKE @search
       OR lower(coalesce(stored_name, '')) LIKE @search
@@ -443,6 +445,84 @@ function listAssetRows(search = '', mediaType = 'all') {
     )
     ORDER BY created_at DESC, id DESC
   `).all(params)
+}
+
+function collectUploadPathsFromValue(value, referenced) {
+  if (value == null) return
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectUploadPathsFromValue(entry, referenced))
+    return
+  }
+  if (typeof value === 'object') {
+    Object.values(value).forEach((entry) => collectUploadPathsFromValue(entry, referenced))
+    return
+  }
+  const raw = String(value || '').trim()
+  if (!raw) return
+  const normalized = normalizeUploadPublicPath(raw)
+  if (isUploadPublicPath(normalized)) {
+    referenced.add(normalized)
+    return
+  }
+  if ((raw.startsWith('{') && raw.endsWith('}')) || (raw.startsWith('[') && raw.endsWith(']'))) {
+    try {
+      collectUploadPathsFromValue(JSON.parse(raw), referenced)
+    } catch (_) {}
+  }
+}
+
+function pruneInvalidReferenceBackfillAssets() {
+  getDb().prepare(`
+    DELETE FROM file_assets
+    WHERE source = 'reference_backfill'
+      AND (public_path IS NULL OR public_path NOT LIKE '/uploads/%')
+  `).run()
+}
+
+function collectReferencedUploadPaths() {
+  const referenced = new Set()
+  const add = (value) => collectUploadPathsFromValue(value, referenced)
+
+  getDb().prepare('SELECT value FROM settings WHERE value IS NOT NULL AND trim(value) != \'\'').all().forEach((row) => add(row.value))
+  getDb().prepare('SELECT image_path FROM products WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all().forEach((row) => add(row.image_path))
+  getDb().prepare('SELECT image_path FROM product_images WHERE image_path IS NOT NULL AND trim(image_path) != \'\'').all().forEach((row) => add(row.image_path))
+  getDb().prepare('SELECT avatar_path FROM users WHERE avatar_path IS NOT NULL AND trim(avatar_path) != \'\'').all().forEach((row) => add(row.avatar_path))
+  getDb().prepare('SELECT screenshots_json FROM customer_share_submissions WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != \'\'').all().forEach((row) => add(row.screenshots_json))
+
+  return [...referenced]
+}
+
+function ensureReferencedAssetsRegistered() {
+  const refs = collectReferencedUploadPaths()
+  if (!refs.length) return
+  refs.forEach((publicPath) => {
+    if (getFileAssetByPublicPath(publicPath)) return
+    const storedName = String(publicPath || '').replace(/^\/uploads\//, '').trim()
+    if (!storedName) return
+    const absPath = path.join(UPLOADS_PATH, storedName)
+    const mediaType = getMediaType({ fileName: storedName, mimeType: getMimeTypeFromName(storedName) })
+    const stats = fs.existsSync(absPath) ? fs.statSync(absPath) : null
+    createFileAssetRecord({
+      original_name: preserveOriginalDisplayName(storedName),
+      stored_name: storedName,
+      public_path: publicPath,
+      mime_type: getMimeTypeFromName(storedName),
+      media_type: mediaType,
+      byte_size: stats?.size || null,
+      original_byte_size: stats?.size || null,
+      optimized_byte_size: stats?.size || null,
+      optimization_status: isObjectStorageEnabled() ? 'stored' : 'backfilled',
+      optimization_note: isObjectStorageEnabled()
+        ? 'Recovered from persisted references while object storage is enabled.'
+        : 'Recovered from persisted references.',
+      width: null,
+      height: null,
+      duration_seconds: null,
+      source: 'reference_backfill',
+      created_by_id: null,
+      created_by_name: null,
+    })
+  })
 }
 
 function getUploadFilePath(publicPath = '') {
@@ -625,7 +705,9 @@ async function backfillUploadAssets() {
 }
 
 async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
+  pruneInvalidReferenceBackfillAssets()
   repairMissingUploadReferences(getDb())
+  ensureReferencedAssetsRegistered()
   await backfillUploadAssets()
   return listAssetRows(search, mediaType).map(serializeAssetRow)
 }

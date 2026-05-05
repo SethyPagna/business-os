@@ -11,19 +11,19 @@ assert.match(
 
 assert.match(
   inventorySource,
-  /p\.barcode \? \(\s*<span className="max-w-\[7\.25rem\] truncate rounded-md bg-white px-1\.5 py-0\.5 font-medium text-\[10px\] text-gray-500 shadow-sm dark:bg-gray-900 dark:text-gray-300">/,
-  'Mobile inventory card should render barcode as a compact header pill next to stock controls',
+  /p\.barcode \? \(\s*<div className="mt-1 text-\[10px\] font-medium leading-none text-gray-500 dark:text-gray-300">\s*\{p\.barcode\}/,
+  'Mobile inventory card should keep the barcode in the left identity block so it does not get pushed under stock controls',
 )
 
 assert.match(
   inventorySource,
-  /className="flex min-w-0 shrink-0 items-center justify-end gap-1 rounded-xl bg-gray-50 px-2 py-1\.5 text-right dark:bg-gray-800\/70"/,
-  'Barcode, quantity, stock status, and Adjust should share one compact inline control strip',
+  /className="flex shrink-0 items-center justify-end gap-1 text-right"/,
+  'Quantity, stock status, and Adjust should share one compact inline control strip without a framed background',
 )
 
 assert.doesNotMatch(
   inventorySource,
-  /className="flex min-w-\[6\.25rem\] flex-col items-end gap-1 rounded-xl bg-gray-50 px-2 py-1\.5 text-right dark:bg-gray-800\/70"/,
+  /rounded-xl bg-gray-50 px-2 py-1\.5 text-right dark:bg-gray-800\/70/,
   'Mobile inventory card should not keep the old stacked stock/status/adjust column',
 )
 

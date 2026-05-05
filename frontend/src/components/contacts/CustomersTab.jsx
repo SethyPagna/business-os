@@ -309,6 +309,14 @@ function CustomersTab({ t, notify, active = true }) {
   const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']
   const contactFilterSections = useMemo(() => ([
     {
+      id: 'sort',
+      label: tr(t, 'sort', 'Sort'),
+      options: [
+        { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
+        { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+      ],
+    },
+    {
       id: 'group',
       label: tr(t, 'group_by', 'Group by'),
       options: [
@@ -349,14 +357,7 @@ function CustomersTab({ t, notify, active = true }) {
         }),
       ],
     },
-    {
-      id: 'sort',
-      label: tr(t, 'sort', 'Sort'),
-      options: [
-        { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
-        { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
-      ],
-    },
+
   ]), [availableYears, groupMode, monthFilter, sortDirection, t, yearFilter])
   const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {

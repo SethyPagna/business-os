@@ -63,6 +63,17 @@ runTest('product image uploads defer optimization and return cache-busting metad
   assert.match(source, /cache_version: asset\.updated_at \|\| asset\.created_at \|\| ''/, 'product upload route should return cache-busting metadata')
 })
 
+runTest('upload path sanitization keeps canonical R2-backed media references intact', () => {
+  const snapshotSource = readSource('src/settingsSnapshot.js')
+  const assetSource = readSource('src/fileAssets.js')
+
+  assert.match(snapshotSource, /const \{ isObjectStorageEnabled \} = require\('\.\/objectStore'\)/, 'settings snapshot sanitization should know when object storage is enabled')
+  assert.match(snapshotSource, /if \(isObjectStorageEnabled\(\)\) return normalized/, 'upload sanitization should keep canonical upload paths when R2/object storage is enabled')
+  assert.match(snapshotSource, /const \[cleanPath\] = raw\.split\(\/\[\?#\]\/, 1\)/, 'upload sanitization should strip cache-busting query strings from persisted upload paths')
+  assert.match(assetSource, /function ensureReferencedAssetsRegistered\(\)/, 'file assets should rebuild missing library rows from persisted references')
+  assert.match(assetSource, /source: 'reference_backfill'/, 'recovered file assets should be marked as reference backfills')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

@@ -422,7 +422,7 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
       </button>
 
       {open && typeof document !== 'undefined' ? createPortal((
-        <div ref={panelRef} className="fixed left-2 right-2 top-16 z-[1000] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:left-auto sm:right-4 sm:w-[min(92vw,24rem)] sm:max-w-[calc(100vw-1rem)]">
+        <div ref={panelRef} className="fixed left-2 right-2 top-[4.75rem] z-[1000] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:left-auto sm:right-4 sm:top-16 sm:w-[min(92vw,24rem)] sm:max-w-[calc(100vw-1rem)]">
           <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 dark:border-slate-700 sm:px-4">
             <div>
               <div className="text-sm font-semibold text-slate-900 dark:text-white">{tr('notifications', 'Notifications', 'ការជូនដំណឹង')}</div>

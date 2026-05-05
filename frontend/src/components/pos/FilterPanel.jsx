@@ -97,8 +97,6 @@ export default function POSFilterPanel({
           {[
             ['all', T('all', 'All')],
             ['grouped', T('groups', 'Groups')],
-            ['parent', T('parents', 'Parents')],
-            ['variant', T('variants', 'Variants')],
             ['standalone', T('standalone', 'Standalone')],
           ].map(([value, label]) => (
             <button

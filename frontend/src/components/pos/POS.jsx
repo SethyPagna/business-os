@@ -267,6 +267,13 @@ export default function POS() {
     () => String(debouncedProductSearch || '').trim().length > 0 || initialFilter !== 'all',
     [debouncedProductSearch, initialFilter],
   )
+  const productCountLabel = useMemo(() => {
+    if (stockFilter === 'all' && !hasProductDiscoveryQuery) return t('in_stock') || 'in-stock products'
+    if (stockFilter === 'positive' || stockFilter === 'in_stock') return t('in_stock') || 'in-stock products'
+    if (stockFilter === 'low') return t('low_stock') || 'low-stock products'
+    if (stockFilter === 'out' || stockFilter === 'out_of_stock') return t('out_of_stock') || 'out-of-stock products'
+    return t('products') || 'products'
+  }, [hasProductDiscoveryQuery, stockFilter, t])
 
   const applyCatalogData = useCallback((prods, cats, brs) => {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
@@ -1262,7 +1269,7 @@ export default function POS() {
               page={productPage}
               pageSize={productPageSize}
               totalItems={productTotal}
-              label={t('products') || 'products'}
+              label={productCountLabel}
               t={t}
               onPageChange={setProductPage}
               onPageSizeChange={(size) => {

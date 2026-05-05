@@ -4,9 +4,14 @@ function toDate(value) {
   if (!value) return null
   const raw = String(value).trim()
   if (!raw) return null
-  const normalized = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
-  const parsed = new Date(normalized)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
+  const direct = new Date(raw)
+  if (!Number.isNaN(direct.getTime())) return direct
+  const isoLike = raw.replace(' ', 'T')
+  const parsedIso = new Date(isoLike)
+  if (!Number.isNaN(parsedIso.getTime())) return parsedIso
+  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(isoLike)
+  const parsedUtc = new Date(needsUtcSuffix ? `${isoLike}Z` : isoLike)
+  return Number.isNaN(parsedUtc.getTime()) ? null : parsedUtc
 }
 
 const KHMER_INITIALS = [

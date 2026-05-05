@@ -1054,10 +1054,6 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
   let products
 
   // Detect whether parent_id column exists (added via migration â€” may be absent on older DBs)
-  let hasParentId = true
-  try { db.prepare('SELECT parent_id FROM products LIMIT 0').run() } catch (_) { hasParentId = false }
-  const parentFilter = hasParentId ? 'AND (p.parent_id IS NULL OR p.parent_id = 0)' : ''
-
   if (branchId) {
     products = db.prepare(`
       SELECT p.*,
@@ -1124,7 +1120,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
           AND COALESCE(r.return_scope, 'customer') = 'customer'
         GROUP BY ri.product_id
       ) ret ON ret.product_id = p.id
-      WHERE p.is_active = 1 ${parentFilter}
+      WHERE p.is_active = 1
       ORDER BY p.name
     `).all(branchId, branchId, branchId, branchId)
   } else {
@@ -1200,7 +1196,7 @@ router.get('/summary', authToken, requirePermission('inventory'), (req, res) => 
           AND COALESCE(r.return_scope, 'customer') = 'customer'
         GROUP BY ri.product_id
       ) ret ON ret.product_id = p.id
-      WHERE p.is_active = 1 ${parentFilter}
+      WHERE p.is_active = 1
       ORDER BY p.name
     `).all()
 

@@ -1432,13 +1432,62 @@ export default function Products() {
 
   const productFilterSections = useMemo(() => ([
     {
+      id: 'sort',
+      label: t('sort') || 'Sort',
+      options: [
+        { id: 'created-desc', label: t('newest_first') || 'Newest first', active: productSortDirection === 'desc', onClick: () => setProductSortDirection('desc') },
+        { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
+      ],
+    },
+    availableCreatedYears.length ? {
+      id: 'created-year',
+      label: t('year') || 'Year',
+      options: [
+        { id: 'created-year-all', label: t('all') || 'All', active: createdYearFilter === 'all', onClick: () => { setCreatedYearFilter('all'); setCreatedMonthFilter('all') } },
+        ...availableCreatedYears.map((year) => ({
+          id: `created-year-${year}`,
+          label: String(year),
+          active: createdYearFilter === String(year),
+          onClick: () => {
+            const nextYear = createdYearFilter === String(year) ? 'all' : String(year)
+            setCreatedYearFilter(nextYear)
+            if (nextYear === 'all') setCreatedMonthFilter('all')
+          },
+        })),
+      ],
+    } : null,
+    {
+      id: 'created-month',
+      label: t('month') || 'Month',
+      options: [
+        { id: 'created-month-all', label: t('all') || 'All', active: createdMonthFilter === 'all', onClick: () => setCreatedMonthFilter('all') },
+        ...CREATED_MONTH_OPTIONS.map(([value, label]) => ({
+          id: `created-month-${value}`,
+          label,
+          active: createdMonthFilter === value,
+          onClick: () => setCreatedMonthFilter(createdMonthFilter === value ? 'all' : value),
+        })),
+      ],
+    },
+    branches.length > 1 ? {
+      id: 'branch',
+      label: t('branch') || 'Branch',
+      options: [
+        { id: 'branch-all', label: t('all') || 'All', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
+        ...branches.map((branch) => ({
+          id: `branch-${branch.id}`,
+          label: branch.name,
+          active: branchFilter === String(branch.id),
+          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
+        })),
+      ],
+    } : null,
+    {
       id: 'group',
       label: t('groups') || 'Groups',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
         { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
-        { id: 'group-parent', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
-        { id: 'group-variant', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
       ],
     },
@@ -1478,19 +1527,6 @@ export default function Products() {
         })),
       ],
     } : null,
-    branches.length > 1 ? {
-      id: 'branch',
-      label: t('branch') || 'Branch',
-      options: [
-        { id: 'branch-all', label: t('all') || 'All', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-        ...branches.map((branch) => ({
-          id: `branch-${branch.id}`,
-          label: branch.name,
-          active: branchFilter === String(branch.id),
-          onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-        })),
-      ],
-    } : null,
     suppliers.length ? {
       id: 'supplier',
       label: t('supplier') || 'Supplier',
@@ -1504,44 +1540,6 @@ export default function Products() {
         })),
       ],
     } : null,
-    availableCreatedYears.length ? {
-      id: 'created-year',
-      label: t('year') || 'Year',
-      options: [
-        { id: 'created-year-all', label: t('all') || 'All', active: createdYearFilter === 'all', onClick: () => { setCreatedYearFilter('all'); setCreatedMonthFilter('all') } },
-        ...availableCreatedYears.map((year) => ({
-          id: `created-year-${year}`,
-          label: String(year),
-          active: createdYearFilter === String(year),
-          onClick: () => {
-            const nextYear = createdYearFilter === String(year) ? 'all' : String(year)
-            setCreatedYearFilter(nextYear)
-            if (nextYear === 'all') setCreatedMonthFilter('all')
-          },
-        })),
-      ],
-    } : null,
-    {
-      id: 'created-month',
-      label: t('month') || 'Month',
-      options: [
-        { id: 'created-month-all', label: t('all') || 'All', active: createdMonthFilter === 'all', onClick: () => setCreatedMonthFilter('all') },
-        ...CREATED_MONTH_OPTIONS.map(([value, label]) => ({
-          id: `created-month-${value}`,
-          label,
-          active: createdMonthFilter === value,
-          onClick: () => setCreatedMonthFilter(createdMonthFilter === value ? 'all' : value),
-        })),
-      ],
-    },
-    {
-      id: 'sort',
-      label: t('sort') || 'Sort',
-      options: [
-        { id: 'created-desc', label: t('newest_first') || 'Newest first', active: productSortDirection === 'desc', onClick: () => setProductSortDirection('desc') },
-        { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
-      ],
-    },
   ].filter(Boolean)), [availableCreatedYears, branches, brandFilter, brandOptions, catFilter, categories, createdMonthFilter, createdYearFilter, groupFilter, productSortDirection, stockFilter, supplierFilter, suppliers, t, tr])
 
   const renderDesktopProductRow = useCallback((p, { indented = false } = {}) => {

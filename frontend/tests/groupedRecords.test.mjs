@@ -61,6 +61,22 @@ await runTest('buildTimeActionSections accepts database timestamps with spaces',
   assert.notEqual(sections[0].label, 'Unknown year')
 })
 
+await runTest('buildTimeActionSections accepts Postgres timestamps with timezone offsets', () => {
+  const sections = buildTimeActionSections([
+    { id: 1, created_at: '2026-05-04 11:06:53.46146+00', status: 'purchase' },
+  ], {
+    getDate: (row) => row.created_at,
+    getItemId: (row) => row.id,
+    getActionKey: (row) => row.status,
+    getActionLabel: (row) => row.status,
+    timeMode: 'year',
+  })
+
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].label, '2026')
+  assert.notEqual(sections[0].label, 'Unknown year')
+})
+
 await runTest('buildTimeActionSections keeps malformed movement dates in unknown bucket', () => {
   const sections = buildTimeActionSections([
     { id: 1, created_at: 'not-a-date', status: 'purchase' },

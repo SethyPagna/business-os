@@ -49,7 +49,7 @@ export default function FilePickerModal({
     try {
       const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library picker')
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setFiles(Array.isArray(result) ? result : (result?.data || []))
+      setFiles(Array.isArray(result) ? result : [])
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notify(error?.message || 'Failed to load files', 'error')

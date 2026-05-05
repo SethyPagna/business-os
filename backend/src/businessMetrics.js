@@ -39,7 +39,7 @@ function getStockMetrics({ branchId = null } = {}) {
     ? 'LEFT JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId'
     : ''
   const params = hasBranch ? { branchId: numericBranchId } : {}
-  const whereSql = sellableProductWhere('p').join(' AND ')
+  const whereSql = 'p.is_active = 1'
   const row = db.prepare(`
     SELECT
       COUNT(*) AS total_products,

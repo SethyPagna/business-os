@@ -1763,8 +1763,6 @@ export default function Inventory() {
         options: [
           { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
           { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
-          { id: 'parents', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter(groupFilter === 'parent' ? 'all' : 'parent') },
-          { id: 'variants', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter(groupFilter === 'variant' ? 'all' : 'variant') },
           { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
         ],
       },
@@ -2225,21 +2223,21 @@ export default function Inventory() {
                         {productTags.length ? <span className="truncate">{productTags.join(' · ')}</span> : null}
                         <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                       </div>
-                    </div>
-                    <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 rounded-xl bg-gray-50 px-2 py-1.5 text-right dark:bg-gray-800/70">
                       {p.barcode ? (
-                        <span className="max-w-[7.25rem] truncate rounded-md bg-white px-1.5 py-0.5 font-medium text-[10px] text-gray-500 shadow-sm dark:bg-gray-900 dark:text-gray-300">
+                        <div className="mt-1 text-[10px] font-medium leading-none text-gray-500 dark:text-gray-300">
                           {p.barcode}
-                        </span>
+                        </div>
                       ) : null}
-                      <div className="whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
+                    </div>
+                    <div className="flex shrink-0 items-center justify-end gap-1 text-right">
+                      <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
                         {qty}
                         <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
                       </div>
-                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap ${scls}`}>{slbl}</span>
+                      <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
                       <button
                         onClick={e => { e.stopPropagation(); openAdjust(p) }}
-                        className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                        className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
                       >
                         {t('adjust')}
                       </button>

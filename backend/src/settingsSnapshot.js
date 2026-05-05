@@ -3,12 +3,19 @@
 const fs = require('fs')
 const path = require('path')
 const { UPLOADS_PATH } = require('./config')
+const { isObjectStorageEnabled } = require('./objectStore')
 
 function normalizeUploadPublicPath(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
-  if (raw.startsWith('/uploads/')) return raw
-  if (raw.startsWith('uploads/')) return `/${raw}`
+  if (raw.startsWith('/uploads/')) {
+    const [cleanPath] = raw.split(/[?#]/, 1)
+    return cleanPath || raw
+  }
+  if (raw.startsWith('uploads/')) {
+    const [cleanPath] = raw.split(/[?#]/, 1)
+    return cleanPath ? `/${cleanPath}` : `/${raw}`
+  }
   return raw
 }
 
@@ -21,6 +28,7 @@ function sanitizeMediaPath(value, emptyValue = '') {
   const normalized = normalizeUploadPublicPath(value)
   if (!normalized) return emptyValue
   if (!normalized.startsWith('/uploads/')) return normalized
+  if (isObjectStorageEnabled()) return normalized
   return uploadPublicPathExists(normalized) ? normalized : emptyValue
 }
 
