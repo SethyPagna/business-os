@@ -258,6 +258,26 @@ function hashFile(filePath, algorithm = 'md5') {
   })
 }
 
+function hashFileMany(filePath, algorithms = ['md5', 'sha256']) {
+  return new Promise((resolve, reject) => {
+    const hashes = algorithms.reduce((acc, algorithm) => {
+      acc[algorithm] = crypto.createHash(algorithm)
+      return acc
+    }, {})
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', (chunk) => {
+      Object.values(hashes).forEach((hash) => hash.update(chunk))
+    })
+    stream.on('error', reject)
+    stream.on('end', () => {
+      resolve(Object.entries(hashes).reduce((acc, [algorithm, hash]) => {
+        acc[algorithm] = hash.digest('hex')
+        return acc
+      }, {}))
+    })
+  })
+}
+
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
 }
@@ -521,10 +541,10 @@ function buildManagedSnapshotRoot(snapshotRoot) {
   return path.join(snapshotRoot, DATA_FOLDER_NAME, 'organizations', ORGANIZATION_FOLDER_NAME)
 }
 
-function ensureSnapshotLayout(snapshotRoot) {
+async function ensureSnapshotLayout(snapshotRoot) {
   const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
-  fs.mkdirSync(path.join(managedRoot, 'uploads'), { recursive: true })
-  fs.mkdirSync(path.join(managedRoot, 'backups'), { recursive: true })
+  await fs.promises.mkdir(path.join(managedRoot, 'uploads'), { recursive: true })
+  await fs.promises.mkdir(path.join(managedRoot, 'backups'), { recursive: true })
 }
 
 function shouldSkipSnapshotFile(relativePath) {
@@ -532,10 +552,10 @@ function shouldSkipSnapshotFile(relativePath) {
 }
 
 async function createDataRootSnapshot(progress = null) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'business-os-drive-sync-'))
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'business-os-drive-sync-'))
   const snapshotRoot = tempDir
   const managedRoot = buildManagedSnapshotRoot(snapshotRoot)
-  ensureSnapshotLayout(snapshotRoot)
+  await ensureSnapshotLayout(snapshotRoot)
 
   try {
     const sourceFiles = []
@@ -556,11 +576,11 @@ async function createDataRootSnapshot(progress = null) {
       }
       const { absolutePath, relativePath } = sourceFiles[index]
       const targetPath = path.join(managedRoot, relativePath)
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true })
-      fs.copyFileSync(absolutePath, targetPath)
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true })
+      await fs.promises.copyFile(absolutePath, targetPath)
     }
 
-    fs.writeFileSync(path.join(managedRoot, 'manifest.json'), JSON.stringify({
+    await fs.promises.writeFile(path.join(managedRoot, 'manifest.json'), JSON.stringify({
       format: 'business-os-drive-snapshot-v3',
       createdAt: new Date().toISOString(),
       note: 'Live database and object storage are backed up through Docker final backup packages. This Drive snapshot mirrors runtime backup artifacts and metadata.',
@@ -592,7 +612,8 @@ async function collectSnapshotItems(snapshotRoot, progress = null) {
     const absolutePath = absolutePaths[index]
     const relativePath = path.relative(snapshotRoot, absolutePath).replace(/\\/g, '/')
     if (!relativePath) continue
-    const stats = fs.statSync(absolutePath)
+    const stats = await fs.promises.stat(absolutePath)
+    const { md5, sha256 } = await hashFileMany(absolutePath)
     const dirName = path.dirname(relativePath).replace(/\\/g, '/')
     let cursor = dirName === '.' ? '' : dirName
     while (cursor) {
@@ -606,8 +627,8 @@ async function collectSnapshotItems(snapshotRoot, progress = null) {
       size: stats.size,
       modifiedAt: new Date(stats.mtimeMs).toISOString(),
       mimeType: inferMimeType(absolutePath),
-      md5Checksum: await hashFile(absolutePath, 'md5'),
-      contentSha256: await hashFile(absolutePath, 'sha256'),
+      md5Checksum: md5,
+      contentSha256: sha256,
     })
   }
   progress?.({
@@ -1270,7 +1291,8 @@ function forgetDriveSyncCredentials() {
 }
 
 function schedulePeriodicDriveSync() {
-  setInterval(() => {
+  if (runtimeState.timer) return runtimeState.timer
+  runtimeState.timer = setInterval(() => {
     const config = getDriveSyncConfig()
     if (!config.enabled || !config.ready) return
     const lastSyncMs = config.lastSyncedAt ? Date.parse(config.lastSyncedAt) : 0
@@ -1279,6 +1301,7 @@ function schedulePeriodicDriveSync() {
       scheduleDriveSync('interval', 1000)
     }
   }, 30 * 1000).unref?.()
+  return runtimeState.timer
 }
 
 schedulePeriodicDriveSync()

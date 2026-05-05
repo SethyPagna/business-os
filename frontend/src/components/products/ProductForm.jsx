@@ -665,7 +665,7 @@ export default function ProductForm({
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}</p>
-                <p className="text-xs text-rose-600 dark:text-rose-300">{tr('product_discount_hint', 'Customer-facing promotion price shown in POS and the public portal.', 'តម្លៃប្រូម៉ូសិនសម្រាប់អតិថិជន ដែលបង្ហាញក្នុង POS និងផតថលសាធារណៈ។')}</p>
+                <p className="text-xs text-rose-600 dark:text-rose-300">{tr('product_discount_hint', 'Customer-facing discount price shown in POS and the public portal.', 'តម្លៃបញ្ចុះតម្លៃសម្រាប់អតិថិជន ដែលបង្ហាញក្នុង POS និងផតថលសាធារណៈ។')}</p>
               </div>
               <label className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm dark:bg-rose-950/50 dark:text-rose-200">
                 <input
@@ -770,7 +770,7 @@ export default function ProductForm({
                     selling_price_khr: parseNumericInput(form.selling_price_khr),
                   }, exchangeRate)
                   return preview.active
-                    ? `${tr('promotion_price', 'Promotion price', 'តម្លៃប្រូម៉ូសិន')}: ${usdSymbol}${formatPriceNumber(preview.applied_price_usd)} / ${khrSymbol}${formatPriceNumber(preview.applied_price_khr)}`
+                    ? `${tr('promotion_price', 'Discount price', 'តម្លៃបញ្ចុះតម្លៃ')}: ${usdSymbol}${formatPriceNumber(preview.applied_price_usd)} / ${khrSymbol}${formatPriceNumber(preview.applied_price_khr)}`
                     : tr('discount_needs_value', 'Enter a discount value to activate the promotion price.', 'សូមបញ្ចូលតម្លៃបញ្ចុះ ដើម្បីបើកតម្លៃប្រូម៉ូសិន។')
                 })()}
               </div>

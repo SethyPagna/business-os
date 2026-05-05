@@ -67,7 +67,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onMo
             ) : null}
             {promotion.active ? (
               <div className="col-span-2 rounded-xl bg-rose-50 p-3 dark:bg-rose-950/30">
-                <div className="mb-1 text-xs font-semibold text-rose-600 dark:text-rose-300">{T('product_discount', 'Promotion')}</div>
+                <div className="mb-1 text-xs font-semibold text-rose-600 dark:text-rose-300">{T('discounts', 'Discounts')}</div>
                 <div className="font-bold text-rose-700 dark:text-rose-200">{fmtUSD(promotion.applied_price_usd || 0)}</div>
                 {(promotion.applied_price_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr || 0)}</div> : null}
               </div>

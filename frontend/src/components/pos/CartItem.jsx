@@ -16,7 +16,7 @@ export default function CartItem({
             <div className="mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{t ? t('special_price') : 'Special price'}</div>
           ) : null}
           {item.price_mode === 'promotion' ? (
-            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">{item.product_discount_label || (t ? t('promotion_price') : 'Promotion price')}</div>
+            <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">{item.product_discount_label || (t ? t('promotion_price') : 'Discount price')}</div>
           ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-0.5">

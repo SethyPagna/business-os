@@ -436,7 +436,7 @@ function deleteAllUploads() {
   } catch (_) {}
 }
 
-function readFinalBackupManifest(sourceRoot) {
+async function readFinalBackupManifest(sourceRoot) {
   return validateLocalBackupPackage(sourceRoot)
 }
 
@@ -484,7 +484,7 @@ async function restoreFolderBackup({ sourceDir, actor = {}, progress = null, thr
       message: 'Validating backup folder',
       metrics: { currentStep: 'validate_manifest' },
     })
-    const snapshot = readFinalBackupManifest(rawSource)
+    const snapshot = await readFinalBackupManifest(rawSource)
     throwIfCancelled?.()
     if (isSamePath(snapshot.root, DATA_ROOT)) {
       throw new Error('Choose a backup folder, not the current live data folder.')

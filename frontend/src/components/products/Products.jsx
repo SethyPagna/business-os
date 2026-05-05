@@ -52,7 +52,7 @@ function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdj
       onDelete={onDelete}
       onAddVariant={onAddVariant}
       extraItems={[
-        onDiscount && { label: label('product_discount', 'Discount'), onClick: onDiscount, color: 'orange' },
+        onDiscount && { label: label('discounts', 'Discounts'), onClick: onDiscount, color: 'orange' },
         onAdjustStock && { label: label('adjust_stock', 'Adjust stock'), onClick: onAdjustStock, color: 'green' },
       ]}
     />
@@ -124,6 +124,36 @@ function parseBrandColorMap(raw) {
   } catch (_) {
     return {}
   }
+}
+
+function ProductDiscountBadge({ product, promotion, fmtUSD, label = 'Discount', overlay = false }) {
+  if (!promotion?.active) return null
+  const text = `${product?.discount_label || label} ${fmtUSD(promotion.applied_price_usd || 0)}`
+  const baseClass = overlay
+    ? 'absolute bottom-1 left-1 right-1 z-10 truncate rounded-md bg-rose-600/95 px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm'
+    : 'inline-flex max-w-[12rem] items-center truncate rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
+  return (
+    <span className={baseClass} title={text}>
+      {text}
+    </span>
+  )
+}
+
+function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchName, renderMetaPill, tr, fmtUSD }) {
+  const detailPills = [
+    selectedBranchName ? { key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
+    branchLabel ? { key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
+    product.sku ? { key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' } : null,
+    product.barcode ? { key: 'barcode', label: product.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="flex max-w-[16rem] flex-wrap items-center gap-1">
+      {detailPills.map((item) => renderMetaPill(item))}
+      <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} />
+      {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
+    </div>
+  )
 }
 
 // ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -1523,11 +1553,6 @@ export default function Products() {
     const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
     const branchSummaryLabel = branchFilter === 'all' ? getBranchSummaryLabel(p) : ''
     const compactMeta = [
-      selectedBranchName ? { key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
-      branchSummaryLabel ? { key: 'branches', label: branchSummaryLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
-      p.sku ? { key: 'sku', label: p.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' } : null,
-      p.barcode ? { key: 'barcode', label: p.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
-      p.unit ? { key: 'unit', label: p.unit, color: unitMap[p.unit]?.color } : null,
       p.brand ? { key: 'brand', label: p.brand, color: getBrandColor(p.brand) } : null,
       p.category ? { key: 'category', label: p.category, color: catMap[p.category]?.color } : null,
     ].filter(Boolean)
@@ -1557,7 +1582,17 @@ export default function Products() {
             {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
             {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
           </div>
-          {p.supplier && <div className="text-xs text-gray-400 truncate max-w-32">{p.supplier}</div>}
+        </td>
+        <td className="hidden px-3 py-2 md:table-cell">
+          <ProductDetailsCell
+            product={p}
+            promotion={promotion}
+            branchLabel={branchSummaryLabel}
+            selectedBranchName={selectedBranchName}
+            renderMetaPill={renderMetaPill}
+            tr={tr}
+            fmtUSD={fmtUSD}
+          />
         </td>
         <td className="px-3 py-2 text-right col-highlight-red">
           <div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(purchaseUsd)}</div>
@@ -1574,7 +1609,7 @@ export default function Products() {
           ) : null}
           {promotion.active ? (
             <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {p.discount_label || tr('promotion', 'Promotion', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+              {p.discount_label || tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
             </div>
           ) : null}
         </td>
@@ -1603,7 +1638,7 @@ export default function Products() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr, unitMap])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getProductGallery, getStockBadge, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderMetaPill, renderUnitChip, t, tr])
 
   const renderMobileProductCard = useCallback((p, { indented = false } = {}) => {
     const purchaseUsd = p.purchase_price_usd || p.cost_price_usd || 0
@@ -1631,10 +1666,11 @@ export default function Products() {
       >
         <div className="flex items-start gap-3">
           <input type="checkbox" className="rounded mt-1 flex-shrink-0 cursor-pointer" checked={isProductSelected(p.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(p.id) }} onClick={(e) => e.stopPropagation()} />
-          <div className="flex-shrink-0">
+          <div className="relative flex-shrink-0">
             {getProductGallery(p).length
               ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
+            <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} overlay />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
@@ -1707,7 +1743,7 @@ export default function Products() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getProductGallery, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderUnitChip, t])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getProductGallery, handleDelete, isProductSelected, openLightbox, openProductFormTab, renderUnitChip, t, tr])
 
   if (loadError && !loading && !products.length && !categories.length && !units.length && !branches.length) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -1962,6 +1998,7 @@ export default function Products() {
                 </th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold w-16">Image</th>
                 <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('product_name')}</th>
+                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold hidden md:table-cell">{t('details') || 'Details'}</th>
                 <th className="text-right px-3 py-3 text-red-600 dark:text-red-400 font-semibold col-highlight-red">{t('cost_in_purchase')}</th>
                 <th className="text-right px-3 py-3 text-green-600 dark:text-green-400 font-semibold col-highlight-green">{t('selling_price_label')}</th>
                 <th className="text-right px-3 py-3 text-blue-600 dark:text-blue-400 font-semibold hidden lg:table-cell">{t('margin')}</th>
@@ -1971,14 +2008,14 @@ export default function Products() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-              : visibleProducts.length === 0 ? <tr><td colSpan={9} className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</td></tr>
+              {loading ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
+              : visibleProducts.length === 0 ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</td></tr>
               : productSections.map((section) => {
                 const isCollapsed = collapsedProductSections.has(section.id)
                 return (
                 <Fragment key={section.id}>
                   <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={9} className="px-4 py-2">
+                    <td colSpan={10} className="px-4 py-2">
                       <div className="flex items-center justify-between gap-3">
                         <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
@@ -2015,7 +2052,7 @@ export default function Products() {
                             className="bg-white/80 dark:bg-slate-900/45"
                             data-product-jump-id={group.anchorId}
                           >
-                            <td colSpan={9} className="px-4 py-2.5">
+                            <td colSpan={10} className="px-4 py-2.5">
                               <div className="flex items-center justify-between gap-3">
                                 <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-100">
                                   <input

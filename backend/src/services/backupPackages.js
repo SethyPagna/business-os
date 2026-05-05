@@ -28,6 +28,16 @@ function createSha256() {
   return crypto.createHash('sha256')
 }
 
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createSha256()
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('error', reject)
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
+}
+
 function readTableRows(tableName, { limit = 500, offset = 0 } = {}) {
   try {
     return getDb().prepare(`SELECT * FROM ${q(tableName)} ORDER BY id ASC LIMIT ? OFFSET ?`).all(limit, offset)
@@ -83,6 +93,7 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
   const fileAssets = []
   const chunkSize = 500
   const totalTables = Math.max(1, BACKUP_TABLES.length)
+  let rowsProcessed = 0
   await writeStream(stream, hash, '{"tables":{')
   for (let tableIndex = 0; tableIndex < BACKUP_TABLES.length; tableIndex += 1) {
     throwIfAborted(signal)
@@ -104,6 +115,7 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
         await writeStream(stream, hash, JSON.stringify(row))
         if (tableName === 'file_assets') fileAssets.push(row)
         written += 1
+        rowsProcessed += 1
       }
       offset += rows.length
       progress?.({
@@ -112,7 +124,7 @@ async function streamBackupDataFile(filePath, { progress, signal, throwIfCancell
         message: `Streaming ${tableName} (${Math.min(offset, totalRows)} of ${totalRows})`,
         metrics: {
           currentTable: tableName,
-          rowsProcessed: Object.values(tableCounts).reduce((sum, count) => sum + (Number(count) || 0), 0),
+          rowsProcessed,
           currentTableRows: Math.min(offset, totalRows),
           currentTableTotal: totalRows,
         },
@@ -203,8 +215,21 @@ function buildPackageMetadata({ packageId, actor = {}, summary = {}, objectManif
 }
 
 async function writeTextFileWithChecksum(filePath, contents) {
-  fs.writeFileSync(filePath, contents, 'utf8')
+  await fs.promises.writeFile(filePath, contents, 'utf8')
   return sha256(contents)
+}
+
+async function writeJsonLinesFileWithChecksum(filePath, rows = []) {
+  const hash = createSha256()
+  const stream = fs.createWriteStream(filePath, { encoding: 'utf8' })
+  const safeRows = Array.isArray(rows) ? rows : []
+  for (let index = 0; index < safeRows.length; index += 1) {
+    if (index > 0) await writeStream(stream, hash, '\n')
+    await writeStream(stream, hash, JSON.stringify(safeRows[index]))
+    if (index > 0 && index % 500 === 0) await yieldToEventLoop()
+  }
+  await closeWriteStream(stream)
+  return hash.digest('hex')
 }
 
 async function uploadPackageFile({ packageId, localPath, fileName, contentType }) {
@@ -226,7 +251,7 @@ async function writeAndUploadMetadataFiles({ files, packageId, localPath, progre
       metrics: { currentFile: fileName, filesProcessed: index + 1, filesTotal: entries.length },
     })
     await yieldToEventLoop()
-    fs.writeFileSync(path.join(localPath, fileName), contents, 'utf8')
+    await fs.promises.writeFile(path.join(localPath, fileName), contents, 'utf8')
     await uploadPackageFile({
       packageId,
       localPath,
@@ -329,8 +354,7 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
   await uploadPackageFile({ packageId, localPath, fileName: 'data.json', contentType: 'application/json; charset=utf-8' })
   await yieldToEventLoop()
   const objectManifest = buildObjectManifest(dataResult.fileAssets)
-  const objectsJsonl = objectManifest.map((item) => JSON.stringify(item)).join('\n')
-  const objectsChecksum = await writeTextFileWithChecksum(path.join(localPath, 'objects-manifest.jsonl'), objectsJsonl)
+  const objectsChecksum = await writeJsonLinesFileWithChecksum(path.join(localPath, 'objects-manifest.jsonl'), objectManifest)
   await uploadPackageFile({ packageId, localPath, fileName: 'objects-manifest.jsonl', contentType: 'application/x-ndjson; charset=utf-8' })
   const summary = buildBackupSummaryFromCounts({
     tableCounts: dataResult.tableCounts,
@@ -398,7 +422,7 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
   }
 }
 
-function validateLocalBackupPackage(sourceDir) {
+async function validateLocalBackupPackage(sourceDir) {
   const root = path.resolve(String(sourceDir || ''))
   const manifestPath = path.join(root, 'manifest.json')
   const dataPath = path.join(root, 'data.json')
@@ -416,7 +440,7 @@ function validateLocalBackupPackage(sourceDir) {
   for (const [fileName, expected] of Object.entries(checksums || {})) {
     const filePath = path.join(root, fileName)
     if (!fs.existsSync(filePath)) throw new Error(`Backup package is missing ${fileName}.`)
-    const actual = sha256(fs.readFileSync(filePath))
+    const actual = await sha256File(filePath)
     if (actual !== expected) throw new Error(`Backup checksum failed for ${fileName}.`)
   }
   return { root, manifest }

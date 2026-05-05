@@ -72,6 +72,17 @@ function useDebouncedValue(value, delayMs = 180) {
   return debounced
 }
 
+function ProductDiscountBadge({ product, exchangeRate, fmtUSD, label = 'Discounts' }) {
+  const promotion = calculateProductDiscount(product, exchangeRate)
+  if (!promotion.active) return null
+  const text = `${product?.discount_label || label} ${fmtUSD(promotion.applied_price_usd || 0)}`
+  return (
+    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md bg-rose-600/95 px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" title={text}>
+      {text}
+    </span>
+  )
+}
+
 export default function POS() {
   const { t, user, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
   const { syncChannel } = useSync()
@@ -1291,11 +1302,12 @@ export default function POS() {
                     </button>
                     <button
                       type="button"
-                      className="w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
+                      className="relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
                       onClick={(event) => { event.stopPropagation(); openImageLightbox(p, 0) }}
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
+                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'បញ្ចុះតម្លៃ')} />
                     </button>
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2">{p.__displayName || p.name}</p>
@@ -1319,7 +1331,7 @@ export default function POS() {
                     ) : null}
                     {promotion.active ? (
                       <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
-                        {p.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+                        {p.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
                       </p>
                     ) : null}
                     <p className={`text-xs mt-0.5 ${stock <= (p.low_stock_threshold || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`}>
@@ -1768,7 +1780,7 @@ export default function POS() {
                   <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</span>{(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(p.special_price_khr || p.selling_price_khr || 0)}</span>}</div></div>
                 ) : null}
                 {promotion.active ? (
-                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Promotion', 'ប្រូម៉ូសិន')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
+                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'បញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
                 ) : null}
                 <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (p.low_stock_threshold || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
                 {groupProduct ? (
@@ -1797,7 +1809,7 @@ export default function POS() {
                               ) : null}
                               {variantPromotion.active ? (
                                 <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'promotion'); setDetailProduct(null) }}>
-                                  {variant.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(variantPromotion.applied_price_usd)}
+                                  {variant.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(variantPromotion.applied_price_usd)}
                                 </button>
                               ) : null}
                             </div>
@@ -1816,7 +1828,7 @@ export default function POS() {
                     </button>
                     {promotion.active ? (
                       <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= (p.out_of_stock_threshold || 0)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
-                        {p.discount_label || posCopy('Promo', 'ប្រូម៉ូសិន')} {fmtUSD(promotion.applied_price_usd)}
+                        {p.discount_label || posCopy('Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
                       </button>
                     ) : null}
                     {((p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0) ? (

@@ -8,7 +8,7 @@ import { fmtTime } from '../../utils/formatters'
 import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
 import { buildStandaloneReportHtml } from '../../utils/exportReports'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
-import { formatPriceNumber } from '../../utils/pricing.js'
+import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
@@ -55,6 +55,17 @@ function parseInventoryTimestamp(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
+function InventoryDiscountBadge({ product, fmtUSD, t }) {
+  const promotion = calculateProductDiscount(product)
+  if (!promotion.active) return null
+  const label = product?.discount_label || (typeof t === 'function' ? (t('discounts') || 'Discounts') : 'Discounts')
+  return (
+    <span className="inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60" title={`${label} ${fmtUSD(promotion.applied_price_usd || 0)}`}>
+      {label} {fmtUSD(promotion.applied_price_usd || 0)}
+    </span>
+  )
+}
+
 const RFID_INVENTORY_WORKFLOWS = [
   { id: 'receiving', labelKey: 'rfid_workflow_receiving', descriptionKey: 'rfid_workflow_receiving_desc', label: 'Receiving', description: 'Pair EPC tags to new stock, supplier lots, cartons, or individual products before adding inventory.' },
   { id: 'stock-count', labelKey: 'rfid_workflow_stock_count', descriptionKey: 'rfid_workflow_stock_count_desc', label: 'Stock count', description: 'Walk shelves with a reader, compare reads against on-hand stock, then approve counted differences.' },
@@ -98,6 +109,8 @@ export default function Inventory() {
   }, [isKhmer, t])
   const [summary,       setSummary]       = useState([])
   const [stockStats,    setStockStats]    = useState(null)
+  const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
+  const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState([])
   const [branches,      setBranches]      = useState([])
   const [returnStats,   setReturnStats]   = useState(null)
@@ -256,7 +269,13 @@ export default function Inventory() {
             setInventoryProductFilters({ brands: [] })
           }
         }
-        if (statsResult?.item) setStockStats(statsResult.item)
+        if (statsResult?.item) {
+          setStockStats(statsResult.item)
+          setStockStatsLoaded(true)
+          setStatsRefreshError('')
+        } else if (loadedOnceRef.current) {
+          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្ថិតិស្តុកបានទេ។ កំពុងបង្ហាញតម្លៃចុងក្រោយដែលបានបញ្ជាក់។'))
+        }
         if (Array.isArray(movs)) setMovements(movs || [])
         if (rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
@@ -717,13 +736,14 @@ export default function Inventory() {
   const totalStoreDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.store_discount_usd || 0), 0)
   const totalMembershipDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.membership_discount_usd || 0), 0)
   const totalProfit   = totalRevenue - totalCOGS
+  const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const primaryStats = [
     {
       id: 'products',
       label: t('products'),
-      value: totalProducts,
+      value: statsValue(totalProducts),
       cls: 'text-gray-800 dark:text-gray-200',
-      sub: `${lowStockCount} ${t('low_stock') || 'low'} - ${outStockCount} ${t('out_of_stock') || 'out'}`,
+      sub: stockStatsLoaded ? `${lowStockCount} ${t('low_stock') || 'low'} - ${outStockCount} ${t('out_of_stock') || 'out'}` : (t('loading') || 'Loading...'),
       details: [
         { label: t('products') || 'Products', value: totalProducts },
         { label: t('low_stock') || 'Low stock', value: lowStockCount },
@@ -734,7 +754,7 @@ export default function Inventory() {
     {
       id: 'stock-value',
       label: t('stock_value'),
-      value: fmtUSD(totalValue),
+      value: statsValue(fmtUSD(totalValue)),
       cls: 'text-blue-700 dark:text-blue-300',
       details: [
         { label: t('stock_value') || 'Stock value', value: fmtUSD(totalValue) },
@@ -1791,6 +1811,12 @@ export default function Inventory() {
         className="mb-3"
       />
 
+      {statsRefreshError ? (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          {statsRefreshError}
+        </div>
+      ) : null}
+
       {selectedMovementGroups.length > 0 ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} movement group{selectedMovementGroups.length === 1 ? '' : 's'} selected</span>
@@ -2082,6 +2108,9 @@ export default function Inventory() {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
                       {p.category && <div className="text-xs text-gray-400">{p.category}</div>}
+                      <div className="mt-1">
+                        <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                      </div>
                     </div>
                   </div>
                   <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -2156,6 +2185,9 @@ export default function Inventory() {
                         <td className="px-3 py-1">
                           <div className="font-medium text-gray-900 dark:text-white leading-tight">{p.name}</div>
                           {p.category && <div className="text-gray-400 text-[10px]">{p.category}</div>}
+                          <div className="mt-1">
+                            <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                          </div>
                         </td>
                         <td className="px-3 py-1 text-right font-bold text-gray-900 dark:text-white whitespace-nowrap">
                           {qty} <span className="text-gray-400 font-normal text-[10px]">{p.unit}</span>
