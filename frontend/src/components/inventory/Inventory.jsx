@@ -2493,28 +2493,31 @@ export default function Inventory() {
         <>
           <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
             <div className="px-3 py-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+              <div className="flex min-w-0 items-center gap-1">
+              <span className="shrink-0 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
                 {inventoryProductSummaryLabel}
               </span>
-              <label className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-blue-200 bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+              <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                 <input
                   ref={inventorySelectAllRef}
                   type="checkbox"
-                  className="h-4 w-4 rounded"
+                  className="h-3.5 w-3.5 rounded"
                   checked={filteredSummary.length > 0 && selectedProductIds.size === filteredSummary.length}
                   onChange={(event) => toggleSelectAllProducts(event.target.checked)}
                 />
-                <span className="truncate whitespace-nowrap">
+                <span className="truncate whitespace-nowrap sm:hidden">
+                  {hasSelectedProducts ? selectedProducts.length : filteredSummary.length}
+                </span>
+                <span className="hidden truncate whitespace-nowrap sm:inline">
                   {hasSelectedProducts
                     ? inventoryControlLabels.selected
                     : inventoryControlLabels.selectAll}
                 </span>
               </label>
-              <label className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+              <label className="inline-flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                 <span className="hidden sm:inline">{t('per_page') || 'per page'}</span>
                 <select
-                  className="bg-transparent text-[11px] font-semibold outline-none"
+                  className="bg-transparent text-[10px] font-semibold outline-none"
                   value={inventoryProductSafePageSize}
                   onChange={(event) => {
                     setInventoryProductPageSize(Number(event.target.value))
@@ -2526,24 +2529,21 @@ export default function Inventory() {
                   ))}
                 </select>
               </label>
-              <div className="inline-flex items-center overflow-hidden rounded-full border border-blue-200 bg-white/85 dark:border-blue-800 dark:bg-blue-950/50">
+              <div className="inline-flex shrink-0 items-center overflow-hidden rounded-full border border-blue-200 bg-white/85 dark:border-blue-800 dark:bg-blue-950/50">
                 <button
                   type="button"
-                  className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                   disabled={inventoryProductSafePage <= 1}
                   onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
                   aria-label="Previous page"
                 >
-                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <ChevronLeft className="h-3 w-3" />
                 </button>
-                <span className="hidden pl-1 text-[11px] font-semibold text-blue-700 sm:inline dark:text-blue-200">
-                  {t('page') || 'Page'}
-                </span>
                 <input
                   type="text"
                   inputMode="numeric"
                   aria-label={t('page') || 'Page'}
-                  className="h-7 w-10 border-0 bg-transparent px-1 text-center text-[11px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  className="h-6 w-7 border-0 bg-transparent px-0.5 text-center text-[10px] font-semibold text-blue-700 outline-none dark:text-blue-200"
                   value={inventoryProductPageDraft}
                   onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={commitInventoryProductPageDraft}
@@ -2558,43 +2558,42 @@ export default function Inventory() {
                     }
                   }}
                 />
-                <span className="pr-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200">
+                <span className="pr-1 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
                   / {inventoryProductTotalPages}
                 </span>
                 <button
                   type="button"
-                  className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                   disabled={inventoryProductSafePage >= inventoryProductTotalPages}
                   onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
                   aria-label="Next page"
                 >
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ChevronRight className="h-3 w-3" />
                 </button>
               </div>
-              </div>
-            </div>
-            <div className="border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700 transition hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200 whitespace-nowrap"
-                  disabled={!hasSelectedProducts}
-                  onClick={openInventoryBatchSession}
-                  title={tr(
-                    'inventory_batch_hint',
-                    'Select products, review each line in one session, then apply all stock changes together.',
-                    'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
-                  )}
-                >
-                  {inventoryControlLabels.batch}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700 transition hover:border-blue-400 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200 whitespace-nowrap"
-                  onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-                >
-                  {inventoryControlLabels.reasons}
-                </button>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white text-blue-700 transition hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                disabled={!hasSelectedProducts}
+                onClick={openInventoryBatchSession}
+                title={tr(
+                  'inventory_batch_hint',
+                  'Select products, review each line in one session, then apply all stock changes together.',
+                  'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                )}
+                aria-label={inventoryControlLabels.batch}
+              >
+                <Package className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white text-blue-700 transition hover:border-blue-400 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                onClick={() => setReasonManager({ open: true, type: 'adjust' })}
+                title={inventoryControlLabels.reasons}
+                aria-label={inventoryControlLabels.reasons}
+              >
+                <ClipboardList className="h-3 w-3" />
+              </button>
               </div>
             </div>
           </div>

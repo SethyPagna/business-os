@@ -1875,28 +1875,31 @@ export default function Products() {
 
       <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
         <div className="px-3 py-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-          <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-medium text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+          <div className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
             {productSummaryLabel}
           </span>
-          <label className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-blue-200 bg-white/90 px-2 py-1 text-[11px] font-medium text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded"
+              className="h-3.5 w-3.5 rounded"
               checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
               ref={mobileSelectAllRef}
               onChange={(event) => toggleSelectAll(event.target.checked)}
             />
-            <span className="truncate whitespace-nowrap">
+            <span className="truncate whitespace-nowrap sm:hidden">
+              {hasSelected ? selectedVisibleCount : visibleProducts.length}
+            </span>
+            <span className="hidden truncate whitespace-nowrap sm:inline">
               {hasSelected
                 ? `${selectedVisibleCount} ${t('selected') || 'selected'}`
                 : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
             </span>
           </label>
-          <label className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-2 py-1 text-[11px] font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+          <label className="inline-flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
             <span className="hidden sm:inline">{t('per_page') || 'per page'}</span>
             <select
-              className="bg-transparent text-[11px] font-semibold outline-none"
+              className="bg-transparent text-[10px] font-semibold outline-none"
               value={productSafePageSize}
               onChange={(event) => {
                 setProductPageSize(Number(event.target.value))
@@ -1908,24 +1911,21 @@ export default function Products() {
               ))}
             </select>
           </label>
-          <div className="inline-flex items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+          <div className="inline-flex shrink-0 items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
             <button
               type="button"
-              className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
               disabled={productSafePage <= 1}
               onClick={() => setProductPage(productSafePage - 1)}
               aria-label="Previous page"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-3 w-3" />
             </button>
-            <span className="hidden pl-1 text-[11px] font-semibold text-blue-700 sm:inline dark:text-blue-200">
-              {t('page') || 'Page'}
-            </span>
             <input
               type="text"
               inputMode="numeric"
               aria-label={t('page') || 'Page'}
-              className="h-7 w-10 border-0 bg-transparent px-1 text-center text-[11px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+              className="h-6 w-7 border-0 bg-transparent px-0.5 text-center text-[10px] font-semibold text-blue-700 outline-none dark:text-blue-200"
               value={productPageDraft}
               onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
               onBlur={commitProductPageDraft}
@@ -1940,17 +1940,17 @@ export default function Products() {
                 }
               }}
             />
-            <span className="pr-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200">
+            <span className="pr-1 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
               / {productTotalPages}
             </span>
             <button
               type="button"
-              className="inline-flex h-7 w-7 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
               disabled={productSafePage >= productTotalPages}
               onClick={() => setProductPage(productSafePage + 1)}
               aria-label="Next page"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-3 w-3" />
             </button>
           </div>
           </div>
