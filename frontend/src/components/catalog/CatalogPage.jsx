@@ -2305,21 +2305,30 @@ export default function CatalogPage({ publicView = false }) {
     const titleText = String(previewConfig.businessName || previewConfig.title || 'Customer Portal').trim()
     document.title = titleText || 'Customer Portal'
 
-    let iconEl = document.querySelector('link[rel="icon"]')
-    let createdIcon = false
-    let previousHref = ''
-    if (iconEl) previousHref = iconEl.getAttribute('href') || ''
-    if (!iconEl) {
-      iconEl = document.createElement('link')
-      iconEl.setAttribute('rel', 'icon')
-      document.head.appendChild(iconEl)
-      createdIcon = true
+    const ensureLink = (rel) => {
+      let linkEl = document.querySelector(`link[rel="${rel}"]`)
+      let created = false
+      const previousHref = linkEl?.getAttribute('href') || ''
+      if (!linkEl) {
+        linkEl = document.createElement('link')
+        linkEl.setAttribute('rel', rel)
+        document.head.appendChild(linkEl)
+        created = true
+      }
+      return { linkEl, created, previousHref, rel }
     }
-    const iconSource = previewConfig.showLogo ? versionedBusinessFavicon : ''
+
+    const iconLinks = [
+      ensureLink('icon'),
+      ensureLink('shortcut icon'),
+      ensureLink('apple-touch-icon'),
+    ]
+
+    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || ''
     const faviconOptions = previewConfig.businessFavicon
       ? { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }
       : {
-          fit: previewConfig.logoFit,
+          fit: 'cover',
           zoom: previewConfig.logoZoom,
           positionX: previewConfig.logoPositionX,
           positionY: previewConfig.logoPositionY,
@@ -2332,12 +2341,25 @@ export default function CatalogPage({ publicView = false }) {
         8000,
       )
         .then((faviconHref) => {
-          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId) || !iconEl) return
-          iconEl.setAttribute('href', faviconHref || iconSource)
+          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
+          const resolvedHref = faviconHref || iconSource
+          iconLinks.forEach(({ linkEl, rel }) => {
+            if (!linkEl) return
+            linkEl.setAttribute('href', resolvedHref)
+            if (rel === 'icon' || rel === 'shortcut icon') {
+              linkEl.setAttribute('type', 'image/png')
+            }
+          })
         })
         .catch(() => {
-          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId) || !iconEl) return
-          iconEl.setAttribute('href', iconSource)
+          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
+          iconLinks.forEach(({ linkEl, rel }) => {
+            if (!linkEl) return
+            linkEl.setAttribute('href', iconSource)
+            if (rel === 'icon' || rel === 'shortcut icon') {
+              linkEl.setAttribute('type', 'image/png')
+            }
+          })
         })
     } else {
       invalidateTrackedRequest(portalFaviconRequestRef)
@@ -2346,12 +2368,16 @@ export default function CatalogPage({ publicView = false }) {
     return () => {
       invalidateTrackedRequest(portalFaviconRequestRef)
       document.title = previousTitle
-      if (createdIcon && iconEl) {
-        iconEl.remove()
-      } else if (iconEl) {
-        if (previousHref) iconEl.setAttribute('href', previousHref)
-        else iconEl.removeAttribute('href')
-      }
+      iconLinks.forEach(({ linkEl, created, previousHref }) => {
+        if (!linkEl) return
+        if (created) {
+          linkEl.remove()
+        } else if (previousHref) {
+          linkEl.setAttribute('href', previousHref)
+        } else {
+          linkEl.removeAttribute('href')
+        }
+      })
     }
   }, [
     publicView,
@@ -2362,8 +2388,8 @@ export default function CatalogPage({ publicView = false }) {
     previewConfig.logoPositionX,
     previewConfig.logoPositionY,
     previewConfig.logoZoom,
-    previewConfig.showLogo,
     previewConfig.title,
+    versionedBusinessLogo,
     versionedBusinessFavicon,
   ])
 
@@ -4778,12 +4804,12 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div
-                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm dark:bg-slate-950"
                       >
                         {versionedBusinessLogo ? (
                           <button
                             type="button"
-                            className="flex h-full w-full items-center justify-center overflow-hidden rounded-[14px] bg-white"
+                            className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
                             onClick={() => openPortalImage(displayConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
                           >
                             <img
@@ -4792,11 +4818,11 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                               loading="eager"
                               decoding="async"
                               fetchPriority="high"
-                              className="h-full w-full rounded-[12px]"
+                              className="h-full w-full rounded-full"
                               style={{
-                                objectFit: 'contain',
+                                objectFit: 'cover',
                                 objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
-                                transform: `scale(${Math.max(0.92, Math.min(1.18, (displayConfig.logoZoom || 100) / 100))})`,
+                                transform: `scale(${Math.max(1, Math.min(1.35, (displayConfig.logoZoom || 100) / 100))})`,
                                 transformOrigin: 'center',
                               }}
                             />
