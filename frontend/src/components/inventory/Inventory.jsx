@@ -2648,10 +2648,21 @@ export default function Inventory() {
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                          <div className="mt-0.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 text-[10px] leading-4 text-gray-400">
-                            <span className="min-w-0 truncate pr-1">{productTags.join(' · ') || (t('product') || 'Product')}</span>
+                          <div className="mt-0.5 flex items-center gap-2 text-[10px] leading-4 text-gray-400">
+                            <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
+                              {productTags.length ? (
+                                productTags.map((tag, index) => (
+                                  <Fragment key={`${p.id}-tag-${index}`}>
+                                    {index > 0 ? <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span> : null}
+                                    <span className="min-w-0 truncate">{tag}</span>
+                                  </Fragment>
+                                ))
+                              ) : (
+                                <span className="min-w-0 truncate">{t('product') || 'Product'}</span>
+                              )}
+                            </div>
                             {p.barcode ? (
-                              <span className="shrink-0 whitespace-nowrap text-right font-medium text-gray-500 dark:text-gray-300">
+                              <span className="ml-auto shrink-0 whitespace-nowrap pl-2 text-right font-medium text-gray-500 dark:text-gray-300">
                                 {p.barcode}
                               </span>
                             ) : null}
