@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 
 function readGitRevision() {
   if (process.env.BUSINESS_OS_BUILD_REVISION) return process.env.BUSINESS_OS_BUILD_REVISION
@@ -79,6 +81,21 @@ function emitBuildManifest() {
           builtAt: new Date().toISOString(),
         }, null, 2),
       })
+    },
+    writeBundle(options) {
+      const outDir = path.resolve(options.dir || 'dist')
+      const serviceWorkerPath = path.join(outDir, 'sw.js')
+      try {
+        const source = readFileSync(serviceWorkerPath, 'utf8')
+        if (!source.includes('__BUSINESS_OS_BUILD_HASH__')) return
+        writeFileSync(
+          serviceWorkerPath,
+          source.replaceAll('__BUSINESS_OS_BUILD_HASH__', buildHash),
+          'utf8',
+        )
+      } catch (_) {
+        // Ignore missing service worker output during non-standard builds.
+      }
     },
   }
 }

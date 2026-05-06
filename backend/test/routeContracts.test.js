@@ -121,6 +121,15 @@ runTest('activity routes include admin-only user filters for attribution review'
   assert.match(actionHistorySource, /isAdminControlUser/)
 })
 
+runTest('sales search uses joined customer membership data instead of a missing sales column', () => {
+  const fs = require('fs')
+  const path = require('path')
+  const salesSource = fs.readFileSync(path.join(__dirname, '../src/routes/sales.js'), 'utf8')
+  assert.match(salesSource, /MAX\(c\.membership_number\)\s+AS customer_membership_number/)
+  assert.match(salesSource, /lower\(COALESCE\(c\.membership_number, ''\)\) LIKE \?/)
+  assert.doesNotMatch(salesSource, /lower\(COALESCE\(s\.customer_membership_number, ''\)\) LIKE \?/)
+})
+
 runTest('server health route exposes runtime driver diagnostics', () => {
   const source = require('fs').readFileSync(require('path').join(__dirname, '../server.js'), 'utf8')
   assert.match(source, /drivers:\s*\{/)

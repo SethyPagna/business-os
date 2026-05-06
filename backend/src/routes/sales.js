@@ -823,7 +823,7 @@ router.get('/sales', authToken, requirePermission('sales'), (req, res) => {
         OR lower(COALESCE(s.cashier_name, '')) LIKE ?
         OR lower(COALESCE(s.customer_name, '')) LIKE ?
         OR lower(COALESCE(s.customer_phone, '')) LIKE ?
-        OR lower(COALESCE(s.customer_membership_number, '')) LIKE ?
+        OR lower(COALESCE(c.membership_number, '')) LIKE ?
         OR lower(COALESCE(s.branch_name, '')) LIKE ?
         OR lower(COALESCE(s.payment_method, '')) LIKE ?
         OR lower(COALESCE(s.notes, '')) LIKE ?

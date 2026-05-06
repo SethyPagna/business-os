@@ -41,6 +41,7 @@ const { wss_clients } = require('./src/helpers')
 const { getRuntimeVersion } = require('./src/runtimeVersion')
 const { getDuckDbRuntimeStatus } = require('./src/analytics/duckdbRuntime')
 const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore')
+const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches')
 const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext')
 const {
   CORS_OPTIONS,
@@ -173,6 +174,9 @@ function mountHealthRoute(target) {
         bucket: S3_BUCKET || null,
       },
       analytics: getDuckDbRuntimeStatus(),
+      batches: {
+        legacyBackfill: getLegacyBatchBackfillStatus(),
+      },
     })
   })
 }
@@ -337,6 +341,11 @@ function bootstrapServer() {
     const defaultOrganization = getDefaultOrganization()
     if (defaultOrganization) ensureOrganizationFilesystemLayout(defaultOrganization)
   } catch (_) {}
+  try {
+    scheduleLegacyBatchBackfill()
+  } catch (error) {
+    console.warn(`[product-batches] background backfill skipped: ${error?.message || error}`)
+  }
   try {
     const { initializeBullQueue, recoverImportJobs } = require('./src/services/importJobs')
     initializeBullQueue().catch((error) => {

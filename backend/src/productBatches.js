@@ -2,6 +2,15 @@
 
 const { db } = require('./database')
 
+const LEGACY_BACKFILL_CHUNK_SIZE = Math.max(1, Math.min(250, Number(process.env.BATCH_BACKFILL_CHUNK_SIZE || 25) || 25))
+const LEGACY_BACKFILL_DELAY_MS = Math.max(0, Math.min(5000, Number(process.env.BATCH_BACKFILL_DELAY_MS || 50) || 50))
+const legacyBackfillState = {
+  scheduled: false,
+  running: false,
+  completedAt: '',
+  lastError: '',
+}
+
 const RECEIVED_AT_ORDER_SQL = `
   CASE
     WHEN NULLIF(pb.received_at, '') IS NOT NULL
@@ -51,6 +60,19 @@ function getBatchRowsForProduct(productId) {
     WHERE variant_product_id = ?
     ORDER BY id ASC
   `).all(productId)
+}
+
+function getLegacyBatchBackfillCandidates(limit = LEGACY_BACKFILL_CHUNK_SIZE) {
+  const safeLimit = Math.max(1, Math.min(1000, Number(limit || LEGACY_BACKFILL_CHUNK_SIZE) || LEGACY_BACKFILL_CHUNK_SIZE))
+  return db.prepare(`
+    SELECT p.id
+    FROM products p
+    LEFT JOIN product_batches pb ON pb.variant_product_id = p.id
+    WHERE NOT (COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)
+      AND pb.id IS NULL
+    ORDER BY p.id ASC
+    LIMIT ?
+  `).all(safeLimit).map((row) => row.id)
 }
 
 function createOrFindProductBatch(productId, options = {}) {
@@ -326,13 +348,60 @@ function migrateLegacyProductToBatches(productId, { force = false } = {}) {
 }
 
 function migrateAllLegacyProductsToBatches({ force = false } = {}) {
-  const productIds = db.prepare(`
-    SELECT id
-    FROM products
-    WHERE NOT (COALESCE(is_group, 0) = 1 AND COALESCE(parent_id, 0) = 0)
-  `).all().map((row) => row.id)
+  const productIds = force
+    ? db.prepare(`
+      SELECT id
+      FROM products
+      WHERE NOT (COALESCE(is_group, 0) = 1 AND COALESCE(parent_id, 0) = 0)
+    `).all().map((row) => row.id)
+    : getLegacyBatchBackfillCandidates()
   for (const productId of productIds) migrateLegacyProductToBatches(productId, { force })
-  syncProductBatchRollups(productIds)
+  return productIds.length
+}
+
+function scheduleLegacyBatchBackfill(options = {}) {
+  const chunkSize = Math.max(1, Math.min(1000, Number(options.chunkSize || LEGACY_BACKFILL_CHUNK_SIZE) || LEGACY_BACKFILL_CHUNK_SIZE))
+  const delayMs = Math.max(0, Math.min(5000, Number(options.delayMs || LEGACY_BACKFILL_DELAY_MS) || LEGACY_BACKFILL_DELAY_MS))
+  if (legacyBackfillState.scheduled || legacyBackfillState.running) return false
+  legacyBackfillState.scheduled = true
+
+  const runNextChunk = () => {
+    legacyBackfillState.scheduled = false
+    legacyBackfillState.running = true
+    try {
+      const pendingIds = getLegacyBatchBackfillCandidates(chunkSize)
+      if (!pendingIds.length) {
+        legacyBackfillState.running = false
+        legacyBackfillState.completedAt = new Date().toISOString()
+        legacyBackfillState.lastError = ''
+        return
+      }
+      for (const productId of pendingIds) {
+        migrateLegacyProductToBatches(productId, { force: false })
+      }
+      legacyBackfillState.running = false
+      legacyBackfillState.completedAt = ''
+      legacyBackfillState.lastError = ''
+      legacyBackfillState.scheduled = true
+      setTimeout(runNextChunk, delayMs).unref?.()
+    } catch (error) {
+      legacyBackfillState.running = false
+      legacyBackfillState.lastError = error?.message || String(error || 'Legacy batch backfill failed')
+      console.warn(`[product-batches] legacy backfill paused: ${legacyBackfillState.lastError}`)
+    }
+  }
+
+  setTimeout(runNextChunk, delayMs).unref?.()
+  return true
+}
+
+function getLegacyBatchBackfillStatus() {
+  return {
+    scheduled: legacyBackfillState.scheduled,
+    running: legacyBackfillState.running,
+    completedAt: legacyBackfillState.completedAt,
+    lastError: legacyBackfillState.lastError,
+  }
 }
 
 function getAvailableProductQuantity(productId, branchId = null) {
@@ -517,11 +586,13 @@ module.exports = {
   listProductBatches,
   markSaleItemAllocationsReleased,
   markReturnItemAllocationsReversed,
+  getLegacyBatchBackfillStatus,
   migrateAllLegacyProductsToBatches,
   migrateLegacyProductToBatches,
   normalizeExpiryDate,
   normalizeLotCode,
   restoreBatchAllocations,
+  scheduleLegacyBatchBackfill,
   setBranchBatchQuantity,
   syncProductBatchRollups,
 }

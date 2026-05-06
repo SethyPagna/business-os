@@ -40,9 +40,61 @@ const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
 const VariantFormModal = lazy(() => import('./VariantFormModal'))
 const ProductForm = lazy(() => import('./ProductForm'))
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
+const CREATED_MONTH_OPTIONS = [
+  ['01', 'Jan'],
+  ['02', 'Feb'],
+  ['03', 'Mar'],
+  ['04', 'Apr'],
+  ['05', 'May'],
+  ['06', 'Jun'],
+  ['07', 'Jul'],
+  ['08', 'Aug'],
+  ['09', 'Sep'],
+  ['10', 'Oct'],
+  ['11', 'Nov'],
+  ['12', 'Dec'],
+]
+const DEFAULT_META_PILL_COLOR = '#e2e8f0'
 
 function multiMatch(text, terms) {
   return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
+}
+
+function useDebouncedValue(value, delayMs = 180) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(timer)
+  }, [delayMs, value])
+  return debounced
+}
+
+function parseBrandColorMap(raw) {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function normalizeBrandLookup(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function ProductDiscountBadge({ product, promotion, fmtUSD, label, overlay = false }) {
+  const promo = promotion || calculateProductDiscount(product)
+  if (!promo?.active) return null
+  const className = overlay
+    ? 'absolute right-1 top-1 inline-flex max-w-[9rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
+    : 'inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
+  const title = `${label} ${fmtUSD(promo.applied_price_usd || 0)}`
+  return (
+    <span className={className} title={title}>
+      {label} {fmtUSD(promo.applied_price_usd || 0)}
+    </span>
+  )
 }
 
 function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdjustStock, t }) {

@@ -306,6 +306,10 @@ function setTunnelSecurityHeaders(req, res) {
 function setFrontendStaticHeaders(res, filePath) {
   const normalizedPath = String(filePath || '').replace(/\\/g, '/')
   const fileName = normalizedPath.split('/').pop() || ''
+  const isRuntimeBootstrapAsset = fileName === 'sw.js'
+    || fileName === 'business-os-build.json'
+    || fileName === 'theme-bootstrap.js'
+    || fileName === 'runtime-noise-guard.js'
 
   if (filePath.endsWith('.css')) {
     res.setHeader('Content-Type', 'text/css; charset=utf-8')
@@ -321,6 +325,13 @@ function setFrontendStaticHeaders(res, filePath) {
 
   if (filePath.endsWith('index.html')) {
     setHtmlNoCacheHeaders(res)
+    return
+  }
+
+  if (isRuntimeBootstrapAsset) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
     return
   }
 

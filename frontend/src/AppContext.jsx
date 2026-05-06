@@ -5,7 +5,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.js'
-import { cacheClearAll, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
+import { cacheClearAll, FRONTEND_BUILD_INFO, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
@@ -76,6 +76,7 @@ const SESSION_ONLY_STORAGE_KEYS = [
   STORAGE_KEYS.USER,
   STORAGE_KEYS.USER_EXPIRY,
 ]
+const RUNTIME_RECOVERY_SESSION_KEY = 'bos-runtime-version-recovery'
 
 function safeStorageGet(storage, key) {
   try {
@@ -538,6 +539,19 @@ export function AppProvider({ children }) {
       const message = e?.detail?.message
         || 'Business OS server update is required. Restart the server, then refresh this page.'
       setSyncServerUnreachable(true)
+      try {
+        const runtimeHash = String(e?.detail?.backend?.frontend?.hash || '').trim()
+        const recoveryKey = `${FRONTEND_BUILD_INFO.hash || 'dev'}:${runtimeHash || 'unknown'}`
+        const previous = window.sessionStorage.getItem(RUNTIME_RECOVERY_SESSION_KEY)
+        if (previous !== recoveryKey) {
+          window.sessionStorage.setItem(RUNTIME_RECOVERY_SESSION_KEY, recoveryKey)
+          const url = new URL(window.location.href)
+          url.searchParams.set('__bos_reload', String(Date.now()))
+          if (runtimeHash) url.searchParams.set('__bos_server_build', runtimeHash)
+          window.location.replace(url.toString())
+          return
+        }
+      } catch (_) {}
       setNotification({ message, type: 'error', id: Date.now() })
     }
     const onConflict = (e) => {

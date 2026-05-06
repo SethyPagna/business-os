@@ -307,6 +307,18 @@ await runTest('runtime version guard compares served frontend metadata, not back
   }, frontend), false)
 })
 
+await runTest('runtime version guard still compares hashes when packaged runtimes report dev revisions', () => {
+  const frontend = { revision: 'dev', hash: 'browser-hash' }
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-rev',
+    frontend: { revision: 'dev', hash: 'browser-hash' },
+  }, frontend), false)
+  assert.equal(shouldCompareRuntimeVersions({
+    revision: 'backend-rev',
+    frontend: { revision: 'dev', hash: 'server-old-hash' },
+  }, frontend), true)
+})
+
 await runTest('health payload exposes data, storage, queue, cache, and analytics drivers', () => {
   const payload = {
     status: 'ok',

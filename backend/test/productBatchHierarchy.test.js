@@ -45,6 +45,8 @@ runTest('schema and runtime migrations create batch stock tables and allocation 
 
 runTest('batch helpers expose migration, FEFO allocation, and rollup primitives', () => {
   assert.match(batchHelpers, /function migrateLegacyProductToBatches/)
+  assert.match(batchHelpers, /function scheduleLegacyBatchBackfill/)
+  assert.match(batchHelpers, /function getLegacyBatchBackfillStatus/)
   assert.match(batchHelpers, /function allocateProductBatches/)
   assert.match(batchHelpers, /function increaseProductBatchStock/)
   assert.match(batchHelpers, /function restoreBatchAllocations/)
@@ -90,7 +92,7 @@ runTest('imports and metrics are wired to the batch-backed hierarchy', () => {
   assert.match(importJobs, /lot_code/)
   assert.match(metrics, /FROM product_batches pb/i)
   assert.match(metrics, /JOIN branch_batch_stock bbs/i)
-  assert.match(metrics, /migrateAllLegacyProductsToBatches/)
+  assert.doesNotMatch(metrics, /migrateAllLegacyProductsToBatches/)
 })
 
 if (failed > 0) {

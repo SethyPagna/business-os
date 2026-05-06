@@ -74,6 +74,8 @@ const ADMIN_PAGE_SEQUENCE = [
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
+const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
+const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 
 function getChunkErrorMessage(error) {
   // Normalize unknown thrown values before chunk retry logic inspects them.
@@ -126,13 +128,29 @@ function clearRetryMarker(marker) {
   } catch (_) {}
 }
 
+function buildChunkRecoveryUrl(reason = 'chunk-reload') {
+  if (typeof window === 'undefined') return ''
+  const url = new URL(window.location.href)
+  url.searchParams.set('__bos_reload', String(Date.now()))
+  url.searchParams.set('__bos_reason', reason)
+  if (FRONTEND_BUILD_HASH && FRONTEND_BUILD_HASH !== 'dev') {
+    url.searchParams.set('__bos_build', FRONTEND_BUILD_HASH)
+  }
+  return url.toString()
+}
+
 function triggerChunkRecoveryReload(marker) {
   try {
     sessionStorage.setItem(marker, '1')
   } catch (_) {}
 
   if (typeof window === 'undefined') return false
-  window.location.reload()
+  const target = buildChunkRecoveryUrl(`chunk:${marker}`)
+  if (target) {
+    window.location.replace(target)
+  } else {
+    window.location.reload()
+  }
   return true
 }
 
@@ -815,10 +833,17 @@ function PageLoader() {
       setStalled(true)
       console.warn('[PageLoader] Page bundle is still loading. If this repeats, reload to fetch the current build assets.')
       try {
-        const key = `business_os_page_loader_retry:${window.location.pathname}`
+        const key = `business_os_page_loader_retry:${window.location.pathname}:${FRONTEND_BUILD_HASH || 'dev'}`
         if (!window.sessionStorage.getItem(key)) {
           window.sessionStorage.setItem(key, String(Date.now()))
-          window.setTimeout(() => window.location.reload(), 1800)
+          window.setTimeout(() => {
+            const target = buildChunkRecoveryUrl('page-loader')
+            if (target) {
+              window.location.replace(target)
+            } else {
+              window.location.reload()
+            }
+          }, 1800)
         }
       } catch {
         // Ignore storage access problems and keep the manual reload button available.
@@ -923,6 +948,28 @@ export default function App() {
   useChunkWarmup(authReady ? user : null)
   useDataWarmup(authReady ? user : null, canAccessPage)
   usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    let changed = false
+    CHUNK_RECOVERY_QUERY_KEYS.forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key)
+        changed = true
+      }
+    })
+    if (changed) {
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+    try {
+      Object.keys(window.sessionStorage)
+        .filter((key) => key.startsWith('business_os_page_loader_retry:') || key.startsWith('bos-lazy-reload:'))
+        .forEach((key) => window.sessionStorage.removeItem(key))
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+  }, [])
 
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined

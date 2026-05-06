@@ -17,6 +17,10 @@ assert.match(app, /const WARMUP_PAGE_IDS = \[\s*'products',[\s\S]*'backup',[\s\S
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')
+assert.match(app, /buildChunkRecoveryUrl/, 'chunk recovery should use a cache-busting recovery URL')
+assert.match(app, /window\.history\.replaceState/, 'successful boot should clean recovery params from the URL')
+assert.match(app, /business_os_page_loader_retry:\$\{window\.location\.pathname\}:\$\{FRONTEND_BUILD_HASH \|\| 'dev'\}/, 'page loader retries should be scoped per build hash')
+assert.match(app, /window\.location\.replace\(target\)/, 'stalled chunk recovery should use hard location replacement')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
@@ -32,6 +36,9 @@ assert.match(contactsShared, /LoadingWatchdog/, 'shared contact table should use
 assert.match(customers, /generateCustomerMembershipNumber/, 'customer form should auto-generate membership numbers')
 assert.match(customers, /Regenerate/, 'customer form should let staff regenerate membership numbers')
 assert.match(loaders, /const DEFAULT_LOADER_TIMEOUT_MS = 20_000/, 'loader timeout should give slow pages enough time before failing first render')
+const appContext = fs.readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
+assert.match(appContext, /RUNTIME_RECOVERY_SESSION_KEY/, 'runtime mismatch recovery should guard against reload loops')
+assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runtime mismatch should heal through a hard reload once')
 for (const [name, source] of [
   ['Customers', customers],
   ['Suppliers', suppliers],

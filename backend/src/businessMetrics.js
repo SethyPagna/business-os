@@ -1,7 +1,6 @@
 'use strict'
 
 const { db } = require('./database')
-const { migrateAllLegacyProductsToBatches } = require('./productBatches')
 
 function sellableProductWhere(alias = 'p') {
   return [
@@ -33,7 +32,6 @@ function normalizeMetricRow(row = {}) {
 }
 
 function getStockMetrics({ branchId = null } = {}) {
-  migrateAllLegacyProductsToBatches()
   const numericBranchId = Number.parseInt(branchId, 10)
   const hasBranch = Number.isFinite(numericBranchId) && numericBranchId > 0
   const qty = hasBranch
@@ -118,7 +116,6 @@ function getStockAlertProducts({ limit = 5000 } = {}) {
 }
 
 function getExpiringProducts({ limit = 20, days = 30 } = {}) {
-  migrateAllLegacyProductsToBatches()
   const safeLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 20))
   const safeDays = Math.max(0, Math.min(3650, Number.parseInt(days, 10) || 30))
   const whereSql = sellableProductWhere('p').join(' AND ')

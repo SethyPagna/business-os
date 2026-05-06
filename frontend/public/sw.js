@@ -6,9 +6,10 @@
  * cannot be silently replaced by stale HTTP responses.
  */
 
-const APP_SHELL_VERSION = 'business-os-app-shell-v3'
+const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__'
+const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`
 const APP_SHELL_CACHE = APP_SHELL_VERSION
-const STATIC_CACHE = 'business-os-static-v6'
+const STATIC_CACHE = `business-os-static-${BUILD_HASH}`
 const APP_SHELL_URLS = ['/', '/index.html', '/icon.png']
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const DB_NAME = 'BusinessOS'

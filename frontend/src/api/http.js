@@ -207,9 +207,11 @@ export function shouldCompareRuntimeVersions(serverRuntime = {}, frontendBuildIn
   const frontendHash = String(frontendBuildInfo.hash || FRONTEND_BUILD_INFO.hash || '').trim()
   const effectiveFrontendRevision = String(frontendBuildInfo.revision || frontendRevision || '').trim()
   if (!servedFrontendRevision && !servedFrontendHash) return false
+  if (servedFrontendHash && frontendHash) {
+    return servedFrontendHash !== frontendHash
+  }
   if (!effectiveFrontendRevision || !servedFrontendRevision) return false
   if (effectiveFrontendRevision === 'dev' || servedFrontendRevision === 'dev') return false
-  if (servedFrontendHash && frontendHash && servedFrontendHash !== frontendHash) return true
   return effectiveFrontendRevision !== servedFrontendRevision
 }
 
