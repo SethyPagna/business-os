@@ -1270,6 +1270,7 @@ export default function POS() {
               label={productCountLabel}
               t={t}
               compact
+              compactPageInput
               onPageChange={setProductPage}
               onPageSizeChange={(size) => {
                 setProductPageSize(size)
