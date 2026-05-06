@@ -22,7 +22,7 @@ export default function ExportMenu({
       trigger={(
         <button
           type="button"
-          className={`inline-flex min-w-[5.75rem] items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors sm:min-w-[6.5rem] sm:text-sm ${buttonClass} ${compact ? 'px-2.5 py-1.5' : ''} ${triggerClassName}`}
+          className={`inline-flex min-w-[5.75rem] items-center justify-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors sm:min-w-[6.5rem] sm:text-sm ${buttonClass} ${compact ? 'px-2.5 py-1.5' : ''} ${triggerClassName}`}
           aria-label={label}
         >
           <Download className="h-4 w-4" />

@@ -1,7 +1,7 @@
 ﻿// ?? Inventory ????????????????????????????????????????????????????????????????
 // Main Inventory page ??sub-components imported from sibling files.
 
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
+import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -16,8 +16,8 @@ import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/Pagi
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import DualMoney from './DualMoney'
-import ProductDetailModal from './ProductDetailModal'
-import InventoryImportModal from './InventoryImportModal'
+const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
+const InventoryImportModal = lazy(() => import('./InventoryImportModal'))
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
@@ -2506,12 +2506,12 @@ export default function Inventory() {
       {showProductsSection && (
         <>
           <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
-            <div className="px-2.5 py-2">
-              <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
-                <span className="min-w-0 shrink rounded-full bg-white/85 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+            <div className="px-2 py-2">
+              <div className="grid min-w-0 grid-cols-[minmax(0,0.95fr)_minmax(0,0.95fr)_2.8rem_minmax(0,1fr)] items-center gap-1 overflow-hidden">
+                <span className="inline-flex min-w-0 max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-white/85 px-1.5 py-0.5 text-[8.5px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
                   {inventoryProductSummaryLabel}
                 </span>
-                <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                <label className="inline-flex min-w-0 shrink items-center gap-1 overflow-hidden rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[8.5px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                   <input
                     ref={inventorySelectAllRef}
                     type="checkbox"
@@ -2530,10 +2530,10 @@ export default function Inventory() {
                       : inventoryControlLabels.selectAll}
                   </span>
                 </label>
-                <label className="relative inline-flex h-6 min-w-[2.9rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+                <label className="relative inline-flex h-6 min-w-[2.8rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
                   <span className="sr-only">{t('per_page') || 'per page'}</span>
                   <select
-                    className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                    className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[8.5px] font-semibold text-blue-700 outline-none dark:text-blue-200"
                     value={inventoryProductSafePageSize}
                     onChange={(event) => {
                       setInventoryProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
@@ -2545,10 +2545,10 @@ export default function Inventory() {
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
                 </label>
-                <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+                <div className="inline-flex min-w-0 items-center justify-self-stretch overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
                   <button
                     type="button"
-                    className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                    className="inline-flex h-6 w-4.5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                     disabled={inventoryProductSafePage <= 1}
                     onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
                     aria-label="Previous page"
@@ -2559,7 +2559,7 @@ export default function Inventory() {
                     type="text"
                     inputMode="numeric"
                     aria-label={t('page') || 'Page'}
-                    className="h-6 w-5 border-0 bg-transparent px-0 text-center text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                    className="h-6 w-6 border-0 bg-transparent px-0 text-center text-[8.5px] font-semibold text-blue-700 outline-none dark:text-blue-200"
                     value={inventoryProductPageDraft}
                     onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                     onBlur={commitInventoryProductPageDraft}
@@ -2574,12 +2574,12 @@ export default function Inventory() {
                       }
                     }}
                   />
-                  <span className="pr-1 text-[9px] font-semibold text-blue-700 dark:text-blue-200">
+                  <span className="pr-1 text-[8.5px] font-semibold text-blue-700 dark:text-blue-200">
                     /{inventoryProductTotalPages}
                   </span>
                   <button
                     type="button"
-                    className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                    className="inline-flex h-6 w-4.5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                     disabled={inventoryProductSafePage >= inventoryProductTotalPages}
                     onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
                     aria-label="Next page"
@@ -2591,7 +2591,7 @@ export default function Inventory() {
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                  className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
                   disabled={!hasSelectedProducts}
                   onClick={openInventoryBatchSession}
                   title={tr(
@@ -2605,7 +2605,7 @@ export default function Inventory() {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                  className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
                   onClick={() => setReasonManager({ open: true, type: 'adjust' })}
                   title={inventoryControlLabels.reasons}
                   aria-label={inventoryControlLabels.reasons}
@@ -3970,27 +3970,31 @@ export default function Inventory() {
       ) : null}
 
       {showImport ? (
-        <InventoryImportModal
-          onClose={() => setShowImport(false)}
-          onDone={() => {
-            setShowImport(false)
-            load()
-          }}
-        />
+        <Suspense fallback={null}>
+          <InventoryImportModal
+            onClose={() => setShowImport(false)}
+            onDone={() => {
+              setShowImport(false)
+              load()
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {detailProduct && (
-        <ProductDetailModal
-          product={detailProduct}
-          onClose={() => setDetailProduct(null)}
-          onAdjust={openAdjust}
-          onTransfer={openTransfer}
-          onMoveRow={openMove}
-          fmtUSD={fmtUSD}
-          fmtKHR={fmtKHR}
-          usdSymbol={usdSymbol}
-          t={t}
-        />
+        <Suspense fallback={null}>
+          <ProductDetailModal
+            product={detailProduct}
+            onClose={() => setDetailProduct(null)}
+            onAdjust={openAdjust}
+            onTransfer={openTransfer}
+            onMoveRow={openMove}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+            usdSymbol={usdSymbol}
+            t={t}
+          />
+        </Suspense>
       )}
     </div>
   )

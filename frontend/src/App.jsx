@@ -456,12 +456,12 @@ function useChunkWarmup(user) {
       await runWarmupBatches(importers, 1)
     }
 
-    timeoutId = window.setTimeout(runWarmup, 1400)
+    timeoutId = window.setTimeout(runWarmup, 700)
 
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 3200 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: 1800 })
     } else {
-      followupId = window.setTimeout(runWarmup, 2400)
+      followupId = window.setTimeout(runWarmup, 1400)
     }
 
     return () => {

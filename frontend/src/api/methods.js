@@ -659,28 +659,59 @@ export async function getSettings(options = {}) {
     return settings
   })
 }
+let settingsSaveQueue = Promise.resolve()
+
 export async function saveSettings(updates) {
-  const payload = await withSettingsExpectedUpdatedAt(updates)
-  const attempted = Object.fromEntries(
-    Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
-  )
-  try {
-    const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
-    if (result?.updatedAt) {
-      await localSaveSettingsMeta(result.updatedAt).catch(() => {})
+  const runSave = async () => {
+    const attempted = Object.fromEntries(
+      Object.entries(updates || {}).filter(([key]) => !['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt'].includes(key)),
+    )
+    let payload = await withSettingsExpectedUpdatedAt(updates)
+    try {
+      const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
+      if (result?.updatedAt) {
+        await localSaveSettingsMeta(result.updatedAt).catch(() => {})
+      }
+      await localSaveSettings(updates).catch(() => {})
+      return result
+    } catch (error) {
+      const attemptedSettings = error?.attempted || attempted
+      const attemptedKeys = Object.keys(attemptedSettings || {})
+      if (
+        isWriteConflictError(error)
+        && error?.actualUpdatedAt
+        && attemptedKeys.length > 0
+        && attemptedKeys.length <= 2
+      ) {
+        const retryPayload = {
+          ...attemptedSettings,
+          expectedUpdatedAt: error.actualUpdatedAt,
+        }
+        try {
+          const retryResult = await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true)
+          if (retryResult?.updatedAt) {
+            await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
+          }
+          await localSaveSettings(attemptedSettings).catch(() => {})
+          return retryResult
+        } catch (retryError) {
+          error = retryError
+        }
+      }
+      error.attempted = error?.attempted || attemptedSettings
+      if (error?.actualUpdatedAt) {
+        await localSaveSettingsMeta(error.actualUpdatedAt).catch(() => {})
+      }
+      if (error?.currentSettings && typeof error.currentSettings === 'object') {
+        await localSaveSettings(error.currentSettings).catch(() => {})
+      }
+      throw error
     }
-    await localSaveSettings(updates).catch(() => {})
-    return result
-  } catch (error) {
-    error.attempted = error?.attempted || attempted
-    if (error?.actualUpdatedAt) {
-      await localSaveSettingsMeta(error.actualUpdatedAt).catch(() => {})
-    }
-    if (error?.currentSettings && typeof error.currentSettings === 'object') {
-      await localSaveSettings(error.currentSettings).catch(() => {})
-    }
-    throw error
   }
+
+  const queuedSave = settingsSaveQueue.catch(() => {}).then(runSave)
+  settingsSaveQueue = queuedSave.catch(() => {})
+  return queuedSave
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
