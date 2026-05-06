@@ -278,8 +278,11 @@ async function writeJsonLinesFileWithChecksum(filePath, rows = []) {
 }
 
 async function uploadPackageFile({ packageId, localPath, fileName, contentType }) {
-  await putObject(`backups/${packageId}/${fileName}`, fs.createReadStream(path.join(localPath, fileName)), {
+  const absolutePath = path.join(localPath, fileName)
+  const stats = await fs.promises.stat(absolutePath)
+  await putObject(`backups/${packageId}/${fileName}`, fs.createReadStream(absolutePath), {
     contentType,
+    contentLength: stats.size,
   })
 }
 
@@ -374,6 +377,7 @@ async function copyOnePackageObject({ item, packageId, localPath, signal, throwI
   const remoteStream = new PassThrough()
   const uploadPromise = putObject(`${prefix}/${relativeKey}`, remoteStream, {
     contentType: object.contentType || item.mime_type || 'application/octet-stream',
+    contentLength: Number(object.contentLength || item.byte_size || 0) || undefined,
   })
   const fanoutStream = createDualWriteStream(localStream, remoteStream)
   const abortCopy = () => {

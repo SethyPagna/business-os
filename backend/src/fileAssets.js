@@ -672,6 +672,7 @@ async function registerStoredAsset({
   if (isObjectStorageEnabled() && fs.existsSync(absPath)) {
     await putObject(`uploads/${storedName}`, fs.createReadStream(absPath), {
       contentType: mimeType || getMimeTypeFromName(storedName),
+      contentLength: stats?.size || undefined,
     })
     try { fs.unlinkSync(absPath) } catch (_) {}
   }

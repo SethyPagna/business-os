@@ -1898,86 +1898,90 @@ export default function Products() {
 
       <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
         <div className="px-2.5 py-2">
-          <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
-          <span className="min-w-0 shrink rounded-full bg-white/80 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
-            {productSummaryLabel}
-          </span>
-          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 shrink-0 rounded"
-              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
-              ref={mobileSelectAllRef}
-              onChange={(event) => toggleSelectAll(event.target.checked)}
-            />
-            <span className="truncate whitespace-nowrap sm:hidden">
-              {hasSelected
-                ? `${productSelectedCompact} ${selectedVisibleCount}`
-                : `${productSelectAllCompact} ${visibleProducts.length}`}
-            </span>
-            <span className="hidden truncate whitespace-nowrap sm:inline">
-              {hasSelected
-                ? `${selectedVisibleCount} ${t('selected') || 'selected'}`
-                : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
-            </span>
-          </label>
-          <label className="relative inline-flex h-6 min-w-[2.9rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
-            <span className="sr-only">{t('per_page') || 'per page'}</span>
-            <select
-              className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
-              value={productSafePageSize}
-              onChange={(event) => {
-                setProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
-                setProductPage(1)
-              }}
-              aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
-          </label>
-          <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
-            <button
-              type="button"
-              className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
-              disabled={productSafePage <= 1}
-              onClick={() => setProductPage(productSafePage - 1)}
-              aria-label="Previous page"
-            >
-              <ChevronLeft className="h-3 w-3" />
-            </button>
-            <input
-              type="text"
-              inputMode="numeric"
-              aria-label={t('page') || 'Page'}
-              className="h-6 w-5 border-0 bg-transparent px-0 text-center text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
-              value={productPageDraft}
-              onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-              onBlur={commitProductPageDraft}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  commitProductPageDraft()
-                  event.currentTarget.blur()
-                } else if (event.key === 'Escape') {
-                  setProductPageDraft(String(productSafePage))
-                  event.currentTarget.blur()
-                }
-              }}
-            />
-            <span className="pr-1 text-[9px] font-semibold text-blue-700 dark:text-blue-200">
-              /{productTotalPages}
-            </span>
-            <button
-              type="button"
-              className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
-              disabled={productSafePage >= productTotalPages}
-              onClick={() => setProductPage(productSafePage + 1)}
-              aria-label="Next page"
-            >
-              <ChevronRight className="h-3 w-3" />
-            </button>
-          </div>
+          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-1">
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+              <span className="min-w-0 shrink rounded-full bg-white/80 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+                {productSummaryLabel}
+              </span>
+              <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 shrink-0 rounded"
+                  checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
+                  ref={mobileSelectAllRef}
+                  onChange={(event) => toggleSelectAll(event.target.checked)}
+                />
+                <span className="truncate whitespace-nowrap sm:hidden">
+                  {hasSelected
+                    ? `${productSelectedCompact} ${selectedVisibleCount}`
+                    : `${productSelectAllCompact} ${visibleProducts.length}`}
+                </span>
+                <span className="hidden truncate whitespace-nowrap sm:inline">
+                  {hasSelected
+                    ? `${selectedVisibleCount} ${t('selected') || 'selected'}`
+                    : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
+                </span>
+              </label>
+            </div>
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap sm:ml-auto">
+              <label className="relative inline-flex h-6 min-w-[2.9rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+                <span className="sr-only">{t('per_page') || 'per page'}</span>
+                <select
+                  className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  value={productSafePageSize}
+                  onChange={(event) => {
+                    setProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
+                    setProductPage(1)
+                  }}
+                  aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
+              </label>
+              <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  disabled={productSafePage <= 1}
+                  onClick={() => setProductPage(productSafePage - 1)}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={t('page') || 'Page'}
+                  className="h-6 w-5 border-0 bg-transparent px-0 text-center text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  value={productPageDraft}
+                  onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                  onBlur={commitProductPageDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      commitProductPageDraft()
+                      event.currentTarget.blur()
+                    } else if (event.key === 'Escape') {
+                      setProductPageDraft(String(productSafePage))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+                <span className="pr-1 text-[9px] font-semibold text-blue-700 dark:text-blue-200">
+                  /{productTotalPages}
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  disabled={productSafePage >= productTotalPages}
+                  onClick={() => setProductPage(productSafePage + 1)}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div className="border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">

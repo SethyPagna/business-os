@@ -66,12 +66,17 @@ async function putObject(key, body, options = {}) {
   if (!isObjectStorageEnabled()) return false
   const { PutObjectCommand } = require('@aws-sdk/client-s3')
   await ensureBucket()
-  await getS3Client().send(new PutObjectCommand({
+  const params = {
     Bucket: S3_BUCKET,
     Key: normalizeObjectKey(key),
     Body: body,
     ContentType: options.contentType || 'application/octet-stream',
-  }))
+  }
+  const contentLength = Number(options.contentLength || 0)
+  if (Number.isFinite(contentLength) && contentLength > 0) {
+    params.ContentLength = contentLength
+  }
+  await getS3Client().send(new PutObjectCommand(params))
   return true
 }
 
