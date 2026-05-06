@@ -935,6 +935,8 @@ export default function Products() {
   const productSummaryLabel = productTotal
     ? `${productStart.toLocaleString()}-${productEnd.toLocaleString()} / ${Number(productTotal || 0).toLocaleString()}`
     : '0 / 0'
+  const productSelectAllCompact = tr('products_select_all_compact', 'All', 'ទាំង')
+  const productSelectedCompact = tr('products_selected_compact', 'Sel', 'ជ្រើស')
   const productChipLabels = useMemo(() => ({
     info: tr('basic_info_short', 'Info', 'ទូទៅ'),
     pricing: tr('pricing_short', 'Price', 'តម្លៃ'),
@@ -1900,7 +1902,7 @@ export default function Products() {
           <span className="min-w-0 shrink rounded-full bg-white/80 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
             {productSummaryLabel}
           </span>
-          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
             <input
               type="checkbox"
               className="h-3.5 w-3.5 shrink-0 rounded"
@@ -1909,7 +1911,9 @@ export default function Products() {
               onChange={(event) => toggleSelectAll(event.target.checked)}
             />
             <span className="truncate whitespace-nowrap sm:hidden">
-              {hasSelected ? selectedVisibleCount : visibleProducts.length}
+              {hasSelected
+                ? `${productSelectedCompact} ${selectedVisibleCount}`
+                : `${productSelectAllCompact} ${visibleProducts.length}`}
             </span>
             <span className="hidden truncate whitespace-nowrap sm:inline">
               {hasSelected
@@ -1917,16 +1921,22 @@ export default function Products() {
                 : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
             </span>
           </label>
-          <button
-            type="button"
-            className="inline-flex h-6 min-w-[2rem] shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white/90 px-1 text-[9px] font-semibold text-blue-700 transition hover:border-blue-300 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200 dark:hover:border-blue-700"
-            onClick={cycleProductPageSize}
-            title={`${t('per_page') || 'per page'}: ${productSafePageSize}`}
-            aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
-          >
-            {productSafePageSize}
-          </button>
-          <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+          <label className="relative inline-flex h-6 min-w-[2.9rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+            <span className="sr-only">{t('per_page') || 'per page'}</span>
+            <select
+              className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+              value={productSafePageSize}
+              onChange={(event) => {
+                setProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
+                setProductPage(1)
+              }}
+              aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
+          </label>
+          <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
             <button
               type="button"
               className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
@@ -1981,12 +1991,12 @@ export default function Products() {
               <button key={opt.id}
                 disabled={bulkActionBusy || !hasSelected}
                 onClick={() => { setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({}) }}
-                className={`inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
+                className={`inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
                 {opt.label}
               </button>
             ))}
-            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkOutOfStock} className="btn-secondary inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.out}</button>
-            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="btn-danger inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.delete}</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkOutOfStock} className="inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-900 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900">{productChipLabels.out}</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-xl border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20">{productChipLabels.delete}</button>
           </div>
         </div>
 

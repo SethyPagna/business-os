@@ -1154,6 +1154,8 @@ export default function Inventory() {
   const inventoryControlLabels = useMemo(() => ({
     selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} បានជ្រើស`),
     selectAll: `${t('select_all') || 'Select all'} (${filteredSummary.length})`,
+    selectAllCompact: tr('inventory_select_all_compact', 'All', 'ទាំង'),
+    selectedCompact: tr('inventory_selected_compact', 'Sel', 'ជ្រើស'),
     batch: tr('inventory_batch_session', 'Batch', 'សម័យបាច់'),
     reasons: tr('saved_reasons', 'Reasons', 'មូលហេតុ'),
   }), [filteredSummary.length, selectedProducts.length, t, tr])
@@ -2505,11 +2507,11 @@ export default function Inventory() {
         <>
           <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
             <div className="px-2.5 py-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
                 <span className="min-w-0 shrink rounded-full bg-white/85 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
                   {inventoryProductSummaryLabel}
                 </span>
-                <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/85 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                   <input
                     ref={inventorySelectAllRef}
                     type="checkbox"
@@ -2518,7 +2520,9 @@ export default function Inventory() {
                     onChange={(event) => toggleSelectAllProducts(event.target.checked)}
                   />
                   <span className="truncate whitespace-nowrap sm:hidden">
-                    {hasSelectedProducts ? selectedProducts.length : filteredSummary.length}
+                    {hasSelectedProducts
+                      ? `${inventoryControlLabels.selectedCompact} ${selectedProducts.length}`
+                      : `${inventoryControlLabels.selectAllCompact} ${filteredSummary.length}`}
                   </span>
                   <span className="hidden truncate whitespace-nowrap sm:inline">
                     {hasSelectedProducts
@@ -2526,16 +2530,22 @@ export default function Inventory() {
                       : inventoryControlLabels.selectAll}
                   </span>
                 </label>
-                <button
-                  type="button"
-                  className="inline-flex h-6 min-w-[2rem] shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white/85 px-1 text-[9px] font-semibold text-blue-700 transition hover:border-blue-300 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200 dark:hover:border-blue-700"
-                  onClick={cycleInventoryProductPageSize}
-                  title={`${t('per_page') || 'per page'}: ${inventoryProductSafePageSize}`}
-                  aria-label={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
-                >
-                  {inventoryProductSafePageSize}
-                </button>
-                <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-full border border-blue-200 bg-white/85 dark:border-blue-800 dark:bg-blue-950/50">
+                <label className="relative inline-flex h-6 min-w-[2.9rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+                  <span className="sr-only">{t('per_page') || 'per page'}</span>
+                  <select
+                    className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                    value={inventoryProductSafePageSize}
+                    onChange={(event) => {
+                      setInventoryProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
+                      setInventoryProductPage(1)
+                    }}
+                    aria-label={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
+                </label>
+                <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
                   <button
                     type="button"
                     className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
@@ -2581,7 +2591,7 @@ export default function Inventory() {
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white px-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
                   disabled={!hasSelectedProducts}
                   onClick={openInventoryBatchSession}
                   title={tr(
@@ -2595,7 +2605,7 @@ export default function Inventory() {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-6 shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white px-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-400 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
                   onClick={() => setReasonManager({ open: true, type: 'adjust' })}
                   title={inventoryControlLabels.reasons}
                   aria-label={inventoryControlLabels.reasons}

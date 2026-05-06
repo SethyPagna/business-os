@@ -609,7 +609,7 @@ export default function FilesPage() {
     <button
       type="button"
       onClick={() => setActiveTab(id)}
-      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition sm:text-sm ${activeTab === id ? 'bg-slate-950 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-semibold transition sm:text-sm ${activeTab === id ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
     >
       <Icon className="h-4 w-4" />
       <span className="truncate">{compactTabLabel(label)}</span>
@@ -624,7 +624,7 @@ export default function FilesPage() {
         title={tr('library', 'Library')}
         subtitle={tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.', 'គ្រប់គ្រងឯកសារ AI providers និងចម្លើយ AI ដែលបានរក្សាទុក នៅកន្លែងតែមួយ។')}
         actions={(
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="inline-flex min-w-0 items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
           {tabButton('providers', tr('library_ai_providers', 'AI Providers', 'AI Providers'), KeyRound)}
           {tabButton('responses', tr('library_ai_responses', 'AI Responses', 'ចម្លើយ AI'), History)}

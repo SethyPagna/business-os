@@ -589,17 +589,17 @@ export default function AuditLog() {
           {t('audit_log') || 'Audit Log'}
         </h1>
         <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
-          <button onClick={load} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
+          <button onClick={load} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
             <RefreshCw className="h-4 w-4" />
             {copy('refresh', 'Refresh')}
           </button>
           {isAdmin ? (
-            <button onClick={clearOldAuditLogs} className="btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
+            <button onClick={clearOldAuditLogs} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
               <X className="h-4 w-4" />
               {copy('clear_30_days', 'Clear 30d')}
             </button>
           ) : null}
-          <ExportMenu label={copy('export', 'Export')} items={exportItems} compact />
+          <ExportMenu label={copy('export', 'Export')} items={exportItems} compact triggerClassName="min-w-[6.5rem]" />
         </div>
       </div>
 

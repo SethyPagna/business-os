@@ -799,7 +799,7 @@ export default function Settings() {
 
       <SectionSwitcher
         className="mx-auto mb-4 max-w-[96rem]"
-        label="Settings"
+        label=""
         options={SETTINGS_SECTION_OPTIONS}
         value={settingsSection}
         onChange={setSettingsSection}
