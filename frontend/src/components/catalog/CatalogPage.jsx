@@ -4798,13 +4798,13 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                 </button>
               </div>
             ) : null}
-            <section className="sticky top-2 z-30 overflow-hidden rounded-[30px] border border-slate-200 bg-white/92 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+            <section className="sticky top-2 z-30 overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_14px_36px_rgba(148,163,184,0.16)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88">
               <div className="px-4 py-4 sm:px-6">
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div
-                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm dark:bg-slate-950"
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-[0_8px_20px_rgba(148,163,184,0.18)] dark:bg-slate-100"
                       >
                         {versionedBusinessLogo ? (
                           <button
@@ -4862,7 +4862,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                           trigger={(
                             <button
                               type="button"
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                               aria-label={copy('publicTranslation', 'Language tools')}
                               title={copy('publicTranslation', 'Language tools')}
                             >
@@ -4924,7 +4924,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                       ) : null}
                       <button
                         type="button"
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                         onClick={toggleTheme}
                         aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                         title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
@@ -4935,7 +4935,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                   </div>
 
                   <div className="overflow-x-auto">
-                    <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] bg-slate-100/90 p-1 dark:bg-slate-800/90">
+                    <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
                       {portalTabs.map((item) => {
                         const Icon = item.icon
                         return (
@@ -4944,8 +4944,8 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                             type="button"
                             className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
                               activeTab === item.key
-                                ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-white dark:ring-slate-700'
-                                : 'text-slate-600 hover:bg-white/80 dark:text-slate-300 dark:hover:bg-slate-900/70'
+                                ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-100 dark:text-slate-950 dark:ring-slate-600'
+                                : 'text-slate-600 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-700/80'
                             }`}
                             onClick={() => setActiveTab(item.key)}
                           >

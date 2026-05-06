@@ -406,7 +406,7 @@ function CatalogAboutSection(props) {
 
   return (
     <section className="space-y-4">
-      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+      <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-slate-700/80 dark:bg-slate-900/88">
         <div
           className="relative overflow-hidden text-white"
           style={{
@@ -416,11 +416,11 @@ function CatalogAboutSection(props) {
             backgroundPosition: 'center',
           }}
         >
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.22),rgba(15,23,42,0.62))]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.12),rgba(15,23,42,0.38))] dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.12),rgba(15,23,42,0.5))]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.24),_transparent_36%)]" />
           <div className="relative z-10 grid gap-6 px-6 py-8 sm:px-8 sm:py-10 xl:grid-cols-[1.08fr,0.92fr] xl:items-end">
             <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/85 backdrop-blur">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/14 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/90 backdrop-blur">
                 <Store className="h-3.5 w-3.5" />
                 {aboutTitle}
               </div>
@@ -431,7 +431,7 @@ function CatalogAboutSection(props) {
               ) : null}
               <div className="mt-4 flex items-center gap-4">
                 <div
-                  className="flex items-center justify-center overflow-hidden rounded-full bg-white/95 shadow-lg shadow-slate-950/15"
+                  className="flex items-center justify-center overflow-hidden rounded-full bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)]"
                   style={{
                     height: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
                     width: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
@@ -463,17 +463,17 @@ function CatalogAboutSection(props) {
                   <h2 className="notranslate text-3xl font-semibold tracking-tight text-white sm:text-4xl" translate="no">
                     {heroTitle}
                   </h2>
-                  {previewConfig.businessTagline ? <div className="notranslate mt-2 text-sm text-white/80 sm:text-base" translate="no">{previewConfig.businessTagline}</div> : null}
+                  {previewConfig.businessTagline ? <div className="notranslate mt-2 text-sm text-white/90 sm:text-base" translate="no">{previewConfig.businessTagline}</div> : null}
                 </div>
               </div>
-              <p className="notranslate mt-5 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base" translate="no">
+              <p className="notranslate mt-5 max-w-2xl text-sm leading-7 text-white sm:text-base" translate="no">
                 {introText}
               </p>
             </div>
 
             <div className="grid gap-4 xl:pl-6">
               {businessFacts?.length ? (
-                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 shadow-lg shadow-slate-950/10 backdrop-blur">
+                <div className="rounded-[28px] border border-white/22 bg-white/14 p-4 shadow-lg shadow-slate-950/10 backdrop-blur">
                   <div className="grid gap-3 sm:grid-cols-2">
                     {businessFacts.map((item) => {
                       const Icon = item.icon || (item.key === 'phone'
@@ -482,8 +482,8 @@ function CatalogAboutSection(props) {
                           ? Mail
                           : MapPin)
                       const body = (
-                        <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white/95 transition hover:bg-white/15">
-                          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/65">
+                        <div className="rounded-2xl border border-white/18 bg-white/14 px-4 py-3 text-white transition hover:bg-white/18">
+                          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75">
                             <Icon className="h-3.5 w-3.5" />
                             {item.label}
                           </div>
@@ -496,7 +496,7 @@ function CatalogAboutSection(props) {
                 </div>
               ) : null}
               {socialLinks?.length ? (
-                <div className="flex flex-wrap gap-2 rounded-[24px] border border-white/15 bg-white/10 p-3 shadow-lg shadow-slate-950/10 backdrop-blur">
+                <div className="flex flex-wrap gap-2 rounded-[24px] border border-white/22 bg-white/14 p-3 shadow-lg shadow-slate-950/10 backdrop-blur">
                   {socialLinks.map((item) => {
                     const Icon = item.key === 'facebook'
                       ? Facebook
@@ -511,7 +511,7 @@ function CatalogAboutSection(props) {
                         href={item.value}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/85 px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-white"
+                        className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
                       >
                         <Icon className="h-4 w-4" />
                         {item.label}

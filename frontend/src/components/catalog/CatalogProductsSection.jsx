@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Tag, Trophy } from 'lucide-react'
+import { ArrowRight, BadgeCheck, BadgePercent, Flame, Medal, Search, ShoppingBag, Sparkles, Trophy } from 'lucide-react'
 import { ProductImg } from '../products/primitives'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { SectionShell, StatusPill } from './catalogUi'
@@ -116,13 +116,6 @@ export default function CatalogProductsSection(props) {
     [letterFilteredProducts, page, pageSize, serverPaged],
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
-  const quickSearchTags = useMemo(() => {
-    const pool = [
-      ...(categories || []).slice(0, 4).map((item) => String(item?.name || '').trim()),
-      ...(brands || []).slice(0, 3).map((item) => String(item || '').trim()),
-    ]
-    return [...new Set(pool.filter(Boolean))].slice(0, 6)
-  }, [brands, categories])
   const visiblePromotionItems = useMemo(
     () => Array.isArray(promotionItems)
       ? promotionItems.filter((item) => item?.title || item?.subtitle || item?.body || item?.mediaUrl)
@@ -170,21 +163,6 @@ export default function CatalogProductsSection(props) {
             ) : null}
           </div>
           </div>
-          {quickSearchTags.length ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {quickSearchTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                  onClick={() => setSearch(tag)}
-                >
-                  <Tag className="h-3.5 w-3.5" />
-                  {tag}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
 
         {filtersOpen ? (
