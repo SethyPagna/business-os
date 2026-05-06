@@ -1151,6 +1151,9 @@ export default function Inventory() {
   const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds', 'ចំណូលដែលបង្ហាញ គឺជាចំណូលសុទ្ធ បន្ទាប់ពីបញ្ចុះតម្លៃ និងការសងប្រាក់ត្រឡប់។')
   const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS មិនរាប់បញ្ចូលបរិមាណដែលត្រូវបានស្តារវិញពីការត្រឡប់ដែលបានដាក់ចូលស្តុកឡើងវិញទេ។')
   const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS', 'ប្រាក់ចំណេញ = ចំណូល - COGS')
+  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.', 'សរុបការបញ្ចុះតម្លៃបង្ហាញការកាត់បន្ថយដែលចេញដោយហាង និងសមាជិកភាព ដែលត្រូវបានបែងចែកទៅផលិតផលដែលបានលក់។')
+  const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.', 'ថ្លៃដែលបានប្រមូល រួមបញ្ចូលពន្ធលើការលក់ និងថ្លៃដឹកជញ្ជូនពីការលក់ដែលបានបញ្ចប់។')
+  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', 'ការប្រគល់មកវិញ រួមបញ្ចូលការសងប្រាក់ជូនអតិថិជន និងករណីប្រគល់ទៅអ្នកផ្គត់ផ្គង់ ដើម្បីពិនិត្យផ្លូវស្ដារវិញទាំងអស់ក្នុងកន្លែងតែមួយ។')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const primaryStats = [
     {
@@ -1191,19 +1194,6 @@ export default function Inventory() {
       ],
     },
     {
-      id: 'revenue',
-      label: t('revenue'),
-      value: fmtUSD(totalRevenue),
-      cls: 'text-green-700 dark:text-green-300',
-      sub: t('after_refunds'),
-      details: [
-        { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
-        { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-        { label: t('tax_collected') || 'Tax', value: fmtUSD(taxDelivery.tax || 0) },
-        { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
-      ],
-    },
-    {
       id: 'cogs',
       label: t('cogs'),
       value: fmtUSD(totalCOGS),
@@ -1217,104 +1207,96 @@ export default function Inventory() {
       ],
     },
     {
-      id: 'profit',
-      label: t('gross_profit'),
-      value: fmtUSD(totalProfit),
+      id: 'revenue-profit',
+      label: tr('revenue_profit', 'Revenue & Profit', 'ចំណូល និងចំណេញ'),
+      value: fmtUSD(totalRevenue),
       cls: totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
-      details: [
-        { label: t('gross_profit') || 'Gross profit', value: fmtUSD(totalProfit) },
-        { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
-        { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
-        { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
+      sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}`,
+      detailSections: [
+        {
+          title: t('revenue') || 'Revenue',
+          rows: [
+            { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
+            { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
+            { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
+          ],
+        },
+        {
+          title: t('gross_profit') || 'Gross profit',
+          rows: [
+            { label: t('gross_profit') || 'Gross profit', value: fmtUSD(totalProfit) },
+            { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
+            { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
+          ],
+        },
       ],
     },
   ]
   const financeStats = [
     {
-      id: 'store-discounts',
-      label: t('store_discounts') || 'Store discounts',
-      value: fmtUSD(totalStoreDiscounts),
+      id: 'discounts',
+      label: tr('discounts_combined', 'Discounts', 'ការបញ្ចុះតម្លៃ'),
+      value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts),
       cls: 'text-amber-600 dark:text-amber-400',
       border: 'border-amber-400',
       sub: t('allocated_to_products') || 'Allocated to sold products',
-      details: [
-        { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
-        { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
+      detailSections: [
+        {
+          title: tr('discount_breakdown', 'Discount breakdown', 'ការបំបែកការបញ្ចុះតម្លៃ'),
+          rows: [
+            { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
+            { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
+            { label: tr('discounts_total', 'Total discounts', 'សរុបការបញ្ចុះតម្លៃ'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
+            { label: t('formula') || 'Formula', value: inventoryDiscountFormulaText },
+          ],
+        },
       ],
     },
     {
-      id: 'membership-discounts',
-      label: t('membership_discounts') || 'Membership discounts',
-      value: fmtUSD(totalMembershipDiscounts),
-      cls: 'text-emerald-600 dark:text-emerald-400',
-      border: 'border-emerald-400',
-      sub: t('allocated_to_products') || 'Allocated to sold products',
-      details: [
-        { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
-        { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
-      ],
-    },
-    {
-      id: 'refund',
-      label: t('total_refunded') || 'Refunded',
-      value: fmtUSD(returnStats?.refund_usd || 0),
-      cls: 'text-rose-600 dark:text-rose-400',
-      border: 'border-rose-400',
-      sub: `${returnStats?.items || 0} ${t('items') || 'items'}`,
-      details: [
-        { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-        { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
-        { label: t('restocked_to_inventory') || 'Restocked', value: returnStats?.restock ?? 0 },
-      ],
-    },
-    {
-      id: 'tax',
-      label: t('tax_collected') || 'Tax collected',
-      value: fmtUSD(taxDelivery.tax || 0),
+      id: 'fees',
+      label: tr('fees_collected', 'Fees collected', 'ថ្លៃដែលបានប្រមូល'),
+      value: fmtUSD((taxDelivery.tax || 0) + (taxDelivery.delivery || 0)),
       cls: 'text-indigo-600 dark:text-indigo-400',
       border: 'border-indigo-400',
-      sub: t('completed_sales_only') || 'Completed sales only',
-      details: [
-        { label: t('tax_collected') || 'Tax collected', value: fmtUSD(taxDelivery.tax || 0) },
-        { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
-      ],
-    },
-    {
-      id: 'delivery',
-      label: t('delivery_fees') || 'Delivery fees',
-      value: fmtUSD(taxDelivery.delivery || 0),
-      cls: 'text-sky-600 dark:text-sky-400',
-      border: 'border-sky-400',
-      sub: `${taxDelivery.deliveryCount || 0} ${t('transactions') || 'transactions'}`,
-      details: [
-        { label: t('delivery_fees') || 'Delivery fees', value: fmtUSD(taxDelivery.delivery || 0) },
-        { label: t('transactions') || 'Transactions', value: taxDelivery.deliveryCount || 0 },
+      sub: `${t('tax_collected') || 'Tax'} + ${t('delivery_fees') || 'Delivery'}`,
+      detailSections: [
+        {
+          title: tr('fees_breakdown', 'Fee breakdown', 'ការបំបែកថ្លៃសេវា'),
+          rows: [
+            { label: t('tax_collected') || 'Tax collected', value: fmtUSD(taxDelivery.tax || 0) },
+            { label: t('delivery_fees') || 'Delivery fees', value: fmtUSD(taxDelivery.delivery || 0) },
+            { label: t('transactions') || 'Transactions', value: taxDelivery.deliveryCount || 0 },
+            { label: t('formula') || 'Formula', value: inventoryFeesFormulaText },
+          ],
+        },
       ],
     },
     {
       id: 'returns',
-      label: t('returns_count') || 'Returns',
-      value: returnStats?.count ?? 0,
+      label: tr('returns_combined', 'Returns', 'ការប្រគល់មកវិញ'),
+      value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
-      sub: `${returnStats?.restock ?? 0} ${t('restocked_to_inventory') || 'restocked'}`,
-      details: [
-        { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
-        { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-        { label: t('items') || 'Items', value: returnStats?.items ?? 0 },
-      ],
-    },
-    {
-      id: 'supplier-returns',
-      label: t('supplier_returns') || 'Supplier returns',
-      value: returnStats?.supplier_count ?? 0,
-      cls: 'text-emerald-600 dark:text-emerald-400',
-      border: 'border-emerald-400',
-      sub: `${t('supplier_compensation') || 'Compensation'} ${fmtUSD(returnStats?.supplier_compensation_usd || 0)}`,
-      details: [
-        { label: t('supplier_returns') || 'Supplier returns', value: returnStats?.supplier_count ?? 0 },
-        { label: t('supplier_compensation') || 'Compensation', value: fmtUSD(returnStats?.supplier_compensation_usd || 0) },
-        { label: t('business_loss') || 'Business loss', value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
+      sub: `${returnStats?.count ?? 0} ${t('customer_returns') || 'customer'} • ${returnStats?.supplier_count ?? 0} ${t('supplier_returns') || 'supplier'}`,
+      detailSections: [
+        {
+          title: t('returns_count') || 'Customer returns',
+          rows: [
+            { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
+            { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
+            { label: t('items') || 'Items', value: returnStats?.items ?? 0 },
+            { label: t('restocked_to_inventory') || 'Restocked', value: returnStats?.restock ?? 0 },
+          ],
+        },
+        {
+          title: t('supplier_returns') || 'Supplier returns',
+          rows: [
+            { label: t('supplier_returns') || 'Supplier returns', value: returnStats?.supplier_count ?? 0 },
+            { label: t('supplier_compensation') || 'Compensation', value: fmtUSD(returnStats?.supplier_compensation_usd || 0) },
+            { label: t('business_loss') || 'Business loss', value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
+            { label: t('formula') || 'Formula', value: inventoryReturnsFormulaText },
+          ],
+        },
       ],
     },
   ]
@@ -2249,7 +2231,7 @@ export default function Inventory() {
       <>
       {/* ?? Primary Stats bar ?? */}
       <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-2">
         {primaryStats.map((stat) => (
           <button
             key={stat.id}
@@ -2264,7 +2246,7 @@ export default function Inventory() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
         {financeStats.map((stat) => (
           <button
             key={stat.id}
@@ -3363,6 +3345,20 @@ export default function Inventory() {
               </button>
             </div>
             <div className="modal-scroll p-4 space-y-2">
+              {Array.isArray(statDetail.detailSections) && statDetail.detailSections.length ? statDetail.detailSections.map((section, sectionIndex) => (
+                <div key={`${statDetail.id}-section-${sectionIndex}`} className="space-y-2 rounded-2xl border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{section.title}</div>
+                    {section.subtitle ? <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{section.subtitle}</div> : null}
+                  </div>
+                  {Array.isArray(section.rows) ? section.rows.map((row, rowIndex) => (
+                    <div key={`${statDetail.id}-${sectionIndex}-${rowIndex}`} className="rounded-xl border border-gray-100 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-950/40">
+                      <div className="text-[11px] uppercase tracking-wide text-gray-400">{row.label}</div>
+                      <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{row.value}</div>
+                    </div>
+                  )) : null}
+                </div>
+              )) : null}
               {Array.isArray(statDetail.details) && statDetail.details.length ? statDetail.details.map((row, index) => (
                 <div key={`${statDetail.id}-${index}`} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
                   <div className="text-[11px] uppercase tracking-wide text-gray-400">{row.label}</div>
