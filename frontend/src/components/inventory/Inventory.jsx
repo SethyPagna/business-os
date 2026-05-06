@@ -2473,7 +2473,7 @@ export default function Inventory() {
       {showInventorySections && !showProductsSection ? (
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
-          ? `${filteredSummary.length} of ${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
+          ? `${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
           : tab === 'rfid'
             ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
             : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${visibleMovementRecordCount} records - ${visibleMovementQuantity} quantity - ${t('tap_for_details')||'click a row for details'}`}
@@ -2486,18 +2486,14 @@ export default function Inventory() {
       {showProductsSection && (
         <>
           <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
-            <div className="flex items-center gap-2 px-3 py-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
-                  {t('products') || 'Products'}
-                </span>
-                <span className="min-w-0 truncate whitespace-nowrap text-[11px] font-medium text-blue-700/90 dark:text-blue-200/80">
-                  {inventoryProductSummaryLabel}
-                </span>
-              </div>
-            </div>
-            <div className="overflow-x-auto border-t border-blue-200/70 px-3 py-2 dark:border-blue-900/60">
-              <div className="flex min-w-max items-center gap-1.5">
+            <div className="overflow-x-auto px-3 py-2">
+              <div className="flex min-w-max items-center gap-1.5 whitespace-nowrap">
+              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
+                {t('products') || 'Products'}
+              </span>
+              <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+                {inventoryProductSummaryLabel}
+              </span>
               <label className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-blue-200 bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                 <input
                   ref={inventorySelectAllRef}
