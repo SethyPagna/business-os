@@ -1866,30 +1866,6 @@ export default function Products() {
 
       <ActionHistoryBar history={actionHistory} className="mb-3" />
 
-      {initialOptions.length ? (
-        <div className="mb-3 flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/85 p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900/75">
-          <button
-            type="button"
-            className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-            onClick={() => setInitialFilter('all')}
-          >
-            {t('all') || 'All'}
-          </button>
-          {initialOptions.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`min-h-8 shrink-0 rounded-lg px-2 font-semibold ${initialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-              onClick={() => setInitialFilter(initialFilter === item.key ? 'all' : item.key)}
-              title={`${item.label} (${item.count})`}
-            >
-              <span>{item.label}</span>
-              <span className="ml-1 text-[10px] opacity-65">{item.count}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       {refreshingProducts && !loading ? (
         <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
           {tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...')}
@@ -1898,13 +1874,13 @@ export default function Products() {
 
       <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
         <div className="px-2 py-2">
-          <div className="grid min-w-0 grid-cols-[minmax(0,0.95fr)_minmax(0,0.95fr)_2.8rem_minmax(0,1fr)] items-center gap-1 overflow-hidden sm:flex sm:flex-wrap sm:items-center sm:gap-1.5">
-            <div className="min-w-0 overflow-hidden">
-              <span className="inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-full bg-white/80 px-1.5 py-0.5 text-[8.5px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+            <div className="min-w-0 flex-[0.9] overflow-hidden">
+              <span className="inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-full bg-white/80 px-1.5 py-0.5 text-[8px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
                 {productSummaryLabel}
               </span>
             </div>
-            <label className="inline-flex min-w-0 shrink items-center gap-1 overflow-hidden rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[8.5px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+            <label className="inline-flex min-w-0 shrink items-center gap-1 overflow-hidden rounded-lg border border-blue-200 bg-white/90 px-1 py-0.5 text-[8px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 shrink-0 rounded"
@@ -1923,10 +1899,10 @@ export default function Products() {
                     : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
                 </span>
             </label>
-            <label className="relative inline-flex h-6 min-w-[2.8rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+            <label className="relative inline-flex h-6 w-[2.75rem] shrink-0 items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
                 <span className="sr-only">{t('per_page') || 'per page'}</span>
                 <select
-                  className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[8.5px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  className="h-full w-full appearance-none bg-transparent pl-1 pr-4 text-[8px] font-semibold text-blue-700 outline-none dark:text-blue-200"
                   value={productSafePageSize}
                   onChange={(event) => {
                     setProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
@@ -1938,10 +1914,10 @@ export default function Products() {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-blue-600 dark:text-blue-200" />
             </label>
-            <div className="inline-flex min-w-0 items-center justify-self-stretch overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50 sm:ml-auto sm:justify-self-auto">
+            <div className="inline-flex min-w-0 flex-[0.92] items-center overflow-hidden rounded-lg border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
                 <button
                   type="button"
-                  className="inline-flex h-6 w-4.5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  className="inline-flex h-6 w-4 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                   disabled={productSafePage <= 1}
                   onClick={() => setProductPage(productSafePage - 1)}
                   aria-label="Previous page"
@@ -1952,7 +1928,7 @@ export default function Products() {
                   type="text"
                   inputMode="numeric"
                   aria-label={t('page') || 'Page'}
-                  className="h-6 w-6 border-0 bg-transparent px-0 text-center text-[8.5px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+                  className="h-6 w-5 border-0 bg-transparent px-0 text-center text-[8px] font-semibold text-blue-700 outline-none dark:text-blue-200"
                   value={productPageDraft}
                   onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                   onBlur={commitProductPageDraft}
@@ -1967,12 +1943,12 @@ export default function Products() {
                     }
                   }}
                 />
-                <span className="pr-1 text-[8.5px] font-semibold text-blue-700 dark:text-blue-200">
+                <span className="pr-1 text-[8px] font-semibold text-blue-700 dark:text-blue-200">
                   /{productTotalPages}
                 </span>
                 <button
                   type="button"
-                  className="inline-flex h-6 w-4.5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                  className="inline-flex h-6 w-4 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
                   disabled={productSafePage >= productTotalPages}
                   onClick={() => setProductPage(productSafePage + 1)}
                   aria-label="Next page"
@@ -2001,6 +1977,31 @@ export default function Products() {
             <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="inline-flex min-w-[4.75rem] items-center justify-center whitespace-nowrap rounded-xl border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20">{productChipLabels.delete}</button>
           </div>
         </div>
+        {initialOptions.length ? (
+          <div className="border-t border-blue-100/80 px-2 py-2 dark:border-blue-900/40">
+            <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/85 p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900/75">
+              <button
+                type="button"
+                className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                onClick={() => setInitialFilter('all')}
+              >
+                {t('all') || 'All'}
+              </button>
+              {initialOptions.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`min-h-8 shrink-0 rounded-lg px-2 font-semibold ${initialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                  onClick={() => setInitialFilter(initialFilter === item.key ? 'all' : item.key)}
+                  title={`${item.label} (${item.count})`}
+                >
+                  <span>{item.label}</span>
+                  <span className="ml-1 text-[10px] opacity-65">{item.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* Expanded edit panel */}
         {bulkEditMode === 'info' && (
