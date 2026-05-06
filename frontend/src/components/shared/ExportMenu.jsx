@@ -6,6 +6,8 @@ export default function ExportMenu({
   items = [],
   compact = false,
   primary = false,
+  triggerClassName = '',
+  triggerWrapperClassName = '',
 }) {
   const buttonClass = primary
     ? 'border-blue-700 bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:border-blue-800'
@@ -16,10 +18,11 @@ export default function ExportMenu({
       align="right"
       items={items}
       menuClassName="min-w-[14rem]"
+      triggerWrapperClassName={triggerWrapperClassName}
       trigger={(
         <button
           type="button"
-          className={`inline-flex min-w-[5.75rem] items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors sm:min-w-[6.5rem] sm:text-sm ${buttonClass} ${compact ? 'px-2.5 py-1.5' : ''}`}
+          className={`inline-flex min-w-[5.75rem] items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors sm:min-w-[6.5rem] sm:text-sm ${buttonClass} ${compact ? 'px-2.5 py-1.5' : ''} ${triggerClassName}`}
           aria-label={label}
         >
           <Download className="h-4 w-4" />

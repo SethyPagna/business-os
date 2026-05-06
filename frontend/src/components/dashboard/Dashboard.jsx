@@ -38,7 +38,7 @@ function readDashboardFilterPrefs(storageKeys) {
       const parsed = JSON.parse(raw)
       if (!parsed || typeof parsed !== 'object') continue
       return {
-        rangeId: typeof parsed.rangeId === 'string' ? parsed.rangeId : '30d',
+        rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'month',
         customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
         customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
         granularity: ['day', 'week', 'month'].includes(parsed.granularity) ? parsed.granularity : 'day',
@@ -59,6 +59,18 @@ function downsampleChartRows(rows = [], limit = DASHBOARD_CHART_POINT_LIMIT) {
     if (index === 0 || index === list.length - 1 || index % step === 0) sampled.push(list[index])
   }
   return sampled
+}
+
+function normalizeDashboardRangeId(rangeId) {
+  if (rangeId === '30d') return 'month'
+  if (rangeId === '90d') return 'year'
+  return rangeId
+}
+
+function compactDashboardMetaParts(parts = []) {
+  return parts
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter((part) => part && part !== '—' && part !== '-')
 }
 
 export default function Dashboard() {
@@ -89,8 +101,6 @@ export default function Dashboard() {
   const RANGE_PRESETS = [
     { id: 'today',  label: t('range_today'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
     { id: '7d',     label: t('range_7d'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
-    { id: '30d',    label: t('range_30d'),          getRange: () => ({ start: offsetDate(-29), end: todayStr(), gran: 'day' }) },
-    { id: '90d',    label: t('range_90d'),          getRange: () => ({ start: offsetDate(-89), end: todayStr(), gran: 'week' }) },
     { id: 'month',  label: t('range_this_month'),  getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' } } },
     { id: 'year',   label: t('range_this_year'),   getRange: () => ({ start: `${new Date().getFullYear()}-01-01`, end: todayStr(), gran: 'month' }) },
     { id: 'custom', label: t('range_custom'),      getRange: null },
@@ -101,7 +111,7 @@ export default function Dashboard() {
   const [loading, setLoading]     = useState(true)
   const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
-  const [rangeId, setRangeId]     = useState(() => initialFilterPrefs?.rangeId || '30d')
+  const [rangeId, setRangeId]     = useState(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
   const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
   const [granularity, setGranularity] = useState(() => initialFilterPrefs?.granularity || 'day')
@@ -186,7 +196,7 @@ export default function Dashboard() {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    setRangeId(nextPrefs?.rangeId || '30d')
+    setRangeId(normalizeDashboardRangeId(nextPrefs?.rangeId || 'month'))
     setCustomStart(nextPrefs?.customStart || offsetDate(-29))
     setCustomEnd(nextPrefs?.customEnd || todayStr())
     setGranularity(nextPrefs?.granularity || 'day')
@@ -300,7 +310,7 @@ export default function Dashboard() {
   })()
 
   const periodShort = (() => {
-    const map = { today: t('range_today'), '7d': t('range_7d'), '30d': t('range_30d'), '90d': t('range_90d'), month: t('range_this_month'), year: t('range_this_year') }
+    const map = { today: t('range_today'), '7d': t('range_7d'), month: t('range_this_month'), year: t('range_this_year'), custom: t('range_custom') }
     return map[rangeId] || `${customStart} - ${customEnd}`
   })()
 
@@ -873,12 +883,12 @@ export default function Dashboard() {
                 loadAnalytics(),
               ])
             }}
-            className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
+            className="btn-secondary inline-flex min-w-[6.25rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
           >
             <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
             {refreshLabel}
           </button>
-          <ExportMenu label={exportLabel} items={dashboardExportItems} compact />
+          <ExportMenu label={exportLabel} items={dashboardExportItems} compact triggerClassName="min-w-[6.25rem] sm:min-w-[6.5rem]" />
         </div>
       </div>
 
@@ -1329,10 +1339,10 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Recent Activity */}
+        {/* Sales */}
         <div className="card">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700">
-            <h2 className="font-semibold text-gray-900 dark:text-white">{t('recent_activity')}</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {!summary?.recent_sales?.length
@@ -1341,7 +1351,9 @@ export default function Dashboard() {
                 <div key={s.id} className="flex items-center justify-between px-3 sm:px-4 py-2.5 gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{s.receipt_number}</p>
-                    <p className="text-xs text-gray-400 truncate">{fmtTime(s.created_at)}{s.branch_name ? ` - ${s.branch_name}` : ''}{s.customer_name ? ` - ${s.customer_name}` : ''}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {compactDashboardMetaParts([fmtTime(s.created_at), s.branch_name, s.customer_name]).join(' • ')}
+                    </p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <span className="font-semibold text-green-600">{fmtUSD(s.total_usd||s.total||0)}</span>

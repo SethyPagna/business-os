@@ -15,6 +15,7 @@ export default function PortalMenu({
   content = null,
   menuClassName = '',
   closeOnContentClick = false,
+  triggerWrapperClassName = '',
 }) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
@@ -129,7 +130,12 @@ export default function PortalMenu({
 
   return (
     <>
-      <div ref={triggerRef} onClickCapture={toggleOpen} style={{ display: 'inline-flex' }}>
+      <div
+        ref={triggerRef}
+        onClickCapture={toggleOpen}
+        className={triggerWrapperClassName}
+        style={{ display: 'inline-flex' }}
+      >
         {triggerNode}
       </div>
 

@@ -1981,12 +1981,12 @@ export default function Products() {
               <button key={opt.id}
                 disabled={bulkActionBusy || !hasSelected}
                 onClick={() => { setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({}) }}
-                className={`whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
+                className={`inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-zinc-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-zinc-600 hover:border-blue-400'}`}>
                 {opt.label}
               </button>
             ))}
-            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkOutOfStock} className="btn-secondary whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.out}</button>
-            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="btn-danger whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.delete}</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkOutOfStock} className="btn-secondary inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.out}</button>
+            <button disabled={bulkActionBusy || !hasSelected} onClick={handleBulkDelete} className="btn-danger inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap px-2.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-60">{productChipLabels.delete}</button>
           </div>
         </div>
 

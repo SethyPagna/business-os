@@ -34,10 +34,10 @@ export default function ProductsHeaderActions({
 
   return (
     <>
-      <div className="flex w-full flex-wrap items-center justify-end gap-1.5 pb-1 sm:hidden">
+      <div className="grid w-full grid-cols-4 gap-1.5 pb-1 sm:hidden">
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex min-w-[5.5rem] shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
+          className="btn-secondary inline-flex w-full min-w-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
           title={importLabel}
           aria-label={importLabel}
         >
@@ -45,11 +45,17 @@ export default function ProductsHeaderActions({
           <span>{importLabel}</span>
         </button>
         {Array.isArray(exportMenuItems) && exportMenuItems.length ? (
-          <ExportMenu label={exportLabel} items={exportMenuItems} compact />
+          <ExportMenu
+            label={exportLabel}
+            items={exportMenuItems}
+            compact
+            triggerClassName="w-full min-w-0 px-2 py-2 text-[11px] font-medium"
+            triggerWrapperClassName="w-full"
+          />
         ) : (
           <button
             onClick={onExport}
-            className="btn-secondary inline-flex min-w-[5.5rem] shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
+            className="btn-secondary inline-flex w-full min-w-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium"
             title={exportLabel}
             aria-label={exportLabel}
           >
@@ -59,8 +65,9 @@ export default function ProductsHeaderActions({
         )}
         <PortalMenu
           align="right"
+          triggerWrapperClassName="w-full"
           trigger={(
-            <button className="btn-secondary inline-flex shrink-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium" aria-label={manageLabel}>
+            <button className="btn-secondary inline-flex w-full min-w-0 items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium" aria-label={manageLabel}>
               <Settings2 className="h-3.5 w-3.5" />
               <span>{manageLabel}</span>
             </button>
@@ -69,7 +76,7 @@ export default function ProductsHeaderActions({
         />
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex shrink-0 items-center justify-center gap-1 px-2.5 py-2 text-[11px] font-medium"
+          className="btn-primary inline-flex w-full min-w-0 items-center justify-center gap-1 px-2.5 py-2 text-[11px] font-medium"
           aria-label={productLabel}
         >
           <PackagePlus className="h-3.5 w-3.5" />
@@ -81,7 +88,7 @@ export default function ProductsHeaderActions({
         <PortalMenu
           align="right"
           trigger={(
-            <button className="btn-secondary inline-flex items-center gap-1.5 text-sm" aria-haspopup="true">
+            <button className="btn-secondary inline-flex min-w-[6.5rem] items-center justify-center gap-1.5 px-3 py-1.5 text-sm" aria-haspopup="true">
               <Settings2 className="h-4 w-4" />
               {manageLabel}
             </button>
@@ -101,7 +108,7 @@ export default function ProductsHeaderActions({
           {importLabel}
         </button>
         {Array.isArray(exportMenuItems) && exportMenuItems.length ? (
-          <ExportMenu label={exportLabel} items={exportMenuItems} compact />
+          <ExportMenu label={exportLabel} items={exportMenuItems} compact triggerClassName="min-w-[6.5rem]" />
         ) : (
           <button
             onClick={onExport}
@@ -114,7 +121,7 @@ export default function ProductsHeaderActions({
         )}
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+          className="btn-primary inline-flex min-w-[6.5rem] items-center justify-center gap-1.5 px-3 py-1.5 text-sm"
           aria-label={productLabel}
         >
           <PackagePlus className="h-4 w-4" />
