@@ -1306,6 +1306,10 @@ export default function Inventory() {
       ],
     },
   ]
+  const inventoryStatCards = useMemo(
+    () => [...primaryStats, ...financeStats],
+    [financeStats, primaryStats],
+  )
   const inventoryBrands = (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
     ? inventoryProductFilters.brands
     : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
@@ -2236,33 +2240,22 @@ export default function Inventory() {
       {showInventoryStats ? (
       <>
       {/* ?? Primary Stats bar ?? */}
-      <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-2">
-        {primaryStats.map((stat) => (
+      <p className="mb-1 text-[10px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
+      <div className="mb-3 -mx-1.5 flex gap-1.5 overflow-x-auto px-1.5 pb-1 md:mx-0 md:grid md:grid-cols-3 md:gap-1.5 md:overflow-visible md:px-0 lg:grid-cols-4 2xl:grid-cols-8">
+        {inventoryStatCards.map((stat) => (
           <button
             key={stat.id}
             type="button"
-            className="card px-3 py-2 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50"
+            className={`card w-[9.4rem] shrink-0 px-2 py-1.5 text-left transition hover:ring-2 hover:ring-blue-200 md:min-w-0 md:w-auto dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
             onClick={() => setStatDetail(stat)}
           >
-            <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{stat.label}</div>
-            <div className={`text-sm font-bold ${stat.cls}`}>{stat.value}</div>
-            {stat.sub && <div className="text-[10px] text-gray-400">{stat.sub}</div>}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-        {financeStats.map((stat) => (
-          <button
-            key={stat.id}
-            type="button"
-            className={`card px-3 py-2 border-l-2 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border}`}
-            onClick={() => setStatDetail(stat)}
-          >
-            <div className="text-[10px] text-gray-400 mb-0.5 font-medium uppercase tracking-wide">{stat.label}</div>
-            <div className={`text-sm font-bold ${stat.cls}`}>{stat.value}</div>
-            {stat.sub ? <div className="text-[10px] text-gray-400 mt-0.5">{stat.sub}</div> : null}
+            <div className="mb-0.5 truncate text-[8px] font-medium uppercase tracking-[0.06em] text-gray-400">{stat.label}</div>
+            <div className={`truncate text-[14px] font-bold leading-4 ${stat.cls}`}>{stat.value}</div>
+            {stat.sub ? (
+              <div className="mt-0.5 min-w-0 text-[9px] leading-3.5 text-gray-400">
+                {stat.sub}
+              </div>
+            ) : null}
           </button>
         ))}
       </div>
