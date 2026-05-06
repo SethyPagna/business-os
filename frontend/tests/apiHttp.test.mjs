@@ -6,6 +6,7 @@ import {
   buildApiRequestDedupeKey,
   createApiVersionMismatchError,
   isTransientGatewayError,
+  isReachableServerResponseStatus,
   route,
   shouldCompareRuntimeVersions,
   isApiVersionMismatchError,
@@ -169,6 +170,15 @@ await runTest('transient gateway statuses are classified for Cloudflare and prox
   assert.equal(isTransientGatewayError(409), false)
 })
 
+await runTest('health connectivity check treats auth failures as reachable but gateway outages as offline', () => {
+  assert.equal(isReachableServerResponseStatus(200), true)
+  assert.equal(isReachableServerResponseStatus(401), true)
+  assert.equal(isReachableServerResponseStatus(403), true)
+  assert.equal(isReachableServerResponseStatus(500), true)
+  assert.equal(isReachableServerResponseStatus(530), false)
+  assert.equal(isReachableServerResponseStatus(0), false)
+})
+
 await runTest('read routes return fallback on transient gateway errors without sync:error', async () => {
   resetApiState()
   setSyncServerUrl('https://sync.example.test')
@@ -239,6 +249,13 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
   assert.match(appContextSource, /console\.warn\('\[sync:transient\]'/)
   assert.match(appSource, /sync:transient-outage/)
   assert.match(appSource, /Server\/tunnel reconnecting/)
+})
+
+await runTest('app bootstrap converts invalid sessions into an explicit unauthorized result', () => {
+  const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
+  assert.match(source, /if\s*\(isInvalidSessionError\(error\)\)/)
+  assert.match(source, /unauthorized:\s*true/)
+  assert.match(source, /authError:\s*error\?\.message \|\| 'Please sign in again to continue\.'/)
 })
 
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {

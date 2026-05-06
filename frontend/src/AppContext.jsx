@@ -5,7 +5,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.js'
-import { cacheClearAll, isTransientGatewayError, startHealthCheck } from './api/http.js'
+import { cacheClearAll, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
@@ -378,6 +378,22 @@ export function AppProvider({ children }) {
     cacheClearAll()
   }, [])
 
+  const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.') => {
+    await clearLocalBusinessState({
+      clearAuth: true,
+      preserveSyncServer: true,
+      preserveSessionDuration: true,
+      preserveRuntimeMeta: true,
+    })
+    setUser(null)
+    setPage('dashboard')
+    setAuthReady(true)
+    clearPersistedAuthState()
+    setSyncConnected(false)
+    setSyncServerUnreachable(false)
+    setNotification({ message, type: 'error', id: Date.now() })
+  }, [clearLocalBusinessState])
+
   const applyBootstrapPayload = useCallback(async (payload, options = {}) => {
     const fallbackUser = options.fallbackUser || null
     const nextUser = payload?.user || fallbackUser || null
@@ -451,6 +467,8 @@ export function AppProvider({ children }) {
           const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
           if (bootstrap?.user) {
             await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
+          } else if (bootstrap?.unauthorized) {
+            await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
           } else if (!getStoredUserPayload()) {
             await loadSettings().catch(() => {})
           }
@@ -591,21 +609,6 @@ export function AppProvider({ children }) {
         id: noticeId,
       })
     }
-    const finalizeUnauthorized = async (message) => {
-      await clearLocalBusinessState({
-        clearAuth: true,
-        preserveSyncServer: true,
-        preserveSessionDuration: true,
-        preserveRuntimeMeta: true,
-      })
-      setUser(null)
-      setPage('dashboard')
-      setAuthReady(true)
-      clearPersistedAuthState()
-      setSyncConnected(false)
-      setSyncServerUnreachable(false)
-      setNotification({ message, type: 'error', id: Date.now() })
-    }
     const onUnauthorized = (e) => {
       const message = e?.detail?.error || 'Please sign in again to continue.'
       const recentAuthEstablished = Date.now() - authEstablishedAtRef.current < 8000
@@ -623,16 +626,21 @@ export function AppProvider({ children }) {
               authRecoveryRef.current = false
               return
             }
+            if (bootstrap?.unauthorized) {
+              authRecoveryRef.current = false
+              await handleUnauthorizedSession(bootstrap.authError || message)
+              return
+            }
           } catch (_) {}
           authRecoveryRef.current = false
           if (Date.now() - authEstablishedAtRef.current < 20000) {
             return
           }
-          await finalizeUnauthorized(message)
+          await handleUnauthorizedSession(message)
         }, 180)
         return
       }
-      finalizeUnauthorized(message).catch(() => {})
+      handleUnauthorizedSession(message).catch(() => {})
     }
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
@@ -655,7 +663,7 @@ export function AppProvider({ children }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
-  }, [applyBootstrapPayload, clearLocalBusinessState, loadSettings, t, user])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, t, user])
 
   // ?? OTP login event listener ?????????????????????????????????????????????
   useEffect(() => {
@@ -685,7 +693,9 @@ export function AppProvider({ children }) {
       setAuthReady(false)
       authEstablishedAtRef.current = Date.now()
       const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
-      if (bootstrap) {
+      if (bootstrap?.unauthorized) {
+        await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+      } else if (bootstrap) {
         await applyBootstrapPayload(bootstrap, { fallbackUser: safeUser })
       } else {
         setUser(safeUser)
@@ -696,7 +706,7 @@ export function AppProvider({ children }) {
     }
     window.addEventListener('otp:login', handleOtpLogin)
     return () => window.removeEventListener('otp:login', handleOtpLogin)
-  }, [applyBootstrapPayload, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings])
 
   useEffect(() => {
     const handleUserUpdated = (e) => {
@@ -762,7 +772,12 @@ export function AppProvider({ children }) {
             }, 10_000)
             withLoaderTimeout(() => window.api.getAppBootstrap(), 'App bootstrap', 9000)
               .then(async (bootstrap) => {
-                if (bootstrap) await applyBootstrapPayload(bootstrap)
+                if (!bootstrap) return
+                if (bootstrap?.unauthorized) {
+                  await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+                  return
+                }
+                await applyBootstrapPayload(bootstrap)
               })
               .catch(() => {})
               .finally(() => {
@@ -773,7 +788,7 @@ export function AppProvider({ children }) {
           }
 
           fetch(`${effectiveUrl}/health`, { signal: AbortSignal.timeout?.(6000) })
-            .then(r => setSyncServerUnreachable(!r.ok))
+            .then((r) => setSyncServerUnreachable(!isReachableServerResponseStatus(r)))
             .catch(() => setSyncServerUnreachable(true))
         } else {
           setAuthReady(true)
@@ -791,7 +806,7 @@ export function AppProvider({ children }) {
     
     // Start discovery in background (no await, doesn't block UI render)
     discoverSyncUrl()
-  }, [applyBootstrapPayload, syncUrl, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, syncUrl, loadSettings])
 
   // ?? Theme and CSS variables ???????????????????????????????????????????????
   useEffect(() => {
@@ -970,14 +985,16 @@ export function AppProvider({ children }) {
     authEstablishedAtRef.current = Date.now()
     setUser(nextUser)
     const bootstrap = await window.api?.getAppBootstrap?.().catch?.(() => null)
-    if (bootstrap) {
+    if (bootstrap?.unauthorized) {
+      await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+    } else if (bootstrap) {
       await applyBootstrapPayload(bootstrap, { fallbackUser: nextUser })
     } else {
       await loadSettings()
     }
     setAuthReady(true)
     setPage('dashboard')
-  }, [applyBootstrapPayload, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings])
 
   const login = useCallback(async (username, password, sessionDuration = 'session', organization = '') => {
     try {

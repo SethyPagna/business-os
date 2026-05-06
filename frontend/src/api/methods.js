@@ -20,6 +20,7 @@ import {
   requireLiveServerWrite,
   isWriteBlockedError,
   isWriteConflictError,
+  isInvalidSessionError,
   isNetErr,
   isServerOnline,
   isTransientGatewayError,
@@ -604,6 +605,15 @@ export async function getAppBootstrap() {
   try {
     return await apiFetch('GET', '/api/auth/bootstrap')
   } catch (error) {
+    if (isInvalidSessionError(error)) {
+      const localBootstrap = await buildLocalBootstrap()
+      return {
+        ...localBootstrap,
+        user: null,
+        unauthorized: true,
+        authError: error?.message || 'Please sign in again to continue.',
+      }
+    }
     if (isNetErr(error)) {
       const localBootstrap = await buildLocalBootstrap()
       return {

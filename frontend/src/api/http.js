@@ -463,10 +463,10 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
-      if (res.status === 401 && parsed?.code === 'invalid_session' && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
         window.dispatchEvent(new CustomEvent('auth:unauthorized', {
           detail: {
-            code: parsed.code,
+            code: parsed?.code || 'invalid_session',
             error: parsed.error || 'Please sign in again to continue.',
           },
         }))
@@ -505,6 +505,30 @@ export function isNetErr(e) {
 export function isTransientGatewayError(statusOrError) {
   const status = Number(typeof statusOrError === 'object' ? statusOrError?.status : statusOrError)
   return TRANSIENT_GATEWAY_STATUSES.has(status) || (status >= 520 && status <= 530)
+}
+
+export function isReachableServerResponseStatus(statusOrResponse) {
+  const status = Number(
+    typeof statusOrResponse === 'object'
+      ? statusOrResponse?.status
+      : statusOrResponse,
+  )
+  if (!Number.isFinite(status) || status <= 0) return false
+  if (isTransientGatewayError(status)) return false
+  return true
+}
+
+function shouldDispatchUnauthorized(path, status, parsed) {
+  if (Number(status) !== 401) return false
+  if (String(parsed?.code || '').trim().toLowerCase() === 'invalid_session') return true
+  const normalizedPath = normalizeApiPath(path).split('?')[0]
+  if (!normalizedPath.startsWith('/api/')) return false
+  if (
+    /^\/api\/auth\/(?:login|verify-otp|forgot-password|request-password-reset|reset-password|providers|oauth\/start|oauth\/complete|owned-google-config)$/.test(normalizedPath)
+  ) {
+    return false
+  }
+  return true
 }
 
 function isConnectivityError(error) {
@@ -552,13 +576,8 @@ async function pingServerHealth() {
     if (res.ok) {
       const payload = await res.clone().json().catch(() => null)
       if (payload) checkRuntimeVersionFromHealth(payload)
-      if (!_serverOnline) {
-        cacheClearAll()
-      }
-      setServerHealth(true)
-      return
     }
-    setServerHealth(false)
+    setServerHealth(isReachableServerResponseStatus(res))
   } catch {
     setServerHealth(false)
   }
