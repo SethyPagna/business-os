@@ -14,6 +14,8 @@ let ws               = null
 let wsReconnectTimer = null
 let wsPingTimer      = null
 let reconnectAttempts = 0
+let wsFailureStreak = 0
+let wsSuppressReconnectUntil = 0
 
 function shouldDebugWs() {
   try {
@@ -34,6 +36,9 @@ function logWs(level, ...args) {
 export function connectWS() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+  if (Date.now() < wsSuppressReconnectUntil) return
   clearTimeout(wsReconnectTimer)
 
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
@@ -53,6 +58,8 @@ export function connectWS() {
     logWs('debug', 'connected')
     const reconnected = reconnectAttempts > 0
     reconnectAttempts = 0
+    wsFailureStreak = 0
+    wsSuppressReconnectUntil = 0
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: true } }))
     if (reconnected) {
       window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: Date.now() } }))
@@ -96,6 +103,12 @@ export function connectWS() {
       }))
       return
     }
+    if (code !== 1000) {
+      wsFailureStreak = Math.min(10, wsFailureStreak + 1)
+      if (wsFailureStreak >= 3) {
+        wsSuppressReconnectUntil = Date.now() + 60_000
+      }
+    }
     if (getSyncServerUrl()) scheduleReconnect()
   }
 
@@ -120,6 +133,9 @@ export function reconnectWS() {
 
 function scheduleReconnect() {
   clearTimeout(wsReconnectTimer)
+  if (Date.now() < wsSuppressReconnectUntil) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   // Exponential backoff with jitter to avoid thundering herds and rapid loops
   reconnectAttempts = Math.min(10, reconnectAttempts + 1)
   const base = SYNC.WS_RECONNECT_DELAY_MS || 2000
@@ -136,4 +152,21 @@ function scheduleReconnect() {
  *  syncConnected correctly without relying on an event that may have already fired. */
 export function isWSConnected() {
   return !!(ws && ws.readyState === WebSocket.OPEN)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    wsSuppressReconnectUntil = 0
+    if (getSyncServerUrl()) reconnectWS()
+  })
+  window.addEventListener('focus', () => {
+    wsSuppressReconnectUntil = 0
+    if (getSyncServerUrl()) reconnectWS()
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      wsSuppressReconnectUntil = 0
+      if (getSyncServerUrl()) reconnectWS()
+    }
+  })
 }

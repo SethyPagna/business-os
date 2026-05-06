@@ -13,6 +13,7 @@ import BackgroundImportTracker from './components/shared/BackgroundImportTracker
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
+import Dashboard from './components/dashboard/Dashboard'
 
 /**
  * Frontend application shell.
@@ -25,7 +26,6 @@ import { withLoaderTimeout } from './utils/loaders.mjs'
  */
 
 const PAGE_IMPORTERS = {
-  dashboard: () => import('./components/dashboard/Dashboard'),
   products: () => import('./components/products/Products'),
   pos: () => import('./components/pos/POS'),
   sales: () => import('./components/sales/Sales'),
@@ -189,7 +189,6 @@ function lazyWithRetry(importer, key) {
   })
 }
 
-const Dashboard = lazyWithRetry(PAGE_IMPORTERS.dashboard, 'dashboard')
 const Products = lazyWithRetry(PAGE_IMPORTERS.products, 'products')
 const POS = lazyWithRetry(PAGE_IMPORTERS.pos, 'pos')
 const Sales = lazyWithRetry(PAGE_IMPORTERS.sales, 'sales')
@@ -824,7 +823,7 @@ function PageLoader() {
       } catch {
         // Ignore storage access problems and keep the manual reload button available.
       }
-    }, 6000)
+    }, 10000)
     return () => window.clearTimeout(timer)
   }, [])
 

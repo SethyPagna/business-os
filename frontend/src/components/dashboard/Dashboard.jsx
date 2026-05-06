@@ -147,7 +147,7 @@ export default function Dashboard() {
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getDashboard(), label)
+      const data = await withLoaderTimeout(() => window.api.getDashboard(), label, 30_000)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       setSummary(data)
       return data
@@ -177,6 +177,7 @@ export default function Dashboard() {
       const data = await withLoaderTimeout(
         () => window.api.getAnalytics({ startDate: start, endDate: end, granularity: gran }),
         'Dashboard analytics',
+        30_000,
       )
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       setAnalytics(data)
@@ -279,6 +280,10 @@ export default function Dashboard() {
   const aStockValue = summary?.stock_value_usd || 0
   const lowStockCount = summary?.low_stock_count ?? summary?.low_stock?.length ?? 0
   const outOfStockCount = summary?.out_of_stock_count ?? summary?.out_of_stock?.length ?? 0
+  const lowStockPreviewLimit = Number(summary?.low_stock_preview_limit || summary?.low_stock?.length || 0)
+  const outOfStockPreviewLimit = Number(summary?.out_of_stock_preview_limit || summary?.out_of_stock?.length || 0)
+  const lowStockPreviewTruncated = !!summary?.low_stock_preview_truncated
+  const outOfStockPreviewTruncated = !!summary?.out_of_stock_preview_truncated
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -593,6 +598,13 @@ export default function Dashboard() {
       Threshold: p.out_of_stock_threshold || 0,
     }))
   ), [summary?.out_of_stock])
+
+  const lowStockPreviewLabel = lowStockPreviewTruncated
+    ? `${lowStockPreviewLimit} / ${lowStockCount} ${t('items') || 'items'}`
+    : `${lowStockCount} ${t('items') || 'items'}`
+  const outOfStockPreviewLabel = outOfStockPreviewTruncated
+    ? `${outOfStockPreviewLimit} / ${outOfStockCount} ${t('items') || 'items'}`
+    : `${outOfStockCount} ${t('items') || 'items'}`
 
   const buildDashboardRecentRows = useCallback(() => (
     (summary?.recent_sales || []).map((sale) => ({
@@ -1268,13 +1280,18 @@ export default function Dashboard() {
                 </div>
               ))}
           </div>
-          {(summary?.low_stock?.length||0) > 5 && (
+          {(summary?.low_stock?.length||0) > 5 && !lowStockPreviewTruncated && (
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllLowStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
                 {showAllLowStock ? t('show_less') : `${t('view_all')} ${summary.low_stock.length} ${t('items')}`}
               </button>
             </div>
           )}
+          {lowStockPreviewTruncated ? (
+            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {translateOr('showing_preview', 'Showing preview')} {lowStockPreviewLabel}
+            </div>
+          ) : null}
         </div>
 
         {/* Out Of Stock */}
@@ -1298,13 +1315,18 @@ export default function Dashboard() {
                 </div>
               ))}
           </div>
-          {(summary?.out_of_stock?.length||0) > 5 && (
+          {(summary?.out_of_stock?.length||0) > 5 && !outOfStockPreviewTruncated && (
             <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
               <button onClick={() => setShowAllOutStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
                 {showAllOutStock ? t('show_less') : `${t('view_all')} ${summary.out_of_stock.length} ${t('items')}`}
               </button>
             </div>
           )}
+          {outOfStockPreviewTruncated ? (
+            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {translateOr('showing_preview', 'Showing preview')} {outOfStockPreviewLabel}
+            </div>
+          ) : null}
         </div>
 
         {/* Expiring Products */}

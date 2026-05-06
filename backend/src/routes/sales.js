@@ -8,6 +8,15 @@ const { normalizeClientRequestId } = require('../idempotency')
 const { getExpiringProducts, getLowStockProducts, getOutOfStockProducts, getStockMetrics } = require('../businessMetrics')
 
 const router = express.Router()
+const DASHBOARD_SUMMARY_CACHE_TTL_MS = 5_000
+const DASHBOARD_ANALYTICS_CACHE_TTL_MS = 10_000
+const DASHBOARD_STOCK_PREVIEW_LIMIT = 120
+
+let dashboardSummaryCache = {
+  expiresAt: 0,
+  payload: null,
+}
+const dashboardAnalyticsCache = new Map()
 
 function periodExpression(alias, granularity = 'day') {
   const createdAt = `NULLIF(${alias}.created_at::text, '')::timestamptz`
@@ -18,6 +27,46 @@ function periodExpression(alias, granularity = 'day') {
 
 function hourExpression(column = 'created_at') {
   return `to_char(NULLIF(${column}::text, '')::timestamptz, 'HH24')`
+}
+
+function toDayBounds(dateStr) {
+  const start = new Date(`${String(dateStr || '').trim()}T00:00:00.000Z`)
+  if (Number.isNaN(start.getTime())) return null
+  const end = new Date(start.getTime() + 86400000)
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  }
+}
+
+function readCachedDashboardSummary() {
+  if (dashboardSummaryCache.payload && dashboardSummaryCache.expiresAt > Date.now()) {
+    return dashboardSummaryCache.payload
+  }
+  return null
+}
+
+function writeCachedDashboardSummary(payload) {
+  dashboardSummaryCache = {
+    payload,
+    expiresAt: Date.now() + DASHBOARD_SUMMARY_CACHE_TTL_MS,
+  }
+  return payload
+}
+
+function readCachedDashboardAnalytics(key) {
+  const record = dashboardAnalyticsCache.get(key)
+  if (record && record.expiresAt > Date.now()) return record.payload
+  if (record) dashboardAnalyticsCache.delete(key)
+  return null
+}
+
+function writeCachedDashboardAnalytics(key, payload) {
+  dashboardAnalyticsCache.set(key, {
+    payload,
+    expiresAt: Date.now() + DASHBOARD_ANALYTICS_CACHE_TTL_MS,
+  })
+  return payload
 }
 
 function normalizeImportedTimestamp(value) {
@@ -922,13 +971,18 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
 
 // GET /api/dashboard
 router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
+  const cached = readCachedDashboardSummary()
+  if (cached) return res.json(cached)
   const todayStr = new Date().toISOString().split('T')[0]
+  const todayBounds = toDayBounds(todayStr)
   const stockMetrics = getStockMetrics()
   const expiringProducts = getExpiringProducts({ limit: 20, days: 30 })
+  const lowStockPreview = getLowStockProducts({ limit: DASHBOARD_STOCK_PREVIEW_LIMIT })
+  const outOfStockPreview = getOutOfStockProducts({ limit: DASHBOARD_STOCK_PREVIEW_LIMIT })
 
   const todaySales = db.prepare(
-    "SELECT COUNT(*) AS count, COALESCE(SUM(subtotal_usd),0) AS subtotal, COALESCE(SUM(subtotal_khr),0) AS subtotal_khr, COALESCE(SUM(discount_usd + COALESCE(membership_discount_usd,0)),0) AS discount_usd, COALESCE(SUM(discount_khr + COALESCE(membership_discount_khr,0)),0) AS discount_khr FROM sales WHERE date(created_at) = ? AND COALESCE(sale_status,'completed') NOT IN ('cancelled','awaiting_payment')"
-  ).get(todayStr)
+    "SELECT COUNT(*) AS count, COALESCE(SUM(subtotal_usd),0) AS subtotal, COALESCE(SUM(subtotal_khr),0) AS subtotal_khr, COALESCE(SUM(discount_usd + COALESCE(membership_discount_usd,0)),0) AS discount_usd, COALESCE(SUM(discount_khr + COALESCE(membership_discount_khr,0)),0) AS discount_khr FROM sales WHERE created_at >= ? AND created_at < ? AND COALESCE(sale_status,'completed') NOT IN ('cancelled','awaiting_payment')"
+  ).get(todayBounds?.startIso, todayBounds?.endIso)
   const allSales = db.prepare(
     "SELECT COALESCE(SUM(subtotal_usd),0) AS subtotal, COALESCE(SUM(subtotal_khr),0) AS subtotal_khr, COALESCE(SUM(discount_usd + COALESCE(membership_discount_usd,0)),0) AS discount_usd, COALESCE(SUM(discount_khr + COALESCE(membership_discount_khr,0)),0) AS discount_khr FROM sales WHERE COALESCE(sale_status,'completed') NOT IN ('cancelled','awaiting_payment')"
   ).get()
@@ -965,10 +1019,11 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
       COALESCE(SUM(total_refund_usd), 0) AS total_refund_usd,
       COALESCE(SUM(total_refund_khr), 0) AS total_refund_khr
     FROM returns
-    WHERE date(created_at) = ?
+    WHERE created_at >= ?
+      AND created_at < ?
       AND COALESCE(status,'completed') != 'cancelled'
       AND COALESCE(return_scope,'customer') = 'customer'
-  `).get(todayStr)
+  `).get(todayBounds?.startIso, todayBounds?.endIso)
   const supplierReturns = db.prepare(`
     SELECT
       COUNT(*) AS return_count,
@@ -990,7 +1045,7 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     WHERE COALESCE(sale_status,'completed') NOT IN ('cancelled')
   `).get()
 
-  res.json({
+  return res.json(writeCachedDashboardSummary({
     today_count:          todaySales.count,
     today_total:          todaySales.subtotal - todaySales.discount_usd - todayReturns.total_refund_usd,
     today_total_khr:      todaySales.subtotal_khr - todaySales.discount_khr - todayReturns.total_refund_khr,
@@ -1019,18 +1074,25 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     in_stock_count:       stockMetrics.in_stock,
     low_stock_count:      stockMetrics.low_stock,
     out_of_stock_count:   stockMetrics.out_of_stock,
-    low_stock:            getLowStockProducts({ limit: 5000 }),
-    out_of_stock:         getOutOfStockProducts({ limit: 5000 }),
+    low_stock_preview_limit: DASHBOARD_STOCK_PREVIEW_LIMIT,
+    out_of_stock_preview_limit: DASHBOARD_STOCK_PREVIEW_LIMIT,
+    low_stock_preview_truncated: stockMetrics.low_stock > lowStockPreview.length,
+    out_of_stock_preview_truncated: stockMetrics.out_of_stock > outOfStockPreview.length,
+    low_stock:            lowStockPreview,
+    out_of_stock:         outOfStockPreview,
     expiring_products:    expiringProducts,
     expiring_count:       expiringProducts.length,
     recent_sales:         db.prepare('SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status FROM sales s ORDER BY s.created_at DESC LIMIT 10').all(),
-  })
+  }))
 })
 
 // GET /api/analytics
 router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
   const { startDate, endDate, granularity = 'day' } = req.query
   if (!startDate || !endDate) return err(res, 'startDate and endDate required')
+  const cacheKey = `${startDate}|${endDate}|${granularity}`
+  const cached = readCachedDashboardAnalytics(cacheKey)
+  if (cached) return res.json(cached)
 
   const saleGroupExpr = periodExpression('s', granularity)
   const returnGroupExpr = periodExpression('r', granularity)
@@ -1193,7 +1255,7 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
     CROSS JOIN returns_prev r
   `).get(prevStart, prevEnd, prevStart, prevEnd)
 
-  res.json({
+  return res.json(writeCachedDashboardAnalytics(cacheKey, {
     periodData,
     totals,
     prevTotals,
@@ -1365,7 +1427,7 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
       GROUP BY hour
       ORDER BY hour
     `).all(startDate, endDate),
-  })
+  }))
 })
 
 module.exports = router
