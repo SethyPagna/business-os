@@ -601,7 +601,7 @@ function CatalogFaqSection(props) {
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         {publicFaqItems.length ? publicFaqItems.map((item, index) => {
           const open = expandedFaqId === item.id
           const accentClass = index % 2 === 0
@@ -611,7 +611,7 @@ function CatalogFaqSection(props) {
             ? 'bg-cyan-100 text-cyan-700'
             : 'bg-amber-100 text-amber-700'
           return (
-            <article key={item.id || index} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-800 ${accentClass}`}>
+            <article key={item.id || index} className={`self-start overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-800 ${accentClass}`}>
               <button
                 type="button"
                 className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"

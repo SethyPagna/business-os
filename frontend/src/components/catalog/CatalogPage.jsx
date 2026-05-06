@@ -923,80 +923,108 @@ function normalizeExternalUrl(value) {
   }
 }
 
+function createFaqId(prefix = 'faq') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeFaqItems(input) {
+  if (!Array.isArray(input)) return []
+  const usedIds = new Set()
+  return input
+    .map((item, index) => {
+      const baseId = String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`
+      let nextId = baseId
+      if (usedIds.has(nextId)) {
+        nextId = `${baseId}-${index + 1}`
+      }
+      while (usedIds.has(nextId)) {
+        nextId = createFaqId(baseId)
+      }
+      usedIds.add(nextId)
+      return {
+        id: nextId,
+        question: String(item?.question || '').trim(),
+        answer: String(item?.answer || '').trim(),
+      }
+    })
+    .filter((item) => item.question && item.answer)
+}
+
 function buildFaqStarterItems() {
+  const seed = Date.now()
   return [
     {
-      id: `faq-${Date.now()}-1`,
+      id: `faq-${seed}-1`,
       question: 'How do I choose products for my skin type?',
       answer: 'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.',
     },
     {
-      id: `faq-${Date.now()}-2`,
+      id: `faq-${seed}-2`,
       question: 'Are the products shown here available in store?',
       answer: 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.',
     },
     {
-      id: `faq-${Date.now()}-3`,
+      id: `faq-${seed}-3`,
       question: 'How do I check my membership points?',
       answer: 'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.',
     },
     {
-      id: `faq-${Date.now()}-4`,
+      id: `faq-${seed}-4`,
       question: 'How does Share & Reward work?',
       answer: 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.',
     },
     {
-      id: `faq-${Date.now()}-5`,
+      id: `faq-${seed}-5`,
       question: 'How can I contact Leang Cosmetics for more accurate advice?',
       answer: 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.',
     },
     {
-      id: `faq-${Date.now()}-6`,
+      id: `faq-${seed}-6`,
       question: 'Do you have products for sensitive skin?',
       answer: 'Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.',
     },
     {
-      id: `faq-${Date.now()}-7`,
+      id: `faq-${seed}-7`,
       question: 'Can I ask whether a product is original or from a specific brand line?',
       answer: 'Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.',
     },
     {
-      id: `faq-${Date.now()}-8`,
+      id: `faq-${seed}-8`,
       question: 'Do you sell skincare, makeup, hair care, and body care together?',
       answer: 'Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.',
     },
     {
-      id: `faq-${Date.now()}-9`,
+      id: `faq-${seed}-9`,
       question: 'Can the store help me build a full routine?',
       answer: 'Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.',
     },
     {
-      id: `faq-${Date.now()}-10`,
+      id: `faq-${seed}-10`,
       question: 'What should I do if an item is out of stock?',
       answer: 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.',
     },
     {
-      id: `faq-${Date.now()}-11`,
+      id: `faq-${seed}-11`,
       question: 'Can I ask for products within a specific budget?',
       answer: 'Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.',
     },
     {
-      id: `faq-${Date.now()}-12`,
+      id: `faq-${seed}-12`,
       question: 'Do you have gift-friendly items or bundles?',
       answer: 'Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.',
     },
     {
-      id: `faq-${Date.now()}-13`,
+      id: `faq-${seed}-13`,
       question: 'Can I ask for alternatives if my preferred brand is unavailable?',
       answer: 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.',
     },
     {
-      id: `faq-${Date.now()}-14`,
+      id: `faq-${seed}-14`,
       question: 'Can I check whether a product is suitable for oily, dry, or combination skin?',
       answer: 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.',
     },
     {
-      id: `faq-${Date.now()}-15`,
+      id: `faq-${seed}-15`,
       question: 'Do you also carry hair, body, and fragrance products?',
       answer: 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.',
     },
@@ -1004,29 +1032,30 @@ function buildFaqStarterItems() {
 }
 
 function buildAiFaqStarterItems() {
+  const seed = Date.now()
   return [
     {
-      id: `faq-ai-${Date.now()}-1`,
+      id: `faq-ai-${seed}-1`,
       question: 'What details help the AI recommend better products?',
       answer: 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.',
     },
     {
-      id: `faq-ai-${Date.now()}-2`,
+      id: `faq-ai-${seed}-2`,
       question: 'Does the AI only recommend products available at Leang Cosmetics?',
       answer: 'Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.',
     },
     {
-      id: `faq-ai-${Date.now()}-3`,
+      id: `faq-ai-${seed}-3`,
       question: 'Should I trust the AI as medical or skin-treatment advice?',
       answer: 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.',
     },
     {
-      id: `faq-ai-${Date.now()}-4`,
+      id: `faq-ai-${seed}-4`,
       question: 'Why does the assistant sometimes suggest several options instead of one product?',
       answer: 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.',
     },
     {
-      id: `faq-ai-${Date.now()}-5`,
+      id: `faq-ai-${seed}-5`,
       question: 'Can the assistant explain why a product was recommended?',
       answer: 'Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.',
     },
@@ -1286,17 +1315,9 @@ function applyDraft(config, draft) {
     faqItems: (() => {
       try {
         const parsed = JSON.parse(draft.customer_portal_faq_items || JSON.stringify(config.faqItems || []))
-        return Array.isArray(parsed)
-          ? parsed
-            .map((item, index) => ({
-              id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
-              question: String(item?.question || '').trim(),
-              answer: String(item?.answer || '').trim(),
-            }))
-            .filter((item) => item.question && item.answer)
-          : []
+        return normalizeFaqItems(parsed)
       } catch (_) {
-        return Array.isArray(config.faqItems) ? config.faqItems : []
+        return normalizeFaqItems(config.faqItems)
       }
     })(),
     showAbout: toBoolean(draft.customer_portal_show_about, config.showAbout),
@@ -1883,15 +1904,9 @@ export default function CatalogPage({ publicView = false }) {
     const raw = editorDraft.customer_portal_faq_items || JSON.stringify(previewConfig.faqItems || [])
     try {
       const parsed = JSON.parse(raw)
-      return Array.isArray(parsed)
-        ? parsed.map((item, index) => ({
-            id: String(item?.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
-            question: String(item?.question || '').trim(),
-            answer: String(item?.answer || '').trim(),
-          }))
-        : []
+      return normalizeFaqItems(parsed)
     } catch (_) {
-      return Array.isArray(previewConfig.faqItems) ? previewConfig.faqItems : []
+      return normalizeFaqItems(previewConfig.faqItems)
     }
   }, [editorDraft.customer_portal_faq_items, previewConfig.faqItems])
   const assistantCategoryOptions = useMemo(() => {
@@ -2803,7 +2818,7 @@ export default function CatalogPage({ publicView = false }) {
     setFaqDraft([
       ...faqItems,
       {
-        id: `faq-${Date.now()}`,
+        id: createFaqId(),
         question: '',
         answer: '',
       },
@@ -2820,7 +2835,7 @@ export default function CatalogPage({ publicView = false }) {
       ...faqItems,
       ...starterItems.filter((item) => !existingQuestions.has(String(item.question || '').trim().toLowerCase())),
     ].slice(0, 24)
-    setFaqDraft(merged)
+    setFaqDraft(normalizeFaqItems(merged))
   }
 
   function addFaqStarterSet() {
