@@ -1,7 +1,7 @@
 // ?�?� Products ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 // Main Products page ??all sub-modals imported from sibling files.
 
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
@@ -12,14 +12,6 @@ import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilterMenu from '../shared/FilterMenu'
 import { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
-import ManageCategoriesModal from './ManageCategoriesModal'
-import ManageBrandsModal from './ManageBrandsModal'
-import ManageUnitsModal      from './ManageUnitsModal'
-import BulkImportModal       from './BulkImportModal'
-import BulkAddStockModal     from './BulkAddStockModal'
-import VariantFormModal      from './VariantFormModal'
-import ProductForm           from './ProductForm'
-import ProductDetailModal    from './ProductDetailModal'
 import ProductsHeaderActions from './HeaderActions'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -38,6 +30,15 @@ import {
   settleLoaderMap,
 } from '../../utils/loaders.mjs'
 import { getContrastingTextColor } from '../../utils/color.js'
+
+const ManageCategoriesModal = lazy(() => import('./ManageCategoriesModal'))
+const ManageBrandsModal = lazy(() => import('./ManageBrandsModal'))
+const ManageUnitsModal = lazy(() => import('./ManageUnitsModal'))
+const BulkImportModal = lazy(() => import('./BulkImportModal'))
+const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
+const VariantFormModal = lazy(() => import('./VariantFormModal'))
+const ProductForm = lazy(() => import('./ProductForm'))
+const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
 
 function multiMatch(text, terms) {
   return terms.every(t => text.toLowerCase().includes(t.toLowerCase()))
@@ -216,6 +217,7 @@ export default function Products() {
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
   const loadedOnceRef = useRef(false)
+  const auxOptionsLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
@@ -262,18 +264,12 @@ export default function Products() {
         const result = await settleLoaderMap({
           products: () => window.api.searchProducts(productQuery),
           filters: () => window.api.getProductFilters({}),
-          categories: () => window.api.getCategories(),
-          units: () => window.api.getUnits(),
-          branches: () => window.api.getBranches(),
         })
         const productPayload = result.values.products || {}
         const prods = Array.isArray(productPayload?.items)
           ? productPayload.items
           : (Array.isArray(productPayload) ? productPayload : [])
         const filters = result.values.filters || productPayload?.filters || {}
-        const cats = result.values.categories
-        const unitList = result.values.units
-        const brs = result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
@@ -289,15 +285,33 @@ export default function Products() {
           suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
           initials: aggregateInitialOptions(filters?.initials || productPayload?.initials || []),
         })
-        if (Array.isArray(cats)) setCategories(cats)
-        if (Array.isArray(unitList)) setUnits(unitList)
-        if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
 
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
         }
         loadedOnceRef.current = true
         setLoadError(null)
+
+        const shouldLoadAuxOptions = !auxOptionsLoadedRef.current || !categories.length || !units.length || !branches.length
+        if (shouldLoadAuxOptions) {
+          void settleLoaderMap({
+            categories: () => window.api.getCategories(),
+            units: () => window.api.getUnits(),
+            branches: () => window.api.getBranches(),
+          }).then((auxResult) => {
+            if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+            const cats = auxResult.values.categories
+            const unitList = auxResult.values.units
+            const brs = auxResult.values.branches
+            if (Array.isArray(cats)) setCategories(cats)
+            if (Array.isArray(unitList)) setUnits(unitList)
+            if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
+            if (Array.isArray(cats) || Array.isArray(unitList) || Array.isArray(brs)) {
+              auxOptionsLoadedRef.current = true
+            }
+          }).catch(() => {})
+        }
+
         if (result.hasErrors && !silent) {
           notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
         }
@@ -324,7 +338,7 @@ export default function Products() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr])
+  }, [branchFilter, brandFilter, branches.length, catFilter, categories.length, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr, units.length])
 
   const fetchProductsByIds = useCallback(async (ids = []) => {
     const uniqueIds = Array.from(new Set(
@@ -2286,19 +2300,21 @@ export default function Products() {
 
       {/* Product detail modal */}
       {detailProduct && (
-        <ProductDetailModal
-          p={detailProduct} catMap={catMap} unitMap={unitMap} brandColorMap={brandColorMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
-          onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
-          onAddVariant={!detailProduct.parent_id ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
-          onDiscount={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'pricing') }}
-          onAdjustStock={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'stock') }}
-          onDelete={()=>handleDelete(detailProduct)}
-          onClose={()=>setDetailProduct(null)}
-          onImageClick={(src, gallery, startIndex = 0) => {
-            const sourceGallery = Array.isArray(gallery) && gallery.length ? gallery : [src]
-            openLightbox(sourceGallery, startIndex, detailProduct?.name || '')
-          }}
-        />
+        <Suspense fallback={null}>
+          <ProductDetailModal
+            p={detailProduct} catMap={catMap} unitMap={unitMap} brandColorMap={brandColorMap} fmtUSD={fmtUSD} fmtKHR={fmtKHR} t={t}
+            onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
+            onAddVariant={!detailProduct.parent_id ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
+            onDiscount={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'pricing') }}
+            onAdjustStock={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'stock') }}
+            onDelete={()=>handleDelete(detailProduct)}
+            onClose={()=>setDetailProduct(null)}
+            onImageClick={(src, gallery, startIndex = 0) => {
+              const sourceGallery = Array.isArray(gallery) && gallery.length ? gallery : [src]
+              openLightbox(sourceGallery, startIndex, detailProduct?.name || '')
+            }}
+          />
+        </Suspense>
       )}
 
       {false && lightbox && lightbox.images?.length && (
@@ -2353,49 +2369,73 @@ export default function Products() {
       />
 
       {bulkAddModal && (
-        <BulkAddStockModal
-          productIds={bulkAddModal.ids}
-          products={products}
-          branches={branches}
-          user={user}
-          onClose={() => setBulkAddModal(null)}
-          onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 } = {}) => {
-            const numericQuantity = Number(quantity || 0)
-            const successfulIds = updatedIds.filter((id) => Number.isFinite(Number(id)))
-            const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
-            setBulkAddModal(null)
-            setSelectedIds(new Set(failedIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))))
-            if (done > 0 && restoredSnapshots.length && numericQuantity > 0) {
-              actionHistory.pushAction({
-                label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
-                undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo bulk add stock'),
-                redo: () => addStockToProducts(successfulIds, numericQuantity, branchId, 'Redo bulk add stock'),
-              })
-            }
-            notify(
-              failed
-                ? `Added stock to ${done} product(s), ${failed} failed`
-                : `Added stock to ${done} product${done === 1 ? '' : 's'}`,
-              failed ? 'warning' : 'success',
-            )
-          }}
-          t={t}
-        />
+        <Suspense fallback={null}>
+          <BulkAddStockModal
+            productIds={bulkAddModal.ids}
+            products={products}
+            branches={branches}
+            user={user}
+            onClose={() => setBulkAddModal(null)}
+            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 } = {}) => {
+              const numericQuantity = Number(quantity || 0)
+              const successfulIds = updatedIds.filter((id) => Number.isFinite(Number(id)))
+              const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
+              setBulkAddModal(null)
+              setSelectedIds(new Set(failedIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))))
+              if (done > 0 && restoredSnapshots.length && numericQuantity > 0) {
+                actionHistory.pushAction({
+                  label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
+                  undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo bulk add stock'),
+                  redo: () => addStockToProducts(successfulIds, numericQuantity, branchId, 'Redo bulk add stock'),
+                })
+              }
+              notify(
+                failed
+                  ? `Added stock to ${done} product(s), ${failed} failed`
+                  : `Added stock to ${done} product${done === 1 ? '' : 's'}`,
+                failed ? 'warning' : 'success',
+              )
+            }}
+            t={t}
+          />
+        </Suspense>
       )}
-      {modal==='form'   && <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} initialTab={formInitialTab} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />}
+      {modal==='form' && (
+        <Suspense fallback={null}>
+          <ProductForm product={selected} categories={categories} units={units} branches={branches} brandOptions={brandOptions} groupCandidates={products} initialTab={formInitialTab} onSave={handleSaveWithGallery} onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}} t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate} user={user} />
+        </Suspense>
+      )}
       {variantModal && (
-        <VariantFormModal
-          parent={variantModal}
-          categories={categories} units={units} branches={branches} user={user}
-          onClose={()=>setVariantModal(null)}
-          onDone={handleVariantDone}
-          t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
-        />
+        <Suspense fallback={null}>
+          <VariantFormModal
+            parent={variantModal}
+            categories={categories} units={units} branches={branches} user={user}
+            onClose={()=>setVariantModal(null)}
+            onDone={handleVariantDone}
+            t={t} usdSymbol={usdSymbol} khrSymbol={khrSymbol} exchangeRate={exchangeRate}
+          />
+        </Suspense>
       )}
-      {modal==='cats'   && <ManageCategoriesModal onClose={()=>{setModal(null);load()}} t={t} />}
-      {modal==='brands' && <ManageBrandsModal onClose={()=>setModal(null)} onDone={load} products={products} user={user} t={t} />}
-      {modal==='units'  && <ManageUnitsModal onClose={()=>{setModal(null);load()}} t={t} />}
-      {modal==='bulk'   && <BulkImportModal onClose={()=>setModal(null)} onDone={load} t={t} />}
+      {modal==='cats' && (
+        <Suspense fallback={null}>
+          <ManageCategoriesModal onClose={()=>{setModal(null);load()}} t={t} />
+        </Suspense>
+      )}
+      {modal==='brands' && (
+        <Suspense fallback={null}>
+          <ManageBrandsModal onClose={()=>setModal(null)} onDone={load} products={products} user={user} t={t} />
+        </Suspense>
+      )}
+      {modal==='units' && (
+        <Suspense fallback={null}>
+          <ManageUnitsModal onClose={()=>{setModal(null);load()}} t={t} />
+        </Suspense>
+      )}
+      {modal==='bulk' && (
+        <Suspense fallback={null}>
+          <BulkImportModal onClose={()=>setModal(null)} onDone={load} t={t} />
+        </Suspense>
+      )}
     </div>
   )
 }

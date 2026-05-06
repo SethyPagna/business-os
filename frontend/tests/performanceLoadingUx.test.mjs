@@ -13,7 +13,7 @@ const returns = fs.readFileSync(new URL('../src/components/returns/Returns.jsx',
 const branches = fs.readFileSync(new URL('../src/components/branches/Branches.jsx', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.mjs', import.meta.url), 'utf8')
 
-assert.match(app, /const WARMUP_PAGE_IDS = \[\]/, 'background chunk warmup should stay disabled to protect INP')
+assert.match(app, /const WARMUP_PAGE_IDS = \[\s*'products',[\s\S]*'backup',[\s\S]*\]/, 'background chunk warmup should target the primary day-to-day pages only')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')

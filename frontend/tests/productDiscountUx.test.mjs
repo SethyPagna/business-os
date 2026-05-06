@@ -40,8 +40,8 @@ await runTest('inventory keeps previous stats during partial refresh failures', 
   const source = fs.readFileSync(new URL('../src/components/inventory/Inventory.jsx', import.meta.url), 'utf8')
   assert.match(source, /const\s+\[stockStatsLoaded,\s*setStockStatsLoaded\]/)
   assert.match(source, /setStatsRefreshError/)
-  assert.match(source, /if\s*\(statsResult\?\.item\)/)
-  assert.match(source, /else\s+if\s*\(loadedOnceRef\.current/)
+  assert.match(source, /if\s*\(needsStatsData\s*&&\s*statsResult\?\.item\)/)
+  assert.match(source, /else\s+if\s*\(needsStatsData\s*&&\s*loadedOnceRef\.current/)
   assert.doesNotMatch(source, /setStockStats\(\{\s*total_products:\s*0/)
 })
 

@@ -10,13 +10,6 @@ import WriteConflictModal from './components/shared/WriteConflictModal'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import NotificationCenter from './components/shared/NotificationCenter'
 import BackgroundImportTracker from './components/shared/BackgroundImportTracker'
-import Users from './components/users/Users'
-import AuditLog from './components/utils-settings/AuditLog'
-import ReceiptSettings from './components/receipt-settings/ReceiptSettings'
-import Backup from './components/utils-settings/Backup'
-import Settings from './components/utils-settings/Settings'
-import FilesPage from './components/files/FilesPage'
-import ServerPage from './components/server/ServerPage'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
@@ -42,6 +35,13 @@ const PAGE_IMPORTERS = {
   contacts: () => import('./components/contacts/Contacts'),
   catalog: () => import('./components/catalog/CatalogPage'),
   loyalty_points: () => import('./components/loyalty-points/LoyaltyPointsPage'),
+  users: () => import('./components/users/Users'),
+  audit_log: () => import('./components/utils-settings/AuditLog'),
+  receipt_settings: () => import('./components/receipt-settings/ReceiptSettings'),
+  backup: () => import('./components/utils-settings/Backup'),
+  settings: () => import('./components/utils-settings/Settings'),
+  files: () => import('./components/files/FilesPage'),
+  server: () => import('./components/server/ServerPage'),
 }
 
 const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
@@ -49,9 +49,20 @@ const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 // Keep route chunks cold until the user asks for them. Background dynamic
 // imports were evaluating large bundles during real clicks, which showed up as
 // very high INP on Backup, Contacts, and mobile section changes.
-const WARMUP_PAGE_IDS = []
+const WARMUP_PAGE_IDS = [
+  'products',
+  'pos',
+  'inventory',
+  'sales',
+  'returns',
+  'contacts',
+  'backup',
+]
 
 const ADMIN_PAGE_SEQUENCE = [
+  'sales',
+  'returns',
+  'contacts',
   'users',
   'audit_log',
   'receipt_settings',
@@ -188,6 +199,13 @@ const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
+const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
+const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
+const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
+const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
+const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
+const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
+const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const PAGE_COMPONENTS = {
   dashboard: Dashboard,
   products: Products,

@@ -222,6 +222,11 @@ export default function Inventory() {
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
 
+  const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products' || tab === 'products'
+  const needsProductSummary = inventorySection === 'all' || inventorySection === 'products' || tab === 'products'
+  const needsMovementData = inventorySection === 'all' || inventorySection === 'movements' || tab === 'movements'
+  const needsRfidData = inventorySection === 'all' || inventorySection === 'rfid' || tab === 'rfid'
+
   const loadInventoryReasons = useCallback(async () => {
     try {
       const result = await window.api.getInventoryReasons?.()
@@ -264,29 +269,34 @@ export default function Inventory() {
         initial: inventoryInitialFilter,
       }
       try {
-        const result = await settleLoaderMap({
-          stats: () => window.api.getInventoryStats(branchOpts),
-          summary: () => window.api.searchInventoryProducts(productQuery),
-          movements: () => window.api.getInventoryMovements({
-            ...branchOpts,
-            startDate: movementStartDate || undefined,
-            endDate: movementEndDate || undefined,
-            page: movementMeta.page,
-            pageSize: movementMeta.pageSize,
-          }),
-          rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
+        const primaryLoaders = {
           branches: () => window.api.getBranches(),
-          returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
-          dashboard: () => window.api.getDashboard().catch(() => ({})),
-        })
+          ...(needsStatsData ? {
+            stats: () => window.api.getInventoryStats(branchOpts),
+          } : {}),
+          ...(needsProductSummary ? {
+            summary: () => window.api.searchInventoryProducts(productQuery),
+          } : {}),
+          ...(needsMovementData ? {
+            movements: () => window.api.getInventoryMovements({
+              ...branchOpts,
+              startDate: movementStartDate || undefined,
+              endDate: movementEndDate || undefined,
+              page: movementMeta.page,
+              pageSize: movementMeta.pageSize,
+            }),
+          } : {}),
+          ...(needsRfidData ? {
+            rfid: () => (window.api.getRfidStatus ? window.api.getRfidStatus(branchOpts).catch(() => null) : Promise.resolve(null)),
+          } : {}),
+        }
+        const result = await settleLoaderMap(primaryLoaders)
         const sumResult = result.values.summary
         const statsResult = result.values.stats
         const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
         const rfid = result.values.rfid
         const brs = result.values.branches
-        const rets = result.values.returns
-        const dash = result.values.dashboard
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
@@ -294,7 +304,7 @@ export default function Inventory() {
           setLoadError(versionMismatchError.message)
           throw versionMismatchError
         }
-        if (Array.isArray(sum)) {
+        if (needsProductSummary && Array.isArray(sum)) {
           setSummary(sum || [])
           setInventoryProductsLoaded(true)
           if (sumResult && !Array.isArray(sumResult)) {
@@ -309,21 +319,21 @@ export default function Inventory() {
             setInventoryProductFilters({ brands: [] })
           }
         }
-        if (statsResult?.item) {
+        if (needsStatsData && statsResult?.item) {
           setStockStats(statsResult.item)
           setStockStatsLoaded(true)
           setStatsRefreshError('')
-        } else if (loadedOnceRef.current) {
+        } else if (needsStatsData && loadedOnceRef.current) {
           setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្ថិតិស្តុកបានទេ។ កំពុងបង្ហាញតម្លៃចុងក្រោយដែលបានបញ្ជាក់។'))
         }
-        if (Array.isArray(movs)) {
+        if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
           setMovementMeta((current) => ({
             ...current,
             total: movs.length,
             totalPages: 1,
           }))
-        } else if (movs && typeof movs === 'object') {
+        } else if (needsMovementData && movs && typeof movs === 'object') {
           setMovements(Array.isArray(movs.items) ? movs.items : [])
           setMovementMeta({
             total: Number(movs.total || 0),
@@ -332,36 +342,47 @@ export default function Inventory() {
             totalPages: Number(movs.totalPages || 1) || 1,
           })
         }
-        if (rfid?.item) setRfidStatus(rfid.item)
+        if (needsRfidData && rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
-        if (dash && typeof dash === 'object') {
-          setTaxDelivery({
-            tax: dash.all_tax_usd || 0,
-            delivery: dash.all_delivery_usd || 0,
-            deliveryCount: dash.all_delivery_count || 0,
-          })
-        }
-        if (Array.isArray(rets)) {
-          const active = rets.filter((ret) => (ret.status || 'completed') !== 'cancelled')
-          const customerReturns = active.filter((ret) => (ret.return_scope || 'customer') !== 'supplier')
-          const supplierReturns = active.filter((ret) => (ret.return_scope || 'customer') === 'supplier')
-          const totalItems = customerReturns.reduce((sumItems, ret) => sumItems + (ret.items?.reduce((acc, item) => acc + (item.quantity || 0), 0) || 0), 0)
-          setReturnStats({
-            count: customerReturns.length,
-            refund_usd: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_usd || 0), 0),
-            refund_khr: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_khr || 0), 0),
-            items: totalItems,
-            restock: customerReturns.filter((ret) => (ret.return_type || 'restock') === 'restock').length,
-            supplier_count: supplierReturns.length,
-            supplier_compensation_usd: supplierReturns.reduce((sumCompensation, ret) => sumCompensation + (ret.supplier_compensation_usd || 0), 0),
-            supplier_loss_usd: supplierReturns.reduce((sumLoss, ret) => sumLoss + (ret.supplier_loss_usd || 0), 0),
-          })
-        }
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
         }
         loadedOnceRef.current = true
         setLoadError(null)
+
+        if (needsStatsData) {
+          void settleLoaderMap({
+            returns: () => window.api.getReturns({ scope: 'all' }).catch(() => []),
+            dashboard: () => window.api.getDashboard().catch(() => ({})),
+          }).then((secondaryResult) => {
+            if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+            const rets = secondaryResult.values.returns
+            const dash = secondaryResult.values.dashboard
+            if (dash && typeof dash === 'object') {
+              setTaxDelivery({
+                tax: dash.all_tax_usd || 0,
+                delivery: dash.all_delivery_usd || 0,
+                deliveryCount: dash.all_delivery_count || 0,
+              })
+            }
+            if (Array.isArray(rets)) {
+              const active = rets.filter((ret) => (ret.status || 'completed') !== 'cancelled')
+              const customerReturns = active.filter((ret) => (ret.return_scope || 'customer') !== 'supplier')
+              const supplierReturns = active.filter((ret) => (ret.return_scope || 'customer') === 'supplier')
+              const totalItems = customerReturns.reduce((sumItems, ret) => sumItems + (ret.items?.reduce((acc, item) => acc + (item.quantity || 0), 0) || 0), 0)
+              setReturnStats({
+                count: customerReturns.length,
+                refund_usd: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_usd || 0), 0),
+                refund_khr: customerReturns.reduce((sumRefund, ret) => sumRefund + (ret.total_refund_khr || 0), 0),
+                items: totalItems,
+                restock: customerReturns.filter((ret) => (ret.return_type || 'restock') === 'restock').length,
+                supplier_count: supplierReturns.length,
+                supplier_compensation_usd: supplierReturns.reduce((sumCompensation, ret) => sumCompensation + (ret.supplier_compensation_usd || 0), 0),
+                supplier_loss_usd: supplierReturns.reduce((sumLoss, ret) => sumLoss + (ret.supplier_loss_usd || 0), 0),
+              })
+            }
+          }).catch(() => {})
+        }
       } catch (e) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         console.warn('[Inventory] load failed:', e.message)
@@ -394,6 +415,10 @@ export default function Inventory() {
     movementEndDate,
     movementMeta.page,
     movementMeta.pageSize,
+    needsMovementData,
+    needsProductSummary,
+    needsRfidData,
+    needsStatsData,
     searchMode,
     stockFilter,
     tr,
