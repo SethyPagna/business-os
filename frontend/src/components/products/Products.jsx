@@ -1005,6 +1005,13 @@ export default function Products() {
     setProductPageDraft(String(nextPage))
   }, [productPageDraft, productSafePage, productTotalPages])
 
+  const cycleProductPageSize = useCallback(() => {
+    const currentIndex = PAGE_SIZE_OPTIONS.findIndex((option) => Number(option) === Number(productSafePageSize))
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % PAGE_SIZE_OPTIONS.length : 0
+    setProductPageSize(PAGE_SIZE_OPTIONS[nextIndex])
+    setProductPage(1)
+  }, [productSafePageSize])
+
   const isSelectionScopeFullySelected = useCallback(
     (ids = []) => ids.length > 0 && ids.every((id) => selectedVisibleIdsSet.has(Number(id))),
     [selectedVisibleIdsSet],
@@ -1874,15 +1881,15 @@ export default function Products() {
       ) : null}
 
       <div className="sticky top-2 z-30 mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40">
-        <div className="px-3 py-2">
-          <div className="flex min-w-0 items-center gap-1">
-          <span className="shrink-0 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
+        <div className="px-2.5 py-2">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+          <span className="min-w-0 shrink rounded-full bg-white/80 px-1 py-0.5 text-[9px] font-semibold text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
             {productSummaryLabel}
           </span>
-          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+          <label className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1 py-0.5 text-[9px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
             <input
               type="checkbox"
-              className="h-3.5 w-3.5 rounded"
+              className="h-3.5 w-3.5 shrink-0 rounded"
               checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
               ref={mobileSelectAllRef}
               onChange={(event) => toggleSelectAll(event.target.checked)}
@@ -1896,25 +1903,19 @@ export default function Products() {
                 : `${t('select_all') || 'Select all'} (${visibleProducts.length})`}
             </span>
           </label>
-          <label className="inline-flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
-            <span className="hidden sm:inline">{t('per_page') || 'per page'}</span>
-            <select
-              className="bg-transparent text-[10px] font-semibold outline-none"
-              value={productSafePageSize}
-              onChange={(event) => {
-                setProductPageSize(Number(event.target.value))
-                setProductPage(1)
-              }}
-            >
-              {PAGE_SIZE_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-          <div className="inline-flex shrink-0 items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
+          <button
+            type="button"
+            className="inline-flex h-6 min-w-[2rem] shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white/90 px-1 text-[9px] font-semibold text-blue-700 transition hover:border-blue-300 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200 dark:hover:border-blue-700"
+            onClick={cycleProductPageSize}
+            title={`${t('per_page') || 'per page'}: ${productSafePageSize}`}
+            aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
+          >
+            {productSafePageSize}
+          </button>
+          <div className="inline-flex min-w-0 shrink items-center overflow-hidden rounded-full border border-blue-200 bg-white/90 dark:border-blue-800 dark:bg-blue-950/50">
             <button
               type="button"
-              className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
               disabled={productSafePage <= 1}
               onClick={() => setProductPage(productSafePage - 1)}
               aria-label="Previous page"
@@ -1925,7 +1926,7 @@ export default function Products() {
               type="text"
               inputMode="numeric"
               aria-label={t('page') || 'Page'}
-              className="h-6 w-7 border-0 bg-transparent px-0.5 text-center text-[10px] font-semibold text-blue-700 outline-none dark:text-blue-200"
+              className="h-6 w-5 border-0 bg-transparent px-0 text-center text-[9px] font-semibold text-blue-700 outline-none dark:text-blue-200"
               value={productPageDraft}
               onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
               onBlur={commitProductPageDraft}
@@ -1940,12 +1941,12 @@ export default function Products() {
                 }
               }}
             />
-            <span className="pr-1 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
-              / {productTotalPages}
+            <span className="pr-1 text-[9px] font-semibold text-blue-700 dark:text-blue-200">
+              /{productTotalPages}
             </span>
             <button
               type="button"
-              className="inline-flex h-6 w-6 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+              className="inline-flex h-6 w-5 items-center justify-center text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/60"
               disabled={productSafePage >= productTotalPages}
               onClick={() => setProductPage(productSafePage + 1)}
               aria-label="Next page"
