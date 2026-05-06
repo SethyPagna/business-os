@@ -2,6 +2,15 @@
 
 const { db } = require('./database')
 
+const RECEIVED_AT_ORDER_SQL = `
+  CASE
+    WHEN NULLIF(pb.received_at, '') IS NOT NULL
+      AND NULLIF(pb.received_at, '') ~ '^\\d{4}-\\d{2}-\\d{2}([ T]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:?\\d{2})?$'
+      THEN NULLIF(pb.received_at, '')::timestamptz
+    ELSE pb.created_at
+  END
+`
+
 function normalizeExpiryDate(value) {
   const raw = String(value || '').trim()
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null
@@ -156,7 +165,7 @@ function getBatchStockRows(productId, { branchId = null, batchId = null, include
           THEN NULLIF(pb.expiry_date, '')::date
         ELSE NULL
       END ASC NULLS LAST,
-      COALESCE(pb.received_at, pb.created_at) ASC,
+      ${RECEIVED_AT_ORDER_SQL} ASC,
       pb.id ASC,
       bbs.branch_id ASC
   `).all(...params)
@@ -206,7 +215,7 @@ function listProductBatches(productIds = [], { branchId = null } = {}) {
           THEN NULLIF(pb.expiry_date, '')::date
         ELSE NULL
       END ASC NULLS LAST,
-      COALESCE(pb.received_at, pb.created_at) ASC,
+      ${RECEIVED_AT_ORDER_SQL} ASC,
       pb.id ASC
   `).all(...params)
 
@@ -462,7 +471,7 @@ function getAvailableSaleAllocationRows(saleItemId) {
         FROM return_item_batch_allocations ria
         WHERE ria.sale_item_id = sia.sale_item_id
           AND ria.batch_id = sia.batch_id
-          AND COALESCE(ria.reversed_at, '') = ''
+          AND ria.reversed_at IS NULL
       ), 0) AS returned_quantity
     FROM sale_item_batch_allocations sia
     WHERE sia.sale_item_id = ?

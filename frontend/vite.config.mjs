@@ -91,6 +91,22 @@ function manualChunks(id) {
     const normalized = id.replace(/\\/g, '/')
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
+    if (normalized.includes('/src/components/catalog/')) return 'catalog'
+    if (
+      normalized.includes('/src/utils/mediaUpload.js')
+      || normalized.includes('/src/utils/favicon')
+      || normalized.includes('/src/components/shared/ImageGalleryLightbox')
+      || normalized.includes('/src/components/files/FilePickerModal')
+    ) {
+      return 'media-tools'
+    }
+    if (
+      normalized.includes('/src/components/products/ProductDetailModal.jsx')
+      || normalized.includes('/src/components/inventory/ProductDetailModal.jsx')
+      || normalized.includes('/src/utils/productBatches.mjs')
+    ) {
+      return 'product-detail'
+    }
     if (normalized.includes('/src/api/')) return 'app-api'
     if (normalized.includes('/src/app/')) return 'app-shell'
     if (normalized.includes('/src/components/shared/')) return 'app-shared'

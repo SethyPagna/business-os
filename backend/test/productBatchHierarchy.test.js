@@ -50,6 +50,9 @@ runTest('batch helpers expose migration, FEFO allocation, and rollup primitives'
   assert.match(batchHelpers, /function restoreBatchAllocations/)
   assert.match(batchHelpers, /function cloneAllocationsToProduct/)
   assert.match(batchHelpers, /function syncProductBatchRollups/)
+  assert.match(batchHelpers, /const RECEIVED_AT_ORDER_SQL =/)
+  assert.match(batchHelpers, /NULLIF\(pb\.received_at, ''\)::timestamptz/)
+  assert.match(batchHelpers, /ria\.reversed_at IS NULL/)
 })
 
 runTest('inventory routes use batch-aware stock mutations and movement logging', () => {
