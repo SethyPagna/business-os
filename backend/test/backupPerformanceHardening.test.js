@@ -46,6 +46,10 @@ runTest('backup package validation uses streaming checksums for package files', 
   assert.match(source, /function\s+createDualWriteStream\(/)
   assert.match(source, /const\s+remoteStream\s*=\s*new\s+PassThrough\(\)/)
   assert.match(source, /await\s+Promise\.all\(\[\s*pipeline\(object\.body,\s*fanoutStream\),\s*uploadPromise,\s*\]\)/)
+  assert.match(source, /function\s+getManagedWritableState\(/)
+  assert.match(source, /__businessOsManagedWritableState/)
+  assert.doesNotMatch(source, /stream\.once\('error', reject\)/)
+  assert.doesNotMatch(source, /destination\.once\('error', reject\)/)
 })
 
 runTest('system jobs throttle noisy persistence while forcing major state changes', () => {

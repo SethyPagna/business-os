@@ -67,19 +67,71 @@ function throwIfAborted(signal) {
   }
 }
 
+function getManagedWritableState(stream) {
+  if (!stream) return null
+  if (stream.__businessOsManagedWritableState) return stream.__businessOsManagedWritableState
+  const state = {
+    error: null,
+    drainWaiters: new Set(),
+  }
+  stream.on('error', (error) => {
+    state.error = error || new Error('Writable stream failed')
+    const waiters = Array.from(state.drainWaiters)
+    state.drainWaiters.clear()
+    waiters.forEach(({ reject }) => {
+      try { reject(state.error) } catch (_) {}
+    })
+  })
+  stream.on('drain', () => {
+    const waiters = Array.from(state.drainWaiters)
+    state.drainWaiters.clear()
+    waiters.forEach(({ resolve }) => {
+      try { resolve() } catch (_) {}
+    })
+  })
+  Object.defineProperty(stream, '__businessOsManagedWritableState', {
+    value: state,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  })
+  return state
+}
+
 function writeStream(stream, hash, chunk) {
   hash?.update(chunk)
+  const state = getManagedWritableState(stream)
+  if (state?.error) return Promise.reject(state.error)
   if (stream.write(chunk)) return Promise.resolve()
   return new Promise((resolve, reject) => {
-    stream.once('drain', resolve)
-    stream.once('error', reject)
+    if (state?.error) {
+      reject(state.error)
+      return
+    }
+    state?.drainWaiters.add({ resolve, reject })
   })
 }
 
 function closeWriteStream(stream) {
+  const state = getManagedWritableState(stream)
+  if (state?.error) return Promise.reject(state.error)
   return new Promise((resolve, reject) => {
-    stream.end(resolve)
-    stream.once('error', reject)
+    const handleFinish = () => {
+      cleanup()
+      if (state?.error) reject(state.error)
+      else resolve()
+    }
+    const handleError = (error) => {
+      cleanup()
+      reject(error)
+    }
+    const cleanup = () => {
+      stream.off('finish', handleFinish)
+      stream.off('error', handleError)
+    }
+    stream.on('finish', handleFinish)
+    stream.on('error', handleError)
+    stream.end()
   })
 }
 
@@ -326,17 +378,38 @@ async function retryOperation(operation, { retries = 3, onRetry = null } = {}) {
 }
 
 function writeDestinationChunk(destination, chunk) {
+  const state = getManagedWritableState(destination)
+  if (state?.error) return Promise.reject(state.error)
   if (destination.write(chunk)) return Promise.resolve()
   return new Promise((resolve, reject) => {
-    destination.once('drain', resolve)
-    destination.once('error', reject)
+    if (state?.error) {
+      reject(state.error)
+      return
+    }
+    state?.drainWaiters.add({ resolve, reject })
   })
 }
 
 function endDestination(destination) {
+  const state = getManagedWritableState(destination)
+  if (state?.error) return Promise.reject(state.error)
   return new Promise((resolve, reject) => {
-    destination.end(resolve)
-    destination.once('error', reject)
+    const handleFinish = () => {
+      cleanup()
+      if (state?.error) reject(state.error)
+      else resolve()
+    }
+    const handleError = (error) => {
+      cleanup()
+      reject(error)
+    }
+    const cleanup = () => {
+      destination.off('finish', handleFinish)
+      destination.off('error', handleError)
+    }
+    destination.on('finish', handleFinish)
+    destination.on('error', handleError)
+    destination.end()
   })
 }
 
