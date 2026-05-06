@@ -133,6 +133,7 @@ export default function Inventory() {
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
+  const [inventoryProductsLoaded, setInventoryProductsLoaded] = useState(false)
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
   const [inventoryInitials, setInventoryInitials] = useState([])
   const [inventoryProductFilters, setInventoryProductFilters] = useState({ brands: [] })
@@ -295,6 +296,7 @@ export default function Inventory() {
         }
         if (Array.isArray(sum)) {
           setSummary(sum || [])
+          setInventoryProductsLoaded(true)
           if (sumResult && !Array.isArray(sumResult)) {
             setInventoryProductTotal(Number(sumResult.total || 0))
             setInventoryProductPage(Number(sumResult.page || inventoryProductPage) || 1)
@@ -1105,7 +1107,11 @@ export default function Inventory() {
   const lowStockCount = Number(stockStats?.low_stock ?? visibleLowStockCount)
   const outStockCount = Number(stockStats?.out_of_stock ?? visibleOutStockCount)
   const inStockCount = Number(stockStats?.in_stock ?? filteredSummary.filter((p) => getStockQty(p) > (p.out_of_stock_threshold || 0)).length)
-  const totalProducts = Number(stockStats?.total_products ?? inventoryProductTotal ?? summary.length)
+  const totalProducts = Number(
+    stockStats?.total_products
+    ?? (inventoryProductsLoaded ? inventoryProductTotal : null)
+    ?? summary.length,
+  )
   const totalQtySold  = filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0)
   const totalRevenue  = filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0)
   const totalCOGS     = filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0)
@@ -2486,11 +2492,8 @@ export default function Inventory() {
       {showProductsSection && (
         <>
           <div className="mb-2 overflow-hidden rounded-xl border border-blue-200 bg-blue-50/85 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/25">
-            <div className="overflow-x-auto px-3 py-2">
-              <div className="flex min-w-max items-center gap-1.5 whitespace-nowrap">
-              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
-                {t('products') || 'Products'}
-              </span>
+            <div className="px-3 py-2">
+              <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded-full bg-white/85 px-2 py-1 text-[11px] font-medium text-blue-700/90 dark:bg-blue-950/40 dark:text-blue-200/85">
                 {inventoryProductSummaryLabel}
               </span>
@@ -2570,8 +2573,8 @@ export default function Inventory() {
               </div>
               </div>
             </div>
-            <div className="overflow-x-auto border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
-              <div className="flex min-w-max items-center gap-1.5">
+            <div className="border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-700 transition hover:border-blue-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-200 whitespace-nowrap"

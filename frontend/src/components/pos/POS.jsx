@@ -293,9 +293,7 @@ export default function POS() {
     const requestId = beginTrackedRequest(catalogRequestRef)
     setCatalogRefreshing(true)
     try {
-      const effectiveStockState = stockFilter === 'all'
-        ? (hasProductDiscoveryQuery ? '' : 'positive')
-        : stockFilter
+      const effectiveStockState = stockFilter === 'all' ? '' : stockFilter
       const productQuery = {
         page: productPage,
         pageSize: productPageSize,
@@ -1271,6 +1269,7 @@ export default function POS() {
               totalItems={productTotal}
               label={productCountLabel}
               t={t}
+              compact
               onPageChange={setProductPage}
               onPageSizeChange={(size) => {
                 setProductPageSize(size)

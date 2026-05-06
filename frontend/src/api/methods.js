@@ -1264,7 +1264,7 @@ export const redoActionHistory = id =>
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
 export const getInventoryStats = ({ branchId } = {}) => {
   const q = new URLSearchParams(Object.entries({ branchId }).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:stats:${q}`, () => apiFetch('GET', `/api/inventory/stats${q ? `?${q}` : ''}`), () => ({ item: { total_products: 0, in_stock: 0, low_stock: 0, out_of_stock: 0, stock_value_usd: 0, stock_value_khr: 0 } }))
+  return route(`inventory:stats:${q}`, () => apiFetch('GET', `/api/inventory/stats${q ? `?${q}` : ''}`), () => ({ item: null }))
 }
 export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()

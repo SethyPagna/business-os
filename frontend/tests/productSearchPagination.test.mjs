@@ -24,13 +24,13 @@ assert.ok(
 )
 assert.match(
   posPage,
-  /hasProductDiscoveryQuery[\s\S]*stockFilter === 'all'[\s\S]*\? \(hasProductDiscoveryQuery \? '' : 'positive'\)/,
-  'POS should switch from sellable-only browsing to all-result discovery during text or initial search',
+  /const effectiveStockState = stockFilter === 'all' \? '' : stockFilter/,
+  'POS should request total product results by default instead of forcing sellable-only browsing',
 )
 assert.match(
   posPage,
-  /stockFilter === 'all' && !hasProductDiscoveryQuery/,
-  'POS client-side fallback should only hide out-of-stock products while browsing without discovery filters',
+  /totalItems=\{productTotal\}/,
+  'POS pagination should be driven by the total product result count',
 )
 assert.match(
   productsPage,
