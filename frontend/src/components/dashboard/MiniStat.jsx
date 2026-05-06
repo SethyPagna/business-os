@@ -15,7 +15,7 @@ export default function MiniStat({ label, value, sub, color, trend, onClick }) {
       <div className={`text-lg font-bold leading-6 tracking-tight sm:text-[1.2rem] ${color || 'text-gray-900 dark:text-white'}`}>{value}</div>
       {sub ? (
         <div
-          className={`${subIsText ? 'truncate text-gray-400' : 'min-w-0 text-gray-500 dark:text-gray-400'} text-[11px] leading-4`}
+          className={`min-w-0 truncate text-[11px] leading-4 ${subIsText ? 'text-gray-400' : 'text-gray-500 dark:text-gray-400'}`}
           title={subIsText ? sub : undefined}
         >
           {sub}

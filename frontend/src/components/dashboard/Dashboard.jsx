@@ -305,17 +305,17 @@ export default function Dashboard() {
   })()
 
   const periodKpis = [
-    {
-      id: 'products',
-      label: t('products_total'),
-      value: summary?.product_count || 0,
-      sub: (
-        <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap">
-          <span className="font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock')}</span>
-          <span className="text-slate-300 dark:text-slate-500">/</span>
-          <span className="font-medium text-rose-600 dark:text-rose-300">{outOfStockCount} {t('out_of_stock')}</span>
-        </span>
-      ),
+      {
+        id: 'products',
+        label: t('products_total'),
+        value: summary?.product_count || 0,
+        sub: (
+          <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+            <span className="min-w-0 shrink truncate font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock')}</span>
+            <span className="text-slate-300 dark:text-slate-500">/</span>
+            <span className="min-w-0 shrink truncate font-medium text-rose-600 dark:text-rose-300">{outOfStockCount} {t('out_of_stock')}</span>
+          </span>
+        ),
       details: [
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('in_stock') || 'In stock', value: summary?.in_stock_count || 0 },

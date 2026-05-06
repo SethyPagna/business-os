@@ -1162,16 +1162,22 @@ export default function Inventory() {
   const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', 'ការប្រគល់មកវិញ រួមបញ្ចូលការសងប្រាក់ជូនអតិថិជន និងករណីប្រគល់ទៅអ្នកផ្គត់ផ្គង់ ដើម្បីពិនិត្យផ្លូវស្ដារវិញទាំងអស់ក្នុងកន្លែងតែមួយ។')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const primaryStats = [
-    {
-      id: 'products',
-      label: t('products'),
-      value: statsValue(totalProducts),
-      cls: 'text-gray-800 dark:text-gray-200',
-      sub: stockStatsLoaded ? `${lowStockCount} ${t('low_stock') || 'low'} - ${outStockCount} ${t('out_of_stock') || 'out'}` : (t('loading') || 'Loading...'),
-      details: [
-        { label: t('products') || 'Products', value: totalProducts },
-        { label: t('low_stock') || 'Low stock', value: lowStockCount },
-        { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
+      {
+        id: 'products',
+        label: t('products'),
+        value: statsValue(totalProducts),
+        cls: 'text-gray-800 dark:text-gray-200',
+        sub: stockStatsLoaded ? (
+          <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+            <span className="min-w-0 shrink truncate font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock') || 'Low stock'}</span>
+            <span className="text-slate-300 dark:text-slate-500">/</span>
+            <span className="min-w-0 shrink truncate font-medium text-rose-600 dark:text-rose-300">{outStockCount} {t('out_of_stock') || 'Out of stock'}</span>
+          </span>
+        ) : (t('loading') || 'Loading...'),
+        details: [
+          { label: t('products') || 'Products', value: totalProducts },
+          { label: t('low_stock') || 'Low stock', value: lowStockCount },
+          { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
         { label: t('formula') || 'Formula', value: inventoryThresholdFormulaText },
       ],
     },
@@ -2181,11 +2187,11 @@ export default function Inventory() {
           </h1>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setShowImport(true)}
-            className="btn-secondary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm"
-            title={tr('import', 'Import', 'នាំចូល')}
-          >
+            <button
+              onClick={() => setShowImport(true)}
+              className="btn-secondary inline-flex min-w-[5.75rem] shrink-0 items-center justify-center whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
+              title={tr('import', 'Import', 'នាំចូល')}
+            >
             <span className="inline-flex items-center gap-2">
               <Upload className="h-4 w-4" />
               {tr('import', 'Import', 'នាំចូល')}
@@ -2241,18 +2247,18 @@ export default function Inventory() {
       <>
       {/* ?? Primary Stats bar ?? */}
       <p className="mb-1 text-[10px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
-      <div className="mb-3 -mx-1.5 flex gap-1.5 overflow-x-auto px-1.5 pb-1 md:mx-0 md:grid md:grid-cols-3 md:gap-1.5 md:overflow-visible md:px-0 lg:grid-cols-4 2xl:grid-cols-8">
+      <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
         {inventoryStatCards.map((stat) => (
           <button
             key={stat.id}
             type="button"
-            className={`card w-[9.4rem] shrink-0 px-2 py-1.5 text-left transition hover:ring-2 hover:ring-blue-200 md:min-w-0 md:w-auto dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
+            className={`card flex min-w-0 flex-col justify-start px-2.5 py-2 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
             onClick={() => setStatDetail(stat)}
           >
-            <div className="mb-0.5 truncate text-[8px] font-medium uppercase tracking-[0.06em] text-gray-400">{stat.label}</div>
-            <div className={`truncate text-[14px] font-bold leading-4 ${stat.cls}`}>{stat.value}</div>
+            <div className="mb-0.5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
+            <div className={`truncate text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
             {stat.sub ? (
-              <div className="mt-0.5 min-w-0 text-[9px] leading-3.5 text-gray-400">
+              <div className="mt-0.5 min-w-0 truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400">
                 {stat.sub}
               </div>
             ) : null}
