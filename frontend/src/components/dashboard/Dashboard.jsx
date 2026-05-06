@@ -309,7 +309,13 @@ export default function Dashboard() {
       id: 'products',
       label: t('products_total'),
       value: summary?.product_count || 0,
-      sub: `${lowStockCount} ${t('low_stock')} / ${outOfStockCount} ${t('out_of_stock')}`,
+      sub: (
+        <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap">
+          <span className="font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock')}</span>
+          <span className="text-slate-300 dark:text-slate-500">/</span>
+          <span className="font-medium text-rose-600 dark:text-rose-300">{outOfStockCount} {t('out_of_stock')}</span>
+        </span>
+      ),
       details: [
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('in_stock') || 'In stock', value: summary?.in_stock_count || 0 },
@@ -327,18 +333,6 @@ export default function Dashboard() {
         { label: t('stock_value') || 'Stock value', value: fmtUSD(aStockValue) },
         { label: t('products_total') || 'Products', value: summary?.product_count || 0 },
         { label: t('formula') || 'Formula', value: stockValueFormulaText },
-      ],
-    },
-    {
-      id: 'out-of-stock',
-      label: t('out_of_stock') || 'Out of stock',
-      value: outOfStockCount,
-      sub: `${lowStockCount} ${t('low_stock') || 'low stock'}`,
-      color: outOfStockCount > 0 ? 'text-red-600' : 'text-gray-500',
-      details: [
-        { label: t('out_of_stock') || 'Out of stock', value: outOfStockCount },
-        { label: t('low_stock') || 'Low stock', value: lowStockCount },
-        { label: t('in_stock') || 'In stock', value: summary?.in_stock_count || 0 },
       ],
     },
     {

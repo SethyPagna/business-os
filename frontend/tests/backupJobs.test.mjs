@@ -101,10 +101,11 @@ await (async function notificationsUseIconsAndKeepUnavailableAlerts() {
   console.log('PASS notifications use icon severity chips and preserve active alerts during unavailable refreshes')
 })()
 
-await (async function dashboardShouldExposeOutOfStockAsTopKpi() {
+await (async function dashboardShouldKeepOutOfStockInsideProductTotalsKpi() {
   const source = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.jsx', import.meta.url), 'utf8')
-  assert.match(source, /id:\s*'out-of-stock'/)
-  assert.match(source, /value:\s*outOfStockCount/)
-  assert.match(source, /label:\s*t\('out_of_stock'\)/)
-  console.log('PASS dashboard exposes out-of-stock as a top KPI')
+  assert.match(source, /id:\s*'products'/)
+  assert.match(source, /lowStockCount/)
+  assert.match(source, /outOfStockCount/)
+  assert.doesNotMatch(source, /id:\s*'out-of-stock'/)
+  console.log('PASS dashboard keeps stock alerts inside total products KPI')
 })()

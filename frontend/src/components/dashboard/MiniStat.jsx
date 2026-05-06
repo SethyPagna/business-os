@@ -3,6 +3,7 @@ export default function MiniStat({ label, value, sub, color, trend, onClick }) {
   const trendUp = trend > 0
   const trendNone = trend === undefined || trend === null
   const Wrapper = onClick ? 'button' : 'div'
+  const subIsText = typeof sub === 'string'
 
   return (
     <Wrapper
@@ -12,7 +13,14 @@ export default function MiniStat({ label, value, sub, color, trend, onClick }) {
     >
       <div className="text-[11px] font-medium leading-4 text-gray-500 dark:text-gray-400">{label}</div>
       <div className={`text-lg font-bold leading-6 tracking-tight sm:text-[1.2rem] ${color || 'text-gray-900 dark:text-white'}`}>{value}</div>
-      {sub ? <div className="truncate text-[11px] leading-4 text-gray-400" title={sub}>{sub}</div> : null}
+      {sub ? (
+        <div
+          className={`${subIsText ? 'truncate text-gray-400' : 'min-w-0 text-gray-500 dark:text-gray-400'} text-[11px] leading-4`}
+          title={subIsText ? sub : undefined}
+        >
+          {sub}
+        </div>
+      ) : null}
       {!trendNone ? (
         <div className={`mt-0.5 flex items-center gap-1 text-[11px] font-semibold leading-4 ${trendUp ? 'text-green-600' : trend < 0 ? 'text-red-500' : 'text-gray-400'}`}>
           <span>{trendUp ? '->' : trend < 0 ? '<-' : '--'}</span>
