@@ -22,6 +22,11 @@ import {
 } from 'lucide-react'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
+function normalizePortalColor(value, fallback) {
+  const raw = String(value || '').trim()
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
+}
+
 function CatalogMembershipSection(props) {
   const {
     copy,
@@ -377,20 +382,61 @@ function CatalogAboutSection(props) {
     businessFacts,
     socialLinks,
     versionedBusinessLogo,
+    versionedBusinessCover,
     openPortalImage,
   } = props
 
+  const previewTitle = String(previewConfig.businessName || previewConfig.title || '').trim()
+  const previewBusinessName = String(previewConfig.businessName || '').trim()
+  const showBrandLabel = previewBusinessName && previewTitle && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
+  const aboutTitle = previewConfig.aboutTitle || copy('about', 'About')
+  const fallbackStory = copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')
+  const storyText = String(previewConfig.aboutContent || fallbackStory).trim()
+  const heroTitle = previewTitle || aboutTitle
+  const introText = String(previewConfig.intro || storyText || fallbackStory).trim()
+  const aboutBlocks = Array.isArray(previewConfig.aboutBlocks)
+    ? previewConfig.aboutBlocks.filter((block) => block?.title || block?.body || block?.mediaUrl)
+    : []
+  const heroGradientStart = normalizePortalColor(previewConfig.heroGradientStart, '#0f172a')
+  const heroGradientMid = normalizePortalColor(previewConfig.heroGradientMid, '#14532d')
+  const heroGradientEnd = normalizePortalColor(previewConfig.heroGradientEnd, '#ea580c')
+  const heroBackground = previewConfig.showCover && versionedBusinessCover
+    ? `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%), url(${versionedBusinessCover})`
+    : `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
+
   return (
-    <SectionShell
-      title={previewConfig.aboutTitle || copy('about', 'About')}
-      subtitle={copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}
-    >
-      <div className="space-y-4">
-        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
-          <div className="grid gap-0 lg:grid-cols-[0.9fr,1.1fr]">
-            <div className="flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-700 p-6 text-white">
-              <div className="text-center">
-                <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white shadow-lg">
+    <section className="space-y-4">
+      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+        <div
+          className="relative overflow-hidden text-white"
+          style={{
+            backgroundColor: heroGradientStart,
+            backgroundImage: heroBackground,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        >
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.22),rgba(15,23,42,0.62))]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%)]" />
+          <div className="relative z-10 grid gap-6 px-6 py-8 sm:px-8 sm:py-10 xl:grid-cols-[1.08fr,0.92fr] xl:items-end">
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/85 backdrop-blur">
+                <Store className="h-3.5 w-3.5" />
+                {aboutTitle}
+              </div>
+              {showBrandLabel ? (
+                <div className="notranslate mt-4 text-sm font-semibold text-amber-100" translate="no">
+                  {previewConfig.businessName}
+                </div>
+              ) : null}
+              <div className="mt-4 flex items-center gap-4">
+                <div
+                  className="flex items-center justify-center overflow-hidden rounded-[28px] border border-white/20 bg-white shadow-lg shadow-slate-950/15"
+                  style={{
+                    height: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
+                    width: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
+                  }}
+                >
                   {versionedBusinessLogo ? (
                     <button
                       type="button"
@@ -413,34 +459,44 @@ function CatalogAboutSection(props) {
                     <span className="text-2xl font-semibold">{String(previewConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
                   )}
                 </div>
-                <div className="mt-4 text-lg font-semibold">{previewConfig.businessName || copy('about', 'About')}</div>
-                {previewConfig.businessTagline ? <div className="mt-1 text-sm text-white/80">{previewConfig.businessTagline}</div> : null}
+                <div className="min-w-0">
+                  <h2 className="notranslate text-3xl font-semibold tracking-tight text-white sm:text-4xl" translate="no">
+                    {heroTitle}
+                  </h2>
+                  {previewConfig.businessTagline ? <div className="notranslate mt-2 text-sm text-white/80 sm:text-base" translate="no">{previewConfig.businessTagline}</div> : null}
+                </div>
               </div>
+              <p className="notranslate mt-5 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base" translate="no">
+                {introText}
+              </p>
             </div>
-            <div className="space-y-4 p-6">
+
+            <div className="grid gap-4 xl:pl-6">
               {businessFacts?.length ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {businessFacts.map((item) => {
-                    const Icon = item.icon || (item.key === 'phone'
-                      ? Phone
-                      : item.key === 'email'
-                        ? Mail
-                        : MapPin)
-                    const body = (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/70">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                          <Icon className="h-3.5 w-3.5" />
-                          {item.label}
+                <div className="rounded-[28px] border border-white/15 bg-white/10 p-4 shadow-lg shadow-slate-950/10 backdrop-blur">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {businessFacts.map((item) => {
+                      const Icon = item.icon || (item.key === 'phone'
+                        ? Phone
+                        : item.key === 'email'
+                          ? Mail
+                          : MapPin)
+                      const body = (
+                        <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white/95 transition hover:bg-white/15">
+                          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/65">
+                            <Icon className="h-3.5 w-3.5" />
+                            {item.label}
+                          </div>
+                          <div className="mt-2 text-sm font-medium leading-6 text-white">{item.value}</div>
                         </div>
-                        <div className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">{item.value}</div>
-                      </div>
-                    )
-                    return item.href ? <a key={item.key} href={item.href} target="_blank" rel="noreferrer">{body}</a> : <div key={item.key}>{body}</div>
-                  })}
+                      )
+                      return item.href ? <a key={item.key} href={item.href} target="_blank" rel="noreferrer">{body}</a> : <div key={item.key}>{body}</div>
+                    })}
+                  </div>
                 </div>
               ) : null}
               {socialLinks?.length ? (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 rounded-[24px] border border-white/15 bg-white/10 p-3 shadow-lg shadow-slate-950/10 backdrop-blur">
                   {socialLinks.map((item) => {
                     const Icon = item.key === 'facebook'
                       ? Facebook
@@ -455,7 +511,7 @@ function CatalogAboutSection(props) {
                         href={item.value}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/85 px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-white"
                       >
                         <Icon className="h-4 w-4" />
                         {item.label}
@@ -468,61 +524,66 @@ function CatalogAboutSection(props) {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-        {previewConfig.aboutContent ? (
-          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
-            <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{previewConfig.aboutContent}</p>
-          </div>
-        ) : null}
-        {previewConfig.aboutBlocks?.length ? previewConfig.aboutBlocks.map((block) => (
-          <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
-            {block.mediaUrl ? (
-              <button
-                type="button"
-                className="flex w-full items-center justify-center bg-slate-50 p-4"
-                onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), [block.mediaUrl])}
-              >
-                {block.type === 'video' ? (
-                  <video src={block.mediaUrl} controls preload="metadata" className="max-h-[340px] w-full rounded-2xl bg-white object-contain" />
-                ) : (
-                  <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[340px] w-full rounded-2xl object-contain" />
-                )}
-              </button>
-            ) : null}
-            <div className="space-y-3 p-6">
-              {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{block.title}</h3> : null}
-              {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{block.body}</p> : null}
-            </div>
-          </div>
-        )) : null}
-        {mapEmbedUrl ? (
-          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                <MapPin className="h-4 w-4" />
-              </span>
-              <div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{copy('mapCard', 'Store map')}</div>
-                {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-slate-400">{addressFact.value}</div> : null}
+        <div className="space-y-5 p-5 sm:p-6">
+          <div className="grid gap-4 lg:grid-cols-2">
+            {storyText ? (
+              <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{aboutTitle}</div>
+                <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">
+                  {storyText}
+                </p>
               </div>
-            </div>
-            <iframe
-              title="portal-about-map"
-              src={mapEmbedUrl}
-              className="h-64 w-full border-0"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
+            ) : null}
+            {mapEmbedUrl ? (
+              <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+                <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <MapPin className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{copy('mapCard', 'Store map')}</div>
+                    {addressFact?.value ? <div className="text-xs text-slate-500 dark:text-slate-400">{addressFact.value}</div> : null}
+                  </div>
+                </div>
+                <iframe
+                  title="portal-about-map"
+                  src={mapEmbedUrl}
+                  className="h-72 w-full border-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
+            ) : null}
+            {aboutBlocks.map((block) => (
+              <div key={block.id} className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+                {block.mediaUrl ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-slate-950/60"
+                    onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), [block.mediaUrl])}
+                  >
+                    {block.type === 'video' ? (
+                      <video src={block.mediaUrl} controls preload="metadata" className="max-h-[340px] w-full rounded-2xl bg-white object-contain dark:bg-slate-950" />
+                    ) : (
+                      <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[340px] w-full rounded-2xl object-contain" />
+                    )}
+                  </button>
+                ) : null}
+                <div className="space-y-3 p-6">
+                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{block.title}</h3> : null}
+                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-slate-300">{block.body}</p> : null}
+                </div>
+              </div>
+            ))}
+            {!storyText && !aboutBlocks.length && !mapEmbedUrl ? (
+              <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
+                <p className="text-sm text-slate-500 dark:text-slate-400">{fallbackStory}</p>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {!previewConfig.aboutContent && !previewConfig.aboutBlocks?.length && !mapEmbedUrl ? (
-          <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')}</p>
-          </div>
-        ) : null}
         </div>
       </div>
-    </SectionShell>
+    </section>
   )
 }
 

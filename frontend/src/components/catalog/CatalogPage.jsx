@@ -3447,6 +3447,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     businessFacts,
     socialLinks,
     versionedBusinessLogo,
+    versionedBusinessCover,
     publicFaqItems,
     expandedFaqId,
     setExpandedFaqId,
@@ -4745,12 +4746,7 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
   const previewTitle = String(displayConfig.businessName || displayConfig.title || '').trim()
   const previewBusinessName = String(displayConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
-  const previewTitleIsBusinessName = previewBusinessName
-    && previewTitle
-    && previewBusinessName.toLowerCase() === previewTitle.toLowerCase()
   const portalTabs = getPortalTabs(displayConfig, copy)
-  const showHeroToolsPanel = publicView
-  const showPortalToolsBar = false
 
   return (
     <div
@@ -4776,35 +4772,13 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                 </button>
               </div>
             ) : null}
-            <section className="overflow-hidden rounded-[36px] border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
-              <div
-                className="relative overflow-hidden px-6 py-8 text-white sm:px-8 sm:py-10"
-                style={{
-                  backgroundColor: normalizeHexColor(displayConfig.heroGradientStart, '#0f172a'),
-                  backgroundImage: (displayConfig.showCover && versionedBusinessCover)
-                    ? `linear-gradient(135deg, ${hexToRgba(displayConfig.heroGradientStart, 0.88)} 0%, ${hexToRgba(displayConfig.heroGradientMid, 0.74)} 55%, ${hexToRgba(displayConfig.heroGradientEnd, 0.72)} 100%), url(${versionedBusinessCover})`
-                    : `linear-gradient(135deg, ${normalizeHexColor(displayConfig.heroGradientStart, '#0f172a')} 0%, ${normalizeHexColor(displayConfig.heroGradientMid, '#14532d')} 45%, ${normalizeHexColor(displayConfig.heroGradientEnd, '#ea580c')} 100%)`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              >
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%)]" />
-                <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="max-w-3xl">
-                    {!publicView ? (
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        {copy('previewBadge', 'Portal Studio')}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-4 flex items-center gap-4">
+            <section className="sticky top-2 z-30 overflow-hidden rounded-[30px] border border-slate-200 bg-white/92 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+              <div className="px-4 py-4 sm:px-6">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
                       <div
-                        className="flex items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white shadow-lg"
-                        style={{
-                          height: `${displayConfig.logoSize || 80}px`,
-                          width: `${displayConfig.logoSize || 80}px`,
-                        }}
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950"
                       >
                         {displayConfig.showLogo && versionedBusinessLogo ? (
                           <button
@@ -4812,190 +4786,150 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                             className="flex h-full w-full items-center justify-center"
                             onClick={() => openPortalImage(displayConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
                           >
-                              <img
-                                src={versionedBusinessLogo}
-                                alt={displayConfig.businessName}
-                                loading="eager"
-                                decoding="async"
-                                fetchPriority="high"
-                                className="h-full w-full"
-                                style={{
-                                  objectFit: displayConfig.logoFit === 'cover' ? 'cover' : 'contain',
-                                  objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
-                                  transform: `scale(${Math.max(0.8, Math.min(1.8, (displayConfig.logoZoom || 100) / 100))})`,
-                                  transformOrigin: 'center',
-                                }}
-                              />
-                            </button>
+                            <img
+                              src={versionedBusinessLogo}
+                              alt={displayConfig.businessName}
+                              loading="eager"
+                              decoding="async"
+                              fetchPriority="high"
+                              className="h-full w-full"
+                              style={{
+                                objectFit: displayConfig.logoFit === 'cover' ? 'cover' : 'contain',
+                                objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
+                                transform: `scale(${Math.max(0.8, Math.min(1.8, (displayConfig.logoZoom || 100) / 100))})`,
+                                transformOrigin: 'center',
+                              }}
+                            />
+                          </button>
                         ) : (
-                          <span className="text-xl font-semibold">{(displayConfig.businessName || 'B').slice(0, 2).toUpperCase()}</span>
+                          <span className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                            {(displayConfig.businessName || 'B').slice(0, 2).toUpperCase()}
+                          </span>
                         )}
                       </div>
-                      <div>
+                      <div className="min-w-0">
+                        {!publicView ? (
+                          <div className="mb-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                            <Sparkles className="h-3 w-3" />
+                            {copy('previewBadge', 'Portal Studio')}
+                          </div>
+                        ) : null}
                         {showBrandLabel ? (
-                          <div className="notranslate text-sm font-semibold text-amber-100" translate="no">{displayConfig.businessName}</div>
+                          <div className="notranslate truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500" translate="no">
+                            {displayConfig.businessName}
+                          </div>
                         ) : null}
+                        <div className="notranslate truncate text-base font-semibold text-slate-900 dark:text-slate-100 sm:text-lg" translate="no">
+                          {previewTitle || displayConfig.businessName || copy('about', 'About')}
+                        </div>
                         {displayConfig.businessTagline ? (
-                          <div className="notranslate mt-1 text-sm text-slate-100/90" translate="no">{displayConfig.businessTagline}</div>
+                          <div className="notranslate hidden truncate text-xs text-slate-500 dark:text-slate-400 sm:block" translate="no">
+                            {displayConfig.businessTagline}
+                          </div>
                         ) : null}
                       </div>
                     </div>
-
-                    {previewTitle ? (
-                      <h1
-                        className={`mt-5 font-semibold tracking-tight text-white${previewTitleIsBusinessName ? ' notranslate' : ''}`}
-                        translate={previewTitleIsBusinessName ? 'no' : undefined}
-                        style={{ fontSize: `${displayConfig.titleSize || 40}px`, lineHeight: 1.05, textShadow: '0 10px 28px rgba(15, 23, 42, 0.32)' }}
-                      >
-                        {previewTitle}
-                      </h1>
-                    ) : null}
-                    <p
-                      className="notranslate mt-3 max-w-2xl text-sm leading-7 text-slate-50 sm:text-base"
-                      translate="no"
-                      style={{ textShadow: '0 6px 18px rgba(15, 23, 42, 0.28)' }}
-                    >
-                      {displayConfig.intro}
-                    </p>
-
-                  </div>
-                  {showHeroToolsPanel ? (
-                    <div className="flex w-full items-start justify-end lg:w-auto">
-                      <div className="flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/35 px-2 py-2 shadow-xl backdrop-blur">
-                        {displayConfig.translateWidgetEnabled ? (
-                          <PortalMenu
-                            align="right"
-                            trigger={(
-                              <button
-                                type="button"
-                                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
-                                aria-label={copy('publicTranslation', 'Language tools')}
-                                title={copy('publicTranslation', 'Language tools')}
-                              >
-                                <Globe className="h-4 w-4" />
-                              </button>
-                            )}
-                            content={({ closeMenu }) => (
-                              <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
-                                <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                  {copy('publicTranslation', 'Language tools')}
-                                </div>
-                                {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => {
-                                  const active = translateTarget === option.value && (
-                                    translateApplyState === 'applied'
-                                    || (option.value === 'original' && translateApplyState === 'idle')
-                                  )
-                                  return (
-                                    <button
-                                      key={option.value}
-                                      type="button"
-                                      className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                        active
-                                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                          : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
-                                      }`}
-                                      onClick={() => {
-                                        changeTranslateTarget(option.value)
-                                        closeMenu()
-                                      }}
-                                    >
-                                      <span>
-                                        {option.value === 'original'
-                                          ? copy('followApp', 'Original')
-                                          : option.kind === 'external'
-                                            ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
-                                            : option.label}
-                                      </span>
-                                      {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                                    </button>
-                                  )
-                                })}
-                                {translateApplyMessage ? (
-                                  <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
-                                    translateApplyState === 'failed'
-                                      ? 'text-rose-600 dark:text-rose-300'
-                                      : 'text-slate-500 dark:text-slate-400'
-                                  }`}>
-                                    {translateApplyMessage}
-                                  </div>
-                                ) : null}
-                                {externalTranslateTarget && !translateReady ? (
-                                  <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                                    {copy('externalTranslationPreparing', 'Preparing external translation...')}
-                                  </div>
-                                ) : null}
+                    <div className="flex items-center gap-2">
+                      {displayConfig.translateWidgetEnabled ? (
+                        <PortalMenu
+                          align="right"
+                          trigger={(
+                            <button
+                              type="button"
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                              aria-label={copy('publicTranslation', 'Language tools')}
+                              title={copy('publicTranslation', 'Language tools')}
+                            >
+                              <Globe className="h-4 w-4" />
+                            </button>
+                          )}
+                          content={({ closeMenu }) => (
+                            <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
+                              <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                {copy('publicTranslation', 'Language tools')}
                               </div>
-                            )}
-                          />
-                        ) : null}
-                        <button
-                          type="button"
-                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/15"
-                          onClick={toggleTheme}
-                          aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                          title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                        >
-                          {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                </div>
-              </div>
-
-              {showPortalToolsBar ? (
-                <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-950/80 sm:px-8">
-                  <div className="portal-tools-bar flex flex-col items-end gap-2">
-                    <label className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-                      <Globe className="h-4 w-4 shrink-0 text-slate-500" />
-                      <select
-                        id="portal-language-tools-bar"
-                        name="portal_language_tools"
-                        className="min-w-[132px] bg-transparent text-sm text-slate-700 outline-none dark:text-slate-100"
-                        value={translateTarget}
-                        onChange={(event) => changeTranslateTarget(event.target.value)}
+                              {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => {
+                                const active = translateTarget === option.value && (
+                                  translateApplyState === 'applied'
+                                  || (option.value === 'original' && translateApplyState === 'idle')
+                                )
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                      active
+                                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                        : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                                    }`}
+                                    onClick={() => {
+                                      changeTranslateTarget(option.value)
+                                      closeMenu()
+                                    }}
+                                  >
+                                    <span>
+                                      {option.value === 'original'
+                                        ? copy('followApp', 'Original')
+                                        : option.kind === 'external'
+                                          ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
+                                          : option.label}
+                                    </span>
+                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                  </button>
+                                )
+                              })}
+                              {translateApplyMessage ? (
+                                <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
+                                  translateApplyState === 'failed'
+                                    ? 'text-rose-600 dark:text-rose-300'
+                                    : 'text-slate-500 dark:text-slate-400'
+                                }`}>
+                                  {translateApplyMessage}
+                                </div>
+                              ) : null}
+                              {externalTranslateTarget && !translateReady ? (
+                                <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                                  {copy('externalTranslationPreparing', 'Preparing external translation...')}
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                        onClick={toggleTheme}
+                        aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
+                        title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       >
-                        {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.value === 'original'
-                              ? copy('followApp', 'Original')
-                              : option.kind === 'external'
-                                ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
-                                : option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className={`text-xs ${translateApplyState === 'failed' ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                      {translateApplyMessage || (!externalTranslateTarget || translateReady
-                        ? copy('translationReady', 'Translation tools are ready')
-                        : copy('externalTranslationPreparing', 'Preparing external translation...'))}
+                        {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                      </button>
                     </div>
                   </div>
-                </div>
-              ) : null}
 
-              <div className="sticky top-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 sm:px-8">
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {portalTabs.map((item) => {
-                    const Icon = item.icon
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition sm:text-sm ${
-                          activeTab === item.key
-                            ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                        }`}
-                        onClick={() => setActiveTab(item.key)}
-                      >
-                        <Icon className="h-4 w-4" />
-                        <span className="whitespace-nowrap">{item.label}</span>
-                      </button>
-                    )
-                  })}
+                  <div className="overflow-x-auto">
+                    <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] bg-slate-100/90 p-1 dark:bg-slate-800/90">
+                      {portalTabs.map((item) => {
+                        const Icon = item.icon
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                              activeTab === item.key
+                                ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-white dark:ring-slate-700'
+                                : 'text-slate-600 hover:bg-white/80 dark:text-slate-300 dark:hover:bg-slate-900/70'
+                            }`}
+                            onClick={() => setActiveTab(item.key)}
+                          >
+                            <Icon className="h-4 w-4" />
+                            <span className="whitespace-nowrap">{item.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
