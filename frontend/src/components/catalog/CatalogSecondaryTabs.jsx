@@ -431,7 +431,7 @@ function CatalogAboutSection(props) {
               ) : null}
               <div className="mt-4 flex items-center gap-4">
                 <div
-                  className="flex items-center justify-center overflow-hidden rounded-[28px] border border-white/20 bg-white shadow-lg shadow-slate-950/15"
+                  className="flex items-center justify-center overflow-hidden rounded-[30px] border border-white/20 bg-white/95 p-2 shadow-lg shadow-slate-950/15"
                   style={{
                     height: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
                     width: `${Math.max(72, Number(previewConfig.logoSize || 80))}px`,
@@ -440,17 +440,17 @@ function CatalogAboutSection(props) {
                   {versionedBusinessLogo ? (
                     <button
                       type="button"
-                      className="flex h-full w-full items-center justify-center"
+                      className="flex h-full w-full items-center justify-center overflow-hidden rounded-[24px] bg-white"
                       onClick={() => openPortalImage(previewConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
                     >
                       <img
                         src={versionedBusinessLogo}
                         alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
-                        className="h-full w-full"
+                        className="h-full w-full rounded-[22px]"
                         style={{
-                          objectFit: previewConfig.logoFit === 'cover' ? 'cover' : 'contain',
+                          objectFit: 'contain',
                           objectPosition: `${previewConfig.logoPositionX || 50}% ${previewConfig.logoPositionY || 50}%`,
-                          transform: `scale(${Math.max(0.8, Math.min(1.8, (previewConfig.logoZoom || 100) / 100))})`,
+                          transform: `scale(${Math.max(0.92, Math.min(1.18, (previewConfig.logoZoom || 100) / 100))})`,
                           transformOrigin: 'center',
                         }}
                       />

@@ -4778,12 +4778,12 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div
-                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950"
+                        className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
                       >
-                        {displayConfig.showLogo && versionedBusinessLogo ? (
+                        {versionedBusinessLogo ? (
                           <button
                             type="button"
-                            className="flex h-full w-full items-center justify-center"
+                            className="flex h-full w-full items-center justify-center overflow-hidden rounded-[14px] bg-white"
                             onClick={() => openPortalImage(displayConfig.businessName || copy('logoImage', 'Logo image'), [versionedBusinessLogo])}
                           >
                             <img
@@ -4792,11 +4792,11 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                               loading="eager"
                               decoding="async"
                               fetchPriority="high"
-                              className="h-full w-full"
+                              className="h-full w-full rounded-[12px]"
                               style={{
-                                objectFit: displayConfig.logoFit === 'cover' ? 'cover' : 'contain',
+                                objectFit: 'contain',
                                 objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
-                                transform: `scale(${Math.max(0.8, Math.min(1.8, (displayConfig.logoZoom || 100) / 100))})`,
+                                transform: `scale(${Math.max(0.92, Math.min(1.18, (displayConfig.logoZoom || 100) / 100))})`,
                                 transformOrigin: 'center',
                               }}
                             />
