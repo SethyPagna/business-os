@@ -2597,7 +2597,7 @@ export default function Inventory() {
               const productTags = [p.brand, p.category, p.is_group ? 'Group' : (p.parent_id ? 'Variant' : '')].filter(Boolean)
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start justify-between gap-1.5">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
                         <input
@@ -2613,10 +2613,10 @@ export default function Inventory() {
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                          <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-gray-400">
-                            <span className="min-w-0 flex-1 truncate">{productTags.join(' · ') || (t('product') || 'Product')}</span>
+                          <div className="mt-0.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 text-[10px] leading-4 text-gray-400">
+                            <span className="min-w-0 truncate pr-1">{productTags.join(' · ') || (t('product') || 'Product')}</span>
                             {p.barcode ? (
-                              <span className="shrink-0 whitespace-nowrap font-medium text-gray-500 dark:text-gray-300">
+                              <span className="shrink-0 whitespace-nowrap text-right font-medium text-gray-500 dark:text-gray-300">
                                 {p.barcode}
                               </span>
                             ) : null}
@@ -2624,7 +2624,7 @@ export default function Inventory() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center justify-end gap-1 text-right">
+                    <div className="flex shrink-0 items-center justify-end gap-0.5 text-right">
                       <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
                         {qty}
                         <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
