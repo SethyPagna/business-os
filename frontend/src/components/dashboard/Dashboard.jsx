@@ -14,6 +14,7 @@ import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
 import PortalMenu from '../shared/PortalMenu'
 import { useIsPageActive } from '../shared/pageActivity'
+import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 
@@ -73,6 +74,29 @@ function compactDashboardMetaParts(parts = []) {
     .filter((part) => part && part !== '—' && part !== '-')
 }
 
+function isDashboardSummaryPayload(value) {
+  if (!value || typeof value !== 'object') return false
+  return (
+    Number.isFinite(Number(value.product_count))
+    || Number.isFinite(Number(value.stock_value_usd))
+    || Array.isArray(value.recent_sales)
+    || Array.isArray(value.low_stock)
+    || Array.isArray(value.out_of_stock)
+  )
+}
+
+function isDashboardAnalyticsPayload(value) {
+  if (!value || typeof value !== 'object') return false
+  return (
+    Array.isArray(value.periodData)
+    || Array.isArray(value.byPayment)
+    || Array.isArray(value.byBranch)
+    || Array.isArray(value.topProducts)
+    || Array.isArray(value.topCustomers)
+    || (value.totals && typeof value.totals === 'object')
+  )
+}
+
 export default function Dashboard() {
   const { t, fmtUSD, fmtKHR, user } = useApp()
   const { syncChannel } = useSync()
@@ -111,6 +135,8 @@ export default function Dashboard() {
   const [loading, setLoading]     = useState(true)
   const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+  const [analyticsError, setAnalyticsError] = useState('')
   const [rangeId, setRangeId]     = useState(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
   const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
@@ -140,7 +166,6 @@ export default function Dashboard() {
   }, [])
 
   const loadSummary = useCallback(async ({
-    clearOnError = false,
     label = 'Dashboard summary',
     markLoading = false,
   } = {}) => {
@@ -149,14 +174,16 @@ export default function Dashboard() {
     try {
       const data = await withLoaderTimeout(() => window.api.getDashboard(), label, 30_000)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
+      if (!isDashboardSummaryPayload(data)) {
+        throw new Error('Dashboard summary returned incomplete data.')
+      }
       setSummary(data)
+      setSummaryError('')
       return data
     } catch (error) {
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       console.error('[Dashboard] getDashboard failed:', error.message)
-      if (clearOnError) {
-        setSummary({})
-      }
+      setSummaryError(error?.message || 'Dashboard summary failed to load.')
       return null
     } finally {
       if (markLoading && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
@@ -180,11 +207,16 @@ export default function Dashboard() {
         30_000,
       )
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
+      if (!isDashboardAnalyticsPayload(data)) {
+        throw new Error('Dashboard analytics returned incomplete data.')
+      }
       setAnalytics(data)
+      setAnalyticsError('')
       return data
     } catch (error) {
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       console.error('[Dashboard] getAnalytics failed:', error.message)
+      setAnalyticsError(error?.message || 'Dashboard analytics failed to load.')
       return null
     } finally {
       if (shouldClearLoading && isTrackedRequestCurrent(analyticsRequestRef, requestId)) {
@@ -229,7 +261,6 @@ export default function Dashboard() {
     }
 
     void loadSummary({
-      clearOnError: true,
       markLoading: summary == null,
     })
   }, [isActive, loadSummary])
@@ -270,6 +301,13 @@ export default function Dashboard() {
   }, [])
 
   const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
+  const summaryReady = isDashboardSummaryPayload(summary)
+  const analyticsReady = isDashboardAnalyticsPayload(analytics)
+  const summaryUnavailable = !loading && !summaryReady
+  const analyticsPending = !analyticsReady && aLoading
+  const analyticsUnavailable = !analyticsReady && !aLoading
+  const staleSummaryNotice = summaryReady && summaryError
+  const staleAnalyticsNotice = analyticsReady && analyticsError
   const calcTrend = (curr, prev) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
   const aRevenue  = analytics?.totals?.revenue_usd || 0
   const aGrossSales = analytics?.totals?.gross_sales_usd || 0
@@ -876,7 +914,49 @@ export default function Dashboard() {
     } },
   ]
 
-  if (loading) return <div className="flex-1 flex items-center justify-center text-gray-400">{t('loading')}</div>
+  if (loading && !summaryReady) {
+    return (
+      <div className="page-scroll p-3 sm:p-5">
+        <LoadingWatchdog
+          loading
+          timeoutMs={30_000}
+          label={t('loading')}
+          details="Dashboard summary and analytics are loading."
+          onRetry={() => {
+            void Promise.allSettled([
+              loadSummary({ label: 'Dashboard summary retry', markLoading: true }),
+              loadAnalytics(),
+            ])
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (summaryUnavailable) {
+    return (
+      <div className="page-scroll p-3 sm:p-5">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="font-semibold">Dashboard summary unavailable</div>
+          <div className="mt-1 text-xs text-amber-800/90 dark:text-amber-200/80">
+            {summaryError || 'The dashboard summary did not finish loading. Retry to fetch fresh totals and activity.'}
+          </div>
+          <button
+            type="button"
+            className="btn-secondary mt-3 px-3 py-1.5 text-xs"
+            onClick={() => {
+              void Promise.allSettled([
+                loadSummary({ label: 'Dashboard summary retry', markLoading: true }),
+                loadAnalytics(),
+              ])
+            }}
+          >
+            {refreshLabel}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
@@ -903,6 +983,21 @@ export default function Dashboard() {
           <ExportMenu label={exportLabel} items={dashboardExportItems} compact triggerClassName="min-w-[6.25rem] sm:min-w-[6.5rem]" />
         </div>
       </div>
+
+      {(staleSummaryNotice || staleAnalyticsNotice) ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="font-semibold">
+            {staleSummaryNotice && staleAnalyticsNotice
+              ? 'Showing saved dashboard totals and analytics while refresh finishes.'
+              : staleSummaryNotice
+                ? 'Showing saved dashboard totals while the latest summary refresh failed.'
+                : 'Showing saved dashboard analytics while the latest analytics refresh failed.'}
+          </div>
+          <div className="mt-0.5 text-[11px] text-amber-800/90 dark:text-amber-200/80">
+            {summaryError || analyticsError}
+          </div>
+        </div>
+      ) : null}
 
       {/* Range selector */}
       <div className="card p-3 sm:p-4">
@@ -962,12 +1057,19 @@ export default function Dashboard() {
             <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">{periodShort}</span>
             <span className="text-xs text-gray-400 ml-auto hidden sm:inline">{rangeLabel}</span>
           </div>
-          {!aLoading ? (
+          {analyticsReady ? (
             <p className="mb-1.5 text-[11px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
           ) : null}
-          {aLoading ? (
+          {analyticsPending ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
               {[...Array(7)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
+            </div>
+          ) : analyticsUnavailable ? (
+            <div className="rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">
+              <div className="font-semibold">Analytics unavailable</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {analyticsError || 'The dashboard analytics could not be loaded for this range.'}
+              </div>
             </div>
           ) : (
             <>
@@ -1002,7 +1104,8 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          {aLoading ? <div className="h-36 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" />
+          {analyticsPending ? <div className="h-36 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" />
+          : analyticsUnavailable ? <div className="h-36 flex flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           : chartRenderData.length === 0 ? <div className="h-36 flex items-center justify-center text-gray-400 text-sm">{t('no_data')}</div>
           : activeChart === 'revenue' ? (
             <>
@@ -1030,7 +1133,9 @@ export default function Dashboard() {
 
         <div className="card p-3 sm:p-4">
           <h2 className="font-semibold text-gray-900 dark:text-white text-sm mb-3">{t('payment_method')}</h2>
-          {aLoading ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : (
+          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
+            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          ) : (
             <>
               <DonutChart data={analytics?.byPayment||[]} valueKey="revenue_usd" />
               <div className="mt-2 space-y-1 max-h-32 overflow-auto">
@@ -1063,7 +1168,9 @@ export default function Dashboard() {
         {/* Branch */}
         <div className="card p-3 sm:p-4">
           <h2 className="font-semibold text-gray-900 dark:text-white text-sm mb-3">{t('branch_performance')}</h2>
-          {aLoading ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : (() => {
+          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
+            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          ) : (() => {
             const all = analytics?.byBranch || []
             const COLORS = ['#2563eb','#16a34a','#ea580c','#7c3aed','#0891b2']
             const maxRev = Math.max(...all.map(b=>b.revenue_usd||0), 0.01)
@@ -1111,7 +1218,9 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          {aLoading ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : (
+          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
+            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          ) : (
             <>
               <div className="space-y-1.5">
                 {topList.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{t('no_data')}</p>
@@ -1160,7 +1269,9 @@ export default function Dashboard() {
                 <h2 className="font-semibold text-gray-900 dark:text-white text-sm">{t('top_customers')}</h2>
                 <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">{t('net_of_returns')}</span>
               </div>
-              {aLoading ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : (
+              {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
+                <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+              ) : (
                 <>
                   {customers.length === 0
                     ? <p className="text-xs text-gray-400 text-center py-4">{t('no_named_customers')}</p>
@@ -1209,7 +1320,9 @@ export default function Dashboard() {
         {/* Best Hour */}
         <div className="card p-3 sm:p-4">
           <h2 className="font-semibold text-gray-900 dark:text-white text-sm mb-3">{t('best_hour')}</h2>
-          {aLoading ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : (() => {
+          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
+            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+          ) : (() => {
             const hourly = analytics?.hourlyDist || []
             const tzOff  = -(new Date().getTimezoneOffset())/60
             const merged = {}

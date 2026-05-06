@@ -1590,13 +1590,13 @@ export const getSales   = (params) => {
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
-export const getDashboard = ()       => route('dashboard:get',  () => apiFetch('GET', '/api/dashboard'),       () => ({}))
+export const getDashboard = ()       => route('dashboard:get',  () => apiFetch('GET', '/api/dashboard'))
 export const getAnalytics = (params) => {
   const q = new URLSearchParams(params).toString()
   // Include the full query string in the cache key so each unique date range
   // gets its own cache entry. Without this, changing the filter (e.g. 7d → 30d)
   // returns the stale cached result instead of re-fetching from the server.
-  return route(`analytics:get:${q}`, () => apiFetch('GET', `/api/analytics?${q}`), () => ({}))
+  return route(`analytics:get:${q}`, () => apiFetch('GET', `/api/analytics?${q}`))
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────

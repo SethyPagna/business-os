@@ -1082,7 +1082,13 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     out_of_stock:         outOfStockPreview,
     expiring_products:    expiringProducts,
     expiring_count:       expiringProducts.length,
-    recent_sales:         db.prepare('SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status FROM sales s ORDER BY s.created_at DESC LIMIT 10').all(),
+    recent_sales:         db.prepare(`
+      SELECT s.id, s.receipt_number, s.total_usd, s.total_khr, s.created_at, s.customer_name, s.branch_name, s.sale_status
+      FROM sales s
+      WHERE COALESCE(s.sale_status,'completed') NOT IN ('cancelled','awaiting_payment')
+      ORDER BY s.created_at DESC
+      LIMIT 10
+    `).all(),
   }))
 })
 
