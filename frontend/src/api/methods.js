@@ -760,7 +760,7 @@ export const getProductsByIds = (ids = [], params = {}) => {
     page: 1,
     pageSize: Math.min(Math.max(uniqueIds.length, 1), 100),
     ids: uniqueIds.join(','),
-    include: 'branch_stock,images',
+    include: 'branch_stock,images,batches',
     ...params,
   })
 }

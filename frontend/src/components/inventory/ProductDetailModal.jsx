@@ -1,6 +1,7 @@
 // ProductDetailModal (Inventory)
 // Shows full stock details for a product across all branches.
 import { calculateProductDiscount } from '../../utils/pricing.js'
+import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.mjs'
 
 export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
@@ -16,6 +17,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       : 'text-green-600'
   const profit = Math.max(0, p.revenue_usd || 0) - Math.max(0, p.cogs_usd || 0)
   const promotion = calculateProductDiscount(p)
+  const visibleBatches = getVisibleProductBatches(p)
+  const batchPreview = buildBatchPreview(p, 'all', { limit: 8 })
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
@@ -117,6 +120,26 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                     <span className="font-medium text-gray-900 dark:text-white">{branchStock?.quantity ?? 0} {p.unit}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          ) : null}
+
+          {visibleBatches.length ? (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{T('batches', 'Batches')}</div>
+              <div className="space-y-2">
+                {batchPreview.items.map((batch) => (
+                  <div key={batch.id || batch.batch_id} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batch.lot_code || T('batch', 'Batch')}</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {p.unit}</span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || T('no_expiry', 'No expiry')}</div>
+                  </div>
+                ))}
+                {batchPreview.extraCount ? (
+                  <div className="text-[11px] text-gray-400">+{batchPreview.extraCount} {T('more', 'more')}</div>
+                ) : null}
               </div>
             </div>
           ) : null}

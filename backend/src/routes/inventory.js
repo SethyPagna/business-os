@@ -8,6 +8,18 @@ const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const { getStockMetrics } = require('../businessMetrics')
 const { normalizeClientRequestId } = require('../idempotency')
+const {
+  allocateProductBatches,
+  cloneAllocationsToProduct,
+  getProductById,
+  increaseProductBatchStock,
+  incrementBranchBatchQuantity,
+  listProductBatches,
+  migrateLegacyProductToBatches,
+  normalizeExpiryDate,
+  normalizeLotCode,
+  syncProductBatchRollups,
+} = require('../productBatches')
 
 const router = express.Router()
 
@@ -20,12 +32,7 @@ function normalizeImportedTimestamp(value) {
 }
 
 function recalcProductStock(productId) {
-  db.prepare(`
-    UPDATE products SET
-      stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(productId, productId)
+  syncProductBatchRollups([productId])
 }
 
 function findTransferByClientRequestId(clientRequestId) {
@@ -174,6 +181,9 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
   const unitCostUsd = parseFloat(body.unitCostUsd ?? body.unit_cost_usd ?? 0) || 0
   const unitCostKhr = parseFloat(body.unitCostKhr ?? body.unit_cost_khr ?? 0) || 0
   const movementCreatedAt = normalizeImportedTimestamp(body.created_at ?? body.movement_date ?? body.date)
+  const requestedBatchId = Number.parseInt(body.batchId ?? body.batch_id, 10) || null
+  const requestedLotCode = normalizeLotCode(body.lotCode ?? body.lot_code)
+  const requestedExpiryDate = normalizeExpiryDate(body.expiryDate ?? body.expiry_date)
 
   if (!productId || !quantity) return err(res, 'Missing required fields')
   if (!['add', 'remove', 'set'].includes(type)) return err(res, 'Invalid stock action')
@@ -181,130 +191,179 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
   const qty = parseFloat(quantity)
   if (isNaN(qty) || qty <= 0) return err(res, 'Quantity must be a positive number')
 
-  const product = db.prepare('SELECT id, stock_quantity FROM products WHERE id = ?').get(productId)
+  const product = getProductById(productId)
   if (!product) return err(res, 'Product not found', 404)
+  migrateLegacyProductToBatches(productId)
 
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
-  const defaultBranch = activeBranches.find(b => b.is_default) || activeBranches[0] || null
+  const defaultBranch = activeBranches.find((branch) => branch.is_default) || activeBranches[0] || null
   const requestedBranchId = branchId ? parseInt(branchId, 10) : null
-  const branchRows = db.prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = ?').all(productId)
-  const getBranchQty = (bid) => branchRows.find(row => row.branch_id === bid)?.quantity || 0
-  const totalAvailable = branchRows.reduce((sum, row) => sum + (row.quantity || 0), 0)
 
   try {
-    let movementBranchId = requestedBranchId || null
-    let movementQty = Math.abs(qty)
-
+    const movementEntries = []
     db.transaction(() => {
-      const ensureBranchRow = db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)')
-
       if (type === 'add') {
         const targetBranchId = requestedBranchId || defaultBranch?.id
         if (!targetBranchId) throw new Error('An active branch is required before stock can be added')
-        ensureBranchRow.run(productId, targetBranchId)
-        db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?')
-          .run(qty, productId, targetBranchId)
-        movementBranchId = targetBranchId
+        const addition = increaseProductBatchStock(productId, targetBranchId, qty, {
+          batchId: requestedBatchId,
+          lotCode: requestedLotCode,
+          expiryDate: requestedExpiryDate,
+          notes: reason || null,
+        })
+        movementEntries.push({
+          movement_type: 'add',
+          quantity: qty,
+          branch_id: targetBranchId,
+          branch_name: activeBranches.find((branch) => branch.id === targetBranchId)?.name || null,
+          batch_id: addition.batch_id,
+          lot_code: addition.lot_code,
+          expiry_date: addition.expiry_date,
+          reason: reason || null,
+        })
       }
 
       if (type === 'remove') {
-        if (requestedBranchId) {
-          const available = getBranchQty(requestedBranchId)
-          if (available <= 0) throw new Error('No stock available in this branch to remove')
-          if (qty > available) throw new Error(`Cannot remove ${qty} â€” only ${available} available in this branch`)
-
-          db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
-            .run(qty, productId, requestedBranchId)
-          movementBranchId = requestedBranchId
-        } else {
-          if (totalAvailable <= 0) throw new Error('No stock available to remove')
-          if (qty > totalAvailable) throw new Error(`Cannot remove ${qty} â€” only ${totalAvailable} available`)
-
-          let remaining = qty
-          const rowsToDeduct = branchRows
-            .filter(row => (row.quantity || 0) > 0)
-            .sort((a, b) => (b.quantity || 0) - (a.quantity || 0) || a.branch_id - b.branch_id)
-
-          for (const row of rowsToDeduct) {
-            if (remaining <= 0) break
-            const take = Math.min(row.quantity || 0, remaining)
-            db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
-              .run(take, productId, row.branch_id)
-            remaining -= take
-          }
-
-          movementBranchId = null
-        }
+        const allocations = allocateProductBatches(productId, requestedBranchId || null, qty, {
+          batchId: requestedBatchId,
+        })
+        allocations.forEach((allocation) => {
+          movementEntries.push({
+            movement_type: 'remove',
+            quantity: allocation.quantity,
+            branch_id: allocation.branch_id || null,
+            branch_name: allocation.branch_name || null,
+            batch_id: allocation.batch_id,
+            lot_code: allocation.lot_code,
+            expiry_date: allocation.expiry_date,
+            reason: reason || null,
+          })
+        })
       }
 
       if (type === 'set') {
         const targetQty = Math.abs(qty)
-
         if (requestedBranchId) {
-          const currentQty = getBranchQty(requestedBranchId)
-          movementQty = Math.abs(targetQty - currentQty)
-          ensureBranchRow.run(productId, requestedBranchId)
-          db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?')
-            .run(targetQty, productId, requestedBranchId)
-          movementBranchId = requestedBranchId
+          const currentQty = db.prepare(`
+            SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+            FROM product_batches pb
+            LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+            WHERE pb.variant_product_id = ? AND bbs.branch_id = ?
+          `).get(productId, requestedBranchId)?.quantity || 0
+          const delta = targetQty - currentQty
+          if (delta > 0) {
+            const addition = increaseProductBatchStock(productId, requestedBranchId, delta, {
+              batchId: requestedBatchId,
+              lotCode: requestedLotCode,
+              expiryDate: requestedExpiryDate,
+              notes: reason || null,
+            })
+            movementEntries.push({
+              movement_type: 'set',
+              quantity: delta,
+              branch_id: requestedBranchId,
+              branch_name: activeBranches.find((branch) => branch.id === requestedBranchId)?.name || null,
+              batch_id: addition.batch_id,
+              lot_code: addition.lot_code,
+              expiry_date: addition.expiry_date,
+              reason: reason || null,
+            })
+          } else if (delta < 0) {
+            allocateProductBatches(productId, requestedBranchId, Math.abs(delta), {
+              batchId: requestedBatchId,
+            }).forEach((allocation) => {
+              movementEntries.push({
+                movement_type: 'set',
+                quantity: allocation.quantity,
+                branch_id: allocation.branch_id || null,
+                branch_name: allocation.branch_name || null,
+                batch_id: allocation.batch_id,
+                lot_code: allocation.lot_code,
+                expiry_date: allocation.expiry_date,
+                reason: reason || null,
+              })
+            })
+          }
         } else {
           if (!defaultBranch) throw new Error('An active branch is required before stock can be set')
-          movementQty = Math.abs(targetQty - totalAvailable)
-
-          if (movementQty > 0) {
-            db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(productId)
-            ensureBranchRow.run(productId, defaultBranch.id)
-            db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?')
-              .run(targetQty, productId, defaultBranch.id)
+          const currentQty = db.prepare(`
+            SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+            FROM product_batches pb
+            LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+            WHERE pb.variant_product_id = ?
+          `).get(productId)?.quantity || 0
+          const delta = targetQty - currentQty
+          if (delta > 0) {
+            const addition = increaseProductBatchStock(productId, defaultBranch.id, delta, {
+              batchId: requestedBatchId,
+              lotCode: requestedLotCode,
+              expiryDate: requestedExpiryDate,
+              notes: reason || null,
+            })
+            movementEntries.push({
+              movement_type: 'set',
+              quantity: delta,
+              branch_id: defaultBranch.id,
+              branch_name: defaultBranch.name,
+              batch_id: addition.batch_id,
+              lot_code: addition.lot_code,
+              expiry_date: addition.expiry_date,
+              reason: reason || null,
+            })
+          } else if (delta < 0) {
+            allocateProductBatches(productId, null, Math.abs(delta), {
+              batchId: requestedBatchId,
+            }).forEach((allocation) => {
+              movementEntries.push({
+                movement_type: 'set',
+                quantity: allocation.quantity,
+                branch_id: allocation.branch_id || null,
+                branch_name: allocation.branch_name || null,
+                batch_id: allocation.batch_id,
+                lot_code: allocation.lot_code,
+                expiry_date: allocation.expiry_date,
+                reason: reason || null,
+              })
+            })
           }
-
-          movementBranchId = defaultBranch.id
         }
       }
 
-      db.prepare(`
-        UPDATE products SET
-          stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(productId, productId)
-
-      if (movementQty > 0) {
-        const branchName = movementBranchId
-          ? activeBranches.find(branch => branch.id === movementBranchId)?.name
-            || db.prepare('SELECT name FROM branches WHERE id = ?').get(movementBranchId)?.name
-          : null
-
+      syncProductBatchRollups([productId])
+      movementEntries.forEach((entry) => {
         const movementId = db.prepare(`
           INSERT INTO inventory_movements
             (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name,
+             batch_id, lot_code, expiry_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
           productId,
           productName,
-          movementBranchId || null,
-          branchName || null,
-          type,
-          movementQty,
+          entry.branch_id || null,
+          entry.branch_name || null,
+          entry.movement_type,
+          entry.quantity,
           unitCostUsd,
           unitCostKhr,
-          movementQty * unitCostUsd,
-          movementQty * unitCostKhr,
-          reason || null,
+          entry.quantity * unitCostUsd,
+          entry.quantity * unitCostKhr,
+          entry.reason || null,
           actor.userId,
           actor.userName,
+          entry.batch_id || null,
+          entry.lot_code || null,
+          entry.expiry_date || null,
         ).lastInsertRowid
-
         if (movementCreatedAt) {
           db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
             .run(movementCreatedAt, movementId)
         }
-      }
+      })
     })()
 
     audit(actor.userId, actor.userName, type === 'remove' ? 'stock_remove' : type === 'set' ? 'stock_set' : 'stock_add', 'product', productId,
-      { type, quantity: qty, reason, branchId: requestedBranchId }, {
+      { type, quantity: qty, reason, branchId: requestedBranchId, batchId: requestedBatchId || null }, {
         deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
       })
     logOp('products:adjustStock', Date.now() - t0)
@@ -315,6 +374,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
     err(res, e.message || 'Stock adjustment failed')
   }
 })
+
 
 // POST /api/inventory/transfer
 router.post('/transfer', authToken, requirePermission('inventory'), (req, res) => {
@@ -330,6 +390,7 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
   const deviceName = body.deviceName || null
   const deviceTz = body.deviceTz || null
   const clientTime = body.clientTime || null
+  const requestedBatchId = Number.parseInt(body.batchId || body.batch_id, 10) || null
 
   if (!Number.isFinite(productId) || productId <= 0) return err(res, 'Product is required')
   if (!Number.isFinite(fromBranchId) || fromBranchId <= 0) return err(res, 'Source branch is required')
@@ -353,28 +414,21 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
       })
     }
     const result = db.transaction(() => {
-      const product = db.prepare(`
-        SELECT id, name, unit, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr
-        FROM products
-        WHERE id = ?
-      `).get(productId)
+      const product = getProductById(productId)
       if (!product) throw new Error('Product not found')
+      migrateLegacyProductToBatches(productId)
 
       const fromBranch = db.prepare('SELECT id, name FROM branches WHERE id = ? AND is_active = 1').get(fromBranchId)
       const toBranch = db.prepare('SELECT id, name FROM branches WHERE id = ? AND is_active = 1').get(toBranchId)
       if (!fromBranch) throw new Error('Source branch is not active')
       if (!toBranch) throw new Error('Destination branch is not active')
 
-      const fromStock = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, fromBranchId)
-      const available = Number(fromStock?.quantity || 0)
-      if (available < qty) throw new Error(`Insufficient stock in source branch. Available: ${available}`)
-
-      db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?')
-        .run(qty, productId, fromBranchId)
-      db.prepare(`
-        INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-        ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity
-      `).run(productId, toBranchId, qty)
+      const allocations = allocateProductBatches(productId, fromBranchId, qty, {
+        batchId: requestedBatchId,
+      })
+      allocations.forEach((allocation) => {
+        incrementBranchBatchQuantity(allocation.batch_id, toBranchId, allocation.quantity)
+      })
 
       const note = reason
       const transferColumns = ['product_id', 'product_name', 'from_branch_id', 'to_branch_id', 'quantity', 'user_id', 'user_name']
@@ -410,42 +464,50 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
         INSERT INTO inventory_movements
           (product_id, product_name, branch_id, branch_name, movement_type, quantity,
            unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
-           reason, reference_id, user_id, user_name)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           reason, reference_id, user_id, user_name, batch_id, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
-      insertMovement.run(
-        productId,
-        product.name,
-        fromBranchId,
-        fromBranch.name,
-        'transfer_out',
-        qty,
-        unitCostUsd,
-        unitCostKhr,
-        unitCostUsd * qty,
-        unitCostKhr * qty,
-        `Transfer to ${toBranch.name}: ${reason}`,
-        referenceId,
-        actor.userId,
-        actor.userName,
-      )
-      insertMovement.run(
-        productId,
-        product.name,
-        toBranchId,
-        toBranch.name,
-        'transfer_in',
-        qty,
-        unitCostUsd,
-        unitCostKhr,
-        unitCostUsd * qty,
-        unitCostKhr * qty,
-        `Transfer from ${fromBranch.name}: ${reason}`,
-        referenceId,
-        actor.userId,
-        actor.userName,
-      )
-      recalcProductStock(productId)
+      allocations.forEach((allocation) => {
+        insertMovement.run(
+          productId,
+          product.name,
+          fromBranchId,
+          fromBranch.name,
+          'transfer_out',
+          allocation.quantity,
+          unitCostUsd,
+          unitCostKhr,
+          unitCostUsd * allocation.quantity,
+          unitCostKhr * allocation.quantity,
+          `Transfer to ${toBranch.name}: ${reason}`,
+          referenceId,
+          actor.userId,
+          actor.userName,
+          allocation.batch_id || null,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+        insertMovement.run(
+          productId,
+          product.name,
+          toBranchId,
+          toBranch.name,
+          'transfer_in',
+          allocation.quantity,
+          unitCostUsd,
+          unitCostKhr,
+          unitCostUsd * allocation.quantity,
+          unitCostKhr * allocation.quantity,
+          `Transfer from ${fromBranch.name}: ${reason}`,
+          referenceId,
+          actor.userId,
+          actor.userName,
+          allocation.batch_id || null,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+      })
+      syncProductBatchRollups([productId])
       audit(actor.userId, actor.userName, 'transfer', 'stock', transferId, {
         productId,
         productName: product.name,
@@ -537,8 +599,13 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
       }
       if (!branch) throw new Error('Selected branch is no longer active')
 
-      const available = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?')
-        .get(sourceProductId, branch.id)?.quantity || 0
+      migrateLegacyProductToBatches(sourceProductId)
+      const available = db.prepare(`
+        SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+        FROM product_batches pb
+        LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+        WHERE pb.variant_product_id = ? AND bbs.branch_id = ?
+      `).get(sourceProductId, branch.id)?.quantity || 0
       if (quantity > available) throw new Error(`Cannot move ${quantity} - only ${available} available in ${branch.name}`)
 
       if (!destinationProductId && destinationDraft) {
@@ -605,10 +672,11 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
       const destination = db.prepare('SELECT * FROM products WHERE id = ?').get(destinationProductId)
       if (!destination) throw new Error('Destination product not found')
 
-      db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(sourceProductId, branch.id)
-      db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)').run(destinationProductId, branch.id)
-      db.prepare('UPDATE branch_stock SET quantity = quantity - ? WHERE product_id = ? AND branch_id = ?').run(quantity, sourceProductId, branch.id)
-      db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?').run(quantity, destinationProductId, branch.id)
+      const movedAllocations = allocateProductBatches(sourceProductId, branch.id, quantity)
+      const destinationAllocations = cloneAllocationsToProduct(destinationProductId, branch.id, movedAllocations, {
+        fallbackKey: `row-move-${destinationProductId}`,
+        notes: note || reason,
+      })
 
       const moveId = db.prepare(`
         INSERT INTO stock_row_moves (
@@ -632,28 +700,38 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
       const insertMovement = db.prepare(`
         INSERT INTO inventory_movements
           (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
+           batch_id, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
-      insertMovement.run(
-        sourceProductId, source.name, branch.id, branch.name, 'row_move_out', quantity,
-        source.cost_price_usd || source.purchase_price_usd || 0,
-        source.cost_price_khr || source.purchase_price_khr || 0,
-        quantity * (source.cost_price_usd || source.purchase_price_usd || 0),
-        quantity * (source.cost_price_khr || source.purchase_price_khr || 0),
-        reason, moveId, actor.userId, actor.userName,
-      )
-      insertMovement.run(
-        destinationProductId, destination.name, branch.id, branch.name, 'row_move_in', quantity,
-        destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0,
-        destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0,
-        quantity * (destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0),
-        quantity * (destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0),
-        reason, moveId, actor.userId, actor.userName,
-      )
+      movedAllocations.forEach((allocation) => {
+        insertMovement.run(
+          sourceProductId, source.name, branch.id, branch.name, 'row_move_out', allocation.quantity,
+          source.cost_price_usd || source.purchase_price_usd || 0,
+          source.cost_price_khr || source.purchase_price_khr || 0,
+          allocation.quantity * (source.cost_price_usd || source.purchase_price_usd || 0),
+          allocation.quantity * (source.cost_price_khr || source.purchase_price_khr || 0),
+          reason, moveId, actor.userId, actor.userName,
+          allocation.batch_id || null,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+      })
+      destinationAllocations.forEach((allocation) => {
+        insertMovement.run(
+          destinationProductId, destination.name, branch.id, branch.name, 'row_move_in', allocation.quantity,
+          destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0,
+          destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0,
+          allocation.quantity * (destination.cost_price_usd || destination.purchase_price_usd || source.cost_price_usd || source.purchase_price_usd || 0),
+          allocation.quantity * (destination.cost_price_khr || destination.purchase_price_khr || source.cost_price_khr || source.purchase_price_khr || 0),
+          reason, moveId, actor.userId, actor.userName,
+          allocation.batch_id || null,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+      })
 
-      recalcProductStock(sourceProductId)
-      recalcProductStock(destinationProductId)
+      syncProductBatchRollups([sourceProductId, destinationProductId])
       audit(actor.userId, actor.userName, 'stock_row_move', 'product', sourceProductId, {
         destinationProductId,
         branchId: branch.id,
@@ -720,6 +798,12 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
       }
       delete product.branch_stock_json
       return product
+    })
+    const batchMap = listProductBatches(rows.map((product) => product.id), {
+      branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
+    })
+    rows.forEach((product) => {
+      product.batches = batchMap.get(product.id) || []
     })
     const metadataQuery = { ...req.query, initial: 'all' }
     const metaFilters = appendInventoryProductFilters(metadataQuery)

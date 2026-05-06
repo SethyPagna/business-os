@@ -24,6 +24,7 @@ import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -63,6 +64,30 @@ function InventoryDiscountBadge({ product, fmtUSD, t }) {
     <span className="inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60" title={`${label} ${fmtUSD(promotion.applied_price_usd || 0)}`}>
       {label} {fmtUSD(promotion.applied_price_usd || 0)}
     </span>
+  )
+}
+
+function InventoryBatchPreview({ product, branchId = 'all', t, compact = false }) {
+  const preview = buildBatchPreview(product, branchId, { limit: compact ? 2 : 3 })
+  const label = (key, fallback) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
+  if (!preview.totalCount) return null
+  return (
+    <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
+      {preview.items.map((batch) => (
+        <span
+          key={`${product?.id || 'product'}-inv-batch-${batch.id || batch.batch_id}`}
+          className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
+          title={`${batch.lot_code || label('batch', 'Batch')} / ${batch.expiry_date || label('no_expiry', 'No expiry')} / ${batch.quantity}`}
+        >
+          {batch.lot_code || label('batch', 'Batch')} / {batch.expiry_date || label('no_expiry', 'No expiry')} / {batch.quantity}
+        </span>
+      ))}
+      {preview.extraCount ? (
+        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          +{preview.extraCount}
+        </span>
+      ) : null}
+    </div>
   )
 }
 
@@ -631,7 +656,7 @@ export default function Inventory() {
     }
     if (productId && window.api.getProductsByIds) {
       try {
-        const result = await window.api.getProductsByIds([productId], { include: 'branch_stock,images' })
+        const result = await window.api.getProductsByIds([productId], { include: 'branch_stock,images,batches' })
         const product = Array.isArray(result?.items) ? result.items[0] : null
         if (product) {
           setDetailProduct(product)
@@ -2683,6 +2708,7 @@ export default function Inventory() {
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                      <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -2765,6 +2791,7 @@ export default function Inventory() {
                           </div>
                           <div className="mt-1 flex flex-wrap gap-1">
                             <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                            <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                           </div>
                         </td>
                         <td className="px-3 py-1 text-right font-bold text-gray-900 dark:text-white whitespace-nowrap">

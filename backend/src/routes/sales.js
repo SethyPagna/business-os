@@ -6,6 +6,15 @@ const { authToken, requirePermission, getAuditActor, isAdminControlUser } = requ
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
 const { getExpiringProducts, getLowStockProducts, getOutOfStockProducts, getStockMetrics } = require('../businessMetrics')
+const {
+  allocateProductBatches,
+  getAvailableProductQuantity,
+  getSaleItemAllocations,
+  markSaleItemAllocationsReleased,
+  migrateLegacyProductToBatches,
+  restoreBatchAllocations,
+  syncProductBatchRollups,
+} = require('../productBatches')
 
 const router = express.Router()
 const DASHBOARD_SUMMARY_CACHE_TTL_MS = 5_000
@@ -118,10 +127,8 @@ function assertSaleStockAvailable(items, fallbackBranchId = null) {
     const [productIdRaw, branchIdRaw] = key.split(':')
     const productId = parseInt(productIdRaw, 10)
     const branchId = branchIdRaw === 'all' ? null : parseInt(branchIdRaw, 10)
-
-    const available = branchId
-      ? (db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, branchId)?.quantity || 0)
-      : (db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(productId)?.stock_quantity || 0)
+    migrateLegacyProductToBatches(productId)
+    const available = getAvailableProductQuantity(productId, branchId)
 
     if (requiredQty > available) {
       const sample = (items || []).find(item => (item.product_id || item.id) === productId)
@@ -246,16 +253,7 @@ function summarizeSaleBranch(items, branchContext) {
 }
 
 function refreshProductStockQuantity(productId) {
-  db.prepare(`
-    UPDATE products
-    SET stock_quantity = (
-      SELECT COALESCE(SUM(quantity), 0)
-      FROM branch_stock
-      WHERE product_id = ?
-    ),
-    updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(productId, productId)
+  syncProductBatchRollups([productId])
 }
 
 function refreshProductStockQuantities(productIds) {
@@ -270,6 +268,14 @@ function deductBranchStock(productId, branchId, quantity) {
     INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,0)
     ON CONFLICT(product_id, branch_id) DO UPDATE
     SET quantity = GREATEST(0, branch_stock.quantity - CAST(? AS numeric))
+  `).run(productId, branchId, quantity)
+}
+
+function restoreBranchStock(productId, branchId, quantity) {
+  db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
+    ON CONFLICT(product_id, branch_id) DO UPDATE
+    SET quantity = branch_stock.quantity + excluded.quantity
   `).run(productId, branchId, quantity)
 }
 
@@ -382,9 +388,15 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         db.prepare(`SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${Array.from(productIdSet).map(() => '?').join(',')})`)
           .all(...Array.from(productIdSet))
           .forEach(p => productMap.set(p.id, p))
+        Array.from(productIdSet).forEach((id) => migrateLegacyProductToBatches(id))
       }
 
       const touchedProductIds = new Set()
+      const insertAllocation = db.prepare(`
+        INSERT INTO sale_item_batch_allocations
+          (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?)
+      `)
 
       for (const item of normalizedItems) {
         const productId = item.product_id
@@ -393,7 +405,7 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
         const totalKhr = (item.applied_price_khr || 0) * item.quantity
         const { unitCostUsd, unitCostKhr, totalCostUsd, totalCostKhr } = getSaleItemCosts(item, product)
 
-        insertItem.run(
+        const saleItemId = insertItem.run(
           sid, productId || null, item.name || null, item.quantity,
           item.applied_price_usd || 0, item.applied_price_khr || 0,
           item.price_mode || 'selling',
@@ -403,40 +415,55 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           item.product_discount_khr || item.discount_amount_khr || 0,
           unitCostUsd, unitCostKhr,
           totalUsd, totalKhr, item.branch_id || null,
-        )
+        ).lastInsertRowid
 
         if (shouldDeductStock) {
-          if (item.branch_id) {
-            deductBranchStock(productId, item.branch_id, item.quantity)
-          }
+          const allocations = allocateProductBatches(productId, item.branch_id || null, item.quantity)
+          allocations.forEach((allocation) => {
+            insertAllocation.run(
+              saleItemId,
+              allocation.batch_id,
+              allocation.branch_id || null,
+              allocation.quantity,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+          })
           touchedProductIds.add(productId)
 
-          const movementId = db.prepare(`
+          const movementStatement = db.prepare(`
             INSERT INTO inventory_movements
               (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          `).run(
-            productId || null,
-            item.name,
-            item.branch_id || null,
-            item.branch_name,
-            'sale',
-            item.quantity,
-            unitCostUsd,
-            unitCostKhr,
-            totalCostUsd,
-            totalCostKhr,
-            `Sale ${receiptNumber} (${saleStatus})`,
-            sid,
-            actor.userId,
-            actor.userName,
-          ).lastInsertRowid
+               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
+               batch_id, lot_code, expiry_date)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `)
+          allocations.forEach((allocation) => {
+            const movementId = movementStatement.run(
+              productId || null,
+              item.name,
+              allocation.branch_id || null,
+              allocation.branch_name || item.branch_name || null,
+              'sale',
+              allocation.quantity,
+              unitCostUsd,
+              unitCostKhr,
+              allocation.quantity * unitCostUsd,
+              allocation.quantity * unitCostKhr,
+              `Sale ${receiptNumber} (${saleStatus})`,
+              sid,
+              actor.userId,
+              actor.userName,
+              allocation.batch_id || null,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            ).lastInsertRowid
 
-          if (saleCreatedAt) {
-            db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
-              .run(saleCreatedAt, movementId)
-          }
+            if (saleCreatedAt) {
+              db.prepare('UPDATE inventory_movements SET created_at = ? WHERE id = ?')
+                .run(saleCreatedAt, movementId)
+            }
+          })
         }
       }
 
@@ -522,70 +549,94 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
         assertSaleStockAvailable(items, sale.branch_id || null)
 
         const touchedProductIds = new Set()
+        const insertAllocation = db.prepare(`
+          INSERT INTO sale_item_batch_allocations
+            (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
+          VALUES (?,?,?,?,?,?)
+        `)
+        const movementStatement = db.prepare(`
+          INSERT INTO inventory_movements
+            (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
+             batch_id, lot_code, expiry_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `)
         for (const item of items) {
-          if (item.branch_id) {
-            deductBranchStock(item.product_id, item.branch_id, item.quantity)
-          }
+          migrateLegacyProductToBatches(item.product_id)
+          const allocations = allocateProductBatches(item.product_id, item.branch_id || null, item.quantity)
+          allocations.forEach((allocation) => {
+            insertAllocation.run(
+              item.id,
+              allocation.batch_id,
+              allocation.branch_id || null,
+              allocation.quantity,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+          })
           touchedProductIds.add(item.product_id)
 
-          db.prepare(`
-            INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          `).run(
-            item.product_id,
-            item.product_name,
-            item.branch_id,
-            item.branch_name || null,
-            'sale',
-            item.quantity,
-            item.cost_price_usd || 0,
-            item.cost_price_khr || 0,
-            (item.cost_price_usd || 0) * item.quantity,
-            (item.cost_price_khr || 0) * item.quantity,
-            `Sale status changed from ${oldStatus} to ${sale_status}`,
-            id,
-            actor.userId,
-            actor.userName,
-          )
+          allocations.forEach((allocation) => {
+            movementStatement.run(
+              item.product_id,
+              item.product_name,
+              allocation.branch_id || item.branch_id,
+              allocation.branch_name || item.branch_name || null,
+              'sale',
+              allocation.quantity,
+              item.cost_price_usd || 0,
+              item.cost_price_khr || 0,
+              (item.cost_price_usd || 0) * allocation.quantity,
+              (item.cost_price_khr || 0) * allocation.quantity,
+              `Sale status changed from ${oldStatus} to ${sale_status}`,
+              id,
+              actor.userId,
+              actor.userName,
+              allocation.batch_id || null,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+          })
         }
         refreshProductStockQuantities(touchedProductIds)
       } else if (wasStockDeducted && !willStockBeDeducted && sale_status !== 'partial_return' && sale_status !== 'returned') {
         // Transition: {completed, awaiting_delivery} â†’ awaiting_payment / cancelled / other
         // Stock was deducted, now needs to be restored
         const touchedProductIds = new Set()
+        const movementStatement = db.prepare(`
+          INSERT INTO inventory_movements
+            (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name,
+             batch_id, lot_code, expiry_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `)
         for (const item of items) {
-          if (item.branch_id) {
-            db.prepare(`
-              INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-              ON CONFLICT(product_id, branch_id) DO UPDATE
-              SET quantity = branch_stock.quantity + excluded.quantity
-            `).run(item.product_id, item.branch_id, item.quantity)
-          }
+          const allocations = getSaleItemAllocations(item.id, { activeOnly: true })
+          restoreBatchAllocations(allocations)
+          markSaleItemAllocationsReleased(item.id)
           touchedProductIds.add(item.product_id)
 
-          db.prepare(`
-            INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-               unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          `).run(
-            item.product_id,
-            item.product_name,
-            item.branch_id,
-            item.branch_name || null,
-            'return',
-            item.quantity,
-            item.cost_price_usd || 0,
-            item.cost_price_khr || 0,
-            (item.cost_price_usd || 0) * item.quantity,
-            (item.cost_price_khr || 0) * item.quantity,
-            `Sale status changed from ${oldStatus} to ${sale_status}`,
-            id,
-            actor.userId,
-            actor.userName,
-          )
+          allocations.forEach((allocation) => {
+            movementStatement.run(
+              item.product_id,
+              item.product_name,
+              allocation.branch_id || item.branch_id,
+              item.branch_name || null,
+              'return',
+              allocation.quantity,
+              item.cost_price_usd || 0,
+              item.cost_price_khr || 0,
+              (item.cost_price_usd || 0) * allocation.quantity,
+              (item.cost_price_khr || 0) * allocation.quantity,
+              `Sale status changed from ${oldStatus} to ${sale_status}`,
+              id,
+              actor.userId,
+              actor.userName,
+              allocation.batch_id || null,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+          })
         }
         refreshProductStockQuantities(touchedProductIds)
       }

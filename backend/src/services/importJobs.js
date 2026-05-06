@@ -33,6 +33,13 @@ const {
   parseImportNumber,
   resolveImportValue,
 } = require('../productImportPolicies')
+const {
+  increaseProductBatchStock,
+  migrateLegacyProductToBatches,
+  normalizeExpiryDate,
+  normalizeLotCode,
+  syncProductBatchRollups,
+} = require('../productBatches')
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_ZIP_IMAGES = 25_000
@@ -1409,6 +1416,9 @@ function normalizeRowForProduct(row = {}) {
     cost_price_khr: buyKhr,
     stock_quantity: parseImportNumber(row, 'stock_quantity', 0),
     low_stock_threshold: parseImportNumber(row, 'low_stock_threshold', 10),
+    expiry_date: normalizeExpiryDate(row.expiry_date),
+    expiry_alert_days: parseImportNumber(row, 'expiry_alert_days', 30),
+    lot_code: normalizeLotCode(row.lot_code || row.lotCode),
     is_active: parseImportFlag(row, 'is_active', 1),
     is_group: parseImportFlag(row, 'is_group', 0),
     parent_id: parseOptionalImportId(row, 'parent_id'),
@@ -1507,31 +1517,37 @@ function determineBranch(ctx, branchName) {
   return branch || ctx.defaultBranch
 }
 
-function handleBranchStock(ctx, productId, branchName, qty, replace) {
+function handleBranchStock(ctx, productId, branchName, qty, replace, batchOptions = {}) {
   const branch = determineBranch(ctx, branchName)
   if (!branch) {
     if (qty > 0) throw new Error('A branch is required to import stock')
-    if (replace) db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(productId)
+    if (replace) {
+      const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId).map((row) => row.id)
+      if (batchIds.length) {
+        const placeholders = batchIds.map(() => '?').join(',')
+        db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
+      }
+    }
     recalcProductStock(productId)
     return null
   }
-  db.prepare('INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity) VALUES (?, ?, 0)').run(productId, branch.id)
-  if (replace) db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(productId)
+  migrateLegacyProductToBatches(productId)
+  if (replace) {
+    const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(productId).map((row) => row.id)
+    if (batchIds.length) {
+      const placeholders = batchIds.map(() => '?').join(',')
+      db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
+    }
+  }
   if (qty > 0) {
-    if (replace) db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(qty, productId, branch.id)
-    else db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?').run(qty, productId, branch.id)
+    increaseProductBatchStock(productId, branch.id, qty, batchOptions)
   }
   recalcProductStock(productId)
   return branch
 }
 
 function recalcProductStock(productId) {
-  db.prepare(`
-    UPDATE products SET
-      stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(productId, productId)
+  syncProductBatchRollups([productId])
 }
 
 function insertInventoryMovement({ productId, productName, branch, movementType, qty, buyUsd, buyKhr, reason, actor, referenceId = null }) {
@@ -1645,8 +1661,9 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
           discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr,
           discount_label, discount_badge_color, discount_starts_at, discount_ends_at,
           purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
-          stock_quantity, low_stock_threshold, is_active, supplier, image_path, is_group, parent_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          stock_quantity, low_stock_threshold, expiry_date, expiry_alert_days,
+          is_active, supplier, image_path, is_group, parent_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         normalized.name,
         identifiers.sku,
@@ -1674,6 +1691,8 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         normalized.cost_price_khr,
         normalized.stock_quantity,
         normalized.low_stock_threshold,
+        normalized.expiry_date,
+        normalized.expiry_alert_days,
         normalized.is_active,
         normalized.supplier,
         primary,
@@ -1710,7 +1729,10 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         }
       }
       seedBranchRows(productId, ctx)
-      const branch = handleBranchStock(ctx, productId, normalized.branch, normalized.stock_quantity, true)
+      const branch = handleBranchStock(ctx, productId, normalized.branch, normalized.stock_quantity, true, {
+        lotCode: normalized.lot_code,
+        expiryDate: normalized.expiry_date,
+      })
       insertInventoryMovement({
         productId,
         productName: normalized.name,
@@ -1748,6 +1770,8 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
       purchase_price_usd: resolveImportValue(existing.purchase_price_usd, normalized.purchase_price_usd, hasImportValue(row, 'purchase_price_usd'), fieldRules.purchase_price_usd, defaultRule),
       purchase_price_khr: resolveImportValue(existing.purchase_price_khr, normalized.purchase_price_khr, hasImportValue(row, 'purchase_price_khr'), fieldRules.purchase_price_khr, defaultRule),
       low_stock_threshold: resolveImportValue(existing.low_stock_threshold, normalized.low_stock_threshold, hasImportValue(row, 'low_stock_threshold'), fieldRules.low_stock_threshold, defaultRule),
+      expiry_date: resolveImportValue(existing.expiry_date, normalized.expiry_date, hasImportValue(row, 'expiry_date'), fieldRules.expiry_date, defaultRule),
+      expiry_alert_days: resolveImportValue(existing.expiry_alert_days, normalized.expiry_alert_days, hasImportValue(row, 'expiry_alert_days'), fieldRules.expiry_alert_days, defaultRule),
       is_group: resolveImportValue(existing.is_group, normalized.is_group, hasImportValue(row, 'is_group'), fieldRules.is_group, defaultRule),
       parent_id: resolveImportValue(existing.parent_id, parentId || null, hasImportValue(row, 'parent_id') || !!parentId, fieldRules.parent_id, defaultRule),
     }
@@ -1784,7 +1808,7 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
         discount_enabled = ?, discount_type = ?, discount_percent = ?, discount_amount_usd = ?, discount_amount_khr = ?,
         discount_label = ?, discount_badge_color = ?, discount_starts_at = ?, discount_ends_at = ?,
         purchase_price_usd = ?, purchase_price_khr = ?, cost_price_usd = ?, cost_price_khr = ?,
-        low_stock_threshold = ?, is_group = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP
+        low_stock_threshold = ?, expiry_date = ?, expiry_alert_days = ?, is_group = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       resolved.category,
@@ -1810,6 +1834,8 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
       normalizePriceValue(resolved.purchase_price_usd || 0),
       normalizePriceValue(resolved.purchase_price_khr || 0),
       resolved.low_stock_threshold || 0,
+      normalizeExpiryDate(resolved.expiry_date),
+      Number(resolved.expiry_alert_days || 30),
       normalizedIsGroup ? 1 : 0,
       normalizedParentId,
       existing.id,
@@ -1818,7 +1844,10 @@ async function processProductRow({ row, imageLookup, actor, ctx, jobId, imageAss
 
     const replaceStock = action === 'override_replace'
     if (replaceStock || normalized.stock_quantity > 0) {
-      const branch = handleBranchStock(ctx, existing.id, normalized.branch, normalized.stock_quantity, replaceStock)
+      const branch = handleBranchStock(ctx, existing.id, normalized.branch, normalized.stock_quantity, replaceStock, {
+        lotCode: normalized.lot_code,
+        expiryDate: normalized.expiry_date,
+      })
       insertInventoryMovement({
         productId: existing.id,
         productName: existing.name,

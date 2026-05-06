@@ -5,6 +5,19 @@ const { ok, err, audit, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
+const {
+  allocateProductBatches,
+  getAvailableProductQuantity,
+  getAvailableSaleAllocationRows,
+  getReturnItemAllocations,
+  increaseProductBatchStock,
+  incrementBranchBatchQuantity,
+  markReturnItemAllocationsReversed,
+  migrateLegacyProductToBatches,
+  normalizeExpiryDate,
+  normalizeLotCode,
+  syncProductBatchRollups,
+} = require('../productBatches')
 
 const router = express.Router()
 
@@ -15,20 +28,20 @@ function deductBranchStock(productId, branchId, quantity) {
     SET quantity = GREATEST(0, branch_stock.quantity - CAST(? AS numeric))
   `).run(productId, branchId, quantity)
 }
+
+function restoreBranchStock(productId, branchId, quantity) {
+  db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
+    ON CONFLICT(product_id, branch_id) DO UPDATE
+    SET quantity = branch_stock.quantity + excluded.quantity
+  `).run(productId, branchId, quantity)
+}
+
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 
 function refreshProductStockQuantity(productId) {
-  db.prepare(`
-    UPDATE products
-    SET stock_quantity = (
-      SELECT COALESCE(SUM(quantity), 0)
-      FROM branch_stock
-      WHERE product_id = ?
-    ),
-    updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(productId, productId)
+  syncProductBatchRollups([productId])
 }
 
 function refreshProductStockQuantities(productIds = []) {
@@ -283,6 +296,18 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
     }
 
     const touchedProductIds = new Set()
+    const insertReturnAllocation = db.prepare(`
+      INSERT INTO return_item_batch_allocations
+        (return_item_id, sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
+      VALUES (?,?,?,?,?,?,?)
+    `)
+    const movementStatement = db.prepare(`
+      INSERT INTO inventory_movements
+        (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+         reason, reference_id, user_id, user_name, batch_id, lot_code, expiry_date)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `)
 
     for (const item of d.items) {
       const totalUsd = (item.applied_price_usd || 0) * item.quantity
@@ -304,7 +329,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         }
       }
 
-      insertItem.run(
+      const returnItemId = insertItem.run(
         rid,
         item.sale_item_id || null,
         item.product_id || null,
@@ -318,39 +343,84 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         totalKhr,
         returnToStock,
         itemBranchId,
-      )
+      ).lastInsertRowid
 
       // Restore stock if return_to_stock is true
       if (returnToStock && item.product_id) {
-        if (itemBranchId) {
-          db.prepare(`
-            INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-            ON CONFLICT(product_id, branch_id) DO UPDATE
-            SET quantity = branch_stock.quantity + excluded.quantity
-          `).run(item.product_id, itemBranchId, item.quantity)
+        migrateLegacyProductToBatches(item.product_id)
+        let remaining = Number(item.quantity || 0)
+        const restoredAllocations = []
+        if (item.sale_item_id) {
+          const allocationRows = getAvailableSaleAllocationRows(item.sale_item_id)
+          for (const allocation of allocationRows) {
+            if (remaining <= 0) break
+            const availableQty = Math.max(0, Number(allocation.quantity || 0) - Number(allocation.returned_quantity || 0))
+            if (availableQty <= 0) continue
+            const take = Math.min(availableQty, remaining)
+            incrementBranchBatchQuantity(allocation.batch_id, allocation.branch_id, take)
+            insertReturnAllocation.run(
+              returnItemId,
+              item.sale_item_id || null,
+              allocation.batch_id,
+              allocation.branch_id || itemBranchId || null,
+              take,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+            restoredAllocations.push({
+              batch_id: allocation.batch_id,
+              branch_id: allocation.branch_id || itemBranchId || null,
+              branch_name: itemBranchName,
+              quantity: take,
+              lot_code: allocation.lot_code || null,
+              expiry_date: allocation.expiry_date || null,
+            })
+            remaining -= take
+          }
+        }
+        if (remaining > 0 && itemBranchId) {
+          const fallbackAddition = increaseProductBatchStock(item.product_id, itemBranchId, remaining, {
+            lotCode: normalizeLotCode(item.lot_code || item.lotCode),
+            expiryDate: normalizeExpiryDate(item.expiry_date || item.expiryDate),
+            notes: `Fallback restock for return ${returnNumber}`,
+          })
+          insertReturnAllocation.run(
+            returnItemId,
+            item.sale_item_id || null,
+            fallbackAddition.batch_id,
+            itemBranchId,
+            remaining,
+            fallbackAddition.lot_code || null,
+            fallbackAddition.expiry_date || null,
+          )
+          restoredAllocations.push({
+            batch_id: fallbackAddition.batch_id,
+            branch_id: itemBranchId,
+            branch_name: itemBranchName,
+            quantity: remaining,
+            lot_code: fallbackAddition.lot_code || null,
+            expiry_date: fallbackAddition.expiry_date || null,
+          })
         }
         touchedProductIds.add(item.product_id)
-
-        // Log inventory movement
-        db.prepare(`
-          INSERT INTO inventory_movements
-            (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
-             reason, reference_id, user_id, user_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).run(
-          item.product_id, item.product_name,
-          itemBranchId,
-          itemBranchName,
-          'return',
-          item.quantity,
-          costUsd || 0, costKhr || 0,
-          (costUsd || 0) * item.quantity, (costKhr || 0) * item.quantity,
-          `Return: ${d.reason}`,
-          rid,
-          actor.userId,
-          actor.userName,
-        )
+        restoredAllocations.forEach((allocation) => {
+          movementStatement.run(
+            item.product_id, item.product_name,
+            allocation.branch_id || itemBranchId,
+            allocation.branch_name || itemBranchName,
+            'return',
+            allocation.quantity,
+            costUsd || 0, costKhr || 0,
+            (costUsd || 0) * allocation.quantity, (costKhr || 0) * allocation.quantity,
+            `Return: ${d.reason}`,
+            rid,
+            actor.userId,
+            actor.userName,
+            allocation.batch_id || null,
+            allocation.lot_code || null,
+            allocation.expiry_date || null,
+          )
+        })
       }
     }
 
@@ -415,12 +485,8 @@ function assertSupplierReturnableStock(items = [], fallbackBranchId = null) {
     if (!item.product_id) throw new Error('Product is required for supplier return')
     const branchId = item.branch_id || fallbackBranchId || null
     if (!branchId) throw new Error('Branch is required for supplier return')
-    const available = db.prepare(`
-      SELECT quantity
-      FROM branch_stock
-      WHERE product_id = ? AND branch_id = ?
-      LIMIT 1
-    `).get(item.product_id, branchId)?.quantity || 0
+    migrateLegacyProductToBatches(item.product_id)
+    const available = getAvailableProductQuantity(item.product_id, branchId)
     if (qty > available) {
       const productName = item.product_name || `product #${item.product_id}`
       throw new Error(`Insufficient stock for ${productName} in selected branch: requested ${qty}, available ${available}`)
@@ -521,6 +587,18 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `)
     const touchedProductIds = new Set()
+    const insertReturnAllocation = db.prepare(`
+      INSERT INTO return_item_batch_allocations
+        (return_item_id, sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
+      VALUES (?,?,?,?,?,?,?)
+    `)
+    const movementStatement = db.prepare(`
+      INSERT INTO inventory_movements
+        (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+         reason, reference_id, user_id, user_name, batch_id, lot_code, expiry_date)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `)
 
     for (const item of d.items) {
       const qty = toNumber(item.quantity, 0)
@@ -533,7 +611,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         ? db.prepare('SELECT name FROM branches WHERE id = ?').get(itemBranchId)?.name || branchName || null
         : branchName || null
 
-      insertItem.run(
+      const returnItemId = insertItem.run(
         rid,
         null,
         item.product_id,
@@ -547,35 +625,46 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         totalKhr,
         0,
         itemBranchId,
-      )
+      ).lastInsertRowid
 
-      if (itemBranchId) {
-        deductBranchStock(item.product_id, itemBranchId, qty)
-      }
+      migrateLegacyProductToBatches(item.product_id)
+      const allocations = allocateProductBatches(item.product_id, itemBranchId, qty, {
+        batchId: Number.parseInt(item.batch_id || item.batchId, 10) || null,
+      })
+      allocations.forEach((allocation) => {
+        insertReturnAllocation.run(
+          returnItemId,
+          null,
+          allocation.batch_id,
+          allocation.branch_id || itemBranchId || null,
+          allocation.quantity,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+      })
       touchedProductIds.add(item.product_id)
 
-      db.prepare(`
-        INSERT INTO inventory_movements
-          (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
-           reason, reference_id, user_id, user_name)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(
-        item.product_id,
-        item.product_name || null,
-        itemBranchId,
-        itemBranchName,
-        'supplier_return',
-        qty,
-        unitCostUsd,
-        unitCostKhr,
-        totalUsd,
-        totalKhr,
-        `Supplier return (${settlement}): ${d.reason}`,
-        rid,
-        actor.userId,
-        actor.userName,
-      )
+      allocations.forEach((allocation) => {
+        movementStatement.run(
+          item.product_id,
+          item.product_name || null,
+          allocation.branch_id || itemBranchId,
+          allocation.branch_name || itemBranchName,
+          'supplier_return',
+          allocation.quantity,
+          unitCostUsd,
+          unitCostKhr,
+          allocation.quantity * unitCostUsd,
+          allocation.quantity * unitCostKhr,
+          `Supplier return (${settlement}): ${d.reason}`,
+          rid,
+          actor.userId,
+          actor.userName,
+          allocation.batch_id || null,
+          allocation.lot_code || null,
+          allocation.expiry_date || null,
+        )
+      })
     }
 
     refreshProductStockQuantities(touchedProductIds)
@@ -612,7 +701,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
   }
 })
 
-// PATCH /api/returns/:id  â€” update a return (e.g. customer changed mind)
+// PATCH /api/returns/:id - update a customer return
 router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) => {
   const { id } = req.params
   const d = req.body || {}
@@ -637,142 +726,219 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
 
   try {
     db.transaction(() => {
-    const branchName = d.branch_id
-      ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
-      : existing.branch_name
-    const touchedProductIds = new Set()
+      const branchName = d.branch_id
+        ? db.prepare('SELECT name FROM branches WHERE id = ?').get(d.branch_id)?.name
+        : existing.branch_name
+      const touchedProductIds = new Set()
+      const insertItem = db.prepare(`
+        INSERT INTO return_items (
+          return_id, sale_item_id, product_id, product_name, quantity,
+          applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr,
+          total_usd, total_khr, return_to_stock, branch_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
+      const insertReturnAllocation = db.prepare(`
+        INSERT INTO return_item_batch_allocations
+          (return_item_id, sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?,?)
+      `)
+      const movementStatement = db.prepare(`
+        INSERT INTO inventory_movements
+          (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+           unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr,
+           reason, reference_id, user_id, user_name, batch_id, lot_code, expiry_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
 
-    // Reverse previous stock effects
-    for (const item of existingItems) {
-      if (item.return_to_stock && item.product_id) {
-        // Undo: remove from stock what was previously added back
-        if (item.branch_id) {
-          deductBranchStock(item.product_id, item.branch_id, item.quantity)
-        }
+      for (const item of existingItems) {
+        if (!item.return_to_stock || !item.product_id) continue
+        migrateLegacyProductToBatches(item.product_id)
+        const allocations = getReturnItemAllocations(item.id, { activeOnly: true })
+        allocations.forEach((allocation) => {
+          allocateProductBatches(item.product_id, allocation.branch_id || item.branch_id || null, allocation.quantity, {
+            batchId: allocation.batch_id,
+          })
+          movementStatement.run(
+            item.product_id,
+            item.product_name,
+            allocation.branch_id || item.branch_id || null,
+            existing.branch_name,
+            'return_reversal',
+            allocation.quantity,
+            item.cost_price_usd || 0,
+            item.cost_price_khr || 0,
+            (item.cost_price_usd || 0) * allocation.quantity,
+            (item.cost_price_khr || 0) * allocation.quantity,
+            `Return #${existing.return_number} updated - reversing previous restock`,
+            parseInt(id, 10),
+            actor.userId,
+            actor.userName,
+            allocation.batch_id || null,
+            allocation.lot_code || null,
+            allocation.expiry_date || null,
+          )
+        })
+        markReturnItemAllocationsReversed(item.id)
         touchedProductIds.add(item.product_id)
-        // Log reversal
-        db.prepare(`
-          INSERT INTO inventory_movements
-            (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).run(
-          item.product_id, item.product_name,
-          item.branch_id, existing.branch_name,
-          'return_reversal', item.quantity,
-          item.cost_price_usd || 0, item.cost_price_khr || 0,
-          (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
-          `Return #${existing.return_number} updated â€” reversing previous restock`,
-          parseInt(id), actor.userId, actor.userName,
-        )
       }
-    }
 
-    // Delete old items
-    db.prepare('DELETE FROM return_items WHERE return_id = ?').run(id)
+      db.prepare('DELETE FROM return_items WHERE return_id = ?').run(id)
 
-    // Compute new totals
-    let totalRefundUsd = 0
-    let totalRefundKhr = 0
+      let totalRefundUsd = 0
+      let totalRefundKhr = 0
 
-    const insertItem = db.prepare(`
-      INSERT INTO return_items (
-        return_id, sale_item_id, product_id, product_name, quantity,
-        applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr,
-        total_usd, total_khr, return_to_stock, branch_id
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `)
+      for (const item of newItems) {
+        const quantity = Number(item.quantity || 0)
+        const totalUsd = (item.applied_price_usd || 0) * quantity
+        const totalKhr = (item.applied_price_khr || 0) * quantity
+        const returnToStock = item.return_to_stock !== false ? 1 : 0
+        const branchId = item.branch_id || existing.branch_id || null
+        totalRefundUsd += totalUsd
+        totalRefundKhr += totalKhr
 
-    for (const item of newItems) {
-      const totalUsd = (item.applied_price_usd || 0) * item.quantity
-      const totalKhr = (item.applied_price_khr || 0) * item.quantity
-      const returnToStock = item.return_to_stock !== false ? 1 : 0
-      totalRefundUsd += totalUsd
-      totalRefundKhr += totalKhr
+        const returnItemId = insertItem.run(
+          id,
+          item.sale_item_id || null,
+          item.product_id || null,
+          item.product_name || null,
+          quantity,
+          item.applied_price_usd || 0,
+          item.applied_price_khr || 0,
+          item.cost_price_usd || 0,
+          item.cost_price_khr || 0,
+          totalUsd,
+          totalKhr,
+          returnToStock,
+          branchId,
+        ).lastInsertRowid
 
-      insertItem.run(
-        id, item.sale_item_id || null, item.product_id || null, item.product_name || null,
-        item.quantity, item.applied_price_usd || 0, item.applied_price_khr || 0,
-        item.cost_price_usd || 0, item.cost_price_khr || 0, totalUsd, totalKhr, returnToStock,
-        item.branch_id || existing.branch_id || null,
+        if (returnToStock && item.product_id) {
+          migrateLegacyProductToBatches(item.product_id)
+          let remaining = quantity
+          const restoredAllocations = []
+          if (item.sale_item_id) {
+            const allocationRows = getAvailableSaleAllocationRows(item.sale_item_id)
+            for (const allocation of allocationRows) {
+              if (remaining <= 0) break
+              const availableQty = Math.max(0, Number(allocation.quantity || 0) - Number(allocation.returned_quantity || 0))
+              if (availableQty <= 0) continue
+              const take = Math.min(availableQty, remaining)
+              incrementBranchBatchQuantity(allocation.batch_id, allocation.branch_id, take)
+              insertReturnAllocation.run(
+                returnItemId,
+                item.sale_item_id || null,
+                allocation.batch_id,
+                allocation.branch_id || branchId || null,
+                take,
+                allocation.lot_code || null,
+                allocation.expiry_date || null,
+              )
+              restoredAllocations.push({
+                batch_id: allocation.batch_id,
+                branch_id: allocation.branch_id || branchId || null,
+                quantity: take,
+                lot_code: allocation.lot_code || null,
+                expiry_date: allocation.expiry_date || null,
+              })
+              remaining -= take
+            }
+          }
+          if (remaining > 0 && branchId) {
+            const fallbackAddition = increaseProductBatchStock(item.product_id, branchId, remaining, {
+              lotCode: normalizeLotCode(item.lot_code || item.lotCode),
+              expiryDate: normalizeExpiryDate(item.expiry_date || item.expiryDate),
+              notes: `Fallback restock for return ${existing.return_number}`,
+            })
+            insertReturnAllocation.run(
+              returnItemId,
+              item.sale_item_id || null,
+              fallbackAddition.batch_id,
+              branchId,
+              remaining,
+              fallbackAddition.lot_code || null,
+              fallbackAddition.expiry_date || null,
+            )
+            restoredAllocations.push({
+              batch_id: fallbackAddition.batch_id,
+              branch_id: branchId,
+              quantity: remaining,
+              lot_code: fallbackAddition.lot_code || null,
+              expiry_date: fallbackAddition.expiry_date || null,
+            })
+          }
+          touchedProductIds.add(item.product_id)
+          restoredAllocations.forEach((allocation) => {
+            movementStatement.run(
+              item.product_id,
+              item.product_name,
+              allocation.branch_id || branchId || null,
+              branchName,
+              'return',
+              allocation.quantity,
+              item.cost_price_usd || 0,
+              item.cost_price_khr || 0,
+              (item.cost_price_usd || 0) * allocation.quantity,
+              (item.cost_price_khr || 0) * allocation.quantity,
+              `Return #${existing.return_number} updated: ${d.reason || existing.reason}`,
+              parseInt(id, 10),
+              actor.userId,
+              actor.userName,
+              allocation.batch_id || null,
+              allocation.lot_code || null,
+              allocation.expiry_date || null,
+            )
+          })
+        }
+      }
+
+      refreshProductStockQuantities(touchedProductIds)
+
+      db.prepare(`
+        UPDATE returns SET
+          reason = ?, return_type = ?, notes = ?,
+          total_refund_usd = ?, total_refund_khr = ?,
+          branch_id = ?, branch_name = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        d.reason || existing.reason,
+        d.return_type || existing.return_type,
+        d.notes !== undefined ? d.notes : existing.notes,
+        d.total_refund_usd !== undefined ? d.total_refund_usd : totalRefundUsd,
+        d.total_refund_khr !== undefined ? d.total_refund_khr : totalRefundKhr,
+        d.branch_id || existing.branch_id,
+        branchName || existing.branch_name,
+        id,
       )
 
-      // Re-apply stock if return_to_stock
-      if (returnToStock && item.product_id) {
-        const bid = item.branch_id || existing.branch_id
-        if (bid) {
-          db.prepare(`
-            INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (?,?,?)
-            ON CONFLICT(product_id, branch_id) DO UPDATE
-            SET quantity = branch_stock.quantity + excluded.quantity
-          `).run(item.product_id, bid, item.quantity)
-        }
-        touchedProductIds.add(item.product_id)
-        db.prepare(`
-          INSERT INTO inventory_movements
-            (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).run(
-          item.product_id, item.product_name,
-          item.branch_id || existing.branch_id || null, branchName,
-          'return', item.quantity,
-          item.cost_price_usd || 0, item.cost_price_khr || 0,
-          (item.cost_price_usd || 0) * item.quantity, (item.cost_price_khr || 0) * item.quantity,
-          `Return #${existing.return_number} updated: ${d.reason || existing.reason}`,
-          parseInt(id), actor.userId, actor.userName,
-        )
+      if (existing.sale_id) {
+        const saleItems = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(existing.sale_id)
+        const allReturned = db.prepare(`
+          SELECT ri.product_id, SUM(ri.quantity) AS total_qty
+          FROM return_items ri
+          JOIN returns r ON r.id = ri.return_id
+          WHERE r.sale_id = ?
+            AND COALESCE(r.status, 'completed') != 'cancelled'
+            AND COALESCE(r.return_scope, 'customer') = 'customer'
+          GROUP BY ri.product_id
+        `).all(existing.sale_id)
+        const map = {}
+        allReturned.forEach((row) => { map[row.product_id] = row.total_qty })
+        const fullyReturned = saleItems.every((saleItem) => (map[saleItem.product_id] || 0) >= saleItem.quantity)
+        const hasAny = allReturned.length > 0
+        const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
+        db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, existing.sale_id)
       }
-    }
 
-    refreshProductStockQuantities(touchedProductIds)
-
-    // Update return header
-    db.prepare(`
-      UPDATE returns SET
-        reason = ?, return_type = ?, notes = ?,
-        total_refund_usd = ?, total_refund_khr = ?,
-        branch_id = ?, branch_name = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      d.reason || existing.reason,
-      d.return_type || existing.return_type,
-      d.notes !== undefined ? d.notes : existing.notes,
-      d.total_refund_usd !== undefined ? d.total_refund_usd : totalRefundUsd,
-      d.total_refund_khr !== undefined ? d.total_refund_khr : totalRefundKhr,
-      d.branch_id || existing.branch_id,
-      branchName || existing.branch_name,
-      id,
-    )
-
-    // Re-evaluate parent sale status
-    if (existing.sale_id) {
-      const saleItems = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(existing.sale_id)
-      const allReturned = db.prepare(`
-        SELECT ri.product_id, SUM(ri.quantity) AS total_qty
-        FROM return_items ri JOIN returns r ON r.id = ri.return_id
-        WHERE r.sale_id = ?
-          AND COALESCE(r.status, 'completed') != 'cancelled'
-          AND COALESCE(r.return_scope, 'customer') = 'customer'
-        GROUP BY ri.product_id
-      `).all(existing.sale_id)
-      const map = {}
-      allReturned.forEach(r => { map[r.product_id] = r.total_qty })
-      const fullyReturned = saleItems.every(si => (map[si.product_id] || 0) >= si.quantity)
-      const hasAny = allReturned.length > 0
-      const newStatus = fullyReturned ? 'returned' : hasAny ? 'partial_return' : 'completed'
-      db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, existing.sale_id)
-    }
-
-    audit(actor.userId, actor.userName, 'update', 'return', parseInt(id),
-      { reason: d.reason }, {
-        tableName: 'returns', recordId: parseInt(id),
-        oldValue: { reason: existing.reason, return_type: existing.return_type },
-        newValue: { reason: d.reason, return_type: d.return_type },
-        deviceName: d.device_name || null,
-        deviceTz: d.device_tz || null,
-        clientTime: d.client_time || null,
-      })
+      audit(actor.userId, actor.userName, 'update', 'return', parseInt(id, 10),
+        { reason: d.reason }, {
+          tableName: 'returns',
+          recordId: parseInt(id, 10),
+          oldValue: { reason: existing.reason, return_type: existing.return_type },
+          newValue: { reason: d.reason, return_type: d.return_type },
+          deviceName: d.device_name || null,
+          deviceTz: d.device_tz || null,
+          clientTime: d.client_time || null,
+        })
     })()
   } catch (e) {
     if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
@@ -784,7 +950,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
   broadcast('sales')
   broadcast('inventory')
   const updatedReturn = db.prepare('SELECT id, updated_at FROM returns WHERE id = ?').get(id)
-  ok(res, updatedReturn || { id: parseInt(id) })
+  ok(res, updatedReturn || { id: parseInt(id, 10) })
 })
 
 module.exports = router

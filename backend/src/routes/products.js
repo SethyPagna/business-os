@@ -23,6 +23,15 @@ const {
   parseImportNumber,
   resolveImportValue,
 } = require('../productImportPolicies')
+const {
+  createOrFindProductBatch,
+  increaseProductBatchStock,
+  listProductBatches,
+  migrateLegacyProductToBatches,
+  normalizeExpiryDate,
+  normalizeLotCode,
+  syncProductBatchRollups,
+} = require('../productBatches')
 
 const router = express.Router()
 
@@ -48,12 +57,7 @@ function seedBranchRows(productId, activeBranches = getActiveBranches()) {
 }
 
 function recalcProductStock(productId) {
-  db.prepare(`
-    UPDATE products SET
-      stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = ?),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(productId, productId)
+  syncProductBatchRollups([productId])
 }
 
 function normalizeImageGallery(value, fallbackPrimary = null) {
@@ -304,6 +308,28 @@ function normalizeExpiryFields(source = {}, fallback = {}) {
   }
 }
 
+function normalizeBatchFields(source = {}, fallback = {}) {
+  return {
+    lot_code: normalizeLotCode(hasOwnField(source, 'lot_code') ? source.lot_code : fallback.lot_code),
+    expiry_date: normalizeExpiryDate(hasOwnField(source, 'expiry_date') ? source.expiry_date : fallback.expiry_date),
+  }
+}
+
+function seedOpeningBatch(productId, branchId, quantity, options = {}) {
+  const qty = Math.max(0, Number(quantity || 0))
+  if (!productId || !branchId || qty <= 0) {
+    syncProductBatchRollups([productId])
+    return null
+  }
+  const addition = increaseProductBatchStock(productId, branchId, qty, {
+    lotCode: options.lot_code || options.lotCode || null,
+    expiryDate: options.expiry_date || options.expiryDate || null,
+    notes: options.notes || null,
+  })
+  syncProductBatchRollups([productId])
+  return addition
+}
+
 function normalizePositiveInt(value, fallback, { min = 1, max = 500 } = {}) {
   const parsed = Number.parseInt(value, 10)
   if (!Number.isFinite(parsed)) return fallback
@@ -550,6 +576,15 @@ router.get('/search', authToken, (req, res) => {
     let items = include.has('family') ? expandProductFamilyRows(rows) : rows
     if (include.has('branch_stock')) items = attachBranchStock(items)
     if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
+    if (include.has('batches') || include.has('family')) {
+      const batchMap = listProductBatches(items.map((product) => product.id), {
+        branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
+      })
+      items = items.map((product) => ({
+        ...product,
+        batches: batchMap.get(product.id) || [],
+      }))
+    }
     const filters = getProductSearchMetadata(req.query)
     ok(res, {
       items,
@@ -606,7 +641,12 @@ router.get('/', authToken, (req, res) => {
     branch_stock_json: undefined,  // Remove raw JSON column
     branch_stock: tryParse(p.branch_stock_json, []),  // Parse branch stock from JSON
   }))
-  res.json(attachImageGallery(parsed))
+  const withImages = attachImageGallery(parsed)
+  const batchMap = listProductBatches(withImages.map((product) => product.id))
+  res.json(withImages.map((product) => ({
+    ...product,
+    batches: batchMap.get(product.id) || [],
+  })))
 })
 
 // ?? POST /api/products/variant ?????????????????????????????????????????????????
@@ -635,6 +675,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       d.image_path || parentGallery[0] || parent.image_path || null,
     )
     const primaryImage = imageGallery[0] || null
+    const batchFields = normalizeBatchFields(d, parent)
     markParentProductAsGroup(d.parent_id)
     const productDiscountValues = discountValues(d, {})
     const expiry = normalizeExpiryFields(d, parent)
@@ -666,10 +707,10 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
     const pid = r.lastInsertRowid
     syncProductImageGallery(pid, imageGallery)
     seedBranchRows(pid, activeBranches)
-    if (openingBranchId && openingStock > 0) {
-      db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?').run(openingStock, pid, openingBranchId)
-      recalcProductStock(pid)
-    }
+    seedOpeningBatch(pid, openingBranchId, openingStock, {
+      ...batchFields,
+      notes: 'Opening stock for variant',
+    })
     audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name, parent_id: d.parent_id }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
     })
@@ -703,6 +744,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
     const productDiscountValues = discountValues(d, {})
     const expiry = normalizeExpiryFields(d, {})
+    const batchFields = normalizeBatchFields(d, {})
 
     const r = db.prepare(`
       INSERT INTO products
@@ -733,11 +775,10 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
 
     // Seed branch_stock rows for all active branches
     seedBranchRows(pid, activeBranches)
-    if (openingBranchId && openingStock > 0) {
-      db.prepare('UPDATE branch_stock SET quantity = ? WHERE product_id = ? AND branch_id = ?')
-        .run(openingStock, pid, openingBranchId)
-      recalcProductStock(pid)
-    }
+    seedOpeningBatch(pid, openingBranchId, openingStock, {
+      ...batchFields,
+      notes: 'Opening stock for product',
+    })
     audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
     })
@@ -880,69 +921,100 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         const activeBranches = getActiveBranches()
         const defaultBranch = getDefaultBranch(activeBranches)
         const requestedBranchId = d.branch_id ? parseInt(d.branch_id, 10) : null
-        let movementBranchId = requestedBranchId || null
+        const batchFields = normalizeBatchFields(d, merged)
+        const movementEntries = []
 
         seedBranchRows(productId, activeBranches)
+        migrateLegacyProductToBatches(productId)
 
         if (delta > 0) {
           const targetBranchId = requestedBranchId || defaultBranch?.id
           if (!targetBranchId) throw new Error('An active branch is required before stock can be increased')
-          db.prepare('UPDATE branch_stock SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?')
-            .run(delta, productId, targetBranchId)
-          movementBranchId = targetBranchId
+          const addition = increaseProductBatchStock(productId, targetBranchId, delta, {
+            ...batchFields,
+            notes: 'Product edit (manual stock change)',
+          })
+          movementEntries.push({
+            movement_type: 'add',
+            quantity: delta,
+            branch_id: targetBranchId,
+            branch_name: activeBranches.find((branch) => branch.id === targetBranchId)?.name || null,
+            batch_id: addition.batch_id,
+            lot_code: addition.lot_code,
+            expiry_date: addition.expiry_date,
+          })
         } else {
           let remaining = Math.abs(delta)
 
           if (requestedBranchId) {
-            const available = db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get(productId, requestedBranchId)?.quantity || 0
+            const available = db.prepare(`
+              SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+              FROM product_batches pb
+              LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+              WHERE pb.variant_product_id = ? AND bbs.branch_id = ?
+            `).get(productId, requestedBranchId)?.quantity || 0
             if (remaining > available) throw new Error(`Cannot remove ${remaining} ??only ${available} available in this branch`)
-
-            db.prepare('UPDATE branch_stock SET quantity = MAX(0, quantity - ?) WHERE product_id = ? AND branch_id = ?')
-              .run(remaining, productId, requestedBranchId)
-            movementBranchId = requestedBranchId
+            allocateProductBatches(productId, requestedBranchId, remaining).forEach((allocation) => {
+              movementEntries.push({
+                movement_type: 'remove',
+                quantity: allocation.quantity,
+                branch_id: allocation.branch_id || null,
+                branch_name: allocation.branch_name || null,
+                batch_id: allocation.batch_id,
+                lot_code: allocation.lot_code,
+                expiry_date: allocation.expiry_date,
+              })
+            })
           } else {
-            const branchRows = db.prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = ? AND quantity > 0 ORDER BY quantity DESC, branch_id ASC').all(productId)
-            const totalAvailable = branchRows.reduce((sum, row) => sum + (row.quantity || 0), 0)
+            const totalAvailable = db.prepare(`
+              SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity
+              FROM product_batches pb
+              LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+              WHERE pb.variant_product_id = ?
+            `).get(productId)?.quantity || 0
             if (remaining > totalAvailable) throw new Error(`Cannot remove ${remaining} ??only ${totalAvailable} available`)
-
-            for (const row of branchRows) {
-              if (remaining <= 0) break
-              const take = Math.min(row.quantity || 0, remaining)
-              db.prepare('UPDATE branch_stock SET quantity = MAX(0, quantity - ?) WHERE product_id = ? AND branch_id = ?')
-                .run(take, productId, row.branch_id)
-              remaining -= take
-            }
-
-            movementBranchId = null
+            allocateProductBatches(productId, null, remaining).forEach((allocation) => {
+              movementEntries.push({
+                movement_type: 'remove',
+                quantity: allocation.quantity,
+                branch_id: allocation.branch_id || null,
+                branch_name: allocation.branch_name || null,
+                batch_id: allocation.batch_id,
+                lot_code: allocation.lot_code,
+                expiry_date: allocation.expiry_date,
+              })
+            })
           }
         }
 
         recalcProductStock(productId)
-
-        const branchName = movementBranchId
-          ? activeBranches.find(branch => branch.id === movementBranchId)?.name || null
-          : null
-
-        db.prepare(`
+        const insertMovement = db.prepare(`
           INSERT INTO inventory_movements
             (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).run(
-          productId,
-          String(merged.name || '').trim(),
-          movementBranchId,
-          branchName,
-          delta > 0 ? 'add' : 'remove',
-          Math.abs(delta),
-          merged.purchase_price_usd || 0,
-          merged.purchase_price_khr || 0,
-          Math.abs(delta) * (merged.purchase_price_usd || 0),
-          Math.abs(delta) * (merged.purchase_price_khr || 0),
-          'Product edit (manual stock change)',
-          actor.userId,
-          actor.userName,
-        )
+             unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, user_id, user_name,
+             batch_id, lot_code, expiry_date)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `)
+        movementEntries.forEach((entry) => {
+          insertMovement.run(
+            productId,
+            String(merged.name || '').trim(),
+            entry.branch_id || null,
+            entry.branch_name || null,
+            entry.movement_type,
+            entry.quantity,
+            merged.purchase_price_usd || 0,
+            merged.purchase_price_khr || 0,
+            entry.quantity * (merged.purchase_price_usd || 0),
+            entry.quantity * (merged.purchase_price_khr || 0),
+            'Product edit (manual stock change)',
+            actor.userId,
+            actor.userName,
+            entry.batch_id || null,
+            entry.lot_code || null,
+            entry.expiry_date || null,
+          )
+        })
       } else {
         recalcProductStock(productId)
       }
@@ -1214,23 +1286,34 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
     return mb
   }
 
-  const handleBranch = (pid, branchName, qty, replace) => {
+  const handleBranch = (pid, branchName, qty, replace, batchOptions = {}) => {
     const mb = determineBranch(branchName)
 
     if (!mb) {
       if (qty > 0) throw new Error('A branch is required to import stock')
-      if (replace) db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(pid)
+      if (replace) {
+        const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(pid).map((row) => row.id)
+        if (batchIds.length) {
+          const placeholders = batchIds.map(() => '?').join(',')
+          db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
+        }
+      }
       recalcProductStock(pid)
-      return
+      return null
     }
 
-    insertBS.run(pid, mb.id, 0)
-    if (replace) db.prepare('UPDATE branch_stock SET quantity = 0 WHERE product_id = ?').run(pid)
-    if (qty > 0) {
-      if (replace) db.prepare('UPDATE branch_stock SET quantity=? WHERE product_id=? AND branch_id=?').run(qty, pid, mb.id)
-      else         db.prepare('UPDATE branch_stock SET quantity=quantity+? WHERE product_id=? AND branch_id=?').run(qty, pid, mb.id)
+    migrateLegacyProductToBatches(pid)
+    if (replace) {
+      const batchIds = db.prepare('SELECT id FROM product_batches WHERE variant_product_id = ?').all(pid).map((row) => row.id)
+      if (batchIds.length) {
+        const placeholders = batchIds.map(() => '?').join(',')
+        db.prepare(`UPDATE branch_batch_stock SET quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE batch_id IN (${placeholders})`).run(...batchIds)
+      }
     }
+    let addition = null
+    if (qty > 0) addition = increaseProductBatchStock(pid, mb.id, qty, batchOptions)
     recalcProductStock(pid)
+    return addition
   }
 
   /**
@@ -1459,7 +1542,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
             logMove.run(pid, p.name.trim(), branch?.id || null, branch?.name || null, 'purchase', qty, buyUsd, buyKhr, qty * buyUsd, qty * buyKhr,
               'CSV import - new product', actor.userId, actor.userName)
           }
-          handleBranch(pid, p.branch, qty, true)
+          handleBranch(pid, p.branch, qty, true, {
+            lot_code: normalizeLotCode(p.lot_code || p.lotCode),
+            expiry_date: importExpiry.expiry_date,
+          })
           imported++
         } else {
           const ep = plannedTargetId
@@ -1593,7 +1679,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               const branch = determineBranch(p.branch)
               logMove.run(pid, ep.name, branch?.id || null, branch?.name || null, 'add', qty, ep.purchase_price_usd, ep.purchase_price_khr,
                 qty * ep.purchase_price_usd, qty * ep.purchase_price_khr, 'CSV import - merge add stock', actor.userId, actor.userName)
-              handleBranch(pid, p.branch, qty, false)
+              handleBranch(pid, p.branch, qty, false, {
+                lot_code: normalizeLotCode(p.lot_code || p.lotCode),
+                expiry_date: importExpiry.expiry_date,
+              })
             }
             if (JSON.stringify(nextGallery) !== JSON.stringify(currentGallery)) {
               syncProductImageGallery(pid, nextGallery)
@@ -1646,7 +1735,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
               syncProductImageGallery(pid, nextGallery)
             }
             if (replaceStock) {
-              handleBranch(pid, p.branch, qty, true)
+              handleBranch(pid, p.branch, qty, true, {
+                lot_code: normalizeLotCode(p.lot_code || p.lotCode),
+                expiry_date: importExpiry.expiry_date,
+              })
             }
             if (qty > 0) {
               const movType = replaceStock ? 'adjustment' : 'add'
@@ -1656,7 +1748,10 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
                 buyUsd || ep.purchase_price_usd, buyKhr || ep.purchase_price_khr,
                 qty * (buyUsd || ep.purchase_price_usd), qty * (buyKhr || ep.purchase_price_khr),
                 movReason, actor.userId, actor.userName)
-              if (!replaceStock) handleBranch(pid, p.branch, qty, false)
+              if (!replaceStock) handleBranch(pid, p.branch, qty, false, {
+                lot_code: normalizeLotCode(p.lot_code || p.lotCode),
+                expiry_date: importExpiry.expiry_date,
+              })
             }
           }
           updated++

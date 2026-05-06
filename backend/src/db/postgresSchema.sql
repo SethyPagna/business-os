@@ -1918,6 +1918,81 @@ CREATE INDEX idx_sales_status_created_pg ON public.sales USING btree (sale_statu
 
 CREATE UNIQUE INDEX idx_settings_key_unique ON public.settings USING btree (key);
 
+--
+-- Name: product_batches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_batches (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    variant_product_id bigint NOT NULL,
+    batch_key text NOT NULL,
+    lot_code text,
+    expiry_date text,
+    received_at text,
+    is_active bigint DEFAULT 1,
+    notes text,
+    synthetic bigint DEFAULT 0,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+--
+-- Name: branch_batch_stock; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.branch_batch_stock (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    batch_id bigint NOT NULL,
+    branch_id bigint NOT NULL,
+    quantity double precision DEFAULT 0,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+--
+-- Name: sale_item_batch_allocations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sale_item_batch_allocations (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sale_item_id bigint NOT NULL,
+    batch_id bigint NOT NULL,
+    branch_id bigint,
+    quantity double precision NOT NULL,
+    lot_code text,
+    expiry_date text,
+    released_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+--
+-- Name: return_item_batch_allocations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.return_item_batch_allocations (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    return_item_id bigint NOT NULL,
+    sale_item_id bigint,
+    batch_id bigint NOT NULL,
+    branch_id bigint,
+    quantity double precision NOT NULL,
+    lot_code text,
+    expiry_date text,
+    reversed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.inventory_movements ADD COLUMN IF NOT EXISTS batch_id bigint;
+ALTER TABLE public.inventory_movements ADD COLUMN IF NOT EXISTS lot_code text;
+ALTER TABLE public.inventory_movements ADD COLUMN IF NOT EXISTS expiry_date text;
+
+CREATE UNIQUE INDEX idx_product_batches_variant_key_unique ON public.product_batches USING btree (variant_product_id, batch_key);
+CREATE INDEX idx_product_batches_variant_expiry ON public.product_batches USING btree (variant_product_id, expiry_date, received_at, id);
+CREATE UNIQUE INDEX idx_branch_batch_stock_batch_branch_unique ON public.branch_batch_stock USING btree (batch_id, branch_id);
+CREATE INDEX idx_branch_batch_stock_branch_qty ON public.branch_batch_stock USING btree (branch_id, quantity DESC, batch_id);
+CREATE INDEX idx_sale_item_batch_allocations_sale_item ON public.sale_item_batch_allocations USING btree (sale_item_id, released_at);
+CREATE INDEX idx_return_item_batch_allocations_return_item ON public.return_item_batch_allocations USING btree (return_item_id, reversed_at);
+
 
 --
 -- PostgreSQL database dump complete

@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
 import { getContrastingTextColor } from '../../utils/color.js'
 import { calculateProductDiscount } from '../../utils/pricing.js'
+import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.mjs'
 
 export default function ProductDetailModal({
   p,
@@ -36,6 +37,8 @@ export default function ProductDetailModal({
   const brandColor = brandColorMap?.[String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()] || ''
   const expiryDate = String(p.expiry_date || '').trim()
   const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / 86400000) : null
+  const visibleBatches = getVisibleProductBatches(p)
+  const batchPreview = buildBatchPreview(p, 'all', { limit: 6 })
 
   const Row = ({ label, children }) => (
     <div className="flex gap-3">
@@ -177,6 +180,28 @@ export default function ProductDetailModal({
                     {bs.branch_name}: {bs.quantity}
                   </span>
                 ))}
+              </div>
+            </div>
+          ) : null}
+
+          {visibleBatches.length ? (
+            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+              <div className="mb-1.5 text-xs text-gray-400">{T('batches', 'Batches')}</div>
+              <div className="space-y-1.5">
+                {batchPreview.items.map((batch) => (
+                  <div key={batch.id || batch.batch_id} className="rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-amber-700 dark:text-amber-200">{batch.lot_code || T('batch', 'Batch')}</span>
+                      <span className="text-gray-500 dark:text-gray-300">{batch.quantity}</span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-300">
+                      {batch.expiry_date || T('no_expiry', 'No expiry')}
+                    </div>
+                  </div>
+                ))}
+                {batchPreview.extraCount ? (
+                  <div className="text-[11px] text-gray-400">+{batchPreview.extraCount} {T('more', 'more')}</div>
+                ) : null}
               </div>
             </div>
           ) : null}

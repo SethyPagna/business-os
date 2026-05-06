@@ -21,6 +21,7 @@ import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnap
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './productHistoryHelpers.mjs'
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
+import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -67,87 +68,30 @@ function ThreeDot({ onDetails, onEdit, onDelete, onAddVariant, onDiscount, onAdj
   )
 }
 
-const CREATED_MONTH_OPTIONS = [
-  ['1', 'Jan'],
-  ['2', 'Feb'],
-  ['3', 'Mar'],
-  ['4', 'Apr'],
-  ['5', 'May'],
-  ['6', 'Jun'],
-  ['7', 'Jul'],
-  ['8', 'Aug'],
-  ['9', 'Sep'],
-  ['10', 'Oct'],
-  ['11', 'Nov'],
-  ['12', 'Dec'],
-]
-
-const PRODUCT_JUMP_OFFSET = 88
-const DEFAULT_META_PILL_COLOR = '#64748b'
-
-function useDebouncedValue(value, delayMs = 180) {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(timer)
-  }, [delayMs, value])
-  return debounced
-}
-
-function getScrollContainer(node) {
-  let current = node?.parentElement
-  while (current) {
-    const style = window.getComputedStyle(current)
-    if (/(auto|scroll)/.test(style.overflowY || '') && current.scrollHeight > current.clientHeight) {
-      return current
-    }
-    current = current.parentElement
-  }
-  return document.scrollingElement || document.documentElement
-}
-
-function scrollNodeWithOffset(node, offset = PRODUCT_JUMP_OFFSET) {
-  if (!node) return
-  const container = getScrollContainer(node)
-  if (!container || container === document.documentElement || container === document.body || container === document.scrollingElement) {
-    const top = window.scrollY + node.getBoundingClientRect().top - offset
-    window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
-    return
-  }
-  const containerRect = container.getBoundingClientRect()
-  const nodeRect = node.getBoundingClientRect()
-  const top = container.scrollTop + (nodeRect.top - containerRect.top) - offset
-  container.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' })
-}
-
-function normalizeBrandLookup(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-function parseBrandColorMap(raw) {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch (_) {
-    return {}
-  }
-}
-
-function ProductDiscountBadge({ product, promotion, fmtUSD, label = 'Discount', overlay = false }) {
-  if (!promotion?.active) return null
-  const text = `${product?.discount_label || label} ${fmtUSD(promotion.applied_price_usd || 0)}`
-  const baseClass = overlay
-    ? 'absolute bottom-1 left-1 right-1 z-10 truncate rounded-md bg-rose-600/95 px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm'
-    : 'inline-flex max-w-[12rem] items-center truncate rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
+function ProductBatchPreview({ product, branchId = 'all', tr, compact = false }) {
+  const preview = buildBatchPreview(product, branchId, { limit: compact ? 2 : 3 })
+  if (!preview.totalCount) return null
   return (
-    <span className={baseClass} title={text}>
-      {text}
-    </span>
+    <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
+      {preview.items.map((batch) => (
+        <span
+          key={`${product?.id || 'product'}-batch-${batch.id || batch.batch_id}`}
+          className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
+          title={`${batch.lot_code || tr('batch', 'Batch', 'Batch')} / ${batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry')} / ${batch.quantity}`}
+        >
+          {batch.lot_code || tr('batch', 'Batch', 'Batch')} / {batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry')} / {batch.quantity}
+        </span>
+      ))}
+      {preview.extraCount ? (
+        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          +{preview.extraCount}
+        </span>
+      ) : null}
+    </div>
   )
 }
 
-function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchName, renderMetaPill, tr, fmtUSD }) {
+function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchName, selectedBranchId = 'all', renderMetaPill, tr, fmtUSD }) {
   const detailPills = [
     selectedBranchName ? { key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
     branchLabel ? { key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' } : null,
@@ -156,15 +100,17 @@ function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchNam
   ].filter(Boolean)
 
   return (
-    <div className="flex max-w-[16rem] flex-wrap items-center gap-1">
-      {detailPills.map((item) => renderMetaPill(item))}
-      <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} />
-      {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
+    <div className="max-w-[17rem]">
+      <div className="flex flex-wrap items-center gap-1">
+        {detailPills.map((item) => renderMetaPill(item))}
+        <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
+        {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
+      </div>
+      <ProductBatchPreview product={product} branchId={selectedBranchId} tr={tr} />
     </div>
   )
 }
 
-// ?�?� Product detail modal ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 
 export default function Products() {
   const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useApp()
@@ -259,7 +205,7 @@ export default function Products() {
           groupState: groupFilter === 'all' ? '' : groupFilter,
           initial: initialFilter === 'all' ? '' : initialFilter,
           sort: productSortDirection === 'asc' ? 'created_asc' : 'created_desc',
-          include: 'branch_stock,images',
+          include: 'branch_stock,images,batches',
         }
         const result = await settleLoaderMap({
           products: () => window.api.searchProducts(productQuery),
@@ -347,7 +293,7 @@ export default function Products() {
         .filter((id) => Number.isFinite(id) && id > 0),
     )).slice(0, 100)
     if (!uniqueIds.length) return []
-    const payload = await window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images' })
+    const payload = await window.api.getProductsByIds(uniqueIds, { include: 'branch_stock,images,batches' })
     return Array.isArray(payload?.items) ? payload.items : []
   }, [])
 
@@ -1648,6 +1594,7 @@ export default function Products() {
             promotion={promotion}
             branchLabel={branchSummaryLabel}
             selectedBranchName={selectedBranchName}
+            selectedBranchId={branchFilter}
             renderMetaPill={renderMetaPill}
             tr={tr}
             fmtUSD={fmtUSD}
@@ -1779,6 +1726,7 @@ export default function Products() {
                 </span>
               ) : null}
             </div>
+            <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
           </div>
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-[5.35rem] text-[11px]">
