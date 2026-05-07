@@ -1881,12 +1881,10 @@ export default function Products() {
 
       <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40 sm:mx-0 sm:rounded-xl">
         <div className="px-2 py-2">
-          <div className="flex min-w-0 items-center gap-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <span className="inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                {productSummaryLabel}
-              </span>
-            </div>
+          <div className="grid min-w-0 grid-cols-[auto_auto_auto] items-center justify-start gap-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+            <span className="inline-flex min-w-0 max-w-[4.95rem] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              {productSummaryLabel}
+            </span>
             <label className="relative inline-flex h-7 w-[3.1rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                 <span className="sr-only">{t('per_page') || 'per page'}</span>
                 <select
@@ -1902,10 +1900,10 @@ export default function Products() {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
             </label>
-            <div className="inline-flex h-7 w-[6.2rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <div className="inline-flex h-7 w-[5.7rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
               <button
                 type="button"
-                className="inline-flex h-7 w-7 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                 disabled={productSafePage <= 1}
                 onClick={() => setProductPage(productSafePage - 1)}
                 aria-label="Previous page"
@@ -1916,7 +1914,7 @@ export default function Products() {
                 type="text"
                 inputMode="numeric"
                 aria-label={t('page') || 'Page'}
-                className="h-7 w-7 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                className="h-7 w-5 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
                 value={productPageDraft}
                 onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={commitProductPageDraft}
@@ -1931,12 +1929,12 @@ export default function Products() {
                   }
                 }}
               />
-              <span className="pr-2 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
+              <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
                 / {productTotalPages}
               </span>
               <button
                 type="button"
-                className="inline-flex h-7 w-7 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                 disabled={productSafePage >= productTotalPages}
                 onClick={() => setProductPage(productSafePage + 1)}
                 aria-label="Next page"
@@ -1945,9 +1943,8 @@ export default function Products() {
               </button>
             </div>
           </div>
-          <div className="mt-1.5 flex items-center">
-            <div className="flex w-full min-w-0 items-center gap-1.5">
-              <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
+          <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_4.9rem] items-center gap-1.5">
+              <label className="inline-flex min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                 <input
                   type="checkbox"
                   className="h-4 w-4 shrink-0 rounded"
@@ -1961,17 +1958,19 @@ export default function Products() {
                     : productSelectAllLabel}
                 </span>
               </label>
-              {hasSelected ? (
-                <button
-                  type="button"
-                  disabled={bulkActionBusy}
-                  onClick={handleBulkDelete}
-                  className="inline-flex h-8 min-w-[4.8rem] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-700 shadow-sm transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20"
-                >
-                  {productChipLabels.delete}
-                </button>
-              ) : null}
-            </div>
+              <button
+                type="button"
+                disabled={!hasSelected || bulkActionBusy}
+                onClick={hasSelected ? handleBulkDelete : undefined}
+                aria-hidden={!hasSelected}
+                className={`inline-flex h-8 min-w-[4.8rem] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border px-2.5 text-[10px] font-semibold shadow-sm transition-colors ${
+                  hasSelected
+                    ? 'border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20'
+                    : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
+                }`}
+              >
+                {productChipLabels.delete}
+              </button>
           </div>
         </div>
         {hasSelected ? (
