@@ -7,6 +7,7 @@ const JOB_PERSIST_MIN_INTERVAL_MS = 750
 const JOB_PROGRESS_PERSIST_STEP = 5
 const jobs = new Map()
 let tableReady = false
+let staleRecoveryApplied = false
 
 function nowIso() {
   return new Date().toISOString()
@@ -96,6 +97,26 @@ function ensureTable() {
   ].forEach((statement) => {
     try { getDb().exec(statement) } catch (_) {}
   })
+  if (!staleRecoveryApplied) {
+    try {
+      getDb().prepare(`
+        UPDATE system_jobs
+        SET
+          status = 'cancelled',
+          phase = 'cancelled',
+          message = CASE
+            WHEN status = 'queued' THEN 'Recovered after server restart before the job could start'
+            ELSE 'Recovered after server restart'
+          END,
+          cancellable = 0,
+          cancel_requested_at = COALESCE(cancel_requested_at, CURRENT_TIMESTAMP),
+          finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE status IN ('queued', 'running', 'cancelling')
+      `).run()
+    } catch (_) {}
+    staleRecoveryApplied = true
+  }
   tableReady = true
 }
 

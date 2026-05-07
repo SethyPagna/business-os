@@ -432,7 +432,7 @@ function SectionChip({ label, value, tone = 'slate' }) {
   )
 }
 
-const DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES = 60
+const DRIVE_SYNC_DEFAULT_INTERVAL_MINUTES = 6 * 60
 const DRIVE_SYNC_MIN_INTERVAL_MINUTES = 60
 const DRIVE_SYNC_MAX_INTERVAL_MINUTES = 24 * 60
 const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
@@ -894,7 +894,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_interval_note', 'Default is 60 minutes (every 1 hour). Quick choices use 3, 6, 9, 12, or 24 hours.')}
+            {copy('drive_sync_interval_note', 'Default is 360 minutes (every 6 hours). Quick choices use 3, 6, 9, 12, or 24 hours.')}
           </p>
         </label>
       </div>

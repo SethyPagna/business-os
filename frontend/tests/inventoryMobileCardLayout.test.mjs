@@ -5,20 +5,20 @@ const inventorySource = readFileSync(new URL('../src/components/inventory/Invent
 
 assert.match(
   inventorySource,
-  /const productTags = \[p\.brand, p\.category, p\.is_group \? 'Group' : \(p\.parent_id \? 'Variant' : ''\)\]\.filter\(Boolean\)/,
-  'Mobile inventory card should keep brand, category, and group tags visible in the identity area',
+  /const productTagText = \[p\.brand,\s*p\.category\]\.filter\(Boolean\)\.join\(' · '\)/,
+  'Mobile inventory card should keep brand and category visible in the identity area',
 )
 
 assert.match(
   inventorySource,
-  /className="min-w-0 flex flex-1 items-center gap-1\.5 overflow-hidden"[\s\S]*p\.barcode \? \(\s*<span className="ml-auto shrink-0 whitespace-nowrap pl-2 text-right font-medium text-gray-500 dark:text-gray-300">\s*\{p\.barcode\}/,
-  'Mobile inventory card should keep the barcode inline with the identity tags so it does not get pushed under stock controls',
+  /className="flex min-w-\[5rem\] max-w-\[5\.2rem\] shrink-0 flex-col items-end gap-0\.5 text-right"[\s\S]*p\.barcode \? \(\s*<span className="mt-0\.5 max-w-full truncate rounded-full bg-slate-100 px-1\.5 py-0\.5 text-\[9px\] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">\s*\{p\.barcode\}/,
+  'Mobile inventory card should keep the barcode in the compact stock-controls area instead of dropping into a separate lower block',
 )
 
 assert.match(
   inventorySource,
-  /className="flex shrink-0 items-center justify-end gap-0\.5 text-right"/,
-  'Quantity, stock status, and Adjust should share one compact inline control strip without a framed background',
+  /className="flex items-center justify-end gap-0\.5"[\s\S]*\{qty\}[\s\S]*\{slbl\}[\s\S]*\{t\('adjust'\)\}/,
+  'Quantity, stock status, and Adjust should share one compact inline control strip',
 )
 
 assert.doesNotMatch(

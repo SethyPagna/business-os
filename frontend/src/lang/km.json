@@ -1846,7 +1846,7 @@
     "drive_sync_failed": "ការសមកាលកម្ម Drive បរាជ័យ។",
     "drive_sync_folder_name": "ឈ្មោះថតក្នុង Drive",
     "drive_sync_interval": "ចន្លោះពេលសមកាលកម្ម (នាទី)",
-    "drive_sync_interval_note": "លំនាំដើមគឺ 60 នាទី (រៀងរាល់ 1 ម៉ោង)។ ជម្រើសរហ័សមាន 3, 6, 9, 12 ឬ 24 ម៉ោង។",
+    "drive_sync_interval_note": "លំនាំដើមគឺ 360 នាទី (រៀងរាល់ 6 ម៉ោង)។ ជម្រើសរហ័សមាន 3, 6, 9, 12 ឬ 24 ម៉ោង។",
     "drive_sync_redirect_uri": "OAuth redirect URI",
     "drive_sync_secret_required": "ត្រូវការ Google client secret។",
     "drive_sync_secret_saved": "បានរក្សាទុក Google client secret។",
@@ -2593,3 +2593,4 @@
   "confirm_sale_status_change": "ប្ដូរស្ថានភាពការលក់មែនទេ?",
   "confirm_sale_status_change_stock": "ប្ដូរស្ថានភាពការលក់មែនទេ? វាអាចប្ដូរចំនួនស្តុកបាន។"
 }
+

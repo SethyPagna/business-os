@@ -611,8 +611,69 @@ async function validateLocalBackupPackage(sourceDir) {
   return { root, manifest }
 }
 
+function getLocalBackupRoot() {
+  return path.join(DATA_ROOT, 'backups')
+}
+
+function listLocalBackupDirectories() {
+  const backupRoot = getLocalBackupRoot()
+  if (!fs.existsSync(backupRoot)) return []
+  return fs.readdirSync(backupRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^datasync-/i.test(String(entry.name || '')))
+    .map((entry) => {
+      const absolutePath = path.join(backupRoot, entry.name)
+      let stats = null
+      try {
+        stats = fs.statSync(absolutePath)
+      } catch (_) {}
+      return {
+        packageId: entry.name,
+        absolutePath,
+        mtimeMs: Number(stats?.mtimeMs || 0) || 0,
+      }
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+function readReusableLocalBackupPackage(absolutePath) {
+  const manifestPath = path.join(absolutePath, 'manifest.json')
+  const dataPath = path.join(absolutePath, 'data.json')
+  const checksumsPath = path.join(absolutePath, 'checksums.json')
+  const objectsPath = path.join(absolutePath, 'objects-manifest.jsonl')
+  const restorePlanPath = path.join(absolutePath, 'restore-plan.json')
+  for (const required of [manifestPath, dataPath, checksumsPath, objectsPath, restorePlanPath]) {
+    if (!fs.existsSync(required)) return null
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  if (!String(manifest.format || '').startsWith('business-os-backup-v')) return null
+  return {
+    packageId: String(manifest.packageId || path.basename(absolutePath)).trim(),
+    manifest,
+    summary: manifest.summary || null,
+    localPath: absolutePath,
+    objectPrefix: `backups/${String(manifest.packageId || path.basename(absolutePath)).trim()}`,
+    objectsCopied: Number(manifest?.summary?.totals?.uploadCount || 0) || 0,
+    objectsFailed: 0,
+    storageDriver: getObjectStorageDriver(),
+    bucket: S3_BUCKET || null,
+    reused: true,
+  }
+}
+
+function findReusableLocalBackupPackage({ maxAgeMs = 10 * 60 * 1000 } = {}) {
+  const cutoff = Date.now() - Math.max(60 * 1000, Number(maxAgeMs || 0))
+  const candidates = listLocalBackupDirectories()
+  for (const candidate of candidates) {
+    if (!candidate?.mtimeMs || candidate.mtimeMs < cutoff) continue
+    const reusable = readReusableLocalBackupPackage(candidate.absolutePath)
+    if (reusable?.packageId) return reusable
+  }
+  return null
+}
+
 async function listBackupVersions({ limit = 50 } = {}) {
-  const objects = await listObjects('backups/', { maxKeys: Math.max(1, Math.min(1000, Number(limit || 50) * 5)) })
+  const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
+  const objects = await listObjects('backups/', { maxKeys: Math.max(100, Math.min(5000, safeLimit * 32)) })
   const versions = new Map()
   objects.forEach((object) => {
     const match = String(object.key || '').match(/^backups\/([^/]+)\//)
@@ -626,11 +687,12 @@ async function listBackupVersions({ limit = 50 } = {}) {
   })
   return Array.from(versions.values())
     .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
-    .slice(0, Math.max(1, Math.min(100, Number(limit || 50))))
+    .slice(0, safeLimit)
 }
 
 module.exports = {
   createFinalBackupPackage,
+  findReusableLocalBackupPackage,
   listBackupVersions,
   validateLocalBackupPackage,
 }

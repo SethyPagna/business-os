@@ -20,7 +20,7 @@ const {
   resolveDriveSyncVersionState,
   selectExpiredDriveSyncVersions,
 } = require('./versioning')
-const { createFinalBackupPackage } = require('../backupPackages')
+const { createFinalBackupPackage, findReusableLocalBackupPackage } = require('../backupPackages')
 const { isMaintenanceLocked, getMaintenanceLock } = require('../../maintenanceLock')
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -29,7 +29,8 @@ const GOOGLE_DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3'
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DRIVE_SYNC_MIN_INTERVAL_SECONDS = 60 * 60
 const DRIVE_SYNC_MAX_INTERVAL_SECONDS = 24 * 60 * 60
-const DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS = 60 * 60
+const DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS = 6 * 60 * 60
+const DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS = 15 * 60 * 1000
 const DRIVE_RESUMABLE_THRESHOLD_BYTES = 5 * 1024 * 1024
 const DRIVE_RESUMABLE_CHUNK_BYTES = 8 * 1024 * 1024
 
@@ -54,7 +55,8 @@ const SETTINGS_KEYS = {
 }
 
 const runtimeState = {
-  timer: null,
+  queuedTimer: null,
+  periodicTimer: null,
   syncPromise: null,
   queuedReason: '',
   lastRunAt: '',
@@ -548,7 +550,10 @@ async function ensureSnapshotLayout(snapshotRoot) {
 }
 
 function shouldSkipSnapshotFile(relativePath) {
-  return !String(relativePath || '').trim()
+  const normalized = String(relativePath || '').replace(/\\/g, '/').trim()
+  if (!normalized) return true
+  if (normalized === 'backups' || normalized.startsWith('backups/')) return true
+  return false
 }
 
 async function createDataRootSnapshot(progress = null) {
@@ -897,13 +902,27 @@ async function runDriveSyncInternal(reason = 'manual', options = {}) {
     [SETTINGS_KEYS.lastError]: '',
   })
 
-  const backupPackage = await createFinalBackupPackage({
-    destinationDir: path.join(DATA_ROOT, 'backups'),
-    actor: { userName: 'Google Drive sync' },
-    progress,
-    signal: options.signal,
-    throwIfCancelled: options.throwIfCancelled,
-  })
+  let backupPackage = findReusableLocalBackupPackage({ maxAgeMs: DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS })
+  if (backupPackage?.packageId) {
+    progress?.({
+      phase: 'starting',
+      progress: 18,
+      message: `Reusing recent backup package ${backupPackage.packageId}`,
+      metrics: {
+        packageId: backupPackage.packageId,
+        filesProcessed: backupPackage.objectsCopied || 0,
+        filesTotal: backupPackage.objectsCopied || 0,
+      },
+    })
+  } else {
+    backupPackage = await createFinalBackupPackage({
+      destinationDir: path.join(DATA_ROOT, 'backups'),
+      actor: { userName: 'Google Drive sync' },
+      progress,
+      signal: options.signal,
+      throwIfCancelled: options.throwIfCancelled,
+    })
+  }
   progress?.({ phase: 'snapshot', progress: 35, message: 'Creating Drive snapshot' })
   await yieldToEventLoop()
   const snapshot = await createDataRootSnapshot(progress)
@@ -1099,9 +1118,9 @@ function scheduleDriveSync(reason = 'change', delayMs = 5000) {
   const config = getDriveSyncConfig()
   if (!config.enabled || !config.ready) return
   runtimeState.queuedReason = reason || runtimeState.queuedReason || 'change'
-  if (runtimeState.timer) clearTimeout(runtimeState.timer)
-  runtimeState.timer = setTimeout(async () => {
-    runtimeState.timer = null
+  if (runtimeState.queuedTimer) clearTimeout(runtimeState.queuedTimer)
+  runtimeState.queuedTimer = setTimeout(async () => {
+    runtimeState.queuedTimer = null
     if (runtimeState.syncPromise) return
     const syncPromise = runDriveSync(runtimeState.queuedReason || 'change')
       .catch(() => null)
@@ -1149,7 +1168,7 @@ function getDriveSyncStatus(redirectUri = '') {
     scope: GOOGLE_DRIVE_SCOPE,
     runtime: {
       syncing: !!runtimeState.syncPromise,
-      queued: !!runtimeState.timer || !!trim(runtimeState.queuedReason),
+      queued: !!runtimeState.queuedTimer || !!trim(runtimeState.queuedReason),
       lastRunAt: runtimeState.lastRunAt,
       lastReason: runtimeState.lastReason,
       lastError: runtimeState.lastError || config.lastError || reconnectMessage,
@@ -1258,9 +1277,6 @@ function saveDriveSyncPreferences(payload = {}) {
     clearDriveSyncMappings()
   }
   writeSettingsMap(updates)
-  if (toBool(updates[SETTINGS_KEYS.enabled]) && current.ready) {
-    scheduleDriveSync('preferences-updated', 1500)
-  }
 }
 
 function disconnectDriveSync() {
@@ -1291,8 +1307,8 @@ function forgetDriveSyncCredentials() {
 }
 
 function schedulePeriodicDriveSync() {
-  if (runtimeState.timer) return runtimeState.timer
-  runtimeState.timer = setInterval(() => {
+  if (runtimeState.periodicTimer) return runtimeState.periodicTimer
+  runtimeState.periodicTimer = setInterval(() => {
     const config = getDriveSyncConfig()
     if (!config.enabled || !config.ready) return
     const lastSyncMs = config.lastSyncedAt ? Date.parse(config.lastSyncedAt) : 0
@@ -1300,8 +1316,9 @@ function schedulePeriodicDriveSync() {
     if (!lastSyncMs || (Date.now() - lastSyncMs) >= dueMs) {
       scheduleDriveSync('interval', 1000)
     }
-  }, 30 * 1000).unref?.()
-  return runtimeState.timer
+  }, 30 * 1000)
+  runtimeState.periodicTimer.unref?.()
+  return runtimeState.periodicTimer
 }
 
 schedulePeriodicDriveSync()

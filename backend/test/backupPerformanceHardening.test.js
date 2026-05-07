@@ -66,13 +66,36 @@ runTest('system jobs throttle noisy persistence while forcing major state change
 
 runTest('drive sync snapshot work avoids synchronous copies and double hashing', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*6\s*\*\s*60\s*\*\s*60/)
+  assert.match(source, /DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS\s*=\s*15\s*\*\s*60\s*\*\s*1000/)
+  assert.match(source, /queuedTimer:\s*null/)
+  assert.match(source, /periodicTimer:\s*null/)
   assert.match(source, /function\s+hashFileMany\(/)
   assert.match(source, /const\s+\{\s*md5,\s*sha256\s*\}\s*=\s*await\s+hashFileMany/)
+  assert.match(source, /findReusableLocalBackupPackage\(\{\s*maxAgeMs:\s*DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS\s*\}\)/)
+  assert.match(source, /Reusing recent backup package/)
   assert.match(source, /await\s+fs\.promises\.copyFile/)
   assert.match(source, /await\s+fs\.promises\.stat/)
+  assert.match(source, /if \(runtimeState\.queuedTimer\) clearTimeout\(runtimeState\.queuedTimer\)/)
+  assert.match(source, /if \(runtimeState\.periodicTimer\) return runtimeState\.periodicTimer/)
+  assert.match(source, /runtimeState\.periodicTimer = setInterval\(/)
+  assert.doesNotMatch(source, /scheduleDriveSync\('preferences-updated'/)
   assert.doesNotMatch(source, /fs\.copyFileSync/)
   assert.doesNotMatch(source, /fs\.statSync/)
   assert.doesNotMatch(source, /await\s+hashFile\(absolutePath,\s*'md5'\)[\s\S]{0,120}await\s+hashFile\(absolutePath,\s*'sha256'\)/)
+})
+
+runTest('backup version listing reads enough objects for recent package pages and can reuse local packages', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  assert.match(source, /function\s+findReusableLocalBackupPackage\(/)
+  assert.match(source, /safeLimit\s*\*\s*32/)
+  assert.match(source, /Math\.max\(100,\s*Math\.min\(5000,\s*safeLimit\s*\*\s*32\)\)/)
+})
+
+runTest('system jobs recover stale queued or running rows after restart', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.js'), 'utf8')
+  assert.match(source, /Recovered after server restart/)
+  assert.match(source, /WHERE status IN \('queued', 'running', 'cancelling'\)/)
 })
 
 if (failed > 0) {

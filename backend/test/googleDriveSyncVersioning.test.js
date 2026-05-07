@@ -80,9 +80,9 @@ runTest('drive sync retention deletes versions older than seven days by default'
   assert.deepEqual(expired.map((entry) => entry.name), versions.slice(8).map((entry) => entry.name).reverse())
 })
 
-runTest('drive sync interval defaults to one hour and allows up to twenty four hours', () => {
+runTest('drive sync interval defaults to six hours and allows up to twenty four hours', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
-  assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*60\s*\*\s*60/)
+  assert.match(source, /DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS\s*=\s*6\s*\*\s*60\s*\*\s*60/)
   assert.match(source, /DRIVE_SYNC_MAX_INTERVAL_SECONDS\s*=\s*24\s*\*\s*60\s*\*\s*60/)
   assert.match(source, /Math\.max\(DRIVE_SYNC_MIN_INTERVAL_SECONDS,\s*config\.syncIntervalSeconds\)/)
 })

@@ -774,13 +774,13 @@ router.post('/drive-sync/forget-credentials', authToken, requirePermission('sett
 })
 
 router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
-  try {
-    const actor = getAuditActor(req, req.body || {})
-    const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
-      progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
-      const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
-      audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
-        reason: 'manual',
+    try {
+      const actor = getAuditActor(req, req.body || {})
+      const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
+      progress({ phase: 'starting', progress: 5, message: 'Preparing Google Drive sync' })
+        const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
+        audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+          reason: 'manual',
         uploaded: summary?.uploaded || 0,
         updated: summary?.updated || 0,
         skipped: summary?.skipped || 0,
@@ -804,13 +804,13 @@ router.post('/drive-sync/jobs', authToken, requireAnyPermission(['backup', 'sett
 })
 
 router.post('/drive-sync/sync-now', authToken, requireAnyPermission(['backup', 'settings']), async (req, res) => {
-  try {
-    const actor = getAuditActor(req, req.body || {})
-    const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
-      progress({ phase: 'syncing', progress: 20, message: 'Syncing backups to Google Drive' })
-      const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
-      audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
-        reason: 'manual',
+    try {
+      const actor = getAuditActor(req, req.body || {})
+      const job = startSystemJob('google_drive_sync', async ({ progress, signal, throwIfCancelled }) => {
+      progress({ phase: 'starting', progress: 5, message: 'Preparing Google Drive sync' })
+        const summary = await runDriveSync('manual', { progress, signal, throwIfCancelled })
+        audit(actor.userId, actor.userName, 'drive_sync', 'system', null, {
+          reason: 'manual',
         uploaded: summary?.uploaded || 0,
         updated: summary?.updated || 0,
         skipped: summary?.skipped || 0,
