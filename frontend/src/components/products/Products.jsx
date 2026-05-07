@@ -1129,9 +1129,9 @@ export default function Products() {
     return fmtUSD(max || min || 0)
   }, [fmtUSD])
 
-  const getGroupSummaryParts = useCallback((group) => {
+  const getGroupSummaryParts = useCallback((group, { includeCount = true } = {}) => {
     const parts = [
-      `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}`,
+      includeCount ? `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
       `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
       getGroupPriceLabel(group),
     ]
@@ -2301,19 +2301,12 @@ export default function Products() {
                               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
                             </div>
                             <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
-                              {getGroupSummaryParts(group).map((part) => (
+                              {getGroupSummaryParts(group, { includeCount: false }).map((part) => (
                                 <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
                               ))}
                             </div>
                           </button>
                         </label>
-                        <button
-                          type="button"
-                          className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:text-slate-300"
-                          onClick={() => toggleProductGroup(group.key)}
-                        >
-                          {groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                        </button>
                       </div>
                     </div>
                   ) : null}

@@ -2569,8 +2569,8 @@ export default function Inventory() {
                   </button>
                 </div>
               </div>
-              <div className="mt-1.5 flex items-center">
-                <label className="inline-flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                   <input
                     ref={inventorySelectAllRef}
                     type="checkbox"
@@ -2584,34 +2584,34 @@ export default function Inventory() {
                       : inventoryControlLabels.selectAll}
                   </span>
                 </label>
+                {hasSelectedProducts ? (
+                  <>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                      disabled={!hasSelectedProducts}
+                      onClick={openInventoryBatchSession}
+                      title={tr(
+                        'inventory_batch_hint',
+                        'Select products, review each line in one session, then apply all stock changes together.',
+                        'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                      )}
+                      aria-label={inventoryControlLabels.batch}
+                    >
+                      {inventoryControlLabels.batch}
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                      onClick={() => setReasonManager({ open: true, type: 'adjust' })}
+                      title={inventoryControlLabels.reasons}
+                      aria-label={inventoryControlLabels.reasons}
+                    >
+                      {inventoryControlLabels.reasons}
+                    </button>
+                  </>
+                ) : null}
               </div>
-              {hasSelectedProducts ? (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                    disabled={!hasSelectedProducts}
-                    onClick={openInventoryBatchSession}
-                    title={tr(
-                      'inventory_batch_hint',
-                      'Select products, review each line in one session, then apply all stock changes together.',
-                      'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
-                    )}
-                    aria-label={inventoryControlLabels.batch}
-                  >
-                    {inventoryControlLabels.batch}
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                    onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-                    title={inventoryControlLabels.reasons}
-                    aria-label={inventoryControlLabels.reasons}
-                  >
-                    {inventoryControlLabels.reasons}
-                  </button>
-                </div>
-              ) : null}
             </div>
           </div>
           {showProductsSection && inventoryInitialOptions.length ? (
@@ -2650,7 +2650,7 @@ export default function Inventory() {
               const slbl  = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
               const soldQty = Math.max(0, p.qty_sold || 0)
               const revenue = Math.max(0, p.revenue_usd || 0)
-              const productTags = [p.brand, p.category, p.is_group ? 'Group' : (p.parent_id ? 'Variant' : '')].filter(Boolean)
+              const productTags = [p.brand, p.category].filter(Boolean)
               return (
                 <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                   <div className="flex items-start justify-between gap-1.5">
@@ -2669,8 +2669,8 @@ export default function Inventory() {
                         />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                          <div className="mt-0.5 flex items-center gap-2 text-[10px] leading-4 text-gray-400">
-                            <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
+                          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] leading-4 text-gray-400">
+                            <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
                               {productTags.length ? (
                                 productTags.map((tag, index) => (
                                   <Fragment key={`${p.id}-tag-${index}`}>
@@ -2683,7 +2683,7 @@ export default function Inventory() {
                               )}
                             </div>
                             {p.barcode ? (
-                              <span className="ml-auto shrink-0 whitespace-nowrap pl-2 text-right font-medium text-gray-500 dark:text-gray-300">
+                              <span className="ml-auto max-w-[7.1rem] shrink-0 truncate whitespace-nowrap pl-1 text-right font-medium text-gray-500 dark:text-gray-300">
                                 {p.barcode}
                               </span>
                             ) : null}
@@ -2708,7 +2708,6 @@ export default function Inventory() {
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                      <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -2721,8 +2720,10 @@ export default function Inventory() {
                         <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
                       </>
                     ) : null}
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                     <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
+                    <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                   </div>
                 </div>
               )
