@@ -6,7 +6,7 @@ const crypto = require('crypto')
 const { spawnSync } = require('child_process')
 const { pipeline } = require('stream/promises')
 const { UPLOADS_PATH } = require('./config')
-const { deleteObject, getObjectStream, isObjectStorageEnabled, putObject } = require('./objectStore')
+const { deleteObject, deleteObjects, getObjectStream, isObjectStorageEnabled, listObjects, putObject } = require('./objectStore')
 const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
 const { repairMissingUploadReferences } = require('./uploadReferenceCleanup')
@@ -47,6 +47,8 @@ const IMAGE_TARGET_DIMENSIONS = [900, 720, 540, 420, 320, 240]
 const IMAGE_TARGET_QUALITIES = [78, 58, 42, 30]
 const MAX_SYNC_VIDEO_OPTIMIZATION_BYTES = 8 * 1024 * 1024
 let cachedFfmpegPath = undefined
+let uploadStorageReconcilePromise = null
+let lastUploadStorageReconcileAt = 0
 
 function getDb() {
   return require('./database').db
@@ -580,6 +582,124 @@ function getUploadFilePath(publicPath = '') {
   return path.join(UPLOADS_PATH, relative)
 }
 
+function toUploadPublicPathFromObjectKey(key = '') {
+  const normalized = String(key || '').replace(/^\/+/, '').replace(/\\/g, '/')
+  if (!normalized.startsWith('uploads/')) return null
+  return `/${normalized}`
+}
+
+function findUploadStorageOrphans(objectKeys = [], trackedPublicPaths = []) {
+  const tracked = new Set((Array.isArray(trackedPublicPaths) ? trackedPublicPaths : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))
+  return (Array.isArray(objectKeys) ? objectKeys : [])
+    .map((key) => ({ key: String(key || '').trim(), publicPath: toUploadPublicPathFromObjectKey(key) }))
+    .filter((entry) => entry.key && entry.publicPath && !tracked.has(entry.publicPath))
+    .map((entry) => entry.key)
+}
+
+function collectTrackedUploadPublicPaths() {
+  const tracked = new Set()
+  const add = (value) => {
+    const normalized = normalizeUploadPublicPath(value)
+    if (isUploadPublicPath(normalized)) tracked.add(normalized)
+  }
+  getDb().prepare(`
+    SELECT public_path
+    FROM file_assets
+    WHERE public_path LIKE '/uploads/%'
+  `).all().forEach((row) => add(row.public_path))
+  collectReferencedUploadPaths().forEach(add)
+  return [...tracked]
+}
+
+async function reconcileUploadStorage({ force = false } = {}) {
+  const now = Date.now()
+  if (!force && uploadStorageReconcilePromise) return uploadStorageReconcilePromise
+  if (!force && lastUploadStorageReconcileAt && (now - lastUploadStorageReconcileAt) < (5 * 60 * 1000)) {
+    return {
+      ok: true,
+      skipped: true,
+      tracked: 0,
+      scanned: 0,
+      deleted: 0,
+    }
+  }
+
+  uploadStorageReconcilePromise = (async () => {
+    pruneInvalidReferenceBackfillAssets()
+    repairMissingUploadReferences(getDb())
+    ensureReferencedAssetsRegistered()
+
+    const trackedPublicPaths = collectTrackedUploadPublicPaths()
+    let scanned = 0
+    let deleted = 0
+
+    if (isObjectStorageEnabled()) {
+      const objects = await listObjects('uploads/', { maxKeys: 1000 })
+      const orphanKeys = findUploadStorageOrphans(objects.map((item) => item.key), trackedPublicPaths)
+      scanned = objects.length
+      if (orphanKeys.length) {
+        deleted += await deleteObjects(orphanKeys)
+      }
+    } else {
+      ensureUploadsDirectory()
+      const files = fs.readdirSync(UPLOADS_PATH, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+      const tracked = new Set(trackedPublicPaths)
+      scanned = files.length
+      files.forEach((storedName) => {
+        const publicPath = `/uploads/${storedName}`
+        if (tracked.has(publicPath)) return
+        try {
+          fs.unlinkSync(path.join(UPLOADS_PATH, storedName))
+          deleted += 1
+        } catch (_) {}
+      })
+    }
+
+    lastUploadStorageReconcileAt = Date.now()
+    return {
+      ok: true,
+      skipped: false,
+      tracked: trackedPublicPaths.length,
+      scanned,
+      deleted,
+    }
+  })()
+    .finally(() => {
+      uploadStorageReconcilePromise = null
+    })
+
+  return uploadStorageReconcilePromise
+}
+
+function requestUploadStorageReconcile(options = {}) {
+  return reconcileUploadStorage(options)
+}
+
+async function deleteAllStoredUploads() {
+  let deleted = 0
+  if (isObjectStorageEnabled()) {
+    const objects = await listObjects('uploads/', { maxKeys: 1000 })
+    if (objects.length) {
+      deleted = await deleteObjects(objects.map((item) => item.key))
+    }
+    return { deleted, storage: 'object' }
+  }
+  try {
+    if (!fs.existsSync(UPLOADS_PATH)) return { deleted: 0, storage: 'local' }
+    for (const fileName of fs.readdirSync(UPLOADS_PATH)) {
+      try {
+        fs.unlinkSync(path.join(UPLOADS_PATH, fileName))
+        deleted += 1
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return { deleted, storage: 'local' }
+}
+
 function collectUsage(publicPath) {
   const usages = []
   const settingsRows = getDb().prepare(`
@@ -792,6 +912,11 @@ async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
   repairMissingUploadReferences(getDb())
   ensureReferencedAssetsRegistered()
   await backfillUploadAssets()
+  if (isObjectStorageEnabled()) {
+    setImmediate(() => {
+      requestUploadStorageReconcile().catch(() => {})
+    })
+  }
   return listAssetRows(search, mediaType).map(serializeAssetRow)
 }
 
@@ -823,10 +948,14 @@ module.exports = {
   getMimeTypeFromName,
   getMediaType,
   listFileAssets,
+  findUploadStorageOrphans,
   optimizeStoredAssetFromQueue,
+  requestUploadStorageReconcile,
   registerStoredAsset,
   registerUploadFromRequest,
+  deleteAllStoredUploads,
   sanitizeOriginalFileName,
   storeDataUrlAsset,
+  toUploadPublicPathFromObjectKey,
   deleteFileAsset,
 }

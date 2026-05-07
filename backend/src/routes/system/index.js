@@ -79,6 +79,7 @@ const { analyzePostgresCutoverReadiness } = require('../../db/cutoverReadiness')
 const { getDuckDbRuntimeStatus } = require('../../analytics/duckdbRuntime')
 const { testObjectStore } = require('../../objectStore')
 const { buildIntegrationDoctor } = require('../../services/integrationDoctor')
+const { deleteAllStoredUploads, requestUploadStorageReconcile } = require('../../fileAssets')
 
 const router = express.Router()
 const SYSTEM_FS_WORKER = path.join(__dirname, '../../systemFsWorker.js')
@@ -425,15 +426,6 @@ function buildScaleMigrationStatus(queueStatus = getQueueStatus()) {
       queueReady,
     },
   }
-}
-
-function deleteAllUploads() {
-  try {
-    if (!fs.existsSync(UPLOADS_PATH)) return
-    for (const f of fs.readdirSync(UPLOADS_PATH)) {
-      try { fs.unlinkSync(path.join(UPLOADS_PATH, f)) } catch (_) {}
-    }
-  } catch (_) {}
 }
 
 async function readFinalBackupManifest(sourceRoot) {
@@ -995,6 +987,9 @@ router.post('/reset-data', authToken, requirePermission('backup'), async (req, r
     if (mode === 'all') {
       await deleteAllImportJobs({ removeFiles: true })
     }
+    if (mode === 'all') {
+      await requestUploadStorageReconcile({ force: true }).catch(() => {})
+    }
 
     const label = mode === 'all'
       ? 'Full data reset ??sales, returns, products, contacts cleared'
@@ -1045,8 +1040,8 @@ router.post('/factory-reset', authToken, requirePermission('backup'), async (req
       ensureCoreDataInvariants()
     })()
 
-    // Remove all uploaded images ??factory reset = clean slate
-    deleteAllUploads()
+    // Remove all uploaded images from both local storage and object storage.
+    await deleteAllStoredUploads()
     await deleteAllImportJobs({ removeFiles: true })
     ensureCoreDataInvariants()
     bumpStorageVersion('factory-reset')

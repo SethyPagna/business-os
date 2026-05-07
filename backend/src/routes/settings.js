@@ -5,6 +5,7 @@ const { ok, err, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission } = require('../middleware')
 const { WriteConflictError, normalizeUpdatedAt, getExpectedUpdatedAt, sendSettingsConflict } = require('../conflictControl')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
+const { requestUploadStorageReconcile } = require('../fileAssets')
 
 const router = express.Router()
 const SETTINGS_CONFLICT_CODE = 'settings_conflict'
@@ -122,6 +123,9 @@ router.post('/', authToken, requirePermission('settings'), (req, res) => {
     const updatedAt = getSettingsUpdatedAt()
     logOp('settings:set', Date.now() - t0)
     broadcast('settings')
+    setImmediate(() => {
+      requestUploadStorageReconcile({ force: true }).catch(() => {})
+    })
     ok(res, { updatedAt })
   } catch (error) {
     if (error instanceof WriteConflictError) {

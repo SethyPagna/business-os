@@ -104,6 +104,28 @@ async function deleteObject(key) {
   return true
 }
 
+async function deleteObjects(keys = []) {
+  if (!isObjectStorageEnabled()) return 0
+  const normalizedKeys = Array.from(new Set((Array.isArray(keys) ? keys : [])
+    .map((key) => normalizeObjectKey(key))
+    .filter(Boolean)))
+  if (!normalizedKeys.length) return 0
+  const { DeleteObjectsCommand } = require('@aws-sdk/client-s3')
+  let deleted = 0
+  for (let index = 0; index < normalizedKeys.length; index += 1000) {
+    const chunk = normalizedKeys.slice(index, index + 1000)
+    await getS3Client().send(new DeleteObjectsCommand({
+      Bucket: S3_BUCKET,
+      Delete: {
+        Objects: chunk.map((key) => ({ Key: key })),
+        Quiet: true,
+      },
+    }))
+    deleted += chunk.length
+  }
+  return deleted
+}
+
 async function listObjects(prefix = '', options = {}) {
   if (!isObjectStorageEnabled()) return []
   const { ListObjectsV2Command } = require('@aws-sdk/client-s3')
@@ -143,6 +165,7 @@ function bufferToStream(buffer) {
 module.exports = {
   bufferToStream,
   deleteObject,
+  deleteObjects,
   ensureBucket,
   getObjectStorageDriver,
   getObjectStream,
