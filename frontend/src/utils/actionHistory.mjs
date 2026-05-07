@@ -118,7 +118,14 @@ export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
       }
       return true
     } catch (error) {
-      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'failed', last_error: error?.message || String(error || '') }).then(refreshServerItems).catch(() => {})
+      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) {
+        const fallbackStatus = direction === 'undo' ? 'undoable' : 'redoable'
+        const nextStatus = serverTransitioned ? fallbackStatus : 'failed'
+        window.api.updateActionHistory(entry.serverId, {
+          status: nextStatus,
+          last_error: error?.message || String(error || ''),
+        }).then(refreshServerItems).catch(() => {})
+      }
       notify?.(error?.message || `Unable to ${direction} that action right now.`, 'error')
       return false
     } finally {

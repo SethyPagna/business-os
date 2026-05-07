@@ -203,6 +203,7 @@ export default function Inventory() {
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const pendingLoadRef = useRef(null)
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'inventory' })
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
@@ -265,8 +266,14 @@ export default function Inventory() {
     }
   }, [])
 
-  const load = useCallback(async (silent = false) => {
-    if (loadPromiseRef.current) return loadPromiseRef.current
+  const load = useCallback(async (silent = false, options = {}) => {
+    const force = !!options?.force
+    if (loadPromiseRef.current && !force) {
+      const currentPending = pendingLoadRef.current || { silent: true }
+      currentPending.silent = currentPending.silent && silent
+      pendingLoadRef.current = currentPending
+      return loadPromiseRef.current
+    }
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (!silent) {
@@ -426,6 +433,13 @@ export default function Inventory() {
     })()
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+      const pending = pendingLoadRef.current
+      if (pending) {
+        pendingLoadRef.current = null
+        queueMicrotask(() => {
+          load(Boolean(pending?.silent), { force: true }).catch(() => {})
+        })
+      }
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
@@ -457,6 +471,7 @@ export default function Inventory() {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      pendingLoadRef.current = null
       setLoading(false)
       return
     }
@@ -847,7 +862,7 @@ export default function Inventory() {
     `${p.name} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.sku||''} ${p.barcode||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
 
   const movHay = (m) =>
-    `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''}`.toLowerCase()
+    `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''} ${m.reference_id||''} ${m.lot_code||''} ${m.expiry_date||''} ${m.created_at||''}`.toLowerCase()
 
   const filteredSummary = summary.filter(p => {
     if (!matchesSearch(productHay(p))) return false
@@ -2844,15 +2859,10 @@ export default function Inventory() {
                                       <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
                                     </div>
                                   </div>
-                                  <div className="mt-1 flex items-start justify-between gap-3 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
+                                  <div className="mt-1 flex items-start gap-3 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
                                     <div className="min-w-0 flex-1 break-words">
                                       {productTagText || (t('product') || 'Product')}
                                     </div>
-                                    {p.barcode ? (
-                                      <span className="shrink-0 whitespace-nowrap pl-2 text-right font-medium text-gray-500 dark:text-gray-300">
-                                        {p.barcode}
-                                      </span>
-                                    ) : null}
                                   </div>
                                 </div>
                                 <div className="flex shrink-0 items-center justify-end gap-1 text-right">
@@ -2873,6 +2883,11 @@ export default function Inventory() {
                                 <div className="min-w-0">
                                   <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                                 </div>
+                                {p.barcode ? (
+                                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                    {p.barcode}
+                                  </span>
+                                ) : null}
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
                                 <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
@@ -3014,13 +3029,13 @@ export default function Inventory() {
                                     </td>
                                     <td className="px-3 py-1">
                                       <div className="font-medium leading-tight text-gray-900 dark:text-white">{p.name}</div>
-                                      <div className="mt-0.5 flex items-start justify-between gap-2 text-[10px] leading-4 text-gray-400">
-                                        <span className="min-w-0 flex-1 break-words">{productTagText || (t('product') || 'Product')}</span>
-                                        {p.barcode ? <span className="shrink-0 whitespace-nowrap font-medium text-gray-500 dark:text-gray-300">{p.barcode}</span> : null}
+                                      <div className="mt-0.5 text-[10px] leading-4 text-gray-400">
+                                        <span className="break-words">{productTagText || (t('product') || 'Product')}</span>
                                       </div>
                                       <div className="mt-1 flex flex-wrap gap-1">
                                         <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                                         <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
+                                        {p.barcode ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">{p.barcode}</span> : null}
                                       </div>
                                     </td>
                                     <td className="px-3 py-1 text-right font-bold whitespace-nowrap text-gray-900 dark:text-white">

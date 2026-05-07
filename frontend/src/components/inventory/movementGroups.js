@@ -184,6 +184,8 @@ export function movementGroupHaystack(group) {
     group.userSummary,
     group.reasonSummary,
     group.reference_id,
+    group.latest_at,
     ...(group.productNames || []),
+    ...(group.items || []).flatMap((item) => [item.lot_code, item.expiry_date, item.created_at]),
   ].map((value) => String(value || '').toLowerCase()).join(' ')
 }

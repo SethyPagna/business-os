@@ -180,6 +180,26 @@ function appendInventoryProductFilters(query = {}) {
   return { where, joins, params, stockExpr }
 }
 
+function hydrateInventoryProducts(rows = [], branchId = null) {
+  const normalizedRows = (Array.isArray(rows) ? rows : []).map((product) => {
+    const next = { ...product }
+    try {
+      next.branch_stock = JSON.parse(next.branch_stock_json || '[]')
+    } catch {
+      next.branch_stock = []
+    }
+    delete next.branch_stock_json
+    return next
+  })
+  const batchMap = listProductBatches(normalizedRows.map((product) => product.id), {
+    branchId: Number.isFinite(Number(branchId)) ? Number(branchId) : null,
+  })
+  normalizedRows.forEach((product) => {
+    product.batches = batchMap.get(product.id) || []
+  })
+  return normalizedRows
+}
+
 // POST /api/inventory/adjust
 router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => {
   const t0 = Date.now()
@@ -782,7 +802,7 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
       ${joinSql}
       ${whereSql}
     `).get(params)?.count || 0
-    const rows = db.prepare(`
+    const baseRows = db.prepare(`
       SELECT p.*,
         ${stockExpr} AS display_quantity,
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
@@ -802,21 +822,51 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
       ${whereSql}
       ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
       LIMIT @pageSize OFFSET @offset
-    `).all({ ...params, pageSize, offset }).map((product) => {
-      try {
-        product.branch_stock = JSON.parse(product.branch_stock_json || '[]')
-      } catch {
-        product.branch_stock = []
-      }
-      delete product.branch_stock_json
-      return product
-    })
-    const batchMap = listProductBatches(rows.map((product) => product.id), {
-      branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
-    })
-    rows.forEach((product) => {
-      product.batches = batchMap.get(product.id) || []
-    })
+    `).all({ ...params, pageSize, offset })
+    const familyRootIds = [...new Set(baseRows.flatMap((product) => {
+      const productId = Number(product?.id || 0)
+      const parentId = Number(product?.parent_id || 0)
+      if (parentId > 0) return [parentId]
+      if (Number(product?.is_group || 0) && productId > 0) return [productId]
+      return []
+    }).filter((id) => Number.isFinite(id) && id > 0))]
+    let rows = baseRows
+    if (familyRootIds.length) {
+      const familyIdSql = familyRootIds.join(',')
+      const familyRows = db.prepare(`
+        SELECT p.*,
+          ${stockExpr} AS display_quantity,
+          COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
+          COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+          (
+            SELECT COALESCE(
+              json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+                FILTER (WHERE bs2.branch_id IS NOT NULL),
+              '[]'::json
+            )::text
+            FROM branch_stock bs2
+            JOIN branches b2 ON b2.id = bs2.branch_id
+            WHERE bs2.product_id = p.id
+          ) AS branch_stock_json
+        FROM products p
+        ${joinSql}
+        WHERE p.is_active = 1
+          AND (p.id IN (${familyIdSql}) OR COALESCE(p.parent_id, 0) IN (${familyIdSql}))
+        ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+      `).all(params)
+      const merged = new Map()
+      ;[...familyRows, ...baseRows].forEach((product) => {
+        merged.set(Number(product.id), product)
+      })
+      rows = [...merged.values()].sort((left, right) => {
+        const leftName = String(left?.name || '')
+        const rightName = String(right?.name || '')
+        const nameDelta = leftName.localeCompare(rightName, undefined, { sensitivity: 'base' })
+        if (nameDelta !== 0) return nameDelta
+        return Number(left?.id || 0) - Number(right?.id || 0)
+      })
+    }
+    rows = hydrateInventoryProducts(rows, params.branchId)
     const metadataQuery = { ...req.query, initial: 'all' }
     const metaFilters = appendInventoryProductFilters(metadataQuery)
     const metaJoinSql = metaFilters.joins.join('\n')

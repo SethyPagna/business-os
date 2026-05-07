@@ -16,6 +16,7 @@ let wsPingTimer      = null
 let reconnectAttempts = 0
 let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
+let wsIntentionalClose = false
 
 function shouldDebugWs() {
   try {
@@ -47,6 +48,7 @@ export function connectWS() {
 
   try {
     logWs('debug', 'attempting connect to', wsUrl)
+    wsIntentionalClose = false
     ws = new WebSocket(wsUrl)
   } catch (e) {
     logWs('warn', 'connect error (constructor):', e)
@@ -94,6 +96,10 @@ export function connectWS() {
     logWs('debug', 'onclose event', ev)
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
+    if (wsIntentionalClose) {
+      wsIntentionalClose = false
+      return
+    }
     if (code === 4001) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: {
@@ -122,12 +128,25 @@ export function disconnectWS() {
   clearTimeout(wsReconnectTimer)
   clearInterval(wsPingTimer)
   wsPingTimer = null
-  if (ws) { ws.onclose = null; ws.close(); ws = null }
+  if (ws) {
+    if (ws.readyState === WebSocket.OPEN) {
+      wsIntentionalClose = true
+      ws.close(1000, 'manual-reconnect')
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      wsIntentionalClose = false
+      ws.onerror = null
+      ws.onclose = null
+      try { ws.close() } catch (_) {}
+    } else {
+      try { ws.close() } catch (_) {}
+    }
+    ws = null
+  }
   window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
 }
 
 export function reconnectWS() {
-  disconnectWS()
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   connectWS()
 }
 
@@ -157,16 +176,16 @@ export function isWSConnected() {
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
     wsSuppressReconnectUntil = 0
-    if (getSyncServerUrl()) reconnectWS()
+    if (getSyncServerUrl()) connectWS()
   })
   window.addEventListener('focus', () => {
     wsSuppressReconnectUntil = 0
-    if (getSyncServerUrl()) reconnectWS()
+    if (getSyncServerUrl()) connectWS()
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       wsSuppressReconnectUntil = 0
-      if (getSyncServerUrl()) reconnectWS()
+      if (getSyncServerUrl()) connectWS()
     }
   })
 }
