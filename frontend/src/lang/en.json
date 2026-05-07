@@ -2520,6 +2520,7 @@
   "syncing": "syncing",
   "waiting_for_server": "Waiting for server",
   "download_image": "Download image",
+  "receipt_image_short": "Image",
   "saving_image": "Saving image...",
   "product_expiry_date": "Expiry date",
   "product_expiry_alert_days": "Expiry alert days",

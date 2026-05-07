@@ -388,6 +388,60 @@ function buildReceiptFileName(title = 'receipt', extension = 'pdf') {
   return `${safeBase || 'receipt'}.${safeExtension}`
 }
 
+function createTextOnlyReceiptCanvas(content, options = {}) {
+  const printSettings = options.printSettings || getPrintSettings()
+  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  const lines = extractReceiptLines(content)
+  const scale = 2
+  const widthPx = Math.max(320, Math.round(widthMm * 8))
+  const paddingX = 18
+  const paddingY = 20
+  const lineHeight = 18
+  const fontSize = 14
+  const maxChars = Math.max(24, Math.floor((widthPx - paddingX * 2) / 7))
+  const wrappedLines = lines.flatMap((line) => wrapTextLine(line, maxChars))
+  const heightPx = Math.max(220, paddingY * 2 + wrappedLines.length * lineHeight)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = widthPx * scale
+  canvas.height = heightPx * scale
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas rendering unavailable')
+
+  context.scale(scale, scale)
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, widthPx, heightPx)
+  context.fillStyle = '#111827'
+  context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  context.textBaseline = 'top'
+
+  let y = paddingY
+  wrappedLines.forEach((line, index) => {
+    if (index === 0) {
+      context.font = `600 ${fontSize + 2}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+    } else {
+      context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+    }
+    context.fillText(String(line || ''), paddingX, y)
+    y += lineHeight
+  })
+
+  return canvas
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob.type === 'image/png' ? blob : new Blob([blob], { type: 'image/png' }))
+        else reject(new Error('Unable to render receipt image. Please try again after the preview finishes loading.'))
+      }, 'image/png')
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
 async function waitForElementAssets(element) {
   const imageWaiters = Array.from(element.querySelectorAll('img')).map((img) => {
     if (img.complete) return Promise.resolve()
@@ -805,13 +859,22 @@ export async function createReceiptPdfBlob(content, options = {}) {
 export async function createReceiptImageBlob(content, options = {}) {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
-  const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob.type === 'image/png' ? blob : new Blob([blob], { type: 'image/png' }))
-      else reject(new Error('Unable to render receipt image. Please try again after the preview finishes loading.'))
-    }, 'image/png')
-  })
+  try {
+    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
+    try {
+      return await canvasToPngBlob(canvas)
+    } catch (_) {
+      const fallbackCanvas = createTextOnlyReceiptCanvas(content, options)
+      return await canvasToPngBlob(fallbackCanvas)
+    }
+  } catch (error) {
+    const fallbackCanvas = createTextOnlyReceiptCanvas(content, options)
+    try {
+      return await canvasToPngBlob(fallbackCanvas)
+    } catch (_) {
+      throw error
+    }
+  }
 }
 
 function extractReceiptLines(content) {

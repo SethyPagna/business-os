@@ -2525,6 +2525,7 @@
   "syncing": "កំពុង sync",
   "waiting_for_server": "កំពុងរង់ចាំ server",
   "download_image": "ទាញយករូបភាព",
+  "receipt_image_short": "រូបភាព",
   "saving_image": "កំពុងរក្សាទុករូបភាព...",
   "product_expiry_date": "កាលបរិច្ឆេទផុតកំណត់",
   "product_expiry_alert_days": "ថ្ងៃជូនដំណឹងផុតកំណត់",

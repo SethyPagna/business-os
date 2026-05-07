@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Download, FileText, ImageDown, Printer } from 'lucide-react'
+import { ArrowLeft, FileText, ImageDown, Printer } from 'lucide-react'
 import { useApp } from '../../AppContext'
-import { downloadReceiptImage, downloadReceiptPdf, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
+import { downloadReceiptImage, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
 
@@ -339,14 +339,7 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
     if (!printRef.current) return
     setPdfBusy(mode)
     try {
-      if (mode === 'download') {
-        await downloadReceiptPdf(printRef.current, {
-          title: receiptTitle,
-          fileName: receiptTitle,
-          previewFallback: true,
-          previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
-        })
-      } else if (mode === 'image') {
+      if (mode === 'image') {
         await downloadReceiptImage(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
@@ -390,29 +383,38 @@ export default function Receipt({ sale, settings, onClose, _previewMode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800">
-        <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-primary px-4 py-2" onClick={() => exportReceiptPdf('print')} disabled={pdfBusy !== ''}>
-          <span className="inline-flex items-center gap-2">
-            <Printer className="h-4 w-4" />
-            {pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print_receipt') || 'Print Receipt')}
+        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+        <button
+          type="button"
+          className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
+          onClick={() => exportReceiptPdf('print')}
+          disabled={pdfBusy !== ''}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            <Printer className="h-4 w-4 shrink-0" />
+            <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
           </span>
         </button>
-        <button type="button" className="btn-secondary px-4 py-2" onClick={() => exportReceiptPdf('open')} disabled={pdfBusy !== ''}>
-          <span className="inline-flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            {pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}
+        <button
+          type="button"
+          className="btn-secondary min-w-0 justify-center px-3 py-2 text-sm"
+          onClick={() => exportReceiptPdf('open')}
+          disabled={pdfBusy !== ''}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            <FileText className="h-4 w-4 shrink-0" />
+            <span className="truncate">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span>
           </span>
         </button>
-        <button type="button" className="btn-secondary px-4 py-2" onClick={() => exportReceiptPdf('download')} disabled={pdfBusy !== ''}>
-          <span className="inline-flex items-center gap-2">
-            <Download className="h-4 w-4" />
-            {pdfBusy === 'download' ? (t?.('saving_pdf') || 'Saving PDF...') : (t?.('download_pdf') || 'Download PDF')}
-          </span>
-        </button>
-        <button type="button" className="btn-secondary px-4 py-2" onClick={() => exportReceiptPdf('image')} disabled={pdfBusy !== ''}>
-          <span className="inline-flex items-center gap-2">
-            <ImageDown className="h-4 w-4" />
-            {pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('download_image') || 'Download image')}
+        <button
+          type="button"
+          className="btn-secondary min-w-0 justify-center px-3 py-2 text-sm"
+          onClick={() => exportReceiptPdf('image')}
+          disabled={pdfBusy !== ''}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            <ImageDown className="h-4 w-4 shrink-0" />
+            <span className="truncate">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span>
           </span>
         </button>
         </div>
