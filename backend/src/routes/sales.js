@@ -1,7 +1,7 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database')
-const { ok, err, audit, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
+const { ok, err, audit, recordActionHistory, broadcast, logOp, getSafeCostPrice, tryParse } = require('../helpers')
 const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
@@ -479,6 +479,20 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
           deviceTz:   d.device_tz   || null,
           clientTime: d.client_time  || null,
         })
+      recordActionHistory({
+        entity: 'sale',
+        entityId: sid,
+        label: `Create sale ${receiptNumber}`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: {
+          action: 'sale.create',
+          saleId: sid,
+          receiptNumber,
+          totalUsd: Number(d.total_usd || 0),
+          status: saleStatus,
+        },
+      })
       return sid
     })()
   } catch (e) {

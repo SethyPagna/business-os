@@ -4,7 +4,7 @@ const fs      = require('fs')
 const express = require('express')
 const { db }  = require('../database')
 const { UPLOADS_PATH } = require('../config')
-const { ok, err, audit, broadcast, logOp, tryParse } = require('../helpers')
+const { ok, err, audit, recordActionHistory, broadcast, logOp, tryParse } = require('../helpers')
 const { authToken, upload, compressUpload, validateUploadedFile, routeRateLimit, requirePermission, getAuditActor } = require('../middleware')
 const { registerUploadFromRequest, storeDataUrlAsset } = require('../fileAssets')
 const { isSafeExternalImageReference } = require('../netSecurity')
@@ -714,6 +714,14 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
     audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name, parent_id: d.parent_id }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
     })
+    recordActionHistory({
+      entity: 'product',
+      entityId: pid,
+      label: `Create product ${String(d.name || '').trim()}`,
+      createdById: actor.userId,
+      createdByName: actor.userName,
+      redoPayload: { action: 'product.create', productId: pid, productName: String(d.name || '').trim() },
+    })
     logOp('products:create', Date.now() - t0)
     broadcast('products')
     ok(res, { id: pid })
@@ -781,6 +789,14 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     })
     audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
+    })
+    recordActionHistory({
+      entity: 'product',
+      entityId: pid,
+      label: `Create product ${String(d.name || '').trim()}`,
+      createdById: actor.userId,
+      createdByName: actor.userName,
+      redoPayload: { action: 'product.create', productId: pid, productName: String(d.name || '').trim() },
     })
     logOp('products:create', Date.now() - t0)
     broadcast('products')
@@ -1022,6 +1038,14 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
       audit(actor.userId, actor.userName, 'update', 'product', productId, { name: merged.name }, {
         deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
       })
+      recordActionHistory({
+        entity: 'product',
+        entityId: productId,
+        label: `Edit product ${String(merged.name || prev.name || '').trim()}`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: { action: 'product.update', productId, productName: String(merged.name || prev.name || '').trim() },
+      })
     })()
     logOp('products:update', Date.now() - t0)
     broadcast('products')
@@ -1051,6 +1075,14 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
       deviceName: deviceName || null,
       deviceTz: deviceTz || null,
       clientTime: clientTime || null,
+    })
+    recordActionHistory({
+      entity: 'product',
+      entityId: req.params.id,
+      label: `Delete product ${String(p?.name || '').trim()}`,
+      createdById: actor.userId,
+      createdByName: actor.userName,
+      redoPayload: { action: 'product.delete', productId: req.params.id, productName: String(p?.name || '').trim() },
     })
     broadcast('products')
     ok(res, {})

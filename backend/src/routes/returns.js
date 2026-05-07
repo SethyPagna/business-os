@@ -1,7 +1,7 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database')
-const { ok, err, audit, broadcast, getSafeCostPrice } = require('../helpers')
+const { ok, err, audit, recordActionHistory, broadcast, getSafeCostPrice } = require('../helpers')
 const { authToken, requirePermission, getAuditActor } = require('../middleware')
 const { WriteConflictError, assertUpdatedAtMatch, getExpectedUpdatedAt, sendWriteConflict } = require('../conflictControl')
 const { normalizeClientRequestId } = require('../idempotency')
@@ -472,6 +472,20 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         deviceName: d.device_name || null,
         deviceTz:   d.device_tz   || null,
       })
+      recordActionHistory({
+        entity: 'return',
+        entityId: rid,
+        label: `Create return ${returnNumber}`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: {
+          action: 'return.create',
+          returnId: rid,
+          returnNumber,
+          saleId: d.sale_id || null,
+          reason: d.reason,
+        },
+      })
 
       return rid
     })()
@@ -702,6 +716,20 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         },
         deviceName: d.device_name || null,
         deviceTz: d.device_tz || null,
+      })
+      recordActionHistory({
+        entity: 'supplier_return',
+        entityId: rid,
+        label: `Create supplier return ${returnNumber}`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: {
+          action: 'supplier_return.create',
+          returnId: rid,
+          returnNumber,
+          supplierName: d.supplier_name || null,
+          settlement,
+        },
       })
 
       return rid

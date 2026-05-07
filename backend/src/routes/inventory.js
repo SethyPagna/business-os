@@ -1,7 +1,7 @@
 'use strict'
 const express = require('express')
 const { db }  = require('../database')
-const { ok, err, audit, broadcast, logOp } = require('../helpers')
+const { ok, err, audit, recordActionHistory, broadcast, logOp } = require('../helpers')
 const { authToken, requirePermission, getAuditActor, isAdminControlUser } = require('../middleware')
 const { normalizePriceValue } = require('../money')
 const { normalizeProductDiscount } = require('../productDiscounts')
@@ -571,6 +571,23 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
       { type, quantity: qty, reason, branchId: requestedBranchId, batchId: requestedBatchId || null }, {
         deviceName: deviceName || null, deviceTz: deviceTz || null, clientTime: clientTime || null,
       })
+    recordActionHistory({
+      entity: 'inventory_adjustment',
+      entityId: productId,
+      label: `${type === 'remove' ? 'Remove' : type === 'set' ? 'Set' : 'Add'} stock for ${product.name}`,
+      createdById: actor.userId,
+      createdByName: actor.userName,
+      redoPayload: {
+        action: 'inventory.adjust',
+        productId,
+        productName: product.name,
+        type,
+        quantity: qty,
+        branchId: requestedBranchId,
+        lotCode: requestedLotCode || null,
+        expiryDate: requestedExpiryDate || null,
+      },
+    })
     logOp('products:adjustStock', Date.now() - t0)
     broadcast('products')
     broadcast('inventory')
@@ -661,7 +678,8 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
       const quotedColumns = transferColumns.map((column) => `"${column}"`).join(', ')
       const transferId = db.prepare(`INSERT INTO stock_transfers (${quotedColumns}) VALUES (${placeholders})`)
         .run(...transferValues).lastInsertRowid
-      const referenceId = clientRequestId || `transfer:${transferId}`
+      const referenceId = Number(transferId)
+      const responseReferenceId = clientRequestId || `transfer:${transferId}`
 
       const unitCostUsd = Number(product.cost_price_usd || product.purchase_price_usd || 0)
       const unitCostKhr = Number(product.cost_price_khr || product.purchase_price_khr || 0)
@@ -722,10 +740,27 @@ router.post('/transfer', authToken, requirePermission('inventory'), (req, res) =
         reason,
         clientRequestId: clientRequestId || null,
       }, { deviceName, deviceTz, clientTime })
+      recordActionHistory({
+        entity: 'inventory_transfer',
+        entityId: transferId,
+        label: `Transfer ${product.name} (${qty})`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: {
+          action: 'inventory.transfer',
+          transferId,
+          productId,
+          productName: product.name,
+          quantity: qty,
+          fromBranchId,
+          toBranchId,
+          reason,
+        },
+      })
       return {
         idempotent: false,
         transferId,
-        referenceId,
+        referenceId: responseReferenceId,
         productName: product.name,
         productId,
         fromBranchId,
@@ -947,6 +982,20 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
         deviceName: body.deviceName || null,
         deviceTz: body.deviceTz || null,
         clientTime: body.clientTime || null,
+      })
+      recordActionHistory({
+        entity: 'inventory_move',
+        entityId: sourceProductId,
+        label: `Move stock from ${source.name} to ${destination.name}`,
+        createdById: actor.userId,
+        createdByName: actor.userName,
+        redoPayload: {
+          action: 'inventory.move_row',
+          sourceProductId,
+          destinationProductId,
+          quantity,
+          branchId: branch.id,
+        },
       })
       return { moveId, sourceProductId, destinationProductId, branchId: branch.id }
     })()

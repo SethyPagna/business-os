@@ -96,6 +96,62 @@ function audit(userId, userName, action, entity, entityId, details, opts = {}) {
   }
 }
 
+function safeHistoryPayload(value) {
+  if (!value || typeof value !== 'object') return '{}'
+  try {
+    const serialized = JSON.stringify(value)
+    return serialized.length <= 20_000 ? serialized : '{}'
+  } catch {
+    return '{}'
+  }
+}
+
+function recordActionHistory({
+  scope = 'global',
+  entity = null,
+  entityId = null,
+  label = '',
+  undoLabel = null,
+  redoLabel = null,
+  reversible = false,
+  status = null,
+  undoPayload = {},
+  redoPayload = {},
+  createdById = null,
+  createdByName = null,
+} = {}) {
+  try {
+    const normalizedLabel = String(label || '').trim().slice(0, 200)
+    if (!normalizedLabel) return null
+    const normalizedReversible = !!reversible
+    const normalizedStatus = String(status || '').trim().toLowerCase()
+    const effectiveStatus = ['undoable', 'redoable', 'recorded', 'failed'].includes(normalizedStatus)
+      ? normalizedStatus
+      : (normalizedReversible ? 'undoable' : 'recorded')
+    return db.prepare(`
+      INSERT INTO action_history (
+        scope, entity, entity_id, label, undo_label, redo_label, reversible, status,
+        undo_payload, redo_payload, created_by_id, created_by_name
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      String(scope || 'global').trim().slice(0, 80) || 'global',
+      entity ? String(entity).trim().slice(0, 80) : null,
+      entityId != null ? String(entityId).trim().slice(0, 120) : null,
+      normalizedLabel,
+      undoLabel ? String(undoLabel).trim().slice(0, 200) : null,
+      redoLabel ? String(redoLabel).trim().slice(0, 200) : null,
+      normalizedReversible ? 1 : 0,
+      effectiveStatus,
+      safeHistoryPayload(undoPayload),
+      safeHistoryPayload(redoPayload),
+      createdById || null,
+      createdByName || null,
+    )
+  } catch (_) {
+    return null
+  }
+}
+
 // â”€â”€ WebSocket broadcast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // wss_clients is shared across middleware and routes via this module.
 const wss_clients = new Set()
@@ -489,7 +545,7 @@ function calculateSaleProfit(sale, items = []) {
 module.exports = {
   logOp, getServerLog,
   ok, err,
-  audit, broadcast, wss_clients,
+  audit, recordActionHistory, broadcast, wss_clients,
   tryParse, today,
   bulkImportCSV, parseCSVRows, parseCSVLine, importRows,
   verifyAndRepairStockQuantities,
