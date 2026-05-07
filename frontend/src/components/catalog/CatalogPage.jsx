@@ -1040,6 +1040,8 @@ export default function CatalogPage({ publicView = false }) {
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicChromeVisible, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
+  const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
+  const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
   const [categories, setCategories] = useState(() => Array.isArray(cachedPortal?.categories) ? cachedPortal.categories : [])
   const [brands, setBrands] = useState(() => Array.isArray(cachedPortal?.brands) ? cachedPortal.brands : [])
   const [branches, setBranches] = useState(() => Array.isArray(cachedPortal?.branches) ? cachedPortal.branches : [])
@@ -1106,6 +1108,7 @@ export default function CatalogPage({ publicView = false }) {
   const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
   const publicScrollAnchorRef = useRef(0)
+  const publicPortalNavRef = useRef(null)
   const mediaUploadControllersRef = useRef(new Map())
   const mediaUploadPreviewUrlsRef = useRef(new Map())
   const mediaUploadOriginalValuesRef = useRef(new Map())
@@ -1766,6 +1769,7 @@ export default function CatalogPage({ publicView = false }) {
   useEffect(() => {
     if (!publicView || typeof window === 'undefined') return undefined
     let frameRequested = false
+    const topOffset = window.innerWidth >= 640 ? 8 : 0
 
     const updateVisibility = () => {
       frameRequested = false
@@ -1776,6 +1780,23 @@ export default function CatalogPage({ publicView = false }) {
         setPublicChromeVisible(true)
       } else if (Math.abs(delta) >= 12) {
         setPublicChromeVisible(delta < 0)
+      }
+      if (publicPortalNavRef.current) {
+        const rect = publicPortalNavRef.current.getBoundingClientRect()
+        const shouldPin = rect.top <= topOffset
+        setPublicPortalNavPinned((current) => (current === shouldPin ? current : shouldPin))
+        setPublicPortalNavMetrics((current) => {
+          const next = {
+            left: Math.max(0, rect.left),
+            width: Math.max(0, rect.width),
+            height: Math.max(0, rect.height),
+          }
+          return (
+            current.left === next.left
+            && current.width === next.width
+            && current.height === next.height
+          ) ? current : next
+        })
       }
       publicScrollAnchorRef.current = scrollTop
     }
@@ -1788,7 +1809,11 @@ export default function CatalogPage({ publicView = false }) {
 
     updateVisibility()
     window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
+    window.addEventListener('resize', handleScroll)
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('resize', handleScroll)
+    }
   }, [publicView])
 
   useEffect(() => {
@@ -4340,8 +4365,21 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
               </div>
             </section>
 
-            <section className={publicView ? 'sticky top-0 z-40 pb-1 sm:top-2' : ''}>
-              <div className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88">
+            <section
+              ref={publicPortalNavRef}
+              className="pb-1"
+              style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
+            >
+              <div
+                className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88"
+                style={publicView && publicPortalNavPinned ? {
+                  position: 'fixed',
+                  top: typeof window !== 'undefined' && window.innerWidth >= 640 ? '8px' : '0px',
+                  left: `${publicPortalNavMetrics.left}px`,
+                  width: `${publicPortalNavMetrics.width}px`,
+                  zIndex: 40,
+                } : undefined}
+              >
                 <div className="overflow-x-auto" aria-label={copy('publicNavigation', 'Section navigation')}>
                   <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
                     {portalTabs.map((item) => {
