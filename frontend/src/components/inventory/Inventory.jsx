@@ -568,6 +568,12 @@ export default function Inventory() {
         if (qty > totalQty) { notify(`Cannot remove ${qty} - only ${totalQty} available`, 'error'); return }
       }
     }
+    const adjustConfirmLabel = adjustForm.type === 'set'
+      ? tr('confirm_set_stock', `Do you want to set stock for "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់កំណត់ស្តុកសម្រាប់ "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
+      : adjustForm.type === 'remove'
+        ? tr('confirm_remove_stock', `Do you want to remove stock from "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់ដកស្តុកពី "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
+        : tr('confirm_add_stock', `Do you want to add stock to "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់បន្ថែមស្តុកទៅ "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
+    if (!window.confirm(adjustConfirmLabel)) return
     setAdjustSaving(true)
     try {
       const res = await window.api.adjustStock(adjustmentRequest)
@@ -710,6 +716,10 @@ export default function Inventory() {
     if (moveForm.mode === 'new' && !String(moveForm.destination_name || '').trim()) {
       return notify(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'), 'error')
     }
+    const moveTargetLabel = moveForm.mode === 'existing'
+      ? tr('existing_product', 'existing product', 'ផលិតផលដែលមានស្រាប់')
+      : String(moveForm.destination_name || '').trim()
+    if (!window.confirm(tr('confirm_move_stock', `Do you want to move stock from "${moveModal.name}" to "${moveTargetLabel}"?`, `តើអ្នកចង់ផ្លាស់ទីស្តុកពី "${moveModal.name}" ទៅ "${moveTargetLabel}" មែនទេ?`))) return
     setMoveSaving(true)
     try {
       const result = await window.api.moveStockRow(request)
@@ -762,9 +772,13 @@ export default function Inventory() {
       notify(tr('transfer_reason_required', 'A transfer reason is required.', 'ត្រូវការមូលហេតុសម្រាប់ការផ្ទេរ។'), 'error')
       return
     }
+    const fromBranch = branches.find((branch) => String(branch.id) === String(transferForm.from_branch_id))
+    const toBranch = branches.find((branch) => String(branch.id) === String(transferForm.to_branch_id))
+    if (!window.confirm(tr('confirm_transfer_stock', `Do you want to transfer ${quantity} from "${fromBranch?.name || transferForm.from_branch_id}" to "${toBranch?.name || transferForm.to_branch_id}"?`, `តើអ្នកចង់ផ្ទេរ ${quantity} ពី "${fromBranch?.name || transferForm.from_branch_id}" ទៅ "${toBranch?.name || transferForm.to_branch_id}" មែនទេ?`))) return
 
     setTransferSaving(true)
     try {
+      const previousSnapshot = cloneHistorySnapshot(transferModal)
       const result = await window.api.transferInventoryStock({
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
@@ -775,6 +789,35 @@ export default function Inventory() {
         userName: user?.name || user?.username,
       })
       if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed', 'ការផ្ទេរស្តុកបានបរាជ័យ'))
+      actionHistory.pushAction({
+        label: `${tr('transfer', 'Transfer', 'ផ្ទេរ')}: ${transferModal.name}`,
+        undo: async () => {
+          const undoResult = await window.api.transferInventoryStock({
+            productId: transferModal.id,
+            fromBranchId: transferForm.to_branch_id,
+            toBranchId: transferForm.from_branch_id,
+            quantity,
+            reason: `Undo: ${transferForm.reason}`,
+            userId: user?.id,
+            userName: user?.name || user?.username,
+          })
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo បានបរាជ័យ'))
+          await load(true)
+        },
+        redo: async () => {
+          const redoResult = await window.api.transferInventoryStock({
+            productId: transferModal.id,
+            fromBranchId: transferForm.from_branch_id,
+            toBranchId: transferForm.to_branch_id,
+            quantity,
+            reason: `Redo: ${transferForm.reason}`,
+            userId: user?.id,
+            userName: user?.name || user?.username,
+          })
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo បានបរាជ័យ'))
+          await load(true)
+        },
+      })
       notify(tr('stock_transferred', 'Stock transferred', 'បានផ្ទេរស្តុក'))
       setTransferModal(null)
       await load(true)
@@ -942,6 +985,7 @@ export default function Inventory() {
 
   const applyInventoryBatchSession = useCallback(async () => {
     if (batchApplying || !inventoryBatch?.items?.length) return
+    if (!window.confirm(tr('confirm_apply_inventory_batch', `Do you want to apply ${inventoryBatch.items.length} inventory change(s)?`, `តើអ្នកចង់អនុវត្តការផ្លាស់ប្តូរស្តុក ${inventoryBatch.items.length} មែនទេ?`))) return
     setBatchApplying(true)
     const failedItems = []
     let successCount = 0
@@ -2281,18 +2325,6 @@ export default function Inventory() {
         </div>
       ) : null}
 
-      {selectedMovementGroups.length > 0 ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
-          <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} movement group{selectedMovementGroups.length === 1 ? '' : 's'} selected</span>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')}>
-            Export selected
-          </button>
-          <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedMovementIds(new Set())}>
-            Clear
-          </button>
-        </div>
-      ) : null}
-
       {showInventoryStats ? (
       <>
       {/* ?? Primary Stats bar ?? */}
@@ -2507,10 +2539,11 @@ export default function Inventory() {
         <>
           <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
             <div className="px-2 py-2">
-              <div className="grid min-w-0 grid-cols-[auto_auto_auto] items-center justify-start gap-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
                 <span className="inline-flex min-w-0 shrink-0 max-w-[4.95rem] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
                   {inventoryProductSummaryLabel}
                 </span>
+                <div className="ml-auto flex min-w-0 items-center gap-1.5">
                 <label className="relative inline-flex h-7 w-[3.1rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                   <span className="sr-only">{t('per_page') || 'per page'}</span>
                   <select
@@ -2568,8 +2601,9 @@ export default function Inventory() {
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                </div>
               </div>
-              <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_4.8rem_auto_auto] items-center gap-1.5">
                 <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                   <input
                     ref={inventorySelectAllRef}
@@ -2584,33 +2618,39 @@ export default function Inventory() {
                       : inventoryControlLabels.selectAll}
                   </span>
                 </label>
-                {hasSelectedProducts ? (
-                  <>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                      disabled={!hasSelectedProducts}
-                      onClick={openInventoryBatchSession}
-                      title={tr(
-                        'inventory_batch_hint',
-                        'Select products, review each line in one session, then apply all stock changes together.',
-                        'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
-                      )}
-                      aria-label={inventoryControlLabels.batch}
-                    >
-                      {inventoryControlLabels.batch}
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2.5 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                      onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-                      title={inventoryControlLabels.reasons}
-                      aria-label={inventoryControlLabels.reasons}
-                    >
-                      {inventoryControlLabels.reasons}
-                    </button>
-                  </>
-                ) : null}
+                <button
+                  type="button"
+                  className={`inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border px-2.5 text-[10px] font-semibold transition ${
+                    hasSelectedProducts
+                      ? 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'
+                      : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
+                  }`}
+                  disabled={!hasSelectedProducts}
+                  onClick={hasSelectedProducts ? openInventoryBatchSession : undefined}
+                  title={hasSelectedProducts ? tr(
+                    'inventory_batch_hint',
+                    'Select products, review each line in one session, then apply all stock changes together.',
+                    'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                  ) : undefined}
+                  aria-label={inventoryControlLabels.batch}
+                  aria-hidden={!hasSelectedProducts}
+                >
+                  {inventoryControlLabels.batch}
+                </button>
+                <button
+                  type="button"
+                  className={`inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border px-2.5 text-[10px] font-semibold transition ${
+                    hasSelectedProducts
+                      ? 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'
+                      : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
+                  }`}
+                  onClick={hasSelectedProducts ? (() => setReasonManager({ open: true, type: 'adjust' })) : undefined}
+                  title={hasSelectedProducts ? inventoryControlLabels.reasons : undefined}
+                  aria-label={inventoryControlLabels.reasons}
+                  aria-hidden={!hasSelectedProducts}
+                >
+                  {inventoryControlLabels.reasons}
+                </button>
               </div>
             </div>
           </div>
@@ -2855,8 +2895,26 @@ export default function Inventory() {
                 <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('grouped_movement_history', 'Grouped movement history', 'ប្រវត្តិចលនាដែលបានដាក់ជាក្រុម')}</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', 'ការផ្លាស់ប្តូរស្តុកដែលពាក់ព័ន្ធ ត្រូវបានដាក់ជាសកម្មភាពតែមួយ ដើម្បីងាយពិនិត្យការលក់ ការត្រឡប់ ការនាំចូល និងការផ្ទេរ។')}</div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups · {visibleMovementRecordCount} records · {visibleMovementQuantity} quantity</div>
+                {selectedMovementGroups.length > 0 ? (
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs dark:border-blue-900/40 dark:bg-blue-900/20">
+                    <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} selected</span>
+                    <button
+                      type="button"
+                      className="btn-secondary px-2.5 py-1 text-[11px]"
+                      onClick={() => {
+                        if (!window.confirm(tr('confirm_export_selected_movements', 'Do you want to export the selected movement groups?', 'តើអ្នកចង់នាំចេញក្រុមចលនាដែលបានជ្រើសមែនទេ?'))) return
+                        exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')
+                      }}
+                    >
+                      {tr('export_selected', 'Export selected', 'នាំចេញដែលបានជ្រើស')}
+                    </button>
+                    <button type="button" className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedMovementIds(new Set())}>
+                      {t('clear') || 'Clear'}
+                    </button>
+                  </div>
+                ) : null}
                 <ExportMenu
                   label={tr('export', 'Export', 'នាំចេញ')}
                   items={inventoryExportItems}
@@ -2928,7 +2986,7 @@ export default function Inventory() {
               return (
               <div key={section.id} className="space-y-2">
                 <div className="flex items-center justify-between gap-3 px-1 pt-1">
-                  <label className="inline-flex min-w-0 items-center gap-2">
+                  <div className="inline-flex min-w-0 items-center gap-2">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
@@ -2938,10 +2996,10 @@ export default function Inventory() {
                       }}
                       onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
                     />
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    <button type="button" className="text-left text-xs font-semibold uppercase tracking-wide text-gray-400" onClick={() => toggleMovementSectionCollapsed(section.id)}>
                       {section.label} · {section.ids.length} groups · {section.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records
-                    </div>
-                  </label>
+                    </button>
+                  </div>
                   <div className="flex items-center gap-1">
                     <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleMovementSectionCollapsed(section.id)}>
                       {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -2968,46 +3026,47 @@ export default function Inventory() {
                       const isExpanded = expandedMovementGroups.has(group.id)
                       return (
                         <div key={group.id} className="card overflow-hidden">
-                          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
-                            <label className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                          <div className="flex items-start gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+                            <label className="inline-flex items-center gap-2 pt-1 text-xs text-gray-500 dark:text-gray-400">
                               <input
                                 type="checkbox"
                                 className="h-4 w-4 rounded"
                                 checked={selectedMovementIds.has(group.id)}
                                 onChange={() => toggleMovementSelection(group.id)}
+                                onClick={(event) => event.stopPropagation()}
                               />
                             </label>
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left hover:text-blue-600 dark:hover:text-blue-300"
+                              onClick={() => toggleMovementGroup(group.id)}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
+                                      {group.movementLabel}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">{fmtTime(group.latest_at)}</span>
+                                  </div>
+                                  <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
+                                  <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
+                                    <span>{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
+                                    {group.branchSummary ? <span>{group.branchSummary}</span> : null}
+                                    {group.userSummary ? <span>{group.userSummary}</span> : null}
+                                  </div>
+                                  {group.reasonSummary ? <div className="mt-1 truncate text-xs text-gray-500">{group.reasonSummary}</div> : null}
+                                </div>
+                                <div className="flex items-start gap-2 text-right">
+                                  <div>
+                                    <div className="text-sm font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
+                                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</div>
+                                  </div>
+                                  <ChevronDown className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                </div>
+                              </div>
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            className="w-full p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                            onClick={() => toggleMovementGroup(group.id)}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
-                                    {group.movementLabel}
-                                  </span>
-                                  <span className="text-[10px] text-gray-400">{fmtTime(group.latest_at)}</span>
-                                </div>
-                                <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
-                                <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                                  <span>{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
-                                  {group.branchSummary ? <span>{group.branchSummary}</span> : null}
-                                  {group.userSummary ? <span>{group.userSummary}</span> : null}
-                                </div>
-                                {group.reasonSummary ? <div className="mt-1 truncate text-xs text-gray-500">{group.reasonSummary}</div> : null}
-                              </div>
-                              <div className="flex items-start gap-2 text-right">
-                                <div>
-                                  <div className="text-sm font-bold text-gray-900 dark:text-white">{group.totalQuantity}</div>
-                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</div>
-                                </div>
-                                <ChevronDown className={`mt-0.5 h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                              </div>
-                            </div>
-                          </button>
                           {isExpanded ? (
                             <div className="border-t border-gray-200 p-3 dark:border-gray-700">
                               {(() => {
@@ -3172,18 +3231,18 @@ export default function Inventory() {
                             return (
                               <Fragment key={group.id}>
                                 <tr className="table-row hover:bg-blue-50 dark:hover:bg-blue-900/10">
-                                  <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded"
-                                      checked={selectedMovementIds.has(group.id)}
-                                      onChange={() => toggleMovementSelection(group.id)}
-                                      aria-label={`Select movement group ${group.id}`}
-                                    />
-                                  </td>
+                                  <td className="px-3 py-2" />
                                   <td className="whitespace-nowrap px-3 py-2 text-[10px] text-gray-400">{fmtTime(group.latest_at)}</td>
                                   <td className="px-3 py-2">
                                     <div className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded"
+                                        checked={selectedMovementIds.has(group.id)}
+                                        onChange={() => toggleMovementSelection(group.id)}
+                                        onClick={(event) => event.stopPropagation()}
+                                        aria-label={`Select movement group ${group.id}`}
+                                      />
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
                                         {group.movementLabel}
                                       </span>
@@ -3191,17 +3250,21 @@ export default function Inventory() {
                                     </div>
                                     {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
                                   </td>
-                                  <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</td>
+                                  <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">
+                                    <button
+                                      type="button"
+                                      className="inline-flex min-w-0 items-center gap-1.5 text-left hover:text-blue-600 dark:hover:text-blue-300"
+                                      onClick={() => toggleMovementGroup(group.id)}
+                                    >
+                                      <span className="truncate">{group.productSummary || 'Movement'}</span>
+                                      <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                    </button>
+                                  </td>
                                   <td className="px-3 py-2 text-right font-bold text-gray-900 dark:text-white">{group.totalQuantity}</td>
                                   <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">{fmtUSD(group.totalCostUsd || 0)}</td>
                                   <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{group.branchSummary || 'N/A'}</td>
                                   <td className="px-3 py-2 text-gray-500 hidden xl:table-cell">{group.userSummary || 'N/A'}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700" onClick={() => toggleMovementGroup(group.id)}>
-                                      <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                      {isExpanded ? 'Collapse' : 'Expand'}
-                                    </button>
-                                  </td>
+                                  <td className="px-3 py-2 text-center" />
                                 </tr>
                                 {isExpanded ? (
                                   <tr className="bg-gray-50/80 dark:bg-gray-900/30">
