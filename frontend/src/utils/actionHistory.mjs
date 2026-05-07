@@ -14,7 +14,7 @@ function normalizeEntry(entry = {}, index = 0) {
   }
 }
 
-export function useActionHistory({ limit = 3, notify, scope = 'global' } = {}) {
+export function useActionHistory({ limit = 10, notify, scope = 'global' } = {}) {
   const { user } = useApp()
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])

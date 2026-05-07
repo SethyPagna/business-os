@@ -108,9 +108,12 @@ function persistSavedInventoryReasons(reasons = []) {
 }
 
 function splitSearchTerms(value = '') {
-  return String(value || '')
-    .normalize('NFC')
-    .split(',')
+  const normalized = String(value || '').normalize('NFC').trim()
+  if (!normalized) return []
+  const parts = normalized.includes(',')
+    ? normalized.split(',')
+    : normalized.split(/\s+/)
+  return parts
     .map((term) => term.trim().toLowerCase())
     .filter(Boolean)
     .slice(0, 8)
@@ -1435,6 +1438,8 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
     const userId = req.query.userId ? String(req.query.userId).trim() : ''
     const startDate = String(req.query.startDate || req.query.start_date || '').trim()
     const endDate = String(req.query.endDate || req.query.end_date || '').trim()
+    const searchMode = String(req.query.searchMode || req.query.search_mode || 'AND').trim().toUpperCase() === 'OR' ? 'OR' : 'AND'
+    const searchTerms = splitSearchTerms(req.query.search || req.query.query || req.query.q || '')
     const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
     const legacyLimit = req.query.limit || '50000'
     const requestedPageSize = req.query.pageSize || req.query.page_size || legacyLimit
@@ -1460,10 +1465,32 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
       where.push(`date(COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text)) <= @endDate`)
       params.endDate = endDate
     }
+    if (searchTerms.length) {
+      const clauses = searchTerms.map((term, index) => {
+        const key = `search${index}`
+        params[key] = `%${term}%`
+        return `(
+          lower(COALESCE(im.product_name::text, '')) LIKE @${key}
+          OR lower(COALESCE(p.name, '')) LIKE @${key}
+          OR lower(COALESCE(im.branch_name::text, '')) LIKE @${key}
+          OR lower(COALESCE(b.name, '')) LIKE @${key}
+          OR lower(COALESCE(im.reason::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.user_name::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.movement_type::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.reference_id::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.lot_code::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.expiry_date::text, '')) LIKE @${key}
+          OR lower(COALESCE(im.created_at::text, '')) LIKE @${key}
+        )`
+      })
+      where.push(`(${clauses.join(` ${searchMode} `)})`)
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const total = db.prepare(`
       SELECT COUNT(*) AS count
       FROM inventory_movements im
+      LEFT JOIN products p ON p.id = im.product_id
+      LEFT JOIN branches b ON b.id = im.branch_id
       ${whereSql}
     `).get(params)?.count || 0
     const rows = db.prepare(`

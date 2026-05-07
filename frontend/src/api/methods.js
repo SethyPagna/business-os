@@ -1280,7 +1280,7 @@ export const adjustStock           = d         => route('products:adjustStock', 
 export const transferInventoryStock = d        => route('inventory:transfer', () => apiFetch('POST', '/api/inventory/transfer', ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'transfer')), null, true)
 export const moveStockRow          = d         => route('inventory:moveRow', () => apiFetch('POST', '/api/inventory/move-row', { ...getDeviceInfo(), ...d }), null, true)
 
-export const getActionHistory = (scope = 'global', limit = 3, params = {}) => {
+export const getActionHistory = (scope = 'global', limit = 10, params = {}) => {
   const query = new URLSearchParams(Object.entries({ scope, limit, ...(params || {}) }).filter(([, value]) => value != null && value !== '')).toString()
   return route(`actionHistory:get:${query}`, () => apiFetch('GET', `/api/action-history?${query}`), () => ({ items: [] }))
 }
@@ -1301,12 +1301,14 @@ export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
 }
-export const getInventoryMovements = ({ branchId, userId, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
+export const getInventoryMovements = ({ branchId, userId, search, searchMode, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
   const safePage = Math.max(1, Number(page || 1) || 1)
   const safePageSize = Math.min(Math.max(Number(pageSize || 10000) || 10000, 1), 50000)
   const q = new URLSearchParams(Object.entries({
     branchId,
     userId,
+    search,
+    searchMode,
     startDate,
     endDate,
     page: safePage,

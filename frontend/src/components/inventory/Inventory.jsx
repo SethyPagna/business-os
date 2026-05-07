@@ -1,7 +1,7 @@
 ﻿// ?? Inventory ????????????????????????????????????????????????????????????????
 // Main Inventory page ??sub-components imported from sibling files.
 
-import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react'
+import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -151,10 +151,10 @@ export default function Inventory() {
   const [transferForm,  setTransferForm]  = useState({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
   const [search,        setSearch]        = useState('')
   const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
-  const deferredSearch = useDeferredValue(search)
+  const deferredSearch = String(search || '').trim()
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('all') // all | grouped | parent | variant | standalone
+  const [groupFilter,   setGroupFilter]   = useState('grouped') // all | grouped | parent | variant | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
@@ -175,6 +175,7 @@ export default function Inventory() {
   const [userOptions, setUserOptions] = useState([])
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
+  const [showMovementDateFilter, setShowMovementDateFilter] = useState(false)
   const [movementYearFilter, setMovementYearFilter] = useState('all')
   const [movementMonthFilter, setMovementMonthFilter] = useState('all')
   const [movementGroupMode, setMovementGroupMode] = useState('time')
@@ -204,7 +205,7 @@ export default function Inventory() {
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
   const pendingLoadRef = useRef(null)
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'inventory' })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory' })
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
     [movementMonthFilter, movementYearFilter],
@@ -300,7 +301,7 @@ export default function Inventory() {
         searchMode,
         brand: brandFilter,
         stockState: stockFilter,
-        groupState: groupFilter,
+        groupState: groupFilter === 'all' ? 'grouped' : groupFilter,
         initial: inventoryInitialFilter,
       }
       try {
@@ -315,6 +316,8 @@ export default function Inventory() {
           ...(needsMovementData ? {
             movements: () => window.api.getInventoryMovements({
               ...branchOpts,
+              search: deferredSearch || undefined,
+              searchMode,
               startDate: movementStartDate || undefined,
               endDate: movementEndDate || undefined,
               page: movementMeta.page,
@@ -848,7 +851,9 @@ export default function Inventory() {
 
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
   const searchTerms = deferredSearch.trim()
-    ? deferredSearch.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    ? (deferredSearch.includes(',') ? deferredSearch.split(',') : deferredSearch.split(/\s+/))
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean)
     : []
 
   const matchesSearch = (hay) => {
@@ -864,8 +869,9 @@ export default function Inventory() {
   const movHay = (m) =>
     `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''} ${m.reference_id||''} ${m.lot_code||''} ${m.expiry_date||''} ${m.created_at||''}`.toLowerCase()
 
+  const hasServerBackedProductSearch = !!searchTerms.length
   const filteredSummary = summary.filter(p => {
-    if (!matchesSearch(productHay(p))) return false
+    if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
     const isVariant = Boolean(p.parent_id)
@@ -904,7 +910,42 @@ export default function Inventory() {
 
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
-  }, [branchFilter, movementEndDate, movementStartDate, movementUserFilter])
+  }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementUserFilter, searchMode])
+
+  useEffect(() => {
+    if (!isActive || !loadedOnceRef.current || !needsProductSummary) return
+    load(true, { force: true }).catch(() => {})
+  }, [
+    branchFilter,
+    brandFilter,
+    deferredSearch,
+    groupFilter,
+    inventoryInitialFilter,
+    inventoryProductPage,
+    inventoryProductPageSize,
+    isActive,
+    load,
+    needsProductSummary,
+    searchMode,
+    stockFilter,
+  ])
+
+  useEffect(() => {
+    if (!isActive || !loadedOnceRef.current || !needsMovementData) return
+    load(true, { force: true }).catch(() => {})
+  }, [
+    branchFilter,
+    deferredSearch,
+    isActive,
+    load,
+    movementEndDate,
+    movementMeta.page,
+    movementMeta.pageSize,
+    movementStartDate,
+    movementUserFilter,
+    needsMovementData,
+    searchMode,
+  ])
 
   useEffect(() => {
     const validIds = new Set(visibleInventoryProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)))
@@ -1102,14 +1143,18 @@ export default function Inventory() {
     }
   }, [batchApplying, inventoryBatch, load, notify, tr])
 
+  const hasServerBackedMovementSearch = !!searchTerms.length
   const filteredMovements = movements.filter(m => {
     if (movFilter !== 'all' && m.movement_type !== movFilter) return false
-    return matchesSearch(movHay(m))
+    return hasServerBackedMovementSearch ? true : matchesSearch(movHay(m))
   })
 
-  const groupedMovements = useMemo(() => (
-    buildMovementGroups(filteredMovements).filter((group) => matchesSearch(movementGroupHaystack(group)))
-  ), [filteredMovements, searchTerms, searchMode])
+  const groupedMovements = useMemo(() => {
+    const groups = buildMovementGroups(filteredMovements)
+    return hasServerBackedMovementSearch
+      ? groups
+      : groups.filter((group) => matchesSearch(movementGroupHaystack(group)))
+  }, [filteredMovements, hasServerBackedMovementSearch, searchTerms, searchMode])
 
   const movementYears = useMemo(
     () => getAvailableYears(groupedMovements, (group) => group?.latest_at || group?.created_at),
@@ -1133,6 +1178,25 @@ export default function Inventory() {
   const visibleMovementGroups = useMemo(
     () => movementSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
     [movementSections],
+  )
+
+  const getMovementRecordCount = useCallback(
+    (group) => Math.max(0, Number(group?.recordCount || group?.items?.length || 0)),
+    [],
+  )
+
+  const getMovementActionGroupRecordCount = useCallback(
+    (actionGroup) => (Array.isArray(actionGroup?.items)
+      ? actionGroup.items.reduce((sum, group) => sum + getMovementRecordCount(group), 0)
+      : 0),
+    [getMovementRecordCount],
+  )
+
+  const getMovementSectionRecordCount = useCallback(
+    (section) => (Array.isArray(section?.groups)
+      ? section.groups.reduce((sum, actionGroup) => sum + getMovementActionGroupRecordCount(actionGroup), 0)
+      : 0),
+    [getMovementActionGroupRecordCount],
   )
 
   useEffect(() => {
@@ -2597,7 +2661,7 @@ export default function Inventory() {
         </div>
       </div>
       ) : null}
-      {showInventorySections ? (
+      {showInventorySections && !showMovementsSection ? (
       <div className="inventory-history-row mb-2 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory} className="min-w-max" />
       </div>
@@ -2859,35 +2923,37 @@ export default function Inventory() {
                                       <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
                                     </div>
                                   </div>
-                                  <div className="mt-1 flex items-start gap-3 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
-                                    <div className="min-w-0 flex-1 break-words">
+                                  <div className="mt-1 flex items-start gap-2 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
+                                    <div className="min-w-0 flex-1 break-words pr-1">
                                       {productTagText || (t('product') || 'Product')}
                                     </div>
                                   </div>
                                 </div>
-                                <div className="flex shrink-0 items-center justify-end gap-1 text-right">
-                                  <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
-                                    {qty}
-                                    <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                                <div className="flex min-w-[5.95rem] max-w-[6.15rem] shrink-0 flex-col items-end gap-0.5 text-right">
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    <div className="whitespace-nowrap text-[13px] font-bold leading-none text-gray-900 dark:text-white">
+                                      {qty}
+                                      <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                                    </div>
+                                    <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                                    <button
+                                      onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
+                                      className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
+                                    >
+                                      {t('adjust')}
+                                    </button>
                                   </div>
-                                  <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
-                                  <button
-                                    onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
-                                    className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
-                                  >
-                                    {t('adjust')}
-                                  </button>
+                                  {p.barcode ? (
+                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                      {p.barcode}
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
-                              <div className="mt-1 flex items-center justify-between gap-2 pl-6">
+                              <div className="mt-1 flex items-center gap-2 pl-6">
                                 <div className="min-w-0">
                                   <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                                 </div>
-                                {p.barcode ? (
-                                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                                    {p.barcode}
-                                  </span>
-                                ) : null}
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
                                 <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
@@ -3134,8 +3200,32 @@ export default function Inventory() {
           </div>
 
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="grid flex-1 gap-3 sm:grid-cols-2 lg:max-w-xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1" />
+              <button
+                type="button"
+                className={`btn-secondary px-3 py-1 text-xs ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
+                onClick={() => setShowMovementDateFilter((current) => !current)}
+              >
+                {tr('custom_range', 'Custom range', 'កំណត់ចន្លោះពេល')}
+              </button>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{movementDateRangeLabel}</div>
+              {(movementStartDate || movementEndDate) ? (
+                <button
+                  type="button"
+                  className="btn-secondary px-3 py-1 text-xs"
+                  onClick={() => {
+                    setMovementStartDate('')
+                    setMovementEndDate('')
+                    setShowMovementDateFilter(false)
+                  }}
+                >
+                  {t('clear') || 'Clear'}
+                </button>
+              ) : null}
+            </div>
+            {showMovementDateFilter ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', 'កាលបរិច្ឆេទចាប់ផ្តើម')}</span>
                   <input
@@ -3156,22 +3246,7 @@ export default function Inventory() {
                   />
                 </label>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-xs text-gray-500 dark:text-gray-400">{movementDateRangeLabel}</div>
-                {(movementStartDate || movementEndDate) ? (
-                  <button
-                    type="button"
-                    className="btn-secondary px-3 py-1 text-xs"
-                    onClick={() => {
-                      setMovementStartDate('')
-                      setMovementEndDate('')
-                    }}
-                  >
-                    {t('clear') || 'Clear'}
-                  </button>
-                ) : null}
-              </div>
-            </div>
+            ) : null}
           </div>
 
           <PaginationControls
@@ -3206,7 +3281,7 @@ export default function Inventory() {
                       onChange={(event) => toggleMovementScopeSelection(section.ids, event.target.checked)}
                     />
                     <button type="button" className="text-left text-xs font-semibold uppercase tracking-wide text-gray-400" onClick={() => toggleMovementSectionCollapsed(section.id)}>
-                      {section.label} · {section.ids.length} groups · {section.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records
+                      {section.label} · {section.ids.length} groups · {getMovementSectionRecordCount(section)} records
                     </button>
                   </div>
                   <div className="flex items-center gap-1">
@@ -3228,7 +3303,7 @@ export default function Inventory() {
                           }}
                           onChange={(event) => toggleMovementScopeSelection(actionGroup.ids, event.target.checked)}
                         />
-                        <span>{actionGroup.label} · {actionGroup.items.length} groups · {actionGroup.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records</span>
+                        <span>{actionGroup.label} · {actionGroup.items.length} groups · {getMovementActionGroupRecordCount(actionGroup)} records</span>
                       </div>
                     ) : null}
                     {actionGroup.items.map((group) => {
@@ -3260,7 +3335,7 @@ export default function Inventory() {
                                   </div>
                                   <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
                                   <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                                    <span>{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
+                                    <span>{getMovementRecordCount(group)} {tr('records', 'records', 'កំណត់ត្រា')}</span>
                                     {group.branchSummary ? <span>{group.branchSummary}</span> : null}
                                     {group.userSummary ? <span>{group.userSummary}</span> : null}
                                   </div>
@@ -3288,7 +3363,7 @@ export default function Inventory() {
                               <div className="grid grid-cols-2 gap-3">
                                 <div>
                                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Records</div>
-                                  <div className="text-base font-bold text-gray-900 dark:text-white">{group.items.length}</div>
+                                  <div className="text-base font-bold text-gray-900 dark:text-white">{getMovementRecordCount(group)}</div>
                                 </div>
                                 <div>
                                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('quantity')}</div>
@@ -3405,7 +3480,7 @@ export default function Inventory() {
                         </td>
                         <td colSpan={8} className="px-4 py-2">
                           <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            <span>{section.label} · {section.ids.length} groups · {section.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records</span>
+                            <span>{section.label} · {section.ids.length} groups · {getMovementSectionRecordCount(section)} records</span>
                             <div className="flex items-center gap-1">
                               <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleMovementSectionCollapsed(section.id)}>
                                 {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -3431,7 +3506,7 @@ export default function Inventory() {
                                 />
                               </td>
                               <td colSpan={8} className="px-4 py-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                {actionGroup.label} · {actionGroup.items.length} groups · {actionGroup.items.reduce((sum, group) => sum + Number(group.items?.length || 0), 0)} records
+                                {actionGroup.label} · {actionGroup.items.length} groups · {getMovementActionGroupRecordCount(actionGroup)} records
                               </td>
                             </tr>
                           ) : null}
@@ -3455,7 +3530,7 @@ export default function Inventory() {
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
                                         {group.movementLabel}
                                       </span>
-                                      <span className="text-[10px] text-gray-400">{group.items.length} {tr('records', 'records', 'កំណត់ត្រា')}</span>
+                                      <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records', 'កំណត់ត្រា')}</span>
                                     </div>
                                     {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
                                   </td>

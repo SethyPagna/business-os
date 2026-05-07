@@ -3,7 +3,7 @@ import { CornerDownLeft, CornerDownRight, History } from 'lucide-react'
 import { useApp } from '../../AppContext.jsx'
 
 function formatHistoryList(items = []) {
-  return items.map((item) => item?.label).filter(Boolean).slice(-3).reverse()
+  return items.map((item) => item?.label).filter(Boolean).slice(-10).reverse()
 }
 
 function formatServerStatus(item, T) {
@@ -30,7 +30,7 @@ export default function ActionHistoryBar({
   }
   const undoItems = formatHistoryList(history.undoItems)
   const redoItems = formatHistoryList(history.redoItems)
-  const recordedItems = Array.isArray(history.serverItems) ? history.serverItems.slice(0, 3) : []
+  const recordedItems = Array.isArray(history.serverItems) ? history.serverItems.slice(0, 10) : []
   const wrapperAlign = align === 'right' ? 'justify-end' : 'justify-start'
   const menuPosition = align === 'right'
     ? 'right-0'
@@ -96,7 +96,7 @@ export default function ActionHistoryBar({
           {!hasItems ? (
             <div className="px-3 py-2 text-slate-500 dark:text-slate-400">{T('no_recent_actions', 'No recent actions')}</div>
           ) : null}
-          {(history.undoItems || []).slice(-3).reverse().map((item) => (
+          {(history.undoItems || []).slice(-10).reverse().map((item) => (
             <button
               key={`undo-${item.id}`}
               type="button"
@@ -108,7 +108,7 @@ export default function ActionHistoryBar({
               <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{T('undo', 'Undo')}</span>
             </button>
           ))}
-          {(history.redoItems || []).slice(-3).reverse().map((item) => (
+          {(history.redoItems || []).slice(-10).reverse().map((item) => (
             <button
               key={`redo-${item.id}`}
               type="button"

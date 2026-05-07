@@ -222,7 +222,7 @@ export default function Products() {
   const desktopSelectAllRef = useRef(null)
   const mobileSelectAllRef = useRef(null)
   const initializedCollapsedGroupKeysRef = useRef(new Set())
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'products' })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products' })
   const debouncedSearch = useDebouncedValue(search, 180)
 
   const load = useCallback(async (silent = false) => {
@@ -1978,7 +1978,7 @@ export default function Products() {
         </div>
         {hasSelected ? (
           <div className="border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="grid grid-cols-5 gap-0.75">
               {[
                 { id: 'info', label: productChipLabels.info },
                 { id: 'pricing', label: productChipLabels.pricing },
@@ -1995,8 +1995,8 @@ export default function Products() {
                     }
                     setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({})
                   }}
-                  className={`inline-flex min-w-[4.5rem] items-center justify-center whitespace-nowrap rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
-                  {opt.label}
+                  className={`inline-flex h-7.5 min-w-0 items-center justify-center overflow-hidden rounded-xl border px-1 text-[9.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
+                  <span className="truncate">{opt.label}</span>
                 </button>
               ))}
             </div>
