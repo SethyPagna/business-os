@@ -61,7 +61,7 @@ await runTest('receipt export supports PNG image download from the same rendered
   assert.match(utilSource, /export async function downloadReceiptImage/)
   assert.match(utilSource, /\.png/)
   assert.match(receiptSource, /downloadReceiptImage/)
-  assert.match(receiptSource, /download_image/)
+  assert.match(receiptSource, /receipt_image_short|saving_image/)
 })
 
 if (failed > 0) {

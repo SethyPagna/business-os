@@ -53,7 +53,12 @@ function parseInventoryTimestamp(value) {
   if (!value) return null
   const raw = String(value).trim()
   if (!raw) return null
-  const normalized = raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`
+  const normalizedBase = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  let normalized = `${normalizedBase}Z`
+  if (/Z$/i.test(normalizedBase)) normalized = normalizedBase
+  else if (/[+-]\d{2}:\d{2}$/i.test(normalizedBase)) normalized = normalizedBase
+  else if (/[+-]\d{4}$/i.test(normalizedBase)) normalized = normalizedBase.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
+  else if (/[+-]\d{2}$/i.test(normalizedBase)) normalized = `${normalizedBase}:00`
   const parsed = new Date(normalized)
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
@@ -2934,7 +2939,9 @@ export default function Inventory() {
                           const slbl = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
                           const soldQty = Math.max(0, p.qty_sold || 0)
                           const revenue = Math.max(0, p.revenue_usd || 0)
-                          const productTagText = [p.brand, p.category].filter(Boolean).join(' · ')
+                          const productBrand = String(p.brand || '').trim()
+                          const productCategory = String(p.category || '').trim()
+                          const productTagText = [productBrand, productCategory].filter(Boolean).join(' · ')
                           return (
                             <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                               <div className="flex items-start justify-between gap-2">
@@ -2956,27 +2963,34 @@ export default function Inventory() {
                                     </div>
                                   </div>
                                   <div className="mt-1 flex items-start gap-1.5 pl-6 text-[9.5px] leading-3.5 text-gray-500 dark:text-gray-300">
-                                    <div className="min-w-0 flex-1 truncate pr-0.5" title={productTagText || (t('product') || 'Product')}>
-                                      {productTagText || (t('product') || 'Product')}
-                                    </div>
+                                    {productBrand ? (
+                                      <span className="max-w-[38%] shrink-0 truncate" title={productBrand}>{productBrand}</span>
+                                    ) : null}
+                                    {productBrand && productCategory ? <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span> : null}
+                                    {productCategory ? (
+                                      <span className="min-w-0 flex-1 truncate" title={productCategory}>{productCategory}</span>
+                                    ) : null}
+                                    {!productTagText ? (
+                                      <span className="truncate">{t('product') || 'Product'}</span>
+                                    ) : null}
                                   </div>
                                 </div>
-                                <div className="flex min-w-[5rem] max-w-[5.2rem] shrink-0 flex-col items-end gap-0.5 text-right">
+                                <div className="flex min-w-[4.35rem] max-w-[4.6rem] shrink-0 flex-col items-end gap-0.5 text-right">
                                   <div className="flex items-center justify-end gap-0.5">
-                                    <div className="whitespace-nowrap text-[12px] font-bold leading-none text-gray-900 dark:text-white">
+                                    <div className="whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                       {qty}
-                                      <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                                      <span className="ml-1 text-[9px] font-normal text-gray-400">{p.unit}</span>
                                     </div>
-                                    <span className={`whitespace-nowrap rounded-full px-1 py-0.5 text-[9px] font-medium ${scls}`}>{slbl}</span>
+                                    <span className={`whitespace-nowrap rounded-full px-1 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
                                     <button
                                       onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
-                                      className="px-0.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400"
+                                      className="px-0.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400"
                                     >
                                       {t('adjust')}
                                     </button>
                                   </div>
                                   {p.barcode ? (
-                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[8.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                                       {p.barcode}
                                     </span>
                                   ) : null}
@@ -3232,9 +3246,9 @@ export default function Inventory() {
           </div>
 
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <ActionHistoryBar history={actionHistory} className="min-w-0" />
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5 lg:justify-end">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 md:justify-end">
                 <button
                   type="button"
                   className={`btn-secondary px-2.5 py-1 text-[11px] ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
@@ -3242,7 +3256,7 @@ export default function Inventory() {
                 >
                   {tr('custom_range', 'Custom range', 'កំណត់ចន្លោះពេល')}
                 </button>
-                <div className="min-w-0 truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                <div className="max-w-full truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                   {movementDateRangeLabel}
                 </div>
                 {(movementStartDate || movementEndDate) ? (
@@ -3261,7 +3275,7 @@ export default function Inventory() {
               </div>
             </div>
             {showMovementDateFilter ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 md:max-w-xl">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', 'កាលបរិច្ឆេទចាប់ផ្តើម')}</span>
                   <input

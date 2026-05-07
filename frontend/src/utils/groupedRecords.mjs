@@ -7,10 +7,15 @@ function toDate(value) {
   const direct = new Date(raw)
   if (!Number.isNaN(direct.getTime())) return direct
   const isoLike = raw.replace(' ', 'T')
-  const parsedIso = new Date(isoLike)
+  const normalizedIso = /[+-]\d{2}$/i.test(isoLike)
+    ? `${isoLike}:00`
+    : /[+-]\d{4}$/i.test(isoLike)
+      ? isoLike.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
+      : isoLike
+  const parsedIso = new Date(normalizedIso)
   if (!Number.isNaN(parsedIso.getTime())) return parsedIso
-  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$/.test(isoLike)
-  const parsedUtc = new Date(needsUtcSuffix ? `${isoLike}Z` : isoLike)
+  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$|[+-]\d{2}$/.test(normalizedIso)
+  const parsedUtc = new Date(needsUtcSuffix ? `${normalizedIso}Z` : normalizedIso)
   return Number.isNaN(parsedUtc.getTime()) ? null : parsedUtc
 }
 

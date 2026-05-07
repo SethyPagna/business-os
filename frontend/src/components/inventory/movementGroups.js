@@ -1,6 +1,18 @@
-function minuteBucket(value) {
+function normalizeMovementTimeValue(value) {
   const raw = String(value || '').trim()
-  const normalized = raw ? (raw.includes('T') || raw.endsWith('Z') ? raw : `${raw.replace(' ', 'T')}Z`) : ''
+  if (!raw) return ''
+  const normalizedBase = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  if (/Z$/i.test(normalizedBase)) return normalizedBase
+  if (/[+-]\d{2}:\d{2}$/i.test(normalizedBase)) return normalizedBase
+  if (/[+-]\d{4}$/i.test(normalizedBase)) {
+    return normalizedBase.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
+  }
+  if (/[+-]\d{2}$/i.test(normalizedBase)) return `${normalizedBase}:00`
+  return `${normalizedBase}Z`
+}
+
+function minuteBucket(value) {
+  const normalized = normalizeMovementTimeValue(value)
   const date = new Date(normalized || Date.now())
   if (Number.isNaN(date.getTime())) return 'unknown'
   date.setSeconds(0, 0)
@@ -60,9 +72,9 @@ function movementSignedValue(movement, field) {
 }
 
 function parseMovementTime(value) {
-  if (!value) return null
-  const raw = String(value).trim()
-  const date = new Date(raw.includes('T') || raw.endsWith('Z') ? raw : raw.replace(' ', 'T') + 'Z')
+  const normalized = normalizeMovementTimeValue(value)
+  if (!normalized) return null
+  const date = new Date(normalized)
   return Number.isNaN(date.getTime()) ? null : date
 }
 

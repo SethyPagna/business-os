@@ -11,7 +11,7 @@ assert.match(
 
 assert.match(
   inventorySource,
-  /className="flex min-w-\[5rem\] max-w-\[5\.2rem\] shrink-0 flex-col items-end gap-0\.5 text-right"[\s\S]*p\.barcode \? \(\s*<span className="mt-0\.5 max-w-full truncate rounded-full bg-slate-100 px-1\.5 py-0\.5 text-\[9px\] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">\s*\{p\.barcode\}/,
+  /className="flex min-w-\[4\.35rem\] max-w-\[4\.6rem\] shrink-0 flex-col items-end gap-0\.5 text-right"[\s\S]*p\.barcode \? \(\s*<span className="mt-0\.5 max-w-full truncate rounded-full bg-slate-100 px-1\.5 py-0\.5 text-\[8\.5px\] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">\s*\{p\.barcode\}/,
   'Mobile inventory card should keep the barcode in the compact stock-controls area instead of dropping into a separate lower block',
 )
 
