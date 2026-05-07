@@ -154,7 +154,7 @@ export default function Inventory() {
   const deferredSearch = String(search || '').trim()
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('grouped') // all | grouped | parent | variant | standalone
+  const [groupFilter,   setGroupFilter]   = useState('grouped') // grouped | parent | variant | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
@@ -301,14 +301,23 @@ export default function Inventory() {
         searchMode,
         brand: brandFilter,
         stockState: stockFilter,
-        groupState: groupFilter === 'all' ? 'grouped' : groupFilter,
+        groupState: groupFilter,
+        initial: inventoryInitialFilter,
+      }
+      const statsQuery = {
+        branchId: branchOpts.branchId,
+        query: deferredSearch,
+        searchMode,
+        brand: brandFilter,
+        stockState: stockFilter,
+        groupState: groupFilter,
         initial: inventoryInitialFilter,
       }
       try {
         const primaryLoaders = {
           branches: () => window.api.getBranches(),
           ...(needsStatsData ? {
-            stats: () => window.api.getInventoryStats(branchOpts),
+            stats: () => window.api.getInventoryStats(statsQuery),
           } : {}),
           ...(needsProductSummary ? {
             summary: () => window.api.searchInventoryProducts(productQuery),
@@ -875,7 +884,6 @@ export default function Inventory() {
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
     const isVariant = Boolean(p.parent_id)
-    if (groupFilter === 'grouped' && !isParent && !isVariant) return false
     if (groupFilter === 'parent' && (!isParent || isVariant)) return false
     if (groupFilter === 'variant' && !isVariant) return false
     if (groupFilter === 'standalone' && (isParent || isVariant)) return false
@@ -1301,11 +1309,26 @@ export default function Inventory() {
     ?? (inventoryProductsLoaded ? inventoryProductTotal : null)
     ?? summary.length,
   )
-  const totalQtySold  = filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0)
-  const totalRevenue  = filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0)
-  const totalCOGS     = filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0)
-  const totalStoreDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.store_discount_usd || 0), 0)
-  const totalMembershipDiscounts = filteredSummary.reduce((s, p) => s + Math.max(0, p.membership_discount_usd || 0), 0)
+  const totalQtySold = Number(
+    stockStats?.net_sold_qty
+    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.qty_sold || 0), 0),
+  )
+  const totalRevenue = Number(
+    stockStats?.revenue_usd
+    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.revenue_usd || 0), 0),
+  )
+  const totalCOGS = Number(
+    stockStats?.cogs_usd
+    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.cogs_usd || 0), 0),
+  )
+  const totalStoreDiscounts = Number(
+    stockStats?.store_discount_usd
+    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.store_discount_usd || 0), 0),
+  )
+  const totalMembershipDiscounts = Number(
+    stockStats?.membership_discount_usd
+    ?? filteredSummary.reduce((s, p) => s + Math.max(0, p.membership_discount_usd || 0), 0),
+  )
   const totalProfit   = totalRevenue - totalCOGS
   const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[0]))
   const inventoryProductSafePage = clampPage(inventoryProductPage, totalProducts, inventoryProductSafePageSize)
@@ -1408,94 +1431,103 @@ export default function Inventory() {
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.', 'ថ្លៃដែលបានប្រមូល រួមបញ្ចូលពន្ធលើការលក់ និងថ្លៃដឹកជញ្ជូនពីការលក់ដែលបានបញ្ចប់។')
   const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', 'ការប្រគល់មកវិញ រួមបញ្ចូលការសងប្រាក់ជូនអតិថិជន និងករណីប្រគល់ទៅអ្នកផ្គត់ផ្គង់ ដើម្បីពិនិត្យផ្លូវស្ដារវិញទាំងអស់ក្នុងកន្លែងតែមួយ។')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
+  const inventoryStatLabels = {
+    products: t('products') || t('products_total') || 'Products',
+    stockValue: t('stock_value') || 'Stock value',
+    netSold: t('net_sold') || 'Net sold',
+    revenue: t('revenue') || 'Revenue',
+    discounts: tr('discounts_combined', 'Discounts', 'ការបញ្ចុះតម្លៃ'),
+    cogs: t('cogs') || 'COGS',
+    grossProfit: tr('gross_profit', 'Gross Profit', 'ចំណេញដុល'),
+    feesCollected: tr('fees_collected', 'Fees collected', 'ថ្លៃដែលបានប្រមូល'),
+    returns: tr('returns_combined', 'Returns', 'ការប្រគល់មកវិញ'),
+  }
   const primaryStats = [
-      {
-        id: 'products',
-        label: t('products'),
-        value: statsValue(totalProducts),
-        cls: 'text-gray-800 dark:text-gray-200',
-        sub: stockStatsLoaded ? (
-          <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
-            <span className="min-w-0 shrink truncate font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock') || 'Low stock'}</span>
-            <span className="text-slate-300 dark:text-slate-500">/</span>
-            <span className="min-w-0 shrink truncate font-medium text-rose-600 dark:text-rose-300">{outStockCount} {t('out_of_stock') || 'Out of stock'}</span>
-          </span>
-        ) : (t('loading') || 'Loading...'),
-        details: [
-          { label: t('products') || 'Products', value: totalProducts },
-          { label: t('low_stock') || 'Low stock', value: lowStockCount },
-          { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
+    {
+      id: 'products',
+      label: inventoryStatLabels.products,
+      value: statsValue(totalProducts),
+      cls: 'text-gray-800 dark:text-gray-200',
+      sub: stockStatsLoaded ? (
+        <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+          <span className="min-w-0 shrink truncate font-medium text-amber-600 dark:text-amber-300">{lowStockCount} {t('low_stock') || 'Low stock'}</span>
+          <span className="text-slate-300 dark:text-slate-500">/</span>
+          <span className="min-w-0 shrink truncate font-medium text-rose-600 dark:text-rose-300">{outStockCount} {t('out_of_stock') || 'Out of stock'}</span>
+        </span>
+      ) : (t('loading') || 'Loading...'),
+      details: [
+        { label: inventoryStatLabels.products, value: totalProducts },
+        { label: t('low_stock') || 'Low stock', value: lowStockCount },
+        { label: t('out_of_stock') || 'Out of stock', value: outStockCount },
         { label: t('formula') || 'Formula', value: inventoryThresholdFormulaText },
       ],
     },
     {
       id: 'stock-value',
-      label: t('stock_value'),
+      label: inventoryStatLabels.stockValue,
       value: statsValue(fmtUSD(totalValue)),
       cls: 'text-blue-700 dark:text-blue-300',
       details: [
-        { label: t('stock_value') || 'Stock value', value: fmtUSD(totalValue) },
-        { label: t('products') || 'Products', value: totalProducts },
+        { label: inventoryStatLabels.stockValue, value: fmtUSD(totalValue) },
+        { label: inventoryStatLabels.products, value: totalProducts },
         { label: t('formula') || 'Formula', value: inventoryStockValueFormulaText },
       ],
     },
     {
       id: 'net-sold',
-      label: t('net_sold'),
-      value: totalQtySold,
+      label: inventoryStatLabels.netSold,
+      value: statsValue(totalQtySold),
       cls: 'text-purple-700 dark:text-purple-300',
       sub: t('after_returns'),
       details: [
-        { label: t('net_sold') || 'Net sold', value: totalQtySold },
+        { label: inventoryStatLabels.netSold, value: totalQtySold },
         { label: t('returns_count') || 'Returns', value: returnStats?.count ?? 0 },
         { label: t('items') || 'Returned items', value: returnStats?.items ?? 0 },
         { label: t('formula') || 'Formula', value: inventoryNetSoldFormulaText },
       ],
     },
     {
+      id: 'revenue',
+      label: inventoryStatLabels.revenue,
+      value: statsValue(fmtUSD(totalRevenue)),
+      cls: 'text-emerald-600 dark:text-emerald-400',
+      sub: t('after_refunds') || 'After refunds',
+      details: [
+        { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
+        { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
+        { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
+      ],
+    },
+    {
       id: 'cogs',
-      label: t('cogs'),
-      value: fmtUSD(totalCOGS),
+      label: inventoryStatLabels.cogs,
+      value: statsValue(fmtUSD(totalCOGS)),
       cls: 'text-orange-600 dark:text-orange-400',
       sub: t('cost_of_goods_sold'),
       details: [
-        { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
-        { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
-        { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
+        { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
         { label: t('formula') || 'Formula', value: inventoryCogsFormulaText },
       ],
     },
     {
-      id: 'revenue-profit',
-      label: tr('revenue_profit', 'Revenue & Profit', 'ចំណូល និងចំណេញ'),
-      value: fmtUSD(totalRevenue),
-      cls: totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
-      sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}`,
-      detailSections: [
-        {
-          title: t('revenue') || 'Revenue',
-          rows: [
-            { label: t('revenue') || 'Revenue', value: fmtUSD(totalRevenue) },
-            { label: t('total_refunded') || 'Refunded', value: fmtUSD(returnStats?.refund_usd || 0) },
-            { label: t('formula') || 'Formula', value: inventoryRevenueFormulaText },
-          ],
-        },
-        {
-          title: t('gross_profit') || 'Gross profit',
-          rows: [
-            { label: t('gross_profit') || 'Gross profit', value: fmtUSD(totalProfit) },
-            { label: t('cogs') || 'COGS', value: fmtUSD(totalCOGS) },
-            { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
-          ],
-        },
+      id: 'gross-profit',
+      label: inventoryStatLabels.grossProfit,
+      value: statsValue(fmtUSD(totalProfit)),
+      cls: totalProfit >= 0 ? 'text-blue-700 dark:text-blue-300' : 'text-red-600 dark:text-red-400',
+      sub: totalRevenue > 0 ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% ${t('profit_margin') || 'margin'}` : '',
+      details: [
+        { label: inventoryStatLabels.grossProfit, value: fmtUSD(totalProfit) },
+        { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
+        { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
+        { label: t('formula') || 'Formula', value: inventoryProfitFormulaText },
       ],
     },
   ]
   const financeStats = [
     {
       id: 'discounts',
-      label: tr('discounts_combined', 'Discounts', 'ការបញ្ចុះតម្លៃ'),
-      value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts),
+      label: inventoryStatLabels.discounts,
+      value: statsValue(fmtUSD(totalStoreDiscounts + totalMembershipDiscounts)),
       cls: 'text-amber-600 dark:text-amber-400',
       border: 'border-amber-400',
       sub: t('allocated_to_products') || 'Allocated to sold products',
@@ -1513,7 +1545,7 @@ export default function Inventory() {
     },
     {
       id: 'fees',
-      label: tr('fees_collected', 'Fees collected', 'ថ្លៃដែលបានប្រមូល'),
+      label: inventoryStatLabels.feesCollected,
       value: fmtUSD((taxDelivery.tax || 0) + (taxDelivery.delivery || 0)),
       cls: 'text-indigo-600 dark:text-indigo-400',
       border: 'border-indigo-400',
@@ -1532,7 +1564,7 @@ export default function Inventory() {
     },
     {
       id: 'returns',
-      label: tr('returns_combined', 'Returns', 'ការប្រគល់មកវិញ'),
+      label: inventoryStatLabels.returns,
       value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
@@ -2310,11 +2342,12 @@ export default function Inventory() {
       {
         id: 'group',
         label: t('product_group') || 'Product group',
-        options: [
-          { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-          { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
-          { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
-        ],
+          options: [
+            { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter('grouped') },
+            { id: 'parent-only', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter('parent') },
+            { id: 'variant-only', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter('variant') },
+            { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter('standalone') },
+          ],
       },
       {
         id: 'stock',
@@ -2370,7 +2403,7 @@ export default function Inventory() {
     return [
       branchFilter !== 'all',
       brandFilter !== 'all',
-      groupFilter !== 'all',
+        groupFilter !== 'grouped',
       stockFilter !== 'all',
       inventoryInitialFilter !== 'all',
     ].filter(Boolean).length
@@ -2379,7 +2412,7 @@ export default function Inventory() {
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
-    setGroupFilter('all')
+      setGroupFilter('grouped')
     setStockFilter('all')
     setInventoryInitialFilter('all')
     setMovFilter('all')
@@ -2919,32 +2952,32 @@ export default function Inventory() {
                                       onClick={(event) => event.stopPropagation()}
                                       aria-label={`${t('select') || 'Select'} ${p.name}`}
                                     />
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+                                    <div className="min-w-0 flex-1 pr-0.5">
+                                      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
                                     </div>
                                   </div>
-                                  <div className="mt-1 flex items-start gap-2 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
-                                    <div className="min-w-0 flex-1 break-words pr-1">
+                                  <div className="mt-1 flex items-start gap-1.5 pl-6 text-[9.5px] leading-3.5 text-gray-500 dark:text-gray-300">
+                                    <div className="min-w-0 flex-1 truncate pr-0.5" title={productTagText || (t('product') || 'Product')}>
                                       {productTagText || (t('product') || 'Product')}
                                     </div>
                                   </div>
                                 </div>
-                                <div className="flex min-w-[5.95rem] max-w-[6.15rem] shrink-0 flex-col items-end gap-0.5 text-right">
+                                <div className="flex min-w-[5rem] max-w-[5.2rem] shrink-0 flex-col items-end gap-0.5 text-right">
                                   <div className="flex items-center justify-end gap-0.5">
-                                    <div className="whitespace-nowrap text-[13px] font-bold leading-none text-gray-900 dark:text-white">
+                                    <div className="whitespace-nowrap text-[12px] font-bold leading-none text-gray-900 dark:text-white">
                                       {qty}
                                       <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
                                     </div>
-                                    <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                                    <span className={`whitespace-nowrap rounded-full px-1 py-0.5 text-[9px] font-medium ${scls}`}>{slbl}</span>
                                     <button
                                       onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
-                                      className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
+                                      className="px-0.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400"
                                     >
                                       {t('adjust')}
                                     </button>
                                   </div>
                                   {p.barcode ? (
-                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                                       {p.barcode}
                                     </span>
                                   ) : null}
@@ -3200,29 +3233,33 @@ export default function Inventory() {
           </div>
 
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <div className="flex flex-wrap items-center gap-2">
-              <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1" />
-              <button
-                type="button"
-                className={`btn-secondary px-3 py-1 text-xs ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
-                onClick={() => setShowMovementDateFilter((current) => !current)}
-              >
-                {tr('custom_range', 'Custom range', 'កំណត់ចន្លោះពេល')}
-              </button>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{movementDateRangeLabel}</div>
-              {(movementStartDate || movementEndDate) ? (
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+              <ActionHistoryBar history={actionHistory} className="min-w-0" />
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 lg:justify-end">
                 <button
                   type="button"
-                  className="btn-secondary px-3 py-1 text-xs"
-                  onClick={() => {
-                    setMovementStartDate('')
-                    setMovementEndDate('')
-                    setShowMovementDateFilter(false)
-                  }}
+                  className={`btn-secondary px-2.5 py-1 text-[11px] ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
+                  onClick={() => setShowMovementDateFilter((current) => !current)}
                 >
-                  {t('clear') || 'Clear'}
+                  {tr('custom_range', 'Custom range', 'កំណត់ចន្លោះពេល')}
                 </button>
-              ) : null}
+                <div className="min-w-0 truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                  {movementDateRangeLabel}
+                </div>
+                {(movementStartDate || movementEndDate) ? (
+                  <button
+                    type="button"
+                    className="btn-secondary px-2.5 py-1 text-[11px]"
+                    onClick={() => {
+                      setMovementStartDate('')
+                      setMovementEndDate('')
+                      setShowMovementDateFilter(false)
+                    }}
+                  >
+                    {t('clear') || 'Clear'}
+                  </button>
+                ) : null}
+              </div>
             </div>
             {showMovementDateFilter ? (
               <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-xl">

@@ -1293,8 +1293,8 @@ export const undoActionHistory = id =>
 export const redoActionHistory = id =>
   route(`actionHistory:redo:${id}`, () => apiFetch('POST', `/api/action-history/${id}/redo`, getDeviceInfo()), null, true)
 export const getInventorySummary   = ({ branchId } = {}) => route(branchId ? `inventory:summary:${branchId}` : 'inventory:summary', () => apiFetch('GET', `/api/inventory/summary${branchId ? `?branchId=${branchId}` : ''}`), () => [])
-export const getInventoryStats = ({ branchId } = {}) => {
-  const q = new URLSearchParams(Object.entries({ branchId }).filter(([, value]) => value != null && value !== '')).toString()
+export const getInventoryStats = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`inventory:stats:${q}`, () => apiFetch('GET', `/api/inventory/stats${q ? `?${q}` : ''}`), () => ({ item: null }))
 }
 export const searchInventoryProducts = (params = {}) => {

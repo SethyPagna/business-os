@@ -313,6 +313,7 @@ export default function Dashboard() {
   const aGrossSales = analytics?.totals?.gross_sales_usd || 0
   const aDiscounts = analytics?.totals?.discount_usd || 0
   const aStoreDiscounts = analytics?.totals?.store_discount_usd || 0
+  const aMemberDiscounts = analytics?.totals?.membership_discount_usd || Math.max(0, aDiscounts - aStoreDiscounts)
   const aTax = analytics?.totals?.tax_usd || 0
   const aDelivery = analytics?.totals?.delivery_usd || 0
   const aStockValue = summary?.stock_value_usd || 0
@@ -360,7 +361,7 @@ export default function Dashboard() {
   const periodKpis = [
       {
         id: 'products',
-        label: t('products_total'),
+        label: t('products') || t('products_total') || 'Products',
         value: summary?.product_count || 0,
         sub: (
           <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
@@ -410,12 +411,14 @@ export default function Dashboard() {
     },
     {
       id: 'discounts',
-      label: t('store_discounts') || 'Store discounts',
-      value: fmtUSD(aStoreDiscounts),
-      sub: aStoreDiscounts > 0 ? (t('promotion') || 'Promotion') : '',
+      label: translateOr('discounts_combined', 'Discounts', 'ការបញ្ចុះតម្លៃ'),
+      value: fmtUSD(aDiscounts),
+      sub: `${fmtUSD(aStoreDiscounts)} ${t('store_discounts') || 'store'} • ${fmtUSD(aMemberDiscounts)} ${t('membership_discounts') || 'member'}`,
       color: aStoreDiscounts > 0 ? 'text-amber-600' : 'text-gray-500',
       details: [
+        { label: t('discounts') || 'Discounts', value: fmtUSD(aDiscounts) },
         { label: t('store_discounts') || 'Store discounts', value: fmtUSD(aStoreDiscounts) },
+        { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(aMemberDiscounts) },
         { label: t('formula') || 'Formula', value: storeDiscountFormulaText },
       ],
     },
@@ -431,7 +434,7 @@ export default function Dashboard() {
     },
     {
       id: 'profit',
-      label: t('est_profit'),
+      label: translateOr('gross_profit', 'Gross Profit', 'ចំណេញដុល'),
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
       sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${t('profit_margin')}` : '',

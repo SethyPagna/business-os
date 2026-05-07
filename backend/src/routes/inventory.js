@@ -169,7 +169,7 @@ function appendInventoryProductFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || '').toLowerCase()
   if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
-  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+  if (['parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
     where.push('((COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0) OR COALESCE(p.parent_id, 0) > 0)')
   }
   if (groupState === 'standalone') where.push('(COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0)')
@@ -201,6 +201,176 @@ function hydrateInventoryProducts(rows = [], branchId = null) {
     product.batches = batchMap.get(product.id) || []
   })
   return normalizedRows
+}
+
+function buildInventoryFinancialJoinSql({ branchScoped = false } = {}) {
+  if (branchScoped) {
+    return `
+      LEFT JOIN (
+        SELECT si.product_id, si.branch_id,
+               SUM(si.quantity) AS qty_sold,
+               SUM(CASE
+                 WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0)
+                 ELSE 0
+               END) AS store_discount_usd,
+               SUM(CASE
+                 WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0)
+                 ELSE 0
+               END) AS store_discount_khr,
+               SUM(CASE
+                 WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0)
+                 ELSE 0
+               END) AS membership_discount_usd,
+               SUM(CASE
+                 WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0)
+                 ELSE 0
+               END) AS membership_discount_khr,
+               SUM(si.total_usd - CASE
+                 WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0))
+                 ELSE 0
+               END) AS revenue_usd,
+               SUM(si.total_khr - CASE
+                 WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0))
+                 ELSE 0
+               END) AS revenue_khr,
+               SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
+               SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE si.branch_id = @branchId
+          AND COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
+        GROUP BY si.product_id, si.branch_id
+      ) si ON si.product_id = p.id AND si.branch_id = @branchId
+      LEFT JOIN (
+        SELECT ri.product_id,
+               SUM(ri.quantity) AS qty_returned,
+               SUM(ri.total_usd) AS refund_usd,
+               SUM(ri.total_khr) AS refund_khr,
+               SUM(CASE WHEN ri.return_to_stock=1 THEN ri.cost_price_usd*ri.quantity ELSE 0 END) AS cogs_returned_usd,
+               SUM(CASE WHEN ri.return_to_stock=1 THEN ri.cost_price_khr*ri.quantity ELSE 0 END) AS cogs_returned_khr
+        FROM return_items ri
+        JOIN returns r ON r.id = ri.return_id
+        WHERE COALESCE(ri.branch_id, r.branch_id) = @branchId
+          AND COALESCE(r.status, 'completed') != 'cancelled'
+          AND COALESCE(r.return_scope, 'customer') = 'customer'
+        GROUP BY ri.product_id
+      ) ret ON ret.product_id = p.id
+    `
+  }
+
+  return `
+    LEFT JOIN (
+      SELECT si.product_id,
+             SUM(si.quantity) AS qty_sold,
+             SUM(CASE
+               WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.discount_usd, 0)
+               ELSE 0
+             END) AS store_discount_usd,
+             SUM(CASE
+               WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.discount_khr, 0)
+               ELSE 0
+             END) AS store_discount_khr,
+             SUM(CASE
+               WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * COALESCE(s.membership_discount_usd, 0)
+               ELSE 0
+             END) AS membership_discount_usd,
+             SUM(CASE
+               WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * COALESCE(s.membership_discount_khr, 0)
+               ELSE 0
+             END) AS membership_discount_khr,
+             SUM(si.total_usd - CASE
+               WHEN COALESCE(s.subtotal_usd, 0) > 0 THEN (si.total_usd / s.subtotal_usd) * (COALESCE(s.discount_usd, 0) + COALESCE(s.membership_discount_usd, 0))
+               ELSE 0
+             END) AS revenue_usd,
+             SUM(si.total_khr - CASE
+               WHEN COALESCE(s.subtotal_khr, 0) > 0 THEN (si.total_khr / s.subtotal_khr) * (COALESCE(s.discount_khr, 0) + COALESCE(s.membership_discount_khr, 0))
+               ELSE 0
+             END) AS revenue_khr,
+             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
+             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE COALESCE(s.sale_status, 'completed') NOT IN ('awaiting_payment', 'cancelled')
+      GROUP BY si.product_id
+    ) si ON si.product_id = p.id
+    LEFT JOIN (
+      SELECT ri.product_id,
+             SUM(ri.quantity) AS qty_returned,
+             SUM(ri.total_usd) AS refund_usd,
+             SUM(ri.total_khr) AS refund_khr,
+             SUM(CASE WHEN ri.return_to_stock=1 THEN ri.cost_price_usd*ri.quantity ELSE 0 END) AS cogs_returned_usd,
+             SUM(CASE WHEN ri.return_to_stock=1 THEN ri.cost_price_khr*ri.quantity ELSE 0 END) AS cogs_returned_khr
+      FROM return_items ri
+      JOIN returns r ON r.id = ri.return_id
+      WHERE COALESCE(r.status, 'completed') != 'cancelled'
+        AND COALESCE(r.return_scope, 'customer') = 'customer'
+      GROUP BY ri.product_id
+    ) ret ON ret.product_id = p.id
+  `
+}
+
+function inventoryFinancialSelectSql() {
+  return `
+    COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0) AS qty_sold,
+    COALESCE(si.store_discount_usd, 0) AS store_discount_usd,
+    COALESCE(si.store_discount_khr, 0) AS store_discount_khr,
+    COALESCE(si.membership_discount_usd, 0) AS membership_discount_usd,
+    COALESCE(si.membership_discount_khr, 0) AS membership_discount_khr,
+    COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0) AS revenue_usd,
+    COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0) AS revenue_khr,
+    COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0) AS cogs_usd,
+    COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0) AS cogs_khr
+  `
+}
+
+function getFilteredInventoryStats(query = {}) {
+  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query)
+  const joinSql = joins.join('\n')
+  const whereSql = `WHERE ${where.join(' AND ')}`
+  const branchScoped = Number.isFinite(Number(params.branchId))
+  const financialJoinSql = buildInventoryFinancialJoinSql({ branchScoped })
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total_products,
+      SUM(CASE WHEN ${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) THEN 1 ELSE 0 END) AS in_stock,
+      SUM(CASE WHEN ${stockExpr} > COALESCE(p.out_of_stock_threshold, 0) AND ${stockExpr} <= COALESCE(p.low_stock_threshold, 10) THEN 1 ELSE 0 END) AS low_stock,
+      SUM(CASE WHEN ${stockExpr} <= COALESCE(p.out_of_stock_threshold, 0) THEN 1 ELSE 0 END) AS out_of_stock,
+      COALESCE(SUM(${stockExpr}), 0) AS stock_quantity,
+      COALESCE(SUM(GREATEST(${stockExpr}, 0) * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0)), 0) AS stock_value_usd,
+      COALESCE(SUM(GREATEST(${stockExpr}, 0) * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0)), 0) AS stock_value_khr,
+      COALESCE(SUM(COALESCE(si.qty_sold, 0) - COALESCE(ret.qty_returned, 0)), 0) AS net_sold_qty,
+      COALESCE(SUM(COALESCE(si.store_discount_usd, 0)), 0) AS store_discount_usd,
+      COALESCE(SUM(COALESCE(si.store_discount_khr, 0)), 0) AS store_discount_khr,
+      COALESCE(SUM(COALESCE(si.membership_discount_usd, 0)), 0) AS membership_discount_usd,
+      COALESCE(SUM(COALESCE(si.membership_discount_khr, 0)), 0) AS membership_discount_khr,
+      COALESCE(SUM(COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0)), 0) AS revenue_usd,
+      COALESCE(SUM(COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0)), 0) AS revenue_khr,
+      COALESCE(SUM(COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0)), 0) AS cogs_usd,
+      COALESCE(SUM(COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0)), 0) AS cogs_khr
+    FROM products p
+    ${joinSql}
+    ${financialJoinSql}
+    ${whereSql}
+  `).get(params) || {}
+
+  return {
+    total_products: Number(row.total_products || 0),
+    in_stock: Number(row.in_stock || 0),
+    low_stock: Number(row.low_stock || 0),
+    out_of_stock: Number(row.out_of_stock || 0),
+    stock_quantity: Number(row.stock_quantity || 0),
+    stock_value_usd: Number(row.stock_value_usd || 0),
+    stock_value_khr: Number(row.stock_value_khr || 0),
+    net_sold_qty: Number(row.net_sold_qty || 0),
+    store_discount_usd: Number(row.store_discount_usd || 0),
+    store_discount_khr: Number(row.store_discount_khr || 0),
+    membership_discount_usd: Number(row.membership_discount_usd || 0),
+    membership_discount_khr: Number(row.membership_discount_khr || 0),
+    revenue_usd: Number(row.revenue_usd || 0),
+    revenue_khr: Number(row.revenue_khr || 0),
+    cogs_usd: Number(row.cogs_usd || 0),
+    cogs_khr: Number(row.cogs_khr || 0),
+  }
 }
 
 // POST /api/inventory/adjust
@@ -799,6 +969,9 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
     const { where, joins, params, stockExpr } = appendInventoryProductFilters(req.query)
     const joinSql = joins.join('\n')
     const whereSql = `WHERE ${where.join(' AND ')}`
+    const branchScoped = Number.isFinite(Number(params.branchId))
+    const financialJoinSql = buildInventoryFinancialJoinSql({ branchScoped })
+    const financialSelectSql = inventoryFinancialSelectSql()
     const total = db.prepare(`
       SELECT COUNT(*) AS count
       FROM products p
@@ -810,6 +983,7 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         ${stockExpr} AS display_quantity,
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
         COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+        ${financialSelectSql},
         (
           SELECT COALESCE(
             json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
@@ -822,6 +996,7 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
         ) AS branch_stock_json
       FROM products p
       ${joinSql}
+      ${financialJoinSql}
       ${whereSql}
       ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
       LIMIT @pageSize OFFSET @offset
@@ -841,6 +1016,7 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
           ${stockExpr} AS display_quantity,
           COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
           COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+          ${financialSelectSql},
           (
             SELECT COALESCE(
               json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
@@ -853,6 +1029,7 @@ router.get('/products/search', authToken, requirePermission('inventory'), (req, 
           ) AS branch_stock_json
         FROM products p
         ${joinSql}
+        ${financialJoinSql}
         WHERE p.is_active = 1
           AND (p.id IN (${familyIdSql}) OR COALESCE(p.parent_id, 0) IN (${familyIdSql}))
         ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
@@ -1256,7 +1433,12 @@ router.post('/rfid/sessions/:id/apply', authToken, requirePermission('inventory'
 router.get('/stats', authToken, requirePermission('inventory'), (req, res) => {
   try {
     const branchId = req.query.branchId ? Number.parseInt(req.query.branchId, 10) : null
-    ok(res, { item: getStockMetrics({ branchId }) })
+    const hasFilterQuery = ['query', 'q', 'brand', 'stockState', 'stock_state', 'groupState', 'group_state', 'initial']
+      .some((key) => String(req.query[key] || '').trim())
+    const item = hasFilterQuery
+      ? getFilteredInventoryStats(req.query)
+      : getStockMetrics({ branchId })
+    ok(res, { item })
   } catch (error) {
     err(res, error?.message || 'Failed to load inventory stats')
   }
