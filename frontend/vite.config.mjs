@@ -142,6 +142,9 @@ export default defineConfig({
 
   build: {
     outDir: 'dist',
+    // Clean the output on each build. Stale-tab compatibility is handled by
+    // the backend asset resolver, so the shipped build can stay lean.
+    emptyOutDir: true,
     sourcemap: false,
     // Inline only files below 1 byte (effectively disables inlining)
     // Prevents base64 data: URLs for small images which confuse CSP/CORS

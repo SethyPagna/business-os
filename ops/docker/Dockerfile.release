@@ -1,13 +1,16 @@
 # syntax=docker/dockerfile:1
 
 FROM node:24-bookworm AS frontend-build
+ARG BUILD_COMMIT=dev
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --loglevel=warn
 COPY frontend/ ./
+RUN printf '%s\n' "$BUILD_COMMIT" > .build-commit
 RUN npm run build
 
 FROM node:24-bookworm AS backend-build
+ARG BUILD_COMMIT=dev
 WORKDIR /build/backend
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ libpq-dev \

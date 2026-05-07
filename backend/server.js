@@ -76,6 +76,53 @@ const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
 let databaseMaintenanceTimer = null
 
+const LEGACY_FRONTEND_ASSET_PREFIXES = [
+  'index-',
+  'app-shared-',
+  'app-api-',
+  'POS-',
+  'Inventory-',
+  'catalog-',
+  'groupedRecords-',
+  'productGrouping-',
+  'product-detail-',
+  'Receipt-',
+  'CustomersTab-',
+]
+
+function listFrontendAssetFiles() {
+  if (!FRONTEND_DIST_EXISTS) return []
+  const assetsDir = path.join(FRONTEND_DIST, 'assets')
+  try {
+    return fs.readdirSync(assetsDir)
+  } catch (_) {
+    return []
+  }
+}
+
+function resolveFrontendAssetPath(assetName = '') {
+  if (!FRONTEND_DIST_EXISTS) return ''
+  const normalized = String(assetName || '').replace(/^\/+/, '')
+  if (!normalized) return ''
+  const assetsDir = path.join(FRONTEND_DIST, 'assets')
+  const directPath = path.join(assetsDir, normalized)
+  if (fs.existsSync(directPath)) return directPath
+  if (!normalized.endsWith('.js')) return ''
+
+  for (const prefix of LEGACY_FRONTEND_ASSET_PREFIXES) {
+    if (!normalized.startsWith(prefix)) continue
+    const fallbackName = listFrontendAssetFiles()
+      .filter((name) => name.startsWith(prefix) && name.endsWith('.js'))
+      .sort()
+      .at(-1)
+    if (!fallbackName) return ''
+    const fallbackPath = path.join(assetsDir, fallbackName)
+    return fs.existsSync(fallbackPath) ? fallbackPath : ''
+  }
+
+  return ''
+}
+
 function loadCompressionMiddleware() {
   // Compression is optional so the server can still boot in minimal installs.
   try {
@@ -143,6 +190,13 @@ function mountStaticAssets(target) {
   target.get(['/', '/index.html'], (req, res, next) => {
     if (!isConfiguredCustomerPortalHost(req)) return next()
     return res.redirect(302, '/public')
+  })
+
+  target.get('/assets/:assetName', (req, res, next) => {
+    const assetPath = resolveFrontendAssetPath(req.params.assetName)
+    if (!assetPath) return next()
+    setFrontendStaticHeaders(res, assetPath)
+    return res.sendFile(assetPath)
   })
 
   target.use(express.static(FRONTEND_DIST, {
