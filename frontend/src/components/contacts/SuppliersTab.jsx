@@ -15,6 +15,7 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -468,17 +469,14 @@ function SuppliersTab({ t, notify, active = true }) {
     const ids = [...selectedIds]
     const snapshots = suppliers.filter((supplier) => ids.includes(Number(supplier?.id || 0))).map((supplier) => JSON.parse(JSON.stringify(supplier)))
     const failedIds = []
-    let deletedCount = 0
     setBulkActionBusy(true)
     try {
-      for (const id of ids) {
-        try {
-          await window.api.deleteSupplier(id)
-          deletedCount += 1
-        } catch (_) {
-          failedIds.push(Number(id))
-        }
-      }
+      const deleteRun = await runConcurrentTasks(ids, async (id) => {
+        await window.api.deleteSupplier(id)
+        return Number(id)
+      })
+      const deletedCount = deleteRun.successes.length
+      failedIds.push(...deleteRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
       setSelectedIds(new Set(failedIds))
       await load({ silent: true, label: 'Suppliers refresh after delete' })
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
@@ -487,8 +485,7 @@ function SuppliersTab({ t, notify, active = true }) {
         actionHistory.pushAction({
           label: `Delete ${deletedCount} supplier${deletedCount === 1 ? '' : 's'}`,
           undo: async () => {
-            restoredEntries = []
-            for (const snapshot of deletedSnapshots) {
+            const restoreRun = await runConcurrentTasks(deletedSnapshots, async (snapshot) => {
               const result = await window.api.createSupplier({
                 name: snapshot.name || '',
                 phone: snapshot.phone || '',
@@ -500,15 +497,16 @@ function SuppliersTab({ t, notify, active = true }) {
                 userId: user?.id,
                 userName: user?.name,
               })
-              restoredEntries.push({ restoredId: Number(result?.id || result?.data?.id || 0) })
-            }
+              return { restoredId: Number(result?.id || result?.data?.id || 0) }
+            })
+            if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore supplier'))
+            restoredEntries = restoreRun.successes.map((entry) => entry.value)
             await load({ silent: true, label: 'Suppliers restore deleted' })
           },
           redo: async () => {
             const idsToDelete = restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
-            for (const id of idsToDelete) {
-              await window.api.deleteSupplier(id)
-            }
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => window.api.deleteSupplier(id))
+            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete supplier'))
             await load({ silent: true, label: 'Suppliers redo delete' })
           },
         })

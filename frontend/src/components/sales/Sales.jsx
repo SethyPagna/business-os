@@ -14,6 +14,7 @@ import SalesImportModal from './SalesImportModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -429,23 +430,19 @@ export default function Sales() {
   }
 
   const applySaleStatusEntries = useCallback(async (entries = [], notes = '') => {
-    const failedIds = []
-    const updatedIds = []
-
-    for (const entry of entries) {
+    const statusRun = await runConcurrentTasks(entries, async (entry) => {
       const saleId = Number(entry?.id || 0)
       const nextStatus = String(entry?.status || '').trim()
-      if (!saleId || !nextStatus) {
-        failedIds.push(saleId)
-        continue
-      }
-      try {
-        await window.api.updateSaleStatus(saleId, nextStatus, notes)
-        updatedIds.push(saleId)
-      } catch {
-        failedIds.push(saleId)
-      }
-    }
+      if (!saleId || !nextStatus) throw new Error('Invalid sale status entry')
+      await window.api.updateSaleStatus(saleId, nextStatus, notes)
+      return saleId
+    })
+    const failedIds = statusRun.failures
+      .map((entry) => Number(entry.item?.id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0)
+    const updatedIds = statusRun.successes
+      .map((entry) => Number(entry.value || entry.item?.id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0)
 
     await loadSales(true)
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))

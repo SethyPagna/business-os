@@ -9,6 +9,7 @@ import BranchForm from './BranchForm'
 import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -330,8 +331,7 @@ export default function Branches() {
       actionHistory.pushAction({
         label: `Delete ${restoredSnapshots.length} branch${restoredSnapshots.length === 1 ? '' : 'es'}`,
         undo: async () => {
-          restoredEntries = []
-          for (const snapshot of restoredSnapshots) {
+          const restoreRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
             const result = await window.api.createBranch({
               name: snapshot.name || '',
               location: snapshot.location || '',
@@ -344,18 +344,21 @@ export default function Branches() {
               userName: user?.name,
             })
             if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
-            restoredEntries.push({ originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) })
-          }
+            return { originalId: snapshot.id, restoredId: Number(result?.id || result?.data?.id || 0) }
+          })
+          if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore branch'))
+          restoredEntries = restoreRun.successes.map((entry) => entry.value)
           await load()
         },
         redo: async () => {
           const idsToDelete = restoredEntries.length
             ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
             : restoredSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
-          for (const branchId of idsToDelete) {
+          const redoRun = await runConcurrentTasks(idsToDelete, async (branchId) => {
             const result = await window.api.deleteBranch(branchId, user?.id, user?.name)
             if (!result?.success) throw new Error(result?.error || 'Failed to re-delete branch')
-          }
+          })
+          if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
           await load()
         },
       })

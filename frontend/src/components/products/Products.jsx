@@ -22,6 +22,7 @@ import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './p
 import { getAvailableYears, matchesYearMonthFilters, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initials.mjs'
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -501,20 +502,15 @@ export default function Products() {
     if (!confirm(`Delete ${selectedVisibleCount} product${selectedVisibleCount > 1 ? 's' : ''}? This cannot be undone.`)) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
-    const failedIds = []
-    let failed = 0
-    let done = 0
     try {
-      for (const id of selectedVisibleIds) {
-        try {
-          const result = await window.api.deleteProduct(id)
-          if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
-          done++
-        } catch {
-          failed++
-          failedIds.push(Number(id))
-        }
-      }
+      const deletionRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
+        const result = await window.api.deleteProduct(id)
+        if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
+        return Number(id)
+      })
+      const failedIds = deletionRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id))
+      const failed = failedIds.length
+      const done = deletionRun.successes.length
       setSelectedIds(new Set(failedIds))
       await load(true)
       const deletedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
@@ -529,10 +525,11 @@ export default function Products() {
             const idsToDelete = restoredEntries.length
               ? restoredEntries.map((entry) => Number(entry.restoredId || 0)).filter((id) => id > 0)
               : deletedSnapshots.map((snapshot) => Number(snapshot.id || 0)).filter((id) => id > 0)
-            for (const id of idsToDelete) {
+            const redoRun = await runConcurrentTasks(idsToDelete, async (id) => {
               const result = await window.api.deleteProduct(id)
               if (result?.success === false) throw new Error(result.error || 'Failed to re-delete product')
-            }
+            })
+            if (redoRun.failures.length) throw new Error(redoRun.failures[0]?.error?.message || 'Failed to re-delete product')
             await load(true)
           },
         })
@@ -1179,12 +1176,12 @@ export default function Products() {
   const restoreProductBranchStock = useCallback(async (productId, snapshot, currentProduct, reason) => {
     const targetMap = new Map((snapshot?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
     const currentMap = new Map((currentProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), Number(entry?.quantity || 0)]))
-    const branchIds = new Set([...targetMap.keys(), ...currentMap.keys()].filter((id) => Number.isFinite(id) && id > 0))
+    const branchIds = [...new Set([...targetMap.keys(), ...currentMap.keys()].filter((id) => Number.isFinite(id) && id > 0))]
 
-    for (const branchId of branchIds) {
+    const syncRun = await runConcurrentTasks(branchIds, async (branchId) => {
       const targetQty = Number(targetMap.get(branchId) || 0)
       const currentQty = Number(currentMap.get(branchId) || 0)
-      if (targetQty === currentQty) continue
+      if (targetQty === currentQty) return
       const delta = Math.abs(targetQty - currentQty)
       await window.api.adjustStock({
         productId,
@@ -1198,20 +1195,22 @@ export default function Products() {
         userId: user.id,
         userName: user.name,
       })
-    }
+    })
+    if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
   }, [user.id, user.name])
 
   const restoreProductSnapshots = useCallback(async (snapshots = [], reason = 'Restore products') => {
     if (!snapshots.length) return
     const latestProducts = await fetchProductsByIds(snapshots.map((snapshot) => snapshot?.id))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    for (const snapshot of snapshots) {
+    const restoreRun = await runConcurrentTasks(snapshots, async (snapshot) => {
       const productId = Number(snapshot?.id || 0)
       const currentProduct = latestMap.get(productId)
-      if (!currentProduct) continue
+      if (!currentProduct) return
       await window.api.updateProduct(productId, buildProductWritePayload(snapshot))
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
-    }
+    })
+    if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
   }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
 
@@ -1251,10 +1250,11 @@ export default function Products() {
     }
     const latestProducts = await fetchProductsByIds(restored.map((entry) => entry.restoredId))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    for (const entry of restored) {
+    const stockRestoreRun = await runConcurrentTasks(restored, async (entry) => {
       const currentProduct = latestMap.get(entry.restoredId)
       await restoreProductBranchStock(entry.restoredId, entry.snapshot, currentProduct || { branch_stock: [] }, reason)
-    }
+    })
+    if (stockRestoreRun.failures.length) throw (stockRestoreRun.failures[0]?.error || new Error('Failed to restore deleted product stock'))
     await load(true)
     return restored
   }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock])
@@ -1303,11 +1303,11 @@ export default function Products() {
     if (!productIds.length) return
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    for (const productId of productIds) {
+    const clearRun = await runConcurrentTasks(productIds, async (productId) => {
       const currentProduct = latestMap.get(Number(productId))
-      if (!currentProduct) continue
+      if (!currentProduct) return
       const branchRows = (currentProduct.branch_stock || []).filter((entry) => Number(entry?.quantity || 0) > 0)
-      for (const entry of branchRows) {
+      const branchRun = await runConcurrentTasks(branchRows, async (entry) => {
         await window.api.adjustStock({
           productId: Number(productId),
           productName: currentProduct.name || '',
@@ -1320,8 +1320,10 @@ export default function Products() {
           userId: user.id,
           userName: user.name,
         })
-      }
-    }
+      })
+      if (branchRun.failures.length) throw (branchRun.failures[0]?.error || new Error('Failed to clear branch stock'))
+    })
+    if (clearRun.failures.length) throw (clearRun.failures[0]?.error || new Error('Failed to clear product stock'))
     await load(true)
   }, [fetchProductsByIds, load, user.id, user.name])
 
@@ -1337,30 +1339,27 @@ export default function Products() {
     const failedIds = []
     const updatedIds = []
 
-    for (const productId of productIds) {
+    const addRun = await runConcurrentTasks(productIds, async (productId) => {
       const currentProduct = latestMap.get(Number(productId))
       if (!currentProduct) {
-        failedIds.push(Number(productId))
-        continue
+        throw new Error('Product not found')
       }
-      try {
-        await window.api.adjustStock({
-          productId: Number(productId),
-          productName: currentProduct.name || '',
-          type: 'add',
-          quantity: amount,
-          branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
-          unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
-          unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
-          reason,
-          userId: user.id,
-          userName: user.name,
-        })
-        updatedIds.push(Number(productId))
-      } catch {
-        failedIds.push(Number(productId))
-      }
-    }
+      await window.api.adjustStock({
+        productId: Number(productId),
+        productName: currentProduct.name || '',
+        type: 'add',
+        quantity: amount,
+        branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
+        unitCostUsd: currentProduct.purchase_price_usd || currentProduct.cost_price_usd || 0,
+        unitCostKhr: currentProduct.purchase_price_khr || currentProduct.cost_price_khr || 0,
+        reason,
+        userId: user.id,
+        userName: user.name,
+      })
+      return Number(productId)
+    })
+    updatedIds.push(...addRun.successes.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
+    failedIds.push(...addRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
 
     await load(true)
     return {
@@ -1382,42 +1381,39 @@ export default function Products() {
     const failedIds = []
     const updatedIds = []
 
-    for (const productId of productIds) {
+    const moveRun = await runConcurrentTasks(productIds, async (productId) => {
       const product = latestMap.get(Number(productId))
       if (!product) {
-        failedIds.push(Number(productId))
-        continue
+        throw new Error('Product not found')
       }
-      try {
-        const currentBranch = (product.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)
-        if (currentBranch && Number(currentBranch.branch_id) !== numericBranchId && Number(currentBranch.quantity || 0) > 0) {
-          await window.api.transferStock({
-            fromBranchId: Number(currentBranch.branch_id),
-            toBranchId: numericBranchId,
-            productId: Number(productId),
-            productName: product.name || '',
-            quantity: Number(currentBranch.quantity || 0),
-            note: reason,
-            userId: user.id,
-            userName: user.name,
-          })
-        } else if (!currentBranch) {
-          await window.api.adjustStock({
-            productId: Number(productId),
-            productName: product.name || '',
-            type: 'add',
-            quantity: 0,
-            branchId: numericBranchId,
-            reason,
-            userId: user.id,
-            userName: user.name,
-          })
-        }
-        updatedIds.push(Number(productId))
-      } catch {
-        failedIds.push(Number(productId))
+      const currentBranch = (product.branch_stock || []).find((entry) => Number(entry?.quantity || 0) > 0)
+      if (currentBranch && Number(currentBranch.branch_id) !== numericBranchId && Number(currentBranch.quantity || 0) > 0) {
+        await window.api.transferStock({
+          fromBranchId: Number(currentBranch.branch_id),
+          toBranchId: numericBranchId,
+          productId: Number(productId),
+          productName: product.name || '',
+          quantity: Number(currentBranch.quantity || 0),
+          note: reason,
+          userId: user.id,
+          userName: user.name,
+        })
+      } else if (!currentBranch) {
+        await window.api.adjustStock({
+          productId: Number(productId),
+          productName: product.name || '',
+          type: 'add',
+          quantity: 0,
+          branchId: numericBranchId,
+          reason,
+          userId: user.id,
+          userName: user.name,
+        })
       }
-    }
+      return Number(productId)
+    })
+    updatedIds.push(...moveRun.successes.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
+    failedIds.push(...moveRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
 
     await load(true)
     return {
@@ -1444,23 +1440,21 @@ export default function Products() {
     let done = 0
     let failed = 0
     try {
-      for (const id of selectedVisibleIds) {
-        try {
-          const current = productsById.get(Number(id))
-          const result = await window.api.updateProduct(id, {
-            ...nextUpdates,
-            updated_at: current?.updated_at || undefined,
-            expectedUpdatedAt: current?.updated_at || undefined,
-            userId: user.id,
-            userName: user.name,
-          })
-          if (result?.success === false) throw new Error(result.error || 'Failed to update product')
-          done++
-        } catch {
-          failed++
-          failedIds.push(Number(id))
-        }
-      }
+      const updateRun = await runConcurrentTasks(selectedVisibleIds, async (id) => {
+        const current = productsById.get(Number(id))
+        const result = await window.api.updateProduct(id, {
+          ...nextUpdates,
+          updated_at: current?.updated_at || undefined,
+          expectedUpdatedAt: current?.updated_at || undefined,
+          userId: user.id,
+          userName: user.name,
+        })
+        if (result?.success === false) throw new Error(result.error || 'Failed to update product')
+        return Number(id)
+      })
+      done = updateRun.successes.length
+      failed = updateRun.failures.length
+      failedIds.push(...updateRun.failures.map((entry) => Number(entry.item)).filter((id) => Number.isFinite(id)))
       setSelectedIds(new Set(failedIds))
       setBulkEditMode(null)
       setBulkEditForm({})
@@ -1471,7 +1465,7 @@ export default function Products() {
           label: `Update ${done} product${done === 1 ? '' : 's'}`,
           undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
           redo: async () => {
-            for (const snapshot of restoredSnapshots) {
+            const redoRun = await runConcurrentTasks(restoredSnapshots, async (snapshot) => {
               const current = productsById.get(Number(snapshot.id))
               const result = await window.api.updateProduct(snapshot.id, {
                 ...nextUpdates,
@@ -1481,7 +1475,8 @@ export default function Products() {
                 userName: user.name,
               })
               if (result?.success === false) throw new Error(result.error || 'Failed to reapply product update')
-            }
+            })
+            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to reapply product update'))
             await load(true)
           },
         })

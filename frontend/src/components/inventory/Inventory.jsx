@@ -26,6 +26,7 @@ import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggle
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
 import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
+import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
   beginTrackedRequest,
@@ -1067,64 +1068,62 @@ export default function Inventory() {
     if (batchApplying || !inventoryBatch?.items?.length) return
     if (!window.confirm(tr('confirm_apply_inventory_batch', `Do you want to apply ${inventoryBatch.items.length} inventory change(s)?`, `តើអ្នកចង់អនុវត្តការផ្លាស់ប្តូរស្តុក ${inventoryBatch.items.length} មែនទេ?`))) return
     setBatchApplying(true)
-    const failedItems = []
-    let successCount = 0
     try {
-      for (const item of inventoryBatch.items) {
+      const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item) => {
         const quantity = Number.parseFloat(item.quantity)
-        try {
-          if (!Number.isFinite(quantity) || quantity <= 0) {
-            throw new Error(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'))
-          }
-          if (item.action === 'adjust') {
-            const result = await window.api.adjustStock({
-              productId: item.productId,
-              productName: item.productName,
-              type: item.adjustType,
-              quantity,
-              reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', 'កែសម្រួលស្តុក'),
-              branchId: item.branchId,
-              unitCostUsd: item.unitCostUsd,
-              unitCostKhr: item.unitCostKhr,
-            })
-            if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', 'ការកែសម្រួលបានបរាជ័យ'))
-          } else if (item.action === 'transfer') {
-            const result = await window.api.transferInventoryStock({
-              productId: item.productId,
-              fromBranchId: item.fromBranchId,
-              toBranchId: item.toBranchId,
-              quantity,
-              reason: item.reason,
-            })
-            if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', 'ការផ្ទេរបានបរាជ័យ'))
-          } else if (item.action === 'move') {
-            const request = {
-              sourceProductId: item.productId,
-              destinationProductId: item.moveMode === 'existing' ? Number(item.destinationProductId || 0) : null,
-              branchId: item.branchId,
-              quantity,
-              reason: item.reason || 'broken',
-              note: item.note || '',
-            }
-            if (item.moveMode === 'new') {
-              request.destinationProduct = {
-                name: item.destinationName,
-                selling_price_usd: item.sellingPriceUsd,
-                special_price_usd: item.specialPriceUsd,
-                discount_enabled: !!item.discountEnabled,
-                discount_type: item.discountType,
-                discount_percent: item.discountPercent,
-                discount_amount_usd: item.discountAmountUsd,
-              }
-            }
-            const result = await window.api.moveStockRow(request)
-            if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
-          }
-          successCount += 1
-        } catch (error) {
-          failedItems.push({ ...item, error: error?.message || tr('save_failed', 'Save failed', 'ការរក្សាទុកបានបរាជ័យ') })
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'))
         }
-      }
+        if (item.action === 'adjust') {
+          const result = await window.api.adjustStock({
+            productId: item.productId,
+            productName: item.productName,
+            type: item.adjustType,
+            quantity,
+            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', 'កែសម្រួលស្តុក'),
+            branchId: item.branchId,
+            unitCostUsd: item.unitCostUsd,
+            unitCostKhr: item.unitCostKhr,
+          })
+          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', 'ការកែសម្រួលបានបរាជ័យ'))
+        } else if (item.action === 'transfer') {
+          const result = await window.api.transferInventoryStock({
+            productId: item.productId,
+            fromBranchId: item.fromBranchId,
+            toBranchId: item.toBranchId,
+            quantity,
+            reason: item.reason,
+          })
+          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', 'ការផ្ទេរបានបរាជ័យ'))
+        } else if (item.action === 'move') {
+          const request = {
+            sourceProductId: item.productId,
+            destinationProductId: item.moveMode === 'existing' ? Number(item.destinationProductId || 0) : null,
+            branchId: item.branchId,
+            quantity,
+            reason: item.reason || 'broken',
+            note: item.note || '',
+          }
+          if (item.moveMode === 'new') {
+            request.destinationProduct = {
+              name: item.destinationName,
+              selling_price_usd: item.sellingPriceUsd,
+              special_price_usd: item.specialPriceUsd,
+              discount_enabled: !!item.discountEnabled,
+              discount_type: item.discountType,
+              discount_percent: item.discountPercent,
+              discount_amount_usd: item.discountAmountUsd,
+            }
+          }
+          const result = await window.api.moveStockRow(request)
+          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
+        }
+      })
+      const failedItems = applyRun.failures.map((entry) => ({
+        ...(entry.item || {}),
+        error: entry?.error?.message || tr('save_failed', 'Save failed', 'ការរក្សាទុកបានបរាជ័យ'),
+      }))
+      const successCount = applyRun.successes.length
       await load(true)
       if (!failedItems.length) {
         setInventoryBatch(null)
