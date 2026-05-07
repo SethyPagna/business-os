@@ -15,10 +15,9 @@
  * Layout (mobile  < md):   Tab bar toggles between Products and Cart views.
  */
 
-import { useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
+import { Suspense, lazy, useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
 import { ImageOff, Info, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
-import Receipt from '../receipt/Receipt'
 import {
   PAYMENT_METHODS,
   DELIVERY_FEE_PAYER,
@@ -31,7 +30,6 @@ import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
 import FilterPanel from './FilterPanel'
-import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import PaginationControls from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -53,6 +51,8 @@ import {
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
+const Receipt = lazy(() => import('../receipt/Receipt'))
+const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
 // ?�?� Customer contact-option helpers (mirrors CustomersTab) ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -1853,34 +1853,40 @@ export default function POS() {
 
       {/* ?�?� Receipt overlay ??shown after each completed sale ?�?�?�?�?�?�?�?�?�?� */}
       {/*   Displayed on top of the POS so other orders remain intact.   */}
-      <ImageGalleryLightbox
-        open={!!(imageLightbox && imageLightbox.images?.length)}
-        title={imageLightbox?.title || t('products')}
-        images={imageLightbox?.images || []}
-        index={imageLightbox?.index || 0}
-        onClose={() => setImageLightbox(null)}
-        onIndexChange={(index) => setImageLightbox((current) => (current ? { ...current, index } : current))}
-        labels={{
-        prev: posCopy('Prev'),
-        next: posCopy('Next'),
-          imageCount: '{current}/{total}',
-          dotsLabel: 'Image {current} of {total}',
-        }}
-      />
-      {receiptQueue.length > 0 && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="relative w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-2xl">
-            {receiptQueue.length > 1 && (
-              <div className="flex-shrink-0 bg-blue-600 text-white text-xs text-center py-1 px-3">{receiptQueue.length} receipts waiting - close this one to see the next</div>
-            )}
-            <Receipt
-              sale={receiptQueue[0]}
-              settings={settings}
-              onClose={() => setReceiptQueue(q => q.slice(1))}
+      {(imageLightbox || receiptQueue.length > 0) ? (
+        <Suspense fallback={null}>
+          {imageLightbox && imageLightbox.images?.length ? (
+            <ImageGalleryLightbox
+              open={!!(imageLightbox && imageLightbox.images?.length)}
+              title={imageLightbox?.title || t('products')}
+              images={imageLightbox?.images || []}
+              index={imageLightbox?.index || 0}
+              onClose={() => setImageLightbox(null)}
+              onIndexChange={(index) => setImageLightbox((current) => (current ? { ...current, index } : current))}
+              labels={{
+                prev: posCopy('Prev'),
+                next: posCopy('Next'),
+                imageCount: '{current}/{total}',
+                dotsLabel: 'Image {current} of {total}',
+              }}
             />
-          </div>
-        </div>
-      )}
+          ) : null}
+          {receiptQueue.length > 0 ? (
+            <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+              <div className="relative w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+                {receiptQueue.length > 1 && (
+                  <div className="flex-shrink-0 bg-blue-600 text-white text-xs text-center py-1 px-3">{receiptQueue.length} receipts waiting - close this one to see the next</div>
+                )}
+                <Receipt
+                  sale={receiptQueue[0]}
+                  settings={settings}
+                  onClose={() => setReceiptQueue(q => q.slice(1))}
+                />
+              </div>
+            </div>
+          ) : null}
+        </Suspense>
+      ) : null}
 
     </div>
   )

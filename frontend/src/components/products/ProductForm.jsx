@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { ScanLine } from 'lucide-react'
 import Modal from '../shared/Modal'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from './primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
-import FilePickerModal from '../files/FilePickerModal'
-import BarcodeScannerModal from './BarcodeScannerModal'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import { buildCacheBustedMediaPath } from '../../utils/mediaUpload.js'
 import {
@@ -13,6 +11,9 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+
+const FilePickerModal = lazy(() => import('../files/FilePickerModal'))
+const BarcodeScannerModal = lazy(() => import('./BarcodeScannerModal'))
 
 function normalizeGallery(product) {
   const source = Array.isArray(product?.image_gallery)
@@ -894,20 +895,28 @@ export default function ProductForm({
           {t('cancel')}
         </button>
       </div>
-      <FilePickerModal
-        open={filePickerOpen}
-        mediaType="image"
-        title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
-        onClose={() => setFilePickerOpen(false)}
-        onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= 5 ? current : [...current, publicPath])}
-      />
-      <BarcodeScannerModal
-        open={!!scannerField}
-        title={scannerField === 'sku' ? scanSkuLabel : scanBarcodeLabel}
-        onClose={closeScanner}
-        onDetected={applyScannedValue}
-        t={t}
-      />
+      {(filePickerOpen || scannerField) ? (
+        <Suspense fallback={null}>
+          {filePickerOpen ? (
+            <FilePickerModal
+              open={filePickerOpen}
+              mediaType="image"
+              title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
+              onClose={() => setFilePickerOpen(false)}
+              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= 5 ? current : [...current, publicPath])}
+            />
+          ) : null}
+          {scannerField ? (
+            <BarcodeScannerModal
+              open={!!scannerField}
+              title={scannerField === 'sku' ? scanSkuLabel : scanBarcodeLabel}
+              onClose={closeScanner}
+              onDetected={applyScannedValue}
+              t={t}
+            />
+          ) : null}
+        </Suspense>
+      ) : null}
     </Modal>
   )
 }
