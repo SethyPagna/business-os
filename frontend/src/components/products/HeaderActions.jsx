@@ -34,53 +34,53 @@ export default function ProductsHeaderActions({
 
   return (
     <>
-      <div className="grid w-full grid-cols-4 gap-2 pb-1 md:hidden">
+      <div className="grid w-full grid-cols-4 gap-2.5 pb-1 md:hidden">
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-medium"
+          className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-[9px] font-medium"
           title={importLabel}
           aria-label={importLabel}
         >
           <Upload className="h-3.5 w-3.5 shrink-0" />
-          <span>{importLabel}</span>
+          <span className="truncate">{importLabel}</span>
         </button>
         {Array.isArray(exportMenuItems) && exportMenuItems.length ? (
           <ExportMenu
             label={exportLabel}
             items={exportMenuItems}
             compact
-            triggerClassName="min-h-10 w-full min-w-0 rounded-xl px-1 py-2 text-[9px] font-medium"
+            triggerClassName="min-h-10 w-full min-w-0 rounded-xl px-0.5 py-2 text-[9px] font-medium"
             triggerWrapperClassName="w-full"
           />
         ) : (
           <button
             onClick={onExport}
-            className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-medium"
+            className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-[9px] font-medium"
             title={exportLabel}
             aria-label={exportLabel}
           >
             <Download className="h-3.5 w-3.5 shrink-0" />
-            <span>{exportLabel}</span>
+            <span className="truncate">{exportLabel}</span>
           </button>
         )}
         <PortalMenu
           align="right"
           triggerWrapperClassName="w-full"
           trigger={(
-            <button className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-medium" aria-label={manageLabel}>
+            <button className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-[9px] font-medium" aria-label={manageLabel}>
               <Settings2 className="h-3.5 w-3.5 shrink-0" />
-              <span>{manageLabel}</span>
+              <span className="truncate">{manageLabel}</span>
             </button>
           )}
           items={manageItems}
         />
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] font-medium"
+          className="btn-primary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-[9px] font-medium"
           aria-label={productLabel}
         >
           <PackagePlus className="h-3.5 w-3.5 shrink-0" />
-          <span>{productLabel}</span>
+          <span className="truncate">{productLabel}</span>
         </button>
       </div>
 
