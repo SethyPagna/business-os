@@ -40,6 +40,17 @@ function restoreBranchStock(productId, branchId, quantity) {
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
 
+function normalizeMovementProductName(...values) {
+  for (const value of values) {
+    const raw = String(value ?? '').trim().replace(/\s+/g, ' ')
+    if (!raw) continue
+    const lowered = raw.toLowerCase()
+    if (lowered === 'undefined' || lowered === 'null' || lowered === 'nan') continue
+    return raw
+  }
+  return ''
+}
+
 function refreshProductStockQuantity(productId) {
   syncProductBatchRollups([productId])
 }
@@ -290,7 +301,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
     const productIds = d.items.map(it => it.product_id).filter(Boolean)
     const productMap = new Map()
     if (productIds.length > 0) {
-      db.prepare(`SELECT id, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`)
+      db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr, purchase_price_usd, purchase_price_khr FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`)
         .all(...productIds)
         .forEach(p => productMap.set(p.id, p))
     }
@@ -317,6 +328,8 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       const itemBranchName = itemBranchId
         ? db.prepare('SELECT name FROM branches WHERE id = ?').get(itemBranchId)?.name || branchName || saleMeta.branch_name || null
         : branchName || saleMeta.branch_name || null
+      const productMeta = item.product_id ? productMap.get(item.product_id) : null
+      const safeProductName = normalizeMovementProductName(item.product_name, productMeta?.name) || (item.product_id ? `product #${item.product_id}` : 'Product')
 
       // Use safe cost prices with fallback to product data
       let costUsd = item.cost_price_usd
@@ -333,7 +346,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         rid,
         item.sale_item_id || null,
         item.product_id || null,
-        item.product_name || null,
+        safeProductName,
         item.quantity,
         item.applied_price_usd || 0,
         item.applied_price_khr || 0,
@@ -405,7 +418,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
         touchedProductIds.add(item.product_id)
         restoredAllocations.forEach((allocation) => {
           movementStatement.run(
-            item.product_id, item.product_name,
+            item.product_id, safeProductName,
             allocation.branch_id || itemBranchId,
             allocation.branch_name || itemBranchName,
             'return',
@@ -587,6 +600,13 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `)
     const touchedProductIds = new Set()
+    const productIds = d.items.map((item) => Number(item.product_id)).filter((id) => Number.isFinite(id) && id > 0)
+    const productNameMap = new Map()
+    if (productIds.length) {
+      db.prepare(`SELECT id, name FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`)
+        .all(...productIds)
+        .forEach((product) => productNameMap.set(Number(product.id), product.name))
+    }
     const insertReturnAllocation = db.prepare(`
       INSERT INTO return_item_batch_allocations
         (return_item_id, sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
@@ -606,6 +626,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       const unitCostKhr = toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
       const totalUsd = Number((qty * unitCostUsd).toFixed(2))
       const totalKhr = Math.round(qty * unitCostKhr)
+      const safeProductName = normalizeMovementProductName(item.product_name, productNameMap.get(Number(item.product_id))) || `product #${item.product_id}`
       const itemBranchId = item.branch_id || d.branch_id || null
       const itemBranchName = itemBranchId
         ? db.prepare('SELECT name FROM branches WHERE id = ?').get(itemBranchId)?.name || branchName || null
@@ -615,7 +636,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
         rid,
         null,
         item.product_id,
-        item.product_name || null,
+        safeProductName,
         qty,
         unitCostUsd,
         unitCostKhr,
@@ -647,7 +668,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       allocations.forEach((allocation) => {
         movementStatement.run(
           item.product_id,
-          item.product_name || null,
+          safeProductName,
           allocation.branch_id || itemBranchId,
           allocation.branch_name || itemBranchName,
           'supplier_return',

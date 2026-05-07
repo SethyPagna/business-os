@@ -34,10 +34,10 @@ export default function ProductsHeaderActions({
 
   return (
     <>
-      <div className="grid w-full grid-cols-4 gap-3 pb-1 md:hidden">
+      <div className="grid w-full grid-cols-4 gap-2 pb-1 md:hidden">
         <button
           onClick={onImport}
-          className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium leading-none"
+          className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-none"
           title={importLabel}
           aria-label={importLabel}
         >
@@ -49,13 +49,13 @@ export default function ProductsHeaderActions({
             label={exportLabel}
             items={exportMenuItems}
             compact
-            triggerClassName="min-h-10 w-full min-w-0 rounded-xl px-2 py-2 text-xs font-medium leading-none"
-            triggerWrapperClassName="w-full"
+            triggerClassName="!min-w-0 min-h-10 w-full min-w-0 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-none"
+            triggerWrapperClassName="w-full px-0.5"
           />
         ) : (
           <button
             onClick={onExport}
-            className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium leading-none"
+            className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-none"
             title={exportLabel}
             aria-label={exportLabel}
           >
@@ -65,9 +65,9 @@ export default function ProductsHeaderActions({
         )}
         <PortalMenu
           align="right"
-          triggerWrapperClassName="w-full"
+          triggerWrapperClassName="w-full px-0.5"
           trigger={(
-            <button className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium leading-none" aria-label={manageLabel}>
+            <button className="btn-secondary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-none" aria-label={manageLabel}>
               <Settings2 className="h-4 w-4 shrink-0" />
               <span className="truncate">{manageLabel}</span>
             </button>
@@ -76,7 +76,7 @@ export default function ProductsHeaderActions({
         />
         <button
           onClick={onAdd}
-          className="btn-primary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-medium leading-none"
+          className="btn-primary inline-flex min-h-10 w-full min-w-0 items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-none"
           aria-label={productLabel}
         >
           <PackagePlus className="h-4 w-4 shrink-0" />

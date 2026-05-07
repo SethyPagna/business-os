@@ -8,7 +8,10 @@ function minuteBucket(value) {
 }
 
 function normalizeText(value) {
-  return String(value || '').trim()
+  const raw = String(value || '').trim().replace(/\s+/g, ' ')
+  const lowered = raw.toLowerCase()
+  if (!raw || lowered === 'undefined' || lowered === 'null' || lowered === 'nan') return ''
+  return raw
 }
 
 function canonicalMovementType(type) {
@@ -125,7 +128,15 @@ export function buildMovementGroups(movements = []) {
 
   return Array.from(groups.values())
     .map((group) => {
-      const uniqueProducts = Array.from(new Set(group.items.map((item) => normalizeText(item.product_name)).filter(Boolean)))
+      const uniqueProducts = Array.from(new Set(group.items.map((item) => {
+        const displayName = normalizeText(item.product_name)
+        if (displayName) return displayName
+        const lotCode = normalizeText(item.lot_code)
+        if (lotCode) return `Lot ${lotCode}`
+        const productId = Number(item.product_id || 0)
+        if (Number.isFinite(productId) && productId > 0) return `product #${productId}`
+        return 'Inventory movement'
+      }).filter(Boolean)))
       const uniqueBranches = Array.from(new Set(group.items.map((item) => normalizeText(item.branch_name)).filter(Boolean)))
       const uniqueUsers = Array.from(new Set(group.items.map((item) => normalizeText(item.user_name)).filter(Boolean)))
       const allReasons = Array.from(new Set(group.items.map((item) => normalizeText(item.reason)).filter(Boolean)))

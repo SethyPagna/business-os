@@ -116,6 +116,17 @@ function splitSearchTerms(value = '') {
     .slice(0, 8)
 }
 
+function normalizeMovementDisplayText(...values) {
+  for (const value of values) {
+    const raw = String(value ?? '').trim().replace(/\s+/g, ' ')
+    if (!raw) continue
+    const lowered = raw.toLowerCase()
+    if (lowered === 'undefined' || lowered === 'null' || lowered === 'nan') continue
+    return raw
+  }
+  return ''
+}
+
 function appendInventoryProductFilters(query = {}) {
   const where = ['p.is_active = 1']
   const params = {}
@@ -194,6 +205,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
   const product = getProductById(productId)
   if (!product) return err(res, 'Product not found', 404)
   migrateLegacyProductToBatches(productId)
+  const movementProductName = normalizeMovementDisplayText(productName, product.name) || `product #${productId}`
 
   const activeBranches = db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
   const defaultBranch = activeBranches.find((branch) => branch.is_default) || activeBranches[0] || null
@@ -339,7 +351,7 @@ router.post('/adjust', authToken, requirePermission('inventory'), (req, res) => 
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(
           productId,
-          productName,
+          movementProductName,
           entry.branch_id || null,
           entry.branch_name || null,
           entry.movement_type,
@@ -1381,13 +1393,13 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
     const where = []
     const params = {}
     if (branchId) {
-      where.push('branch_id = @branchId')
+      where.push('im.branch_id = @branchId')
       params.branchId = branchId
     }
     if (userId) {
       if (!isAdminControlUser(req.user)) return err(res, 'Administrator access required for movement user filters.', 403)
       // Keep parity with the legacy SQLite activity filter contract: user_id = ?
-      where.push('user_id = @userId')
+      where.push('im.user_id = @userId')
       params.userId = parseInt(userId, 10) || userId
     }
     if (startDate) {
@@ -1406,8 +1418,26 @@ router.get('/movements', authToken, requirePermission('inventory'), (req, res) =
     `).get(params)?.count || 0
     const rows = db.prepare(`
       SELECT im.*,
+        COALESCE(
+          NULLIF(
+            CASE
+              WHEN lower(trim(COALESCE(im.product_name::text, ''))) IN ('', 'undefined', 'null', 'nan')
+                THEN NULL
+              ELSE trim(im.product_name::text)
+            END,
+            ''
+          ),
+          NULLIF(trim(COALESCE(p.name, '')), ''),
+          CASE WHEN im.product_id IS NOT NULL THEN 'product #' || im.product_id::text ELSE 'Inventory movement' END
+        ) AS product_name,
+        COALESCE(
+          NULLIF(trim(COALESCE(im.branch_name::text, '')), ''),
+          NULLIF(trim(COALESCE(b.name, '')), '')
+        ) AS branch_name,
         COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text) AS created_at
       FROM inventory_movements im
+      LEFT JOIN products p ON p.id = im.product_id
+      LEFT JOIN branches b ON b.id = im.branch_id
       ${whereSql}
       ORDER BY COALESCE(NULLIF(im.created_at::text, ''), CURRENT_TIMESTAMP::text) DESC, im.id DESC
       LIMIT @pageSize OFFSET @offset

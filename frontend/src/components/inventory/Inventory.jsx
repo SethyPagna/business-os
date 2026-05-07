@@ -24,6 +24,7 @@ import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.mjs'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { buildProductGroupSections } from '../../utils/productGrouping.mjs'
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import {
@@ -183,6 +184,8 @@ export default function Inventory() {
   const [expandedMovementGroups, setExpandedMovementGroups] = useState(() => new Set())
   const [expandedMovementPages, setExpandedMovementPages] = useState({})
   const [collapsedMovementSections, setCollapsedMovementSections] = useState(() => new Set())
+  const [collapsedInventorySections, setCollapsedInventorySections] = useState(() => new Set())
+  const [collapsedInventoryGroups, setCollapsedInventoryGroups] = useState(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
@@ -862,6 +865,24 @@ export default function Inventory() {
     return true
   })
 
+  const inventoryProductsById = useMemo(
+    () => new Map(summary.map((product) => [Number(product?.id || 0), product])),
+    [summary],
+  )
+
+  const inventoryProductSections = useMemo(
+    () => buildProductGroupSections(filteredSummary, {
+      productsById: inventoryProductsById,
+      sortDirection: 'asc',
+    }),
+    [filteredSummary, inventoryProductsById],
+  )
+
+  const visibleInventoryProducts = useMemo(
+    () => inventoryProductSections.flatMap((section) => section.items),
+    [inventoryProductSections],
+  )
+
   useEffect(() => {
     setInventoryProductPage(1)
   }, [branchFilter, brandFilter, deferredSearch, groupFilter, inventoryInitialFilter, searchMode, stockFilter, tab])
@@ -870,20 +891,15 @@ export default function Inventory() {
     setMovementMeta((current) => ({ ...current, page: 1 }))
   }, [branchFilter, movementEndDate, movementStartDate, movementUserFilter])
 
-  const pagedSummary = useMemo(
-    () => filteredSummary,
-    [filteredSummary],
-  )
-
   useEffect(() => {
-    const validIds = new Set(filteredSummary.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)))
+    const validIds = new Set(visibleInventoryProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id)))
     setSelectedProductIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
-  }, [filteredSummary])
+  }, [visibleInventoryProducts])
 
   useEffect(() => {
     if (!inventorySelectAllRef.current) return
-    inventorySelectAllRef.current.indeterminate = selectedProductIds.size > 0 && selectedProductIds.size < filteredSummary.length
-  }, [filteredSummary.length, selectedProductIds.size])
+    inventorySelectAllRef.current.indeterminate = selectedProductIds.size > 0 && selectedProductIds.size < visibleInventoryProducts.length
+  }, [selectedProductIds.size, visibleInventoryProducts.length])
 
   const toggleSelectedProduct = useCallback((productId) => {
     const numericId = Number(productId)
@@ -896,12 +912,12 @@ export default function Inventory() {
       setSelectedProductIds(new Set())
       return
     }
-    setSelectedProductIds(new Set(filteredSummary.map((product) => Number(product.id)).filter((id) => Number.isFinite(id))))
-  }, [filteredSummary])
+    setSelectedProductIds(new Set(visibleInventoryProducts.map((product) => Number(product.id)).filter((id) => Number.isFinite(id))))
+  }, [visibleInventoryProducts])
 
   const selectedProducts = useMemo(
-    () => filteredSummary.filter((product) => selectedProductIds.has(Number(product.id))),
-    [filteredSummary, selectedProductIds],
+    () => visibleInventoryProducts.filter((product) => selectedProductIds.has(Number(product.id))),
+    [selectedProductIds, visibleInventoryProducts],
   )
   const hasSelectedProducts = selectedProducts.length > 0
 
@@ -1220,12 +1236,70 @@ export default function Inventory() {
   const inventoryProductSummaryLabel = totalProducts
     ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
     : '0 / 0'
+  const getInventoryGroupPriceLabel = useCallback((group) => {
+    const min = Number(group?.minSellingPriceUsd || 0)
+    const max = Number(group?.maxSellingPriceUsd || 0)
+    if (group?.hasMultipleItems && min !== max) return `${fmtUSD(min)} - ${fmtUSD(max)}`
+    return fmtUSD(max || min || 0)
+  }, [fmtUSD])
+  const getInventoryGroupSummaryParts = useCallback((group, { includeCount = true } = {}) => {
+    const parts = [
+      includeCount ? `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
+      `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
+      getInventoryGroupPriceLabel(group),
+    ]
+    return parts.filter(Boolean)
+  }, [getInventoryGroupPriceLabel, t])
   const inventoryControlLabels = useMemo(() => ({
     selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} បានជ្រើស`),
-    selectAll: `${t('select_all') || 'Select all'} (${filteredSummary.length})`,
+    selectAll: `${t('select_all') || 'Select all'} (${visibleInventoryProducts.length})`,
     batch: tr('inventory_batch_session', 'Batch', 'សម័យបាច់'),
     reasons: tr('saved_reasons', 'Reasons', 'មូលហេតុ'),
-  }), [filteredSummary.length, selectedProducts.length, t, tr])
+  }), [selectedProducts.length, t, tr, visibleInventoryProducts.length])
+  useEffect(() => {
+    setCollapsedInventorySections((current) => {
+      const validIds = new Set(inventoryProductSections.map((section) => section.id))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [inventoryProductSections])
+  useEffect(() => {
+    setCollapsedInventoryGroups((current) => {
+      const validIds = new Set(inventoryProductSections.flatMap((section) => section.groups.map((group) => group.key)))
+      const next = new Set([...current].filter((id) => validIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [inventoryProductSections])
+  const isInventorySelectionScopeFullySelected = useCallback((ids = []) => {
+    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    return normalized.length > 0 && normalized.every((id) => selectedProductIds.has(id))
+  }, [selectedProductIds])
+  const isInventorySelectionScopePartiallySelected = useCallback((ids = []) => {
+    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    if (!normalized.length) return false
+    const selectedCount = normalized.filter((id) => selectedProductIds.has(id)).length
+    return selectedCount > 0 && selectedCount < normalized.length
+  }, [selectedProductIds])
+  const toggleInventorySelectionScope = useCallback((ids = [], checked) => {
+    const normalized = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    setSelectedProductIds((current) => toggleIdSet(current, normalized, checked))
+  }, [])
+  const toggleInventorySection = useCallback((sectionId) => {
+    setCollapsedInventorySections((current) => {
+      const next = new Set(current)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }, [])
+  const toggleInventoryGroup = useCallback((groupKey) => {
+    setCollapsedInventoryGroups((current) => {
+      const next = new Set(current)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }, [])
   useEffect(() => {
     setInventoryProductPageDraft(String(inventoryProductSafePage))
   }, [inventoryProductSafePage])
@@ -2539,12 +2613,12 @@ export default function Inventory() {
         <>
           <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
             <div className="px-2 py-2">
-              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+              <div className="flex min-w-0 items-center gap-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
                 <span className="inline-flex min-w-0 shrink-0 max-w-[4.95rem] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
                   {inventoryProductSummaryLabel}
                 </span>
-                <div className="ml-auto flex min-w-0 items-center gap-1.5">
-                <label className="relative inline-flex h-7 w-[3.1rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                <div className="flex min-w-0 items-center gap-1">
+                <label className="relative inline-flex h-7 w-[3.05rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                   <span className="sr-only">{t('per_page') || 'per page'}</span>
                   <select
                     className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
@@ -2559,7 +2633,7 @@ export default function Inventory() {
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
                 </label>
-                <div className="inline-flex h-7 w-[5.7rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                <div className="inline-flex h-7 w-[5.45rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                   <button
                     type="button"
                     className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -2603,13 +2677,13 @@ export default function Inventory() {
                 </div>
                 </div>
               </div>
-              <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_4.8rem_auto_auto] items-center gap-1.5">
+              <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
                 <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                   <input
                     ref={inventorySelectAllRef}
                     type="checkbox"
                     className="h-4 w-4 shrink-0 rounded"
-                    checked={filteredSummary.length > 0 && selectedProductIds.size === filteredSummary.length}
+                    checked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
                     onChange={(event) => toggleSelectAllProducts(event.target.checked)}
                   />
                   <span className="truncate whitespace-nowrap">
@@ -2618,39 +2692,33 @@ export default function Inventory() {
                       : inventoryControlLabels.selectAll}
                   </span>
                 </label>
-                <button
-                  type="button"
-                  className={`inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border px-2.5 text-[10px] font-semibold transition ${
-                    hasSelectedProducts
-                      ? 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'
-                      : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
-                  }`}
-                  disabled={!hasSelectedProducts}
-                  onClick={hasSelectedProducts ? openInventoryBatchSession : undefined}
-                  title={hasSelectedProducts ? tr(
-                    'inventory_batch_hint',
-                    'Select products, review each line in one session, then apply all stock changes together.',
-                    'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
-                  ) : undefined}
-                  aria-label={inventoryControlLabels.batch}
-                  aria-hidden={!hasSelectedProducts}
-                >
-                  {inventoryControlLabels.batch}
-                </button>
-                <button
-                  type="button"
-                  className={`inline-flex h-7 min-w-[4.75rem] shrink-0 items-center justify-center rounded-xl border px-2.5 text-[10px] font-semibold transition ${
-                    hasSelectedProducts
-                      ? 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'
-                      : 'pointer-events-none border-transparent bg-transparent text-transparent shadow-none'
-                  }`}
-                  onClick={hasSelectedProducts ? (() => setReasonManager({ open: true, type: 'adjust' })) : undefined}
-                  title={hasSelectedProducts ? inventoryControlLabels.reasons : undefined}
-                  aria-label={inventoryControlLabels.reasons}
-                  aria-hidden={!hasSelectedProducts}
-                >
-                  {inventoryControlLabels.reasons}
-                </button>
+                {hasSelectedProducts ? (
+                  <>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 min-w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                      disabled={!hasSelectedProducts}
+                      onClick={openInventoryBatchSession}
+                      title={tr(
+                        'inventory_batch_hint',
+                        'Select products, review each line in one session, then apply all stock changes together.',
+                        'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                      )}
+                      aria-label={inventoryControlLabels.batch}
+                    >
+                      {inventoryControlLabels.batch}
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 min-w-[4.6rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
+                      onClick={() => setReasonManager({ open: true, type: 'adjust' })}
+                      title={inventoryControlLabels.reasons}
+                      aria-label={inventoryControlLabels.reasons}
+                    >
+                      {inventoryControlLabels.reasons}
+                    </button>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2680,91 +2748,153 @@ export default function Inventory() {
           <div className="space-y-2 sm:hidden">
             {loading ? (
               <div className="text-center py-10 text-gray-400">{t('loading')}</div>
-            ) : filteredSummary.length === 0 ? (
+            ) : visibleInventoryProducts.length === 0 ? (
               <div className="text-center py-10 text-gray-400">{t('no_data')}</div>
-            ) : pagedSummary.map(p => {
-              const qty   = getStockQty(p)
-              const isLow = qty > 0 && qty <= p.low_stock_threshold
-              const isOut = qty <= (p.out_of_stock_threshold || 0)
-              const scls  = isOut ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : isLow ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700' : 'bg-green-100 dark:bg-green-900/30 text-green-700'
-              const slbl  = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
-              const soldQty = Math.max(0, p.qty_sold || 0)
-              const revenue = Math.max(0, p.revenue_usd || 0)
-              const productTags = [p.brand, p.category].filter(Boolean)
+            ) : inventoryProductSections.map((section) => {
+              const isCollapsed = collapsedInventorySections.has(section.id)
               return (
-                <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
-                  <div className="flex items-start justify-between gap-1.5">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start gap-2">
+                <div key={section.id} className="space-y-2">
+                  <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                         <input
                           type="checkbox"
-                          className="mt-0.5 h-4 w-4 rounded"
-                          checked={selectedProductIds.has(Number(p.id))}
-                          onChange={(event) => {
-                            event.stopPropagation()
-                            toggleSelectedProduct(p.id)
+                          className="h-4 w-4 rounded"
+                          checked={isInventorySelectionScopeFullySelected(section.ids)}
+                          ref={(node) => {
+                            if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(section.ids)
                           }}
-                          onClick={(event) => event.stopPropagation()}
-                          aria-label={`${t('select') || 'Select'} ${p.name}`}
+                          onChange={(event) => toggleInventorySelectionScope(section.ids, event.target.checked)}
+                          aria-label={`Select ${section.label}`}
                         />
-                        <div className="min-w-0 flex-1">
-                          <div className="font-semibold text-sm text-gray-900 dark:text-white truncate">{p.name}</div>
-                          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] leading-4 text-gray-400">
-                            <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
-                              {productTags.length ? (
-                                productTags.map((tag, index) => (
-                                  <Fragment key={`${p.id}-tag-${index}`}>
-                                    {index > 0 ? <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span> : null}
-                                    <span className="min-w-0 truncate">{tag}</span>
-                                  </Fragment>
-                                ))
-                              ) : (
-                                <span className="min-w-0 truncate">{t('product') || 'Product'}</span>
-                              )}
-                            </div>
-                            {p.barcode ? (
-                              <span className="ml-auto max-w-[7.1rem] shrink-0 truncate whitespace-nowrap pl-1 text-right font-medium text-gray-500 dark:text-gray-300">
-                                {p.barcode}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center justify-end gap-0.5 text-right">
-                      <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
-                        {qty}
-                        <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
-                      </div>
-                      <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                        <span>{section.label}</span>
+                        <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                      </label>
                       <button
-                        onClick={e => { e.stopPropagation(); openAdjust(p) }}
-                        className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                        onClick={() => toggleInventorySection(section.id)}
                       >
-                        {t('adjust')}
+                        {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
                       </button>
                     </div>
                   </div>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
-                    {(p.special_price_usd || 0) > 0 ? (
-                      <>
-                        <span className="text-gray-300 dark:text-gray-600">|</span>
-                        <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
-                      </>
-                    ) : null}
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                    <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
-                    <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
-                  </div>
+                  {!isCollapsed ? section.groups.map((group) => {
+                    const groupCollapsed = collapsedInventoryGroups.has(group.key)
+                    const showGroupRow = group.hasMultipleItems
+                    return (
+                      <div key={group.key} className="space-y-2">
+                        {showGroupRow ? (
+                          <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
+                            <div className="flex items-start justify-between gap-3">
+                              <label className="flex min-w-0 items-start gap-2">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1 h-4 w-4 rounded"
+                                  checked={isInventorySelectionScopeFullySelected(group.ids)}
+                                  ref={(node) => {
+                                    if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(group.ids)
+                                  }}
+                                  onChange={(event) => toggleInventorySelectionScope(group.ids, event.target.checked)}
+                                  aria-label={`Select ${group.name}`}
+                                />
+                                <button type="button" className="min-w-0 text-left" onClick={() => toggleInventoryGroup(group.key)}>
+                                  <div className="flex items-center gap-1.5">
+                                    {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                    <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
+                                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
+                                    {getInventoryGroupSummaryParts(group, { includeCount: false }).map((part) => (
+                                      <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
+                                    ))}
+                                  </div>
+                                </button>
+                              </label>
+                            </div>
+                          </div>
+                        ) : null}
+                        {!groupCollapsed ? group.items.map((p) => {
+                          const qty = getStockQty(p)
+                          const isLow = qty > 0 && qty <= p.low_stock_threshold
+                          const isOut = qty <= (p.out_of_stock_threshold || 0)
+                          const scls = isOut ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : isLow ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700' : 'bg-green-100 dark:bg-green-900/30 text-green-700'
+                          const slbl = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
+                          const soldQty = Math.max(0, p.qty_sold || 0)
+                          const revenue = Math.max(0, p.revenue_usd || 0)
+                          const productTagText = [p.brand, p.category].filter(Boolean).join(' · ')
+                          return (
+                            <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start gap-2">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 h-4 w-4 rounded"
+                                      checked={selectedProductIds.has(Number(p.id))}
+                                      onChange={(event) => {
+                                        event.stopPropagation()
+                                        toggleSelectedProduct(p.id)
+                                      }}
+                                      onClick={(event) => event.stopPropagation()}
+                                      aria-label={`${t('select') || 'Select'} ${p.name}`}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-1 flex items-start justify-between gap-3 pl-6 text-[10px] leading-4 text-gray-500 dark:text-gray-300">
+                                    <div className="min-w-0 flex-1 break-words">
+                                      {productTagText || (t('product') || 'Product')}
+                                    </div>
+                                    {p.barcode ? (
+                                      <span className="shrink-0 whitespace-nowrap pl-2 text-right font-medium text-gray-500 dark:text-gray-300">
+                                        {p.barcode}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center justify-end gap-1 text-right">
+                                  <div className="whitespace-nowrap text-sm font-bold leading-none text-gray-900 dark:text-white">
+                                    {qty}
+                                    <span className="ml-1 text-[10px] font-normal text-gray-400">{p.unit}</span>
+                                  </div>
+                                  <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-medium ${scls}`}>{slbl}</span>
+                                  <button
+                                    onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
+                                    className="px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400"
+                                  >
+                                    {t('adjust')}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="mt-1 flex items-center justify-between gap-2 pl-6">
+                                <div className="min-w-0">
+                                  <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                                </div>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                                <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
+                                <span className="text-gray-300 dark:text-gray-600">|</span>
+                                <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
+                                {(p.special_price_usd || 0) > 0 ? (
+                                  <>
+                                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                                    <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
+                                  </>
+                                ) : null}
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
+                                <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
+                              </div>
+                            </div>
+                          )
+                        }) : null}
+                      </div>
+                    )
+                  }) : null}
                 </div>
               )
             })}
@@ -2798,83 +2928,147 @@ export default function Inventory() {
                 <tbody>
                   {loading ? (
                     <tr><td colSpan={13} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-                  ) : filteredSummary.length === 0 ? (
+                  ) : visibleInventoryProducts.length === 0 ? (
                     <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t('no_data')}</td></tr>
-                  ) : pagedSummary.map(p => {
-                    const qty    = getStockQty(p)
-                    const isLow  = qty > 0 && qty <= p.low_stock_threshold
-                    const isOut  = qty <= (p.out_of_stock_threshold || 0)
-                    const status = isOut ? { label:'Out', cls:'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-1.5 py-0.5 rounded-full' }
-                                 : isLow ? { label:'Low', cls:'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 text-xs px-1.5 py-0.5 rounded-full' }
-                                 :         { label:'OK',  cls:'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs px-1.5 py-0.5 rounded-full' }
-                    const netRev  = Math.max(0, p.revenue_usd || 0)
-                    const netCogs = Math.max(0, p.cogs_usd || 0)
-                    const profit  = netRev - netCogs
+                  ) : inventoryProductSections.map((section) => {
+                    const isCollapsed = collapsedInventorySections.has(section.id)
                     return (
-                      <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
-                        <td className="px-3 py-1" onClick={(event) => event.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={selectedProductIds.has(Number(p.id))}
-                            onChange={() => toggleSelectedProduct(p.id)}
-                            aria-label={`${t('select') || 'Select'} ${p.name}`}
-                          />
-                        </td>
-                        <td className="px-3 py-1">
-                          <div className="font-medium text-gray-900 dark:text-white leading-tight">{p.name}</div>
-                          <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-gray-400">
-                            {p.brand ? <span>{p.brand}</span> : null}
-                            {p.category ? <span>{p.category}</span> : null}
-                            {p.is_group ? <span>Group</span> : null}
-                            {p.parent_id ? <span>Variant</span> : null}
-                            {p.barcode ? <span>{p.barcode}</span> : null}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                            <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
-                          </div>
-                        </td>
-                        <td className="px-3 py-1 text-right font-bold text-gray-900 dark:text-white whitespace-nowrap">
-                          {qty} <span className="text-gray-400 font-normal text-[10px]">{p.unit}</span>
-                        </td>
-                        {branches.length > 1 && (
-                          <td className="px-3 py-1 hidden md:table-cell">
-                            <div className="flex flex-wrap gap-0.5">
-                              {(p.branch_stock || []).slice(0,3).map(bs => (
-                                <span key={bs.branch_id} className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-1 py-0.5 rounded">
-                                  {bs.branch_name?.split(' ')[0]}: {bs?.quantity ?? 0}
-                                </span>
-                              ))}
+                      <Fragment key={section.id}>
+                        <tr className="bg-slate-50 dark:bg-slate-800/60">
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded"
+                              checked={isInventorySelectionScopeFullySelected(section.ids)}
+                              ref={(node) => {
+                                if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(section.ids)
+                              }}
+                              onChange={(event) => toggleInventorySelectionScope(section.ids, event.target.checked)}
+                              aria-label={`Select ${section.label}`}
+                            />
+                          </td>
+                          <td colSpan={12} className="px-4 py-2">
+                            <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                              <span>{section.label} · {section.items.length} {(t('products') || 'products').toLowerCase()}</span>
+                              <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleInventorySection(section.id)}>
+                                {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                              </button>
                             </div>
                           </td>
-                        )}
-                        <td className="px-3 py-1 text-center"><span className={status.cls}>{status.label}</span></td>
-                        <td className="px-3 py-1"><DualMoney usd={p.purchase_price_usd||p.cost_price_usd||0} khr={p.purchase_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                        <td className="px-3 py-1">
-                          <DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
-                          {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                            <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-                              {t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
-                              {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-1 hidden lg:table-cell"><DualMoney usd={p.stock_value_usd||0} khr={p.stock_value_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                        <td className="px-3 py-1 text-right text-gray-500 hidden xl:table-cell">{Math.max(0,p.qty_sold||0)}</td>
-                        <td className="px-3 py-1 hidden xl:table-cell"><DualMoney usd={netRev} khr={0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                        <td className="px-3 py-1 hidden xl:table-cell text-right">
-                          <span className="text-xs font-medium text-orange-600 dark:text-orange-400">{fmtUSD(netCogs)}</span>
-                        </td>
-                        <td className="px-3 py-1 hidden xl:table-cell">
-                          <div className={`text-right text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtUSD(profit)}</div>
-                        </td>
-                        <td className="px-3 py-1 text-center" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => openAdjust(p)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline px-2 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20">
-                            {t('adjust')}
-                          </button>
-                        </td>
-                      </tr>
+                        </tr>
+                        {!isCollapsed ? section.groups.map((group) => {
+                          const groupCollapsed = collapsedInventoryGroups.has(group.key)
+                          const showGroupRow = group.hasMultipleItems
+                          return (
+                            <Fragment key={group.key}>
+                              {showGroupRow ? (
+                                <tr className="bg-white dark:bg-gray-800/70">
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded"
+                                      checked={isInventorySelectionScopeFullySelected(group.ids)}
+                                      ref={(node) => {
+                                        if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(group.ids)
+                                      }}
+                                      onChange={(event) => toggleInventorySelectionScope(group.ids, event.target.checked)}
+                                      aria-label={`Select ${group.name}`}
+                                    />
+                                  </td>
+                                  <td colSpan={12} className="px-4 py-1.5">
+                                    <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => toggleInventoryGroup(group.key)}>
+                                      {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
+                                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
+                                      <span className="ml-2 flex flex-wrap gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-300">
+                                        {getInventoryGroupSummaryParts(group, { includeCount: false }).map((part) => (
+                                          <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
+                                        ))}
+                                      </span>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ) : null}
+                              {!groupCollapsed ? group.items.map((p) => {
+                                const qty = getStockQty(p)
+                                const isLow = qty > 0 && qty <= p.low_stock_threshold
+                                const isOut = qty <= (p.out_of_stock_threshold || 0)
+                                const status = isOut ? { label:'Out', cls:'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-1.5 py-0.5 rounded-full' }
+                                             : isLow ? { label:'Low', cls:'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 text-xs px-1.5 py-0.5 rounded-full' }
+                                             :         { label:'OK',  cls:'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs px-1.5 py-0.5 rounded-full' }
+                                const netRev = Math.max(0, p.revenue_usd || 0)
+                                const netCogs = Math.max(0, p.cogs_usd || 0)
+                                const profit = netRev - netCogs
+                                const productTagText = [p.brand, p.category].filter(Boolean).join(' · ')
+                                return (
+                                  <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
+                                    <td className="px-3 py-1" onClick={(event) => event.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded"
+                                        checked={selectedProductIds.has(Number(p.id))}
+                                        onChange={() => toggleSelectedProduct(p.id)}
+                                        aria-label={`${t('select') || 'Select'} ${p.name}`}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-1">
+                                      <div className="font-medium leading-tight text-gray-900 dark:text-white">{p.name}</div>
+                                      <div className="mt-0.5 flex items-start justify-between gap-2 text-[10px] leading-4 text-gray-400">
+                                        <span className="min-w-0 flex-1 break-words">{productTagText || (t('product') || 'Product')}</span>
+                                        {p.barcode ? <span className="shrink-0 whitespace-nowrap font-medium text-gray-500 dark:text-gray-300">{p.barcode}</span> : null}
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
+                                        <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-1 text-right font-bold whitespace-nowrap text-gray-900 dark:text-white">
+                                      {qty} <span className="text-[10px] font-normal text-gray-400">{p.unit}</span>
+                                    </td>
+                                    {branches.length > 1 && (
+                                      <td className="hidden px-3 py-1 md:table-cell">
+                                        <div className="flex flex-wrap gap-0.5">
+                                          {(p.branch_stock || []).slice(0, 3).map((bs) => (
+                                            <span key={bs.branch_id} className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                                              {bs.branch_name?.split(' ')[0]}: {bs?.quantity ?? 0}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    )}
+                                    <td className="px-3 py-1 text-center"><span className={status.cls}>{status.label}</span></td>
+                                    <td className="px-3 py-1"><DualMoney usd={p.purchase_price_usd||p.cost_price_usd||0} khr={p.purchase_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
+                                    <td className="px-3 py-1">
+                                      <DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+                                      {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
+                                        <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+                                          {t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
+                                          {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                    <td className="hidden px-3 py-1 lg:table-cell"><DualMoney usd={p.stock_value_usd||0} khr={p.stock_value_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
+                                    <td className="hidden px-3 py-1 text-right text-gray-500 xl:table-cell">{Math.max(0,p.qty_sold||0)}</td>
+                                    <td className="hidden px-3 py-1 xl:table-cell"><DualMoney usd={netRev} khr={0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
+                                    <td className="hidden px-3 py-1 text-right xl:table-cell">
+                                      <span className="text-xs font-medium text-orange-600 dark:text-orange-400">{fmtUSD(netCogs)}</span>
+                                    </td>
+                                    <td className="hidden px-3 py-1 xl:table-cell">
+                                      <div className={`text-right text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtUSD(profit)}</div>
+                                    </td>
+                                    <td className="px-3 py-1 text-center" onClick={e => e.stopPropagation()}>
+                                      <button onClick={() => openAdjust(p)} className="rounded px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-900/20">
+                                        {t('adjust')}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                )
+                              }) : null}
+                            </Fragment>
+                          )
+                        }) : null}
+                      </Fragment>
                     )
                   })}
                 </tbody>
