@@ -3,7 +3,7 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const { PassThrough, Writable } = require('stream')
+const { Writable } = require('stream')
 const { pipeline } = require('stream/promises')
 const { BACKUP_TABLES, BACKUP_VERSION, buildBackupSummaryFromCounts } = require('../backupSchema')
 const { DATA_ROOT, S3_BUCKET, OBJECT_STORAGE_DRIVER } = require('../config')
@@ -413,28 +413,6 @@ function endDestination(destination) {
   })
 }
 
-function createDualWriteStream(primary, secondary) {
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      Promise.all([
-        writeDestinationChunk(primary, chunk),
-        writeDestinationChunk(secondary, chunk),
-      ]).then(() => callback(), callback)
-    },
-    final(callback) {
-      Promise.all([
-        endDestination(primary),
-        endDestination(secondary),
-      ]).then(() => callback(), callback)
-    },
-    destroy(error, callback) {
-      try { primary.destroy(error || undefined) } catch (_) {}
-      try { secondary.destroy(error || undefined) } catch (_) {}
-      callback(error)
-    },
-  })
-}
-
 async function copyOnePackageObject({ item, packageId, localPath, signal, throwIfCancelled }) {
   const sourceKey = String(item.object_key || '').replace(/^\/+/, '')
   if (!sourceKey) return false
@@ -447,29 +425,25 @@ async function copyOnePackageObject({ item, packageId, localPath, signal, throwI
   if (!object?.body) throw new Error('Object returned no data')
   throwIfCancelled?.()
   const localStream = fs.createWriteStream(localObjectPath)
-  const remoteStream = new PassThrough()
-  const uploadPromise = putObject(`${prefix}/${relativeKey}`, remoteStream, {
-    contentType: object.contentType || item.mime_type || 'application/octet-stream',
-    contentLength: Number(object.contentLength || item.byte_size || 0) || undefined,
-  })
-  const fanoutStream = createDualWriteStream(localStream, remoteStream)
   const abortCopy = () => {
     const error = new Error('Job cancelled')
     error.code = 'job_cancelled'
     try { object.body?.destroy?.(error) } catch (_) {}
     try { localStream.destroy(error) } catch (_) {}
-    try { remoteStream.destroy(error) } catch (_) {}
-    try { fanoutStream.destroy(error) } catch (_) {}
   }
   if (signal) signal.addEventListener('abort', abortCopy, { once: true })
   try {
-    await Promise.all([
-      pipeline(object.body, fanoutStream),
-      uploadPromise,
-    ])
+    await pipeline(object.body, localStream)
   } finally {
     if (signal) signal.removeEventListener('abort', abortCopy)
   }
+  throwIfAborted(signal)
+  throwIfCancelled?.()
+  const localStats = await fs.promises.stat(localObjectPath)
+  await putObject(`${prefix}/${relativeKey}`, fs.createReadStream(localObjectPath), {
+    contentType: object.contentType || item.mime_type || 'application/octet-stream',
+    contentLength: localStats.size,
+  })
   return true
 }
 
