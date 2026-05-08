@@ -138,7 +138,7 @@ export default function InventoryProductsSurface({
                                 {!productTagText ? <span className="truncate">{t('product') || 'Product'}</span> : null}
                               </div>
                             </div>
-                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1.5 text-right">
+                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1 text-right">
                               <div className="flex max-w-full items-center justify-end gap-1">
                                 <div className="min-w-0 max-w-[4.5rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                   {qty}
@@ -146,9 +146,6 @@ export default function InventoryProductsSurface({
                                 </div>
                                 <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
                               </div>
-                              <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="mt-0.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[12px] font-bold leading-none text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25">
-                                {t('adjust')}
-                              </button>
                             </div>
                           </div>
                           <div className="mt-1 flex items-center gap-2 pl-6">
@@ -156,20 +153,27 @@ export default function InventoryProductsSurface({
                               <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                             </div>
                           </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                            <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
-                            <span className="text-gray-300 dark:text-gray-600">|</span>
-                            <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
-                            {(p.special_price_usd || 0) > 0 ? (
-                              <>
+                          <div className="mt-2 flex items-start justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-700">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
                                 <span className="text-gray-300 dark:text-gray-600">|</span>
-                                <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
-                              </>
-                            ) : null}
-                          </div>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                            <span>Sold {soldQty} | Rev {fmtUSD(revenue)}</span>
-                            <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
+                                <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
+                                {(p.special_price_usd || 0) > 0 ? (
+                                  <>
+                                    <span className="text-gray-300 dark:text-gray-600">|</span>
+                                    <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
+                                  </>
+                                ) : null}
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                <span>Sold {soldQty} | Rev {fmtUSD(revenue)}</span>
+                                <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
+                              </div>
+                            </div>
+                            <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-none text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-400 dark:hover:bg-blue-500/15 dark:hover:text-blue-200">
+                              {t('adjust')}
+                            </button>
                           </div>
                         </div>
                       )
