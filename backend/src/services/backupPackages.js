@@ -671,15 +671,60 @@ function findReusableLocalBackupPackage({ maxAgeMs = 10 * 60 * 1000 } = {}) {
   return null
 }
 
-async function listBackupVersions({ limit = 50 } = {}) {
+function listLocalBackupVersions({ limit = 50 } = {}) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
-  const objects = await listObjects('backups/', { maxKeys: Math.max(100, Math.min(5000, safeLimit * 32)) })
+  return listLocalBackupDirectories()
+    .slice(0, safeLimit)
+    .map((candidate) => {
+      const reusable = readReusableLocalBackupPackage(candidate.absolutePath)
+      if (reusable?.packageId) {
+        return {
+          packageId: reusable.packageId,
+          objectPrefix: reusable.objectPrefix,
+          localPath: reusable.localPath,
+          objects: Number(reusable.objectsCopied || 0) || 0,
+          bytes: Number(reusable?.manifest?.summary?.totals?.bytes || 0) || 0,
+          updatedAt: reusable?.manifest?.created_at || reusable?.manifest?.createdAt || new Date(candidate.mtimeMs).toISOString(),
+          storageDriver: reusable.storageDriver,
+          source: 'local',
+        }
+      }
+      return {
+        packageId: candidate.packageId,
+        objectPrefix: `backups/${candidate.packageId}`,
+        localPath: candidate.absolutePath,
+        objects: 0,
+        bytes: 0,
+        updatedAt: new Date(candidate.mtimeMs).toISOString(),
+        source: 'local',
+      }
+    })
+}
+
+async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)))
   const versions = new Map()
+  for (const local of listLocalBackupVersions({ limit: safeLimit })) {
+    versions.set(local.packageId, local)
+  }
+  let objects = []
+  try {
+    objects = await listObjects('backups/', {
+      maxKeys: Math.max(100, Math.min(5000, safeLimit * 32)),
+      timeoutMs,
+    })
+  } catch (error) {
+    console.warn(`[Backup] R2 backup version listing unavailable: ${error?.message || error}`)
+    return Array.from(versions.values())
+      .sort((a, b) => String(b.packageId).localeCompare(String(a.packageId)))
+      .slice(0, safeLimit)
+  }
   objects.forEach((object) => {
     const match = String(object.key || '').match(/^backups\/([^/]+)\//)
     if (!match) return
     const packageId = match[1]
     const current = versions.get(packageId) || { packageId, objectPrefix: `backups/${packageId}`, objects: 0, bytes: 0, updatedAt: object.lastModified || null }
+    current.source = current.source === 'local' ? 'local+r2' : 'r2'
     current.objects += 1
     current.bytes += Number(object.size || 0)
     current.updatedAt = object.lastModified || current.updatedAt
@@ -693,6 +738,7 @@ async function listBackupVersions({ limit = 50 } = {}) {
 module.exports = {
   createFinalBackupPackage,
   findReusableLocalBackupPackage,
+  listLocalBackupVersions,
   listBackupVersions,
   validateLocalBackupPackage,
 }

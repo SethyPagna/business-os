@@ -87,9 +87,18 @@ runTest('drive sync snapshot work avoids synchronous copies and double hashing',
 
 runTest('backup version listing reads enough objects for recent package pages and can reuse local packages', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  const objectStoreSource = fs.readFileSync(path.join(__dirname, '../src/objectStore.js'), 'utf8')
   assert.match(source, /function\s+findReusableLocalBackupPackage\(/)
+  assert.match(source, /function\s+listLocalBackupVersions\(/)
+  assert.match(source, /catch\s*\(error\)\s*{\s*console\.warn\(`\[Backup\] R2 backup version listing unavailable:/)
   assert.match(source, /safeLimit\s*\*\s*32/)
   assert.match(source, /Math\.max\(100,\s*Math\.min\(5000,\s*safeLimit\s*\*\s*32\)\)/)
+  assert.match(objectStoreSource, /socketAcquisitionWarningTimeout:\s*15000/)
+  assert.match(objectStoreSource, /maxSockets:\s*200/)
+  assert.match(objectStoreSource, /abortSignal:\s*controller\.signal/)
+  assert.match(objectStoreSource, /function\s+canUseCloudflareR2Api\(/)
+  assert.match(objectStoreSource, /Cloudflare R2 API fallback is not configured/)
+  assert.match(objectStoreSource, /shouldFallbackToR2Api\(error\)/)
 })
 
 runTest('system jobs recover stale queued or running rows after restart', () => {

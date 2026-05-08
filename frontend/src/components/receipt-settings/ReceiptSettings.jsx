@@ -61,6 +61,8 @@ export default function ReceiptSettings() {
   const queuedSaveRef    = useRef(null)
   const aliveRef         = useRef(true)
   const previewTargetRef = useRef(null)
+  const persistedTemplateRef = useRef('')
+  const suppressNextAutoSaveRef = useRef(false)
 
   // Keep loadSettings ref current without re-triggering effects
   useEffect(() => { loadSettingsRef.current = loadSettings }, [loadSettings])
@@ -72,7 +74,10 @@ export default function ReceiptSettings() {
   // Initialise tpl once persisted settings arrive from the server
   useEffect(() => {
     if (settings.receipt_template) {
-      setTpl(parseReceiptTemplate(settings.receipt_template))
+      const parsed = parseReceiptTemplate(settings.receipt_template)
+      persistedTemplateRef.current = serializeReceiptTemplate(parsed)
+      suppressNextAutoSaveRef.current = true
+      setTpl(parsed)
     }
   }, [settings.receipt_template])
 
@@ -98,6 +103,7 @@ export default function ReceiptSettings() {
         () => window.api.saveSettings({ receipt_template: serializeReceiptTemplate(tpl) }),
         'Receipt settings save',
       )
+      persistedTemplateRef.current = serializeReceiptTemplate(tpl)
 
       if (options.showToast) {
         try {
@@ -139,6 +145,11 @@ export default function ReceiptSettings() {
   useEffect(() => {
     if (!isMountedRef.current) {
       isMountedRef.current = true
+      return
+    }
+    const serialized = serializeReceiptTemplate(tpl)
+    if (suppressNextAutoSaveRef.current || serialized === persistedTemplateRef.current) {
+      suppressNextAutoSaveRef.current = false
       return
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)

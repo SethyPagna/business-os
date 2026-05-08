@@ -160,7 +160,7 @@ export default function Inventory() {
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
   const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState([])
-  const [movementMeta,  setMovementMeta]  = useState({ total: 0, page: 1, pageSize: 10000, totalPages: 1 })
+  const [movementMeta,  setMovementMeta]  = useState({ total: 0, page: 1, pageSize: 50, totalPages: 1 })
   const [branches,      setBranches]      = useState([])
   const [returnStats,   setReturnStats]   = useState(null)
   const [taxDelivery,   setTaxDelivery]   = useState({ tax: 0, delivery: 0, deliveryCount: 0 })
@@ -190,7 +190,7 @@ export default function Inventory() {
   const [batchApplying, setBatchApplying] = useState(false)
   const [rfidStatus, setRfidStatus] = useState(null)
   const [tab,           setTab]           = useState('products')
-  const [inventorySection, setInventorySection] = useState('all')
+  const [inventorySection, setInventorySection] = useState('products')
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
@@ -2463,7 +2463,7 @@ export default function Inventory() {
     [isMovementScopeFullySelected, selectedMovementIds],
   )
   const showMovementActionGroups = movementGroupMode === 'time+action'
-  const sectionStorageKey = 'business-os:inventory:section'
+  const sectionStorageKey = 'business-os:inventory:section:v2'
   const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
   const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
   const showInventoryTabs = inventorySection === 'all'
