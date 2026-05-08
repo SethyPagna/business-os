@@ -27,6 +27,7 @@ const API_FAIL_MS = 10_000
 const LONG_TASK_WARN_MS = 200
 const LONG_TASK_FAIL_COUNT = 3
 const JS_CHUNK_WARN_BYTES = 150 * 1024
+const RAW_JS_TO_GZIP_ESTIMATE_RATIO = 0.35
 const BUTTON_RESPONSE_WARN_MS = 1_500
 const BUTTON_RESPONSE_FAIL_MS = 5_000
 const LONG_RUNNING_API_RE = /\/api\/(?:backups|system\/drive-sync\/jobs|system\/jobs|import-jobs\/[^/]+\/(?:start|approve|preflight))/i
@@ -79,6 +80,7 @@ const summary = {
   findings: [],
   artifacts: {},
 }
+const reportedAssetBudgetKeys = new Set()
 
 const networkReport = []
 const performanceReport = []
@@ -107,6 +109,35 @@ function addFinding(priority, area, message, extra = {}) {
     message,
     ...extra,
   })
+}
+
+function assetFileName(url) {
+  try {
+    return path.basename(new URL(url).pathname)
+  } catch {
+    return path.basename(String(url || ''))
+  }
+}
+
+function getScriptBudgetBytes(script) {
+  const transferBytes = Number(script.transferSize || 0)
+  const encodedBytes = Number(script.encodedBodySize || 0)
+  const decodedBytes = Number(script.decodedBodySize || 0)
+  const rawBytes = Math.max(encodedBytes, decodedBytes, 0)
+  if (transferBytes > 0) {
+    return {
+      bytes: transferBytes,
+      rawBytes,
+      source: 'transferSize',
+      estimatedGzipEquivalent: false,
+    }
+  }
+  return {
+    bytes: Math.round(rawBytes * RAW_JS_TO_GZIP_ESTIMATE_RATIO),
+    rawBytes,
+    source: rawBytes ? 'estimated-gzip-equivalent' : 'unknown',
+    estimatedGzipEquivalent: rawBytes > 0,
+  }
 }
 
 function isFailingFinding(finding) {
@@ -660,13 +691,18 @@ function analyzeRoute(profileName, route, routeResult, networkEntries, perf, con
   }
 
   for (const script of perf.mainScripts || []) {
-    const bytes = Number(script.transferSize || script.encodedBodySize || 0)
-    if (bytes > JS_CHUNK_WARN_BYTES) {
-      addFinding(2, 'asset-weight', `${profileName}/${route.name} large route script`, {
+    const budget = getScriptBudgetBytes(script)
+    const assetKey = `${profileName}:${assetFileName(script.name)}`
+    if (budget.bytes > JS_CHUNK_WARN_BYTES && !reportedAssetBudgetKeys.has(assetKey)) {
+      reportedAssetBudgetKeys.add(assetKey)
+      addFinding(2, 'asset-weight', `${profileName} large route script`, {
         route: route.name,
         profile: profileName,
         url: script.name,
-        bytes,
+        bytes: budget.bytes,
+        rawBytes: budget.rawBytes,
+        budgetSource: budget.source,
+        estimatedGzipEquivalent: budget.estimatedGzipEquivalent,
       })
     }
   }

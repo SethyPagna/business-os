@@ -329,16 +329,27 @@ async function writeJsonLinesFileWithChecksum(filePath, rows = []) {
   return hash.digest('hex')
 }
 
-async function uploadPackageFile({ packageId, localPath, fileName, contentType }) {
+async function uploadPackageFile({ packageId, localPath, fileName, contentType, optional = false, timeoutMs = null }) {
   const absolutePath = path.join(localPath, fileName)
   const stats = await fs.promises.stat(absolutePath)
-  await putObject(`backups/${packageId}/${fileName}`, fs.createReadStream(absolutePath), {
-    contentType,
-    contentLength: stats.size,
-  })
+  try {
+    await putObject(`backups/${packageId}/${fileName}`, fs.createReadStream(absolutePath), {
+      contentType,
+      contentLength: stats.size,
+      timeoutMs: timeoutMs || (optional ? 5000 : undefined),
+    })
+    return { ok: true, key: `backups/${packageId}/${fileName}` }
+  } catch (error) {
+    if (!optional) throw error
+    return {
+      ok: false,
+      key: `backups/${packageId}/${fileName}`,
+      error: error?.message || 'Object-store mirror upload failed',
+    }
+  }
 }
 
-async function writeAndUploadMetadataFiles({ files, packageId, localPath, progress, signal, throwIfCancelled } = {}) {
+async function writeAndUploadMetadataFiles({ files, packageId, localPath, progress, signal, throwIfCancelled, remoteUploadErrors = [] } = {}) {
   const reportProgress = createProgressReporter(progress)
   const entries = Object.entries(files || {})
   for (let index = 0; index < entries.length; index += 1) {
@@ -353,12 +364,14 @@ async function writeAndUploadMetadataFiles({ files, packageId, localPath, progre
     })
     await yieldToEventLoop()
     await fs.promises.writeFile(path.join(localPath, fileName), contents, 'utf8')
-    await uploadPackageFile({
+    const uploaded = await uploadPackageFile({
       packageId,
       localPath,
       fileName,
       contentType: fileName.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
+      optional: true,
     })
+    if (!uploaded.ok) remoteUploadErrors.push(uploaded)
   }
 }
 
@@ -440,10 +453,15 @@ async function copyOnePackageObject({ item, packageId, localPath, signal, throwI
   throwIfAborted(signal)
   throwIfCancelled?.()
   const localStats = await fs.promises.stat(localObjectPath)
-  await putObject(`${prefix}/${relativeKey}`, fs.createReadStream(localObjectPath), {
-    contentType: object.contentType || item.mime_type || 'application/octet-stream',
-    contentLength: localStats.size,
-  })
+  try {
+    await putObject(`${prefix}/${relativeKey}`, fs.createReadStream(localObjectPath), {
+      contentType: object.contentType || item.mime_type || 'application/octet-stream',
+      contentLength: localStats.size,
+      timeoutMs: 5000,
+    })
+  } catch (_) {
+    // The local package already contains this object. Remote package mirroring is best-effort.
+  }
   return true
 }
 
@@ -501,17 +519,32 @@ async function copyPackageObjects({ objectManifest = [], packageId, localPath, p
 async function createFinalBackupPackage({ destinationDir = '', actor = {}, progress = null, signal = null, throwIfCancelled = null } = {}) {
   const reportProgress = createProgressReporter(progress)
   const packageId = `datasync-${nowSafeId()}`
+  const remoteUploadErrors = []
   reportProgress({ phase: 'starting', progress: 5, message: 'Preparing final backup package' }, { force: true })
   const localPath = destinationDir
     ? path.join(path.resolve(destinationDir), packageId)
     : path.join(DATA_ROOT, 'backups', packageId)
   fs.mkdirSync(localPath, { recursive: true })
   const dataResult = await streamBackupDataFile(path.join(localPath, 'data.json'), { progress, signal, throwIfCancelled })
-  await uploadPackageFile({ packageId, localPath, fileName: 'data.json', contentType: 'application/json; charset=utf-8' })
+  const dataUpload = await uploadPackageFile({
+    packageId,
+    localPath,
+    fileName: 'data.json',
+    contentType: 'application/json; charset=utf-8',
+    optional: true,
+  })
+  if (!dataUpload.ok) remoteUploadErrors.push(dataUpload)
   await yieldToEventLoop()
   const objectManifest = buildObjectManifest(dataResult.fileAssets)
   const objectsChecksum = await writeJsonLinesFileWithChecksum(path.join(localPath, 'objects-manifest.jsonl'), objectManifest)
-  await uploadPackageFile({ packageId, localPath, fileName: 'objects-manifest.jsonl', contentType: 'application/x-ndjson; charset=utf-8' })
+  const objectsManifestUpload = await uploadPackageFile({
+    packageId,
+    localPath,
+    fileName: 'objects-manifest.jsonl',
+    contentType: 'application/x-ndjson; charset=utf-8',
+    optional: true,
+  })
+  if (!objectsManifestUpload.ok) remoteUploadErrors.push(objectsManifestUpload)
   const summary = buildBackupSummaryFromCounts({
     tableCounts: dataResult.tableCounts,
     uploads: objectManifest,
@@ -555,6 +588,7 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
     progress,
     signal,
     throwIfCancelled,
+    remoteUploadErrors,
   })
   const objectCopy = await copyPackageObjects({
     objectManifest,
@@ -572,6 +606,7 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
       filesProcessed: objectCopy.copied,
       filesTotal: objectManifest.length,
       failedObjects: objectCopy.failed,
+      remoteMirrorFailed: remoteUploadErrors.length,
     },
   }, { force: true })
   return {
@@ -582,6 +617,8 @@ async function createFinalBackupPackage({ destinationDir = '', actor = {}, progr
     localPath,
     objectsCopied: objectCopy.copied,
     objectsFailed: objectCopy.failed,
+    remoteUploadErrors,
+    remoteMirrorFailed: remoteUploadErrors.length,
     storageDriver: getObjectStorageDriver(),
     bucket: S3_BUCKET || null,
   }

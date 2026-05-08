@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -72,6 +72,7 @@ export default function Returns() {
   const [scope, setScope] = useState(CUSTOMER_SCOPE)
   const [rows, setRows] = useState([])
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -93,6 +94,7 @@ export default function Returns() {
   const loadPromiseRef = useRef(null)
   const loadWatchdogRef = useRef(null)
   const selectAllRef = useRef(null)
+  const deferredSearch = useDeferredValue(search)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const returnsDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
@@ -132,7 +134,7 @@ export default function Returns() {
       try {
         const params = {
           scope,
-          ...(search.trim() ? { search: search.trim() } : {}),
+          ...(debouncedSearch ? { search: debouncedSearch } : {}),
           ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
           ...returnsDateRange,
         }
@@ -161,7 +163,14 @@ export default function Returns() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [returnsDateRange, scope, search, tr, typeFilter])
+  }, [debouncedSearch, returnsDateRange, scope, tr, typeFilter])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   useEffect(() => {
     if (!isActive) {
@@ -219,7 +228,10 @@ export default function Returns() {
     return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]))
   }, [rows, tr])
 
-  const searchTerms = search.trim().split(/\s+/).filter(Boolean)
+  const searchTerms = useMemo(
+    () => deferredSearch.trim().toLowerCase().split(/\s+/).filter(Boolean),
+    [deferredSearch],
+  )
   const filtered = useMemo(() => rows.filter((ret) => {
     if (typeFilter !== 'all' && getReturnTypeKey(ret) !== typeFilter) return false
     if (!searchTerms.length) return true
@@ -233,7 +245,7 @@ export default function Returns() {
       ret.return_type,
       ret.supplier_settlement,
     ].join(' ').toLowerCase()
-    return searchTerms.every((term) => hay.includes(term.toLowerCase()))
+    return searchTerms.every((term) => hay.includes(term))
   }), [rows, searchTerms, typeFilter])
 
   const allReturnSections = useMemo(() => buildTimeActionSections(filtered, {
@@ -255,7 +267,7 @@ export default function Returns() {
 
   useEffect(() => {
     setReturnPage(1)
-  }, [monthFilter, returnGroupMode, returnSortDirection, scope, search, typeFilter, yearFilter])
+  }, [deferredSearch, monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter])
 
   const pagedReturns = useMemo(
     () => paginateItems(allVisibleReturns, returnPage, returnPageSize),

@@ -459,6 +459,12 @@ function useChunkWarmup(user) {
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
     if (shouldSkipBackgroundWarmup()) return undefined
+    if (!shouldWarmPageEntries({
+      viewportWidth: Number(window.innerWidth || 0),
+      coarsePointer: typeof window.matchMedia === 'function' ? !!window.matchMedia('(pointer: coarse)').matches : false,
+    })) {
+      return undefined
+    }
 
     let cancelled = false
     let idleId = null

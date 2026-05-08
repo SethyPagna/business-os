@@ -101,6 +101,17 @@ runTest('backup version listing reads enough objects for recent package pages an
   assert.match(objectStoreSource, /shouldFallbackToR2Api\(error\)/)
 })
 
+runTest('backup packages complete locally when remote mirror upload is slow', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/backupPackages.js'), 'utf8')
+  assert.match(source, /async\s+function\s+uploadPackageFile\(\{\s*packageId,[\s\S]*optional\s*=\s*false/)
+  assert.match(source, /if\s*\(!optional\)\s*throw\s+error/)
+  assert.match(source, /remoteUploadErrors/)
+  assert.match(source, /remoteMirrorFailed/)
+  assert.match(source, /optional:\s*true/)
+  assert.match(source, /Remote package mirroring is best-effort/)
+  assert.match(source, /timeoutMs:\s*5000/)
+})
+
 runTest('system jobs recover stale queued or running rows after restart', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/systemJobs.js'), 'utf8')
   assert.match(source, /Recovered after server restart/)
