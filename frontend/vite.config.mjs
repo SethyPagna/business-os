@@ -109,6 +109,11 @@ function manualChunks(id) {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (
+      normalized.includes('/src/components/catalog/CatalogEditorSurface.jsx')
+    ) {
+      return 'catalog-editor'
+    }
+    if (
       normalized.includes('/src/components/catalog/CatalogPreviewSurface.jsx')
       || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.jsx')
       || normalized.includes('/src/components/catalog/CatalogProductsSection.jsx')
