@@ -626,7 +626,7 @@ async function clickNamedButton(page, label, routeName) {
   }
   try {
     await button.click({ timeout: BUTTON_RESPONSE_FAIL_MS })
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(75)
   } catch (error) {
     await dismissTransientUi(page)
     return {
@@ -636,11 +636,14 @@ async function clickNamedButton(page, label, routeName) {
       error: error?.message || String(error),
     }
   }
+  const responseMs = Math.round(performance.now() - started)
+  const cleanupStarted = performance.now()
   await dismissTransientUi(page)
   return {
     name: `${routeName}:button:${label}`,
     ok: true,
-    ms: Math.round(performance.now() - started),
+    ms: responseMs,
+    cleanupMs: Math.round(performance.now() - cleanupStarted),
   }
 }
 

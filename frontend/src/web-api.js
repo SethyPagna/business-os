@@ -25,11 +25,15 @@ import {
 
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
+const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
+const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 let offlineMaintenanceStarted = false
 let lastServiceWorkerUpdateAt = 0
+let offlineSnapshotTimer = 0
+let offlineSnapshotIdleId = 0
 let offlineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer = null
@@ -465,14 +469,31 @@ function registerOutboxBackgroundSync() {
 
 function refreshOfflineSnapshotSoon(force = false) {
   if (typeof window === 'undefined') return
+  if (offlineSnapshotTimer) {
+    window.clearTimeout(offlineSnapshotTimer)
+    offlineSnapshotTimer = 0
+  }
+  if (offlineSnapshotIdleId && typeof window.cancelIdleCallback === 'function') {
+    window.cancelIdleCallback(offlineSnapshotIdleId)
+    offlineSnapshotIdleId = 0
+  }
   const run = () => {
+    offlineSnapshotTimer = 0
+    offlineSnapshotIdleId = 0
+    if (document.visibilityState === 'hidden') {
+      refreshOfflineSnapshotSoon(force)
+      return
+    }
     getLazyApiMethod('refreshOfflineDeviceSnapshot')({ force }).catch(() => {})
   }
+  const delay = force ? OFFLINE_SNAPSHOT_FORCE_DELAY_MS : OFFLINE_SNAPSHOT_IDLE_DELAY_MS
   if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(run, { timeout: 5000 })
+    offlineSnapshotTimer = window.setTimeout(() => {
+      offlineSnapshotIdleId = window.requestIdleCallback(run, { timeout: delay })
+    }, delay)
     return
   }
-  window.setTimeout(run, 1500)
+  offlineSnapshotTimer = window.setTimeout(run, delay)
 }
 
 function refreshServiceWorkerSoon(force = false) {

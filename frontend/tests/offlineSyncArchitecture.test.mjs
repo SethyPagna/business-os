@@ -60,9 +60,12 @@ await runTest('vault-unlocked foreground sync decrypts outbox payloads and repor
 
 await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {
   assert.match(webApiSource, /const OFFLINE_REFRESH_INTERVAL_MS = 5 \* 60_000/)
+  assert.match(webApiSource, /const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000/)
+  assert.match(webApiSource, /const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000/)
   assert.match(webApiSource, /startOfflineMaintenanceLoop/)
   assert.match(webApiSource, /window\.setInterval/)
   assert.match(webApiSource, /refreshOfflineSnapshotSoon/)
+  assert.match(webApiSource, /document\.visibilityState === 'hidden'/)
   assert.match(webApiSource, /registration\.update\?\.\(\)/)
 })
 
