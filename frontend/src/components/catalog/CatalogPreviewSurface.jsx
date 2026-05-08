@@ -89,11 +89,11 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <section className="overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_14px_36px_rgba(148,163,184,0.16)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88">
+            <section className="portal-header-shell overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/96 shadow-[0_14px_36px_rgba(148,163,184,0.16)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88">
               <div className="px-4 py-4 sm:px-6">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-[0_8px_20px_rgba(148,163,184,0.18)] dark:bg-slate-100">
+                    <div className="portal-logo-frame flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-[0_8px_20px_rgba(148,163,184,0.18)] dark:bg-slate-100">
                       {versionedBusinessLogo ? (
                         <button
                           type="button"

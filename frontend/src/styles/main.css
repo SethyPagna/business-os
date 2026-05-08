@@ -246,6 +246,18 @@ body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-
   box-shadow: none !important;
 }
 
+[data-portal-root='true'].dark .portal-header-shell,
+.dark [data-portal-root='true'] .portal-header-shell {
+  background-color: rgba(15, 23, 42, 0.94) !important;
+  border-color: rgba(51, 65, 85, 0.82) !important;
+  box-shadow: none !important;
+}
+
+[data-portal-root='true'].dark .portal-logo-frame,
+.dark [data-portal-root='true'] .portal-logo-frame {
+  box-shadow: none !important;
+}
+
 [data-portal-root='true'].dark .portal-nav-track,
 .dark [data-portal-root='true'] .portal-nav-track {
   background-color: rgba(2, 6, 23, 0.96) !important;
