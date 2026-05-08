@@ -16,7 +16,6 @@
 import { apiFetch, setSyncServerUrl, setSyncToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
-import * as methods                from './api/methods.js'
 import { STORAGE_KEYS }            from './constants.js'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.js'
 import {
@@ -34,6 +33,27 @@ let lastServiceWorkerUpdateAt = 0
 let offlineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer = null
+let methodsModulePromise = null
+const lazyApiMethodCache = new Map()
+
+function loadMethodsModule() {
+  if (!methodsModulePromise) methodsModulePromise = import('./api/methods.js')
+  return methodsModulePromise
+}
+
+function getLazyApiMethod(name) {
+  if (!lazyApiMethodCache.has(name)) {
+    lazyApiMethodCache.set(name, (...args) =>
+      loadMethodsModule().then((module) => {
+        const fn = module?.[name]
+        if (typeof fn !== 'function') {
+          throw new Error(`window.api.${name} is not available.`)
+        }
+        return fn(...args)
+      }))
+  }
+  return lazyApiMethodCache.get(name)
+}
 
 function bytesToBase64(bytes) {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
@@ -446,7 +466,7 @@ function registerOutboxBackgroundSync() {
 function refreshOfflineSnapshotSoon(force = false) {
   if (typeof window === 'undefined') return
   const run = () => {
-    methods.refreshOfflineDeviceSnapshot?.({ force }).catch(() => {})
+    getLazyApiMethod('refreshOfflineDeviceSnapshot')({ force }).catch(() => {})
   }
   if (typeof window.requestIdleCallback === 'function') {
     window.requestIdleCallback(run, { timeout: 5000 })
@@ -467,7 +487,7 @@ function refreshServiceWorkerSoon(force = false) {
 
 function runOfflineMaintenance(force = false) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-  methods.retryPendingSyncNow?.().catch(() => {})
+  getLazyApiMethod('retryPendingSyncNow')().catch(() => {})
   if (offlineVaultKey) {
     syncUnlockedOfflineOutbox({ force }).catch(() => {})
     syncUnlockedOfflineFileChunks({ force }).catch(() => {})
@@ -587,7 +607,7 @@ function forwardServiceWorkerAppEvent(event) {
   }))
 }
 
-window.api = {
+const staticApi = {
 
   setSyncServerUrl(url) {
     const clean = sanitizeSyncServerUrl(url)
@@ -639,6 +659,14 @@ window.api = {
   getCallLog,
   clearCallLog,
 }
+
+window.api = new Proxy(staticApi, {
+  get(target, prop, receiver) {
+    if (Reflect.has(target, prop)) return Reflect.get(target, prop, receiver)
+    if (typeof prop !== 'string') return undefined
+    return getLazyApiMethod(prop)
+  },
+})
 
 if (typeof window !== 'undefined') {
   navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerOutboxEvent)
