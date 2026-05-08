@@ -38,8 +38,8 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
 
 await runTest('browser startup and online recovery retry queued work without clearing it', () => {
   assert.doesNotMatch(webApiSource, /discardPendingSyncQueue\?\.\(\)/)
-  assert.match(webApiSource, /retryPendingSyncNow\?\.\(\)/)
-  assert.match(webApiSource, /refreshOfflineDeviceSnapshot\?\.\(/)
+  assert.match(webApiSource, /getLazyApiMethod\('retryPendingSyncNow'\)\(\)/)
+  assert.match(webApiSource, /getLazyApiMethod\('refreshOfflineDeviceSnapshot'\)\(\{ force \}\)/)
   assert.match(webApiSource, /sync:reconnected/)
   assert.match(webApiSource, /addEventListener\('online'/)
 })

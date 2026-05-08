@@ -16,9 +16,10 @@ async function runTest(name, fn) {
 
 await runTest('products table separates product identity from operational details', () => {
   const source = fs.readFileSync(new URL('../src/components/products/Products.jsx', import.meta.url), 'utf8')
+  const surface = fs.readFileSync(new URL('../src/components/products/ProductsListSurface.jsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
   assert.match(source, /ProductDetailsCell/)
-  assert.match(source, /t\('details'\)\s*\|\|\s*'Details'/)
+  assert.match(surface, /t\('details'\)\s*\|\|\s*'Details'/)
   assert.match(source, /renderDesktopProductRow[\s\S]*<ProductDetailsCell/)
   assert.match(source, /renderMobileProductCard[\s\S]*<ProductDiscountBadge[\s\S]*overlay/)
   const desktopRowStart = source.indexOf('const renderDesktopProductRow')

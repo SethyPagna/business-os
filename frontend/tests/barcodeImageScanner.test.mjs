@@ -46,6 +46,42 @@ await runTest('scanBarcodeFromImageFile returns the decoded image value', async 
   assert.equal(value, 'SKU-001')
 })
 
+await runTest('scanBarcodeFromImageFile uses native BarcodeDetector before loading zxing', async () => {
+  let zxingLoaded = false
+  const value = await scanBarcodeFromImageFile(
+    { name: 'native-photo.png' },
+    {
+      readDataUrl: async () => 'data:image/png;base64,native123',
+      loadZxingModule: async () => {
+        zxingLoaded = true
+        throw new Error('zxing should not load when native detector succeeds')
+      },
+      getNativeBarcodeDetector: () => class {
+        static async getSupportedFormats() {
+          return ['qr_code', 'ean_13']
+        }
+
+        async detect(image) {
+          assert.equal(image.src, 'data:image/png;base64,native123')
+          return [{ rawValue: 'NATIVE-001' }]
+        }
+      },
+      createImage: () => ({
+        set src(value) {
+          this._src = value
+          queueMicrotask(() => this.onload?.())
+        },
+        get src() {
+          return this._src
+        },
+      }),
+    },
+  )
+
+  assert.equal(value, 'NATIVE-001')
+  assert.equal(zxingLoaded, false)
+})
+
 await runTest('scanBarcodeFromImageFile rejects empty image results', async () => {
   await assert.rejects(
     () => scanBarcodeFromImageFile(
