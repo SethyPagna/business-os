@@ -8,7 +8,6 @@ import { downloadCSV } from '../../utils/csv'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import { ThreeDotPortal } from '../shared/PortalMenu'
 import Modal from '../shared/Modal'
-import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
 import FilterMenu from '../shared/FilterMenu'
 import { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
@@ -41,6 +40,7 @@ const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
 const VariantFormModal = lazy(() => import('./VariantFormModal'))
 const ProductForm = lazy(() => import('./ProductForm'))
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
+const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const CREATED_MONTH_OPTIONS = [
   ['01', 'Jan'],
   ['02', 'Feb'],
@@ -2377,20 +2377,24 @@ export default function Products() {
         </div>
       )}
 
-      <ImageGalleryLightbox
-        open={!!(lightbox && lightbox.images?.length)}
-        title={lightbox?.title || detailProduct?.name || t('products')}
-        images={lightbox?.images || []}
-        index={lightbox?.index || 0}
-        onClose={() => setLightbox(null)}
-        onIndexChange={(index) => setLightbox((curr) => (curr ? { ...curr, index } : curr))}
-        labels={{
-          prev: t('prev') || 'Prev',
-          next: t('next') || 'Next',
-          imageCount: '{current}/{total}',
-          dotsLabel: 'Image {current} of {total}',
-        }}
-      />
+      {lightbox && lightbox.images?.length ? (
+        <Suspense fallback={null}>
+          <ImageGalleryLightbox
+            open={!!(lightbox && lightbox.images?.length)}
+            title={lightbox?.title || detailProduct?.name || t('products')}
+            images={lightbox?.images || []}
+            index={lightbox?.index || 0}
+            onClose={() => setLightbox(null)}
+            onIndexChange={(index) => setLightbox((curr) => (curr ? { ...curr, index } : curr))}
+            labels={{
+              prev: t('prev') || 'Prev',
+              next: t('next') || 'Next',
+              imageCount: '{current}/{total}',
+              dotsLabel: 'Image {current} of {total}',
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       {bulkAddModal && (
         <Suspense fallback={null}>

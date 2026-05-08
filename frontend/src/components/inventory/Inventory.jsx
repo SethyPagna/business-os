@@ -5,9 +5,6 @@ import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, us
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
-import { buildCSV, downloadCSV, downloadZipFiles } from '../../utils/csv'
-import { buildStandaloneReportHtml } from '../../utils/exportReports'
-import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage'
 import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.js'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -128,6 +125,23 @@ const RFID_SECTION_OPTIONS = [
   { value: 'exceptions', labelKey: 'rfid_section_exceptions', hintKey: 'rfid_section_exceptions_hint', label: 'Exceptions', hint: 'Review wrong-branch, unknown, missing, and extra tag detections before applying.' },
   { value: 'sessions', labelKey: 'rfid_section_sessions', hintKey: 'rfid_section_sessions_hint', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
 ]
+
+let inventoryExportToolsPromise = null
+
+async function loadInventoryExportTools() {
+  if (!inventoryExportToolsPromise) {
+    inventoryExportToolsPromise = Promise.all([
+      import('../../utils/csv'),
+      import('../../utils/exportReports'),
+      import('../../utils/exportPackage'),
+    ]).then(([csvUtils, reportUtils, packageUtils]) => ({
+      ...csvUtils,
+      ...reportUtils,
+      ...packageUtils,
+    }))
+  }
+  return inventoryExportToolsPromise
+}
 
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp()
@@ -1937,15 +1951,18 @@ export default function Inventory() {
     }))
   ), [filteredSummary, getStockQty])
 
-  const exportMovementGroups = useCallback((groups, filePrefix = 'inventory-movements') => {
+  const exportMovementGroups = useCallback(async (groups, filePrefix = 'inventory-movements') => {
+    const { downloadCSV } = await loadInventoryExportTools()
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildMovementRows(groups))
   }, [buildMovementRows, exportStamp])
 
-  const exportInventorySummary = useCallback((productsToExport = filteredSummary, filePrefix = 'inventory') => {
+  const exportInventorySummary = useCallback(async (productsToExport = filteredSummary, filePrefix = 'inventory') => {
+    const { downloadCSV } = await loadInventoryExportTools()
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryProductRows(productsToExport))
   }, [buildInventoryProductRows, exportStamp, filteredSummary])
 
-  const exportInventoryStats = useCallback((filePrefix = 'inventory-stats') => {
+  const exportInventoryStats = useCallback(async (filePrefix = 'inventory-stats') => {
+    const { downloadCSV } = await loadInventoryExportTools()
     const rows = [
       ...buildInventoryExportContextRows().map((row) => ({
         Section: row.Section,
@@ -1972,7 +1989,14 @@ export default function Inventory() {
     downloadCSV(`${filePrefix}-${exportStamp}.csv`, rows)
   }, [buildInventoryExportContextRows, buildInventoryFormulaRows, buildInventoryStatsRows, exportStamp])
 
-  const exportInventoryPackage = useCallback((mode = tab) => {
+  const exportInventoryPackage = useCallback(async (mode = tab) => {
+    const {
+      buildCSV,
+      buildReportManifestRows,
+      buildReportPackageFiles,
+      buildStandaloneReportHtml,
+      downloadZipFiles,
+    } = await loadInventoryExportTools()
     const movementRows = buildMovementRows(visibleMovementGroups)
     const productRows = buildInventoryProductRows(filteredSummary)
     const statsRows = buildInventoryStatsRows()
