@@ -21,6 +21,43 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
 const DASHBOARD_CHART_POINT_LIMIT = 180
+const EMPTY_DASHBOARD_SUMMARY = {
+  today_count: 0,
+  today_total: 0,
+  today_total_khr: 0,
+  today_return_count: 0,
+  today_return_usd: 0,
+  all_total: 0,
+  all_total_khr: 0,
+  cost_in: 0,
+  cost_out: 0,
+  cost_in_khr: 0,
+  cost_out_khr: 0,
+  product_count: 0,
+  in_stock_count: 0,
+  low_stock_count: 0,
+  out_of_stock_count: 0,
+  stock_value_usd: 0,
+  stock_value_khr: 0,
+  low_stock: [],
+  out_of_stock: [],
+  expiring_products: [],
+  expiring_count: 0,
+  recent_sales: [],
+}
+const EMPTY_DASHBOARD_ANALYTICS = {
+  totals: {},
+  prevTotals: {},
+  periodReturns: {},
+  periodSupplierReturns: {},
+  periodData: [],
+  byPayment: [],
+  byBranch: [],
+  topProducts: [],
+  topProductsQty: [],
+  topCustomers: [],
+  hourlyDist: [],
+}
 
 function getDashboardFilterStorageKey(user) {
   const userKey = user?.id || user?.username || user?.email || 'guest'
@@ -95,6 +132,37 @@ function isDashboardAnalyticsPayload(value) {
     || Array.isArray(value.topCustomers)
     || (value.totals && typeof value.totals === 'object')
   )
+}
+
+function normalizeDashboardSummaryPayload(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    ...EMPTY_DASHBOARD_SUMMARY,
+    ...value,
+    low_stock: Array.isArray(value.low_stock) ? value.low_stock : [],
+    out_of_stock: Array.isArray(value.out_of_stock) ? value.out_of_stock : [],
+    expiring_products: Array.isArray(value.expiring_products) ? value.expiring_products : [],
+    recent_sales: Array.isArray(value.recent_sales) ? value.recent_sales : [],
+  }
+}
+
+function normalizeDashboardAnalyticsPayload(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    ...EMPTY_DASHBOARD_ANALYTICS,
+    ...value,
+    totals: value.totals && typeof value.totals === 'object' ? value.totals : {},
+    prevTotals: value.prevTotals && typeof value.prevTotals === 'object' ? value.prevTotals : {},
+    periodReturns: value.periodReturns && typeof value.periodReturns === 'object' ? value.periodReturns : {},
+    periodSupplierReturns: value.periodSupplierReturns && typeof value.periodSupplierReturns === 'object' ? value.periodSupplierReturns : {},
+    periodData: Array.isArray(value.periodData) ? value.periodData : [],
+    byPayment: Array.isArray(value.byPayment) ? value.byPayment : [],
+    byBranch: Array.isArray(value.byBranch) ? value.byBranch : [],
+    topProducts: Array.isArray(value.topProducts) ? value.topProducts : [],
+    topProductsQty: Array.isArray(value.topProductsQty) ? value.topProductsQty : [],
+    topCustomers: Array.isArray(value.topCustomers) ? value.topCustomers : [],
+    hourlyDist: Array.isArray(value.hourlyDist) ? value.hourlyDist : [],
+  }
 }
 
 export default function Dashboard() {
@@ -174,10 +242,11 @@ export default function Dashboard() {
     try {
       const data = await withLoaderTimeout(() => window.api.getDashboard(), label, 30_000)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
-      if (!isDashboardSummaryPayload(data)) {
+      const normalized = normalizeDashboardSummaryPayload(data)
+      if (!normalized || !isDashboardSummaryPayload(normalized)) {
         throw new Error('Dashboard summary returned incomplete data.')
       }
-      setSummary(data)
+      setSummary(normalized)
       setSummaryError('')
       return data
     } catch (error) {
@@ -207,10 +276,11 @@ export default function Dashboard() {
         30_000,
       )
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
-      if (!isDashboardAnalyticsPayload(data)) {
+      const normalized = normalizeDashboardAnalyticsPayload(data)
+      if (!normalized || !isDashboardAnalyticsPayload(normalized)) {
         throw new Error('Dashboard analytics returned incomplete data.')
       }
-      setAnalytics(data)
+      setAnalytics(normalized)
       setAnalyticsError('')
       return data
     } catch (error) {

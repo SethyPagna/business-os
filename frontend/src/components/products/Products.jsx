@@ -695,7 +695,7 @@ export default function Products() {
     if (!raw) return ''
     if (raw.startsWith('http') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw
     if (raw.startsWith('/uploads/')) {
-      const base = (window.api?.getSyncServerUrl?.()) || localStorage.getItem('businessos_sync_server') || ''
+      const base = String((window.api?.getSyncServerUrl?.()) || localStorage.getItem('businessos_sync_server') || '')
       return base ? `${base.replace(/\/$/, '')}${raw}` : raw
     }
     return raw
@@ -1878,12 +1878,11 @@ export default function Products() {
 
       <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-700 dark:bg-blue-900/40 sm:mx-0 sm:rounded-xl">
         <div className="px-2 py-2">
-          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-            <span className="inline-flex min-w-0 max-w-[4.95rem] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+          <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+            <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
               {productSummaryLabel}
             </span>
-            <div className="ml-auto flex min-w-0 items-center gap-1.5">
-            <label className="relative inline-flex h-7 w-[3.1rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                 <span className="sr-only">{t('per_page') || 'per page'}</span>
                 <select
                   className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
@@ -1898,10 +1897,10 @@ export default function Products() {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
             </label>
-            <div className="inline-flex h-7 w-[5.7rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
               <button
                 type="button"
-                className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                 disabled={productSafePage <= 1}
                 onClick={() => setProductPage(productSafePage - 1)}
                 aria-label="Previous page"
@@ -1912,7 +1911,7 @@ export default function Products() {
                 type="text"
                 inputMode="numeric"
                 aria-label={t('page') || 'Page'}
-                className="h-7 w-5 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
                 value={productPageDraft}
                 onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={commitProductPageDraft}
@@ -1932,14 +1931,13 @@ export default function Products() {
               </span>
               <button
                 type="button"
-                className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                 disabled={productSafePage >= productTotalPages}
                 onClick={() => setProductPage(productSafePage + 1)}
                 aria-label="Next page"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
-            </div>
             </div>
           </div>
           <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_4.9rem] items-center gap-1.5">

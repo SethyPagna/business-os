@@ -28,8 +28,8 @@ const LONG_TASK_WARN_MS = 200
 const LONG_TASK_FAIL_COUNT = 3
 const JS_CHUNK_WARN_BYTES = 150 * 1024
 const RAW_JS_TO_GZIP_ESTIMATE_RATIO = 0.35
-const BUTTON_RESPONSE_WARN_MS = 1_500
-const BUTTON_RESPONSE_FAIL_MS = 5_000
+const BUTTON_RESPONSE_WARN_MS = 300
+const BUTTON_RESPONSE_FAIL_MS = 1_500
 const LONG_RUNNING_API_RE = /\/api\/(?:backups|system\/drive-sync\/jobs|system\/jobs|import-jobs\/[^/]+\/(?:start|approve|preflight))/i
 
 const ADMIN_ROUTES = [
@@ -647,6 +647,43 @@ async function clickNamedButton(page, label, routeName) {
   }
 }
 
+async function clickTestIdButton(page, testId, routeName, { waitForProgress = false } = {}) {
+  const started = performance.now()
+  await dismissTransientUi(page)
+  const button = page.locator(`[data-testid="${testId}"]`).first()
+  if (!(await button.count().catch(() => 0))) {
+    return { name: `${routeName}:testid:${testId}`, ok: false, skipped: true, ms: 0, reason: 'Button not found' }
+  }
+  if (!(await button.isVisible().catch(() => false)) || !(await button.isEnabled().catch(() => false))) {
+    return { name: `${routeName}:testid:${testId}`, ok: false, skipped: true, ms: 0, reason: 'Button not visible/enabled' }
+  }
+  try {
+    await button.click({ timeout: BUTTON_RESPONSE_FAIL_MS })
+  } catch (error) {
+    return {
+      name: `${routeName}:testid:${testId}`,
+      ok: false,
+      ms: Math.round(performance.now() - started),
+      error: error?.message || String(error),
+    }
+  }
+  const responseMs = Math.round(performance.now() - started)
+  let progressMs = null
+  if (waitForProgress) {
+    const progressStarted = performance.now()
+    const progress = page.locator('[data-testid="backup-job-progress"]').first()
+    await progress.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {})
+    progressMs = Math.round(performance.now() - progressStarted)
+  }
+  await page.waitForTimeout(75)
+  return {
+    name: `${routeName}:testid:${testId}`,
+    ok: true,
+    ms: responseMs,
+    progressMs,
+  }
+}
+
 async function runRouteInteractions(page, route) {
   const interactions = []
   if (['products', 'inventory', 'pos', 'sales', 'returns', 'audit_log', 'files', 'contacts', 'backup'].includes(route.name)) {
@@ -665,6 +702,11 @@ async function runRouteInteractions(page, route) {
   }
   for (const label of buttonMap[route.name] || []) {
     interactions.push(await clickNamedButton(page, label, route.name))
+  }
+  if (route.name === 'backup') {
+    interactions.push(await clickTestIdButton(page, 'backup-doctor-refresh', route.name))
+    interactions.push(await clickTestIdButton(page, 'backup-export-create', route.name, { waitForProgress: true }))
+    interactions.push(await clickTestIdButton(page, 'backup-drive-sync-now', route.name, { waitForProgress: true }))
   }
   return interactions
 }
@@ -748,6 +790,9 @@ function analyzeRoute(profileName, route, routeResult, networkEntries, perf, con
       addFinding(1, 'interaction', `${profileName}/${interaction.name} exceeded fail budget`, interaction)
     } else if (interaction.ms > BUTTON_RESPONSE_WARN_MS) {
       addFinding(2, 'interaction', `${profileName}/${interaction.name} exceeded warning budget`, interaction)
+    }
+    if (interaction.progressMs != null && interaction.progressMs > 1_000) {
+      addFinding(1, 'interaction', `${profileName}/${interaction.name} did not show job progress within 1s`, interaction)
     }
   }
 }

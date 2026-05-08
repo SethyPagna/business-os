@@ -180,6 +180,7 @@ function Write-EnvFile($values) {
     "S3_SECRET_ACCESS_KEY=$($values.S3_SECRET_ACCESS_KEY)",
     "S3_BUCKET=$($values.S3_BUCKET)",
     "R2_PUBLIC_BASE_URL=$($values.R2_PUBLIC_BASE_URL)",
+    "CLOUDFLARE_API_TOKEN=$($values.CLOUDFLARE_API_TOKEN)",
     "CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE=$($values.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE)",
     'APP_BIND_HOST=127.0.0.1',
     'APP_PORT=4000',
@@ -230,6 +231,7 @@ function Ensure-Env {
   }
   $defaultTokenFile = Join-Path $SecretDir 'cloudflare-tunnel.token'
   $sourceTokenFile = Join-Path (Join-Path $Root 'ops\runtime\secrets') 'cloudflare-business-os-leangcosmetics.token'
+  $sourceApiTokenFile = Join-Path (Join-Path $Root 'ops\runtime\secrets') 'cloudflare-api-token.txt'
   $tokenFile = if ($existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE) { $existing.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE } else { $defaultTokenFile }
   $tokenLooksEmpty = -not (Test-Path -LiteralPath $tokenFile) -or ((Get-Item -LiteralPath $tokenFile -ErrorAction SilentlyContinue).Length -le 0)
   if ($tokenLooksEmpty -and (Test-Path -LiteralPath $sourceTokenFile) -and ((Get-Item -LiteralPath $sourceTokenFile).Length -gt 0)) {
@@ -263,6 +265,7 @@ function Ensure-Env {
     S3_ACCESS_KEY_ID = if ($existing.S3_ACCESS_KEY_ID) { $existing.S3_ACCESS_KEY_ID } else { '' }
     S3_SECRET_ACCESS_KEY = if ($existing.S3_SECRET_ACCESS_KEY) { $existing.S3_SECRET_ACCESS_KEY } else { '' }
     R2_PUBLIC_BASE_URL = if ($existing.R2_PUBLIC_BASE_URL) { $existing.R2_PUBLIC_BASE_URL } else { '' }
+    CLOUDFLARE_API_TOKEN = if ($existing.CLOUDFLARE_API_TOKEN) { $existing.CLOUDFLARE_API_TOKEN } elseif (Test-Path -LiteralPath $sourceApiTokenFile) { (Get-Content -LiteralPath $sourceApiTokenFile -Raw).Trim() } else { '' }
     DATABASE_URL = $databaseUrl
     BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ((Get-PostgresCutoverBlockerSummary) -match '"blockerCount"\s*:\s*0') { '1' } else { if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' } }
     ANALYTICS_ENGINE = if ($existing.ANALYTICS_ENGINE) { $existing.ANALYTICS_ENGINE } else { 'duckdb' }
@@ -529,6 +532,7 @@ function Write-DockerReleaseKit($imageName) {
     S3_SECRET_ACCESS_KEY = Get-EnvValue $kitExisting $sourceExisting 'S3_SECRET_ACCESS_KEY'
     S3_BUCKET = Get-EnvValue $kitExisting $sourceExisting 'S3_BUCKET' 'business-os-assets'
     R2_PUBLIC_BASE_URL = Get-EnvValue $kitExisting $sourceExisting 'R2_PUBLIC_BASE_URL'
+    CLOUDFLARE_API_TOKEN = Get-EnvValue $kitExisting $sourceExisting 'CLOUDFLARE_API_TOKEN'
     CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
     DATABASE_DRIVER = 'postgres'
     OBJECT_STORAGE_DRIVER = Get-EnvValue $kitExisting $sourceExisting 'OBJECT_STORAGE_DRIVER' 'r2'

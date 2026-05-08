@@ -648,12 +648,13 @@ async function validateLocalBackupPackage(sourceDir) {
   return { root, manifest }
 }
 
-function getLocalBackupRoot() {
-  return path.join(DATA_ROOT, 'backups')
+function getLocalBackupRoot(rootDir = '') {
+  const customRoot = String(rootDir || '').trim()
+  return customRoot ? path.resolve(customRoot) : path.join(DATA_ROOT, 'backups')
 }
 
-function listLocalBackupDirectories() {
-  const backupRoot = getLocalBackupRoot()
+function listLocalBackupDirectories({ rootDir = '' } = {}) {
+  const backupRoot = getLocalBackupRoot(rootDir)
   if (!fs.existsSync(backupRoot)) return []
   return fs.readdirSync(backupRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^datasync-/i.test(String(entry.name || '')))
@@ -697,9 +698,9 @@ function readReusableLocalBackupPackage(absolutePath) {
   }
 }
 
-function findReusableLocalBackupPackage({ maxAgeMs = 10 * 60 * 1000 } = {}) {
+function findReusableLocalBackupPackage({ maxAgeMs = 10 * 60 * 1000, rootDir = '' } = {}) {
   const cutoff = Date.now() - Math.max(60 * 1000, Number(maxAgeMs || 0))
-  const candidates = listLocalBackupDirectories()
+  const candidates = listLocalBackupDirectories({ rootDir })
   for (const candidate of candidates) {
     if (!candidate?.mtimeMs || candidate.mtimeMs < cutoff) continue
     const reusable = readReusableLocalBackupPackage(candidate.absolutePath)

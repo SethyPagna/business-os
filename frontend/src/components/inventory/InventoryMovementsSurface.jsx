@@ -1,5 +1,7 @@
 ﻿import { Fragment } from 'react'
 import { ChevronDown, ChevronRight, Package } from 'lucide-react'
+import ActionHistoryBar from '../shared/ActionHistoryBar'
+import ExportMenu from '../shared/ExportMenu'
 
 export default function InventoryMovementsSurface({
   MOV_COLORS,
@@ -13,17 +15,27 @@ export default function InventoryMovementsSurface({
   getMovementGroupPage,
   getMovementRecordCount,
   getMovementSectionRecordCount,
+  inventoryExportItems,
   isMovementScopeFullySelected,
   isMovementScopePartiallySelected,
   loading,
+  movementDateRangeLabel,
+  movementEndDate,
+  movementMeta,
   movementSections,
   movementSelectAllRef,
+  movementStartDate,
   openMovementProductDetail,
   selectedMovementGroups,
   selectedMovementIds,
   setSelectedMovementIds,
   setExpandedMovementGroupPage,
+  setMovementEndDate,
+  setMovementMeta,
+  setMovementStartDate,
+  setShowMovementDateFilter,
   showMovementActionGroups,
+  showMovementDateFilter,
   t,
   toggleAllMovementSelection,
   toggleMovementGroup,
@@ -31,6 +43,8 @@ export default function InventoryMovementsSurface({
   toggleMovementSectionCollapsed,
   toggleMovementSelection,
   tr,
+  actionHistory,
+  collapsedMovementSections,
   visibleMovementGroups,
   visibleMovementQuantity,
   visibleMovementRecordCount,

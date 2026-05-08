@@ -71,7 +71,7 @@ const {
   forgetDriveSyncCredentials,
 } = require('../../services/googleDriveSync')
 const { cancelAllImportJobs, deleteAllImportJobs, getQueueStatus, initializeBullQueue } = require('../../services/importJobs')
-const { createFinalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages')
+const { createFinalBackupPackage, findReusableLocalBackupPackage, listBackupVersions, validateLocalBackupPackage } = require('../../services/backupPackages')
 const { buildRuntimeDescriptor, bumpStorageVersion } = require('../../runtimeState')
 const { startSystemJob, getSystemJob, listSystemJobs, cancelSystemJob } = require('../../systemJobs')
 const { getMaintenanceLock, withMaintenanceLock } = require('../../maintenanceLock')
@@ -449,6 +449,27 @@ async function createFolderBackup({ destinationDir, actor = {}, progress = null,
   const resolvedDestination = path.resolve(rawDestination)
   if (isSamePath(resolvedDestination, DATA_ROOT) || isSubPath(DATA_ROOT, resolvedDestination)) {
     throw new Error('Choose a backup destination outside the current live data folder.')
+  }
+  const reusable = findReusableLocalBackupPackage({ rootDir: resolvedDestination, maxAgeMs: 15 * 60 * 1000 })
+  if (reusable?.packageId) {
+    progress?.({
+      phase: 'completed',
+      progress: 100,
+      message: `Recent backup package reused: ${reusable.packageId}`,
+      metrics: {
+        packageId: reusable.packageId,
+        reused: true,
+        filesProcessed: reusable.objectsCopied || 0,
+        filesTotal: reusable.objectsCopied || 0,
+      },
+    })
+    audit(actor.userId, actor.userName, 'backup_export_reused', 'system', null, {
+      packageId: reusable.packageId,
+      objectPrefix: reusable.objectPrefix,
+      localPath: reusable.localPath,
+      storageDriver: reusable.storageDriver,
+    })
+    return reusable
   }
   const result = await createFinalBackupPackage({ destinationDir: resolvedDestination, actor, progress, signal, throwIfCancelled })
   audit(actor.userId, actor.userName, 'backup_export', 'system', null, {

@@ -24,34 +24,37 @@ function ProductImg({ src, alt, className, onClick }) {
   const [url, setUrl] = useState(null)
   const [failed, setFailed] = useState(false)
   const imageRequestRef = useRef(0)
+  const safeSrc = String(src || '').trim()
 
   useEffect(() => {
     const requestId = imageRequestRef.current + 1
     imageRequestRef.current = requestId
     setFailed(false)
-    if (!src) {
+    if (!safeSrc) {
       setUrl(null)
       return () => {
         imageRequestRef.current = requestId + 1
       }
     }
-    if (src.startsWith('data:') || src.startsWith('blob:')) {
-      setUrl(src)
+    if (safeSrc.startsWith('data:') || safeSrc.startsWith('blob:')) {
+      setUrl(safeSrc)
       return () => {
         imageRequestRef.current = requestId + 1
       }
     }
-    if (src.startsWith('http')) {
-      setUrl(src)
+    if (safeSrc.startsWith('http')) {
+      setUrl(safeSrc)
       return () => {
         imageRequestRef.current = requestId + 1
       }
     }
-    if (src.startsWith('/uploads/')) {
-      const base = (typeof window !== 'undefined' && window.api?.getSyncServerUrl?.())
-        || localStorage.getItem('businessos_sync_server')
-        || ''
-      setUrl(base ? `${base.replace(/\/$/, '')}${src}` : src)
+    if (safeSrc.startsWith('/uploads/')) {
+      const base = String(
+        (typeof window !== 'undefined' && window.api?.getSyncServerUrl?.())
+          || localStorage.getItem('businessos_sync_server')
+          || '',
+      )
+      setUrl(base ? `${base.replace(/\/$/, '')}${safeSrc}` : safeSrc)
       return () => {
         imageRequestRef.current = requestId + 1
       }
@@ -59,7 +62,7 @@ function ProductImg({ src, alt, className, onClick }) {
     if (window.api?.getImageDataUrl) {
       async function loadImageData() {
         try {
-          const data = await window.api.getImageDataUrl(src)
+          const data = await window.api.getImageDataUrl(safeSrc)
           if (imageRequestRef.current !== requestId) return
           setUrl(data || null)
         } catch {
@@ -75,7 +78,7 @@ function ProductImg({ src, alt, className, onClick }) {
     return () => {
       imageRequestRef.current = requestId + 1
     }
-  }, [src])
+  }, [safeSrc])
 
   if (!url || failed) return null
   return (

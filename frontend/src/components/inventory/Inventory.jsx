@@ -2753,12 +2753,11 @@ export default function Inventory() {
         <>
           <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
             <div className="px-2 py-2">
-              <div className="flex min-w-0 items-center gap-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-                <span className="inline-flex min-w-0 shrink-0 max-w-[4.95rem] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+                <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
                   {inventoryProductSummaryLabel}
                 </span>
-                <div className="flex min-w-0 items-center gap-1">
-                <label className="relative inline-flex h-7 w-[3.05rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                   <span className="sr-only">{t('per_page') || 'per page'}</span>
                   <select
                     className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
@@ -2773,10 +2772,10 @@ export default function Inventory() {
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
                 </label>
-                <div className="inline-flex h-7 w-[5.45rem] shrink-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                   <button
                     type="button"
-                    className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                    className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                     disabled={inventoryProductSafePage <= 1}
                     onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
                     aria-label="Previous page"
@@ -2787,7 +2786,7 @@ export default function Inventory() {
                     type="text"
                     inputMode="numeric"
                     aria-label={t('page') || 'Page'}
-                    className="h-7 w-5 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                    className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
                     value={inventoryProductPageDraft}
                     onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                     onBlur={commitInventoryProductPageDraft}
@@ -2807,14 +2806,13 @@ export default function Inventory() {
                   </span>
                   <button
                     type="button"
-                    className="inline-flex h-7 w-6.5 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                    className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
                     disabled={inventoryProductSafePage >= inventoryProductTotalPages}
                     onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
                     aria-label="Next page"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
-                </div>
                 </div>
               </div>
               <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
@@ -2918,6 +2916,8 @@ export default function Inventory() {
       {showMovementsSection ? (
         <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_movements', 'Loading inventory movements...', 'Loading inventory movements...')}</div>}>
           <InventoryMovementsSurface
+            actionHistory={actionHistory}
+            collapsedMovementSections={collapsedMovementSections}
             MOV_COLORS={MOV_COLORS}
             PaginationControls={PaginationControls}
             expandedMovementGroups={expandedMovementGroups}
@@ -2929,17 +2929,27 @@ export default function Inventory() {
             getMovementGroupPage={getMovementGroupPage}
             getMovementRecordCount={getMovementRecordCount}
             getMovementSectionRecordCount={getMovementSectionRecordCount}
+            inventoryExportItems={inventoryExportItems}
             isMovementScopeFullySelected={isMovementScopeFullySelected}
             isMovementScopePartiallySelected={isMovementScopePartiallySelected}
             loading={loading}
+            movementDateRangeLabel={movementDateRangeLabel}
+            movementEndDate={movementEndDate}
+            movementMeta={movementMeta}
             movementSections={movementSections}
             movementSelectAllRef={movementSelectAllRef}
+            movementStartDate={movementStartDate}
             openMovementProductDetail={openMovementProductDetail}
             selectedMovementGroups={selectedMovementGroups}
             selectedMovementIds={selectedMovementIds}
             setSelectedMovementIds={setSelectedMovementIds}
             setExpandedMovementGroupPage={setExpandedMovementGroupPage}
+            setMovementEndDate={setMovementEndDate}
+            setMovementMeta={setMovementMeta}
+            setMovementStartDate={setMovementStartDate}
+            setShowMovementDateFilter={setShowMovementDateFilter}
             showMovementActionGroups={showMovementActionGroups}
+            showMovementDateFilter={showMovementDateFilter}
             t={t}
             toggleAllMovementSelection={toggleAllMovementSelection}
             toggleMovementGroup={toggleMovementGroup}
