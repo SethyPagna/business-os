@@ -17,8 +17,8 @@ assert.match(
 
 assert.match(
   inventoryProductsSource,
-  /className="flex max-w-\[8\.6rem\] shrink-0 flex-col items-end gap-1 text-right"[\s\S]*\{qty\}[\s\S]*\{slbl\}/,
-  'Quantity and stock status should share a compact top-right line without crowding the product details',
+  /className="flex max-w-\[7rem\] shrink-0 flex-col items-end gap-1 text-right"[\s\S]*\{qty\}[\s\S]*<span className=\{`max-w-full whitespace-nowrap rounded-full px-2 py-0\.5 text-\[9\.5px\] font-semibold leading-none \$\{scls\}`\}>\{slbl\}<\/span>/,
+  'Quantity and stock status should stack into compact separate rows without crowding the product details',
 )
 
 assert.match(

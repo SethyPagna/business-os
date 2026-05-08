@@ -138,14 +138,14 @@ export default function InventoryProductsSurface({
                                 {!productTagText ? <span className="truncate">{t('product') || 'Product'}</span> : null}
                               </div>
                             </div>
-                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1 text-right">
-                              <div className="flex max-w-full items-center justify-end gap-1">
-                                <div className="min-w-0 max-w-[4.5rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
+                            <div className="flex max-w-[7rem] shrink-0 flex-col items-end gap-1 text-right">
+                              <div className="flex max-w-full items-center justify-end">
+                                <div className="min-w-0 max-w-[5.25rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                   {qty}
                                   <span className="ml-1 text-[9px] font-normal text-gray-400">{p.unit}</span>
                                 </div>
-                                <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
                               </div>
+                              <span className={`max-w-full whitespace-nowrap rounded-full px-2 py-0.5 text-[9.5px] font-semibold leading-none ${scls}`}>{slbl}</span>
                             </div>
                           </div>
                           <div className="mt-1 flex items-center gap-2 pl-6">
