@@ -2521,6 +2521,8 @@
   "offline_mode_active": "របៀបក្រៅបណ្ដាញ៖ ការលក់ត្រូវបានរក្សាទុកលើឧបករណ៍នេះ ហើយនឹង sync ពេល server ភ្ជាប់ឡើងវិញ។",
   "offline_mode_ready_sync": "Server online ហើយ។ Sync ការលក់ក្រៅបណ្ដាញឥឡូវ?",
   "server_back_online": "Server ត្រឡប់ online វិញហើយ។ អ្នកអាចបន្តធ្វើការបាន។",
+  "server_reconnecting": "Server កំពុងភ្ជាប់ឡើងវិញ",
+  "server_tunnel_reconnecting": "Server/tunnel កំពុងភ្ជាប់ឡើងវិញ។ ទិន្នន័យ cache នៅតែបង្ហាញ ហើយការពិនិត្យ read-only នឹង refresh ដោយស្វ័យប្រវត្តិ។",
   "offline_sale_saved_notice": "ការលក់ក្រៅបណ្ដាញ {receipt} បានរក្សាទុកនៅ {time}។ វានឹង sync ពេល server online។",
   "offline_sale_synced_notice": "ការលក់ក្រៅបណ្ដាញ {receipt} បាន sync នៅ {time}។",
   "sync_now": "Sync ឥឡូវ",

@@ -2516,6 +2516,8 @@
   "offline_mode_active": "Offline mode: sales are saved on this device and will sync when the server reconnects.",
   "offline_mode_ready_sync": "Server is online. Sync offline sales now?",
   "server_back_online": "Server is back online. You can keep working.",
+  "server_reconnecting": "Server reconnecting",
+  "server_tunnel_reconnecting": "Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.",
   "offline_sale_saved_notice": "Offline sale {receipt} saved at {time}. It will sync when the server is online.",
   "offline_sale_synced_notice": "Offline sale {receipt} synced at {time}.",
   "sync_now": "Sync now",

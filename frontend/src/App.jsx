@@ -674,14 +674,6 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }) {
   )
 }
 
-function ReadOnlyServerBanner() {
-  return (
-    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-      Server connection is unavailable. You can review cached data, but changes are blocked until the live server reconnects.
-    </div>
-  )
-}
-
 function GlobalScrollControls() {
   const scrollTo = (direction) => {
     const target = getScrollTarget(window)
@@ -719,16 +711,6 @@ function GlobalScrollControls() {
   )
 }
 
-function TransientServerBanner({ outage }) {
-  if (!outage) return null
-  return (
-    <div className="border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-      Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.
-      {outage.status ? <span className="ml-2 opacity-70">Status {outage.status}</span> : null}
-    </div>
-  )
-}
-
 function formatSyncTimestamp(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -741,7 +723,7 @@ function formatSyncTimestamp(value) {
   })
 }
 
-function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }) {
+function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }) {
   const { t } = useApp()
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
@@ -771,11 +753,15 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, vaultLocked
   const failed = Number(pendingSync?.failed || 0)
   const ready = !!syncUrl && canWriteToServer
   const oldest = formatSyncTimestamp(pendingSync?.oldest_created_at)
+  const reconnecting = offline && !!transientOutage
   const label = ready
     ? (total
       ? (t('offline_mode_ready_sync') || 'Server is back online. Offline actions can sync now.')
       : (t('server_back_online') || 'Server is back online. You can keep working.'))
-    : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
+    : reconnecting
+      ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
+      : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
+  const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
   const priority = appUpdate
     ? { title: 'New version ready', message: 'Update available', tone: 'info' }
     : conflictsNeedReview
@@ -794,8 +780,8 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, vaultLocked
     <div className={`border-b px-4 py-2 text-xs ${toneClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="min-w-0">
-          <strong>{priority?.title || t('offline_mode') || 'Offline mode'}</strong>
-          <span className="ml-2">{priority?.message || label}</span>
+          <strong>{priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')}</strong>
+          <span className="ml-2">{priority?.message || `${label}${statusSuffix}`}</span>
           {total ? (
             <span className="ml-2 opacity-75">
               {total} {t('pending') || 'pending'}{syncing ? `, ${syncing} ${t('syncing') || 'syncing'}` : ''}{failed ? `, ${failed} ${t('failed') || 'failed'}` : ''}{oldest ? `, since ${oldest}` : ''}
@@ -1163,11 +1149,11 @@ export default function App() {
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
           <div className="flex min-w-0 items-center gap-3">
           </div>
-          <TransientServerBanner outage={transientOutage} />
           <OfflineModeBanner
             pendingSync={pendingSync}
             canWriteToServer={canWriteToServer}
             syncUrl={syncUrl}
+            transientOutage={transientOutage}
             vaultLocked={vaultLocked}
             appUpdate={appUpdate}
             conflictsNeedReview={conflictsNeedReview}
@@ -1177,7 +1163,6 @@ export default function App() {
               window.setTimeout(() => window.location.reload(), 250)
             }}
           />
-          {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
           <Suspense fallback={null}>
             <BackgroundImportTracker />
           </Suspense>

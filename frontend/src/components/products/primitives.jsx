@@ -4,6 +4,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
 
+const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
+const brokenProductImageUrls = new Map()
+
+function isRecentlyBrokenProductImage(src) {
+  const lastFailedAt = Number(brokenProductImageUrls.get(src) || 0)
+  if (!lastFailedAt) return false
+  if ((Date.now() - lastFailedAt) < BROKEN_PRODUCT_IMAGE_RETRY_MS) return true
+  brokenProductImageUrls.delete(src)
+  return false
+}
+
+function markBrokenProductImage(src) {
+  if (!src) return
+  brokenProductImageUrls.set(src, Date.now())
+}
+
 function sanitizeNumericInput(value, { allowDecimal = true, allowNegative = false } = {}) {
   let next = String(value ?? '').replace(/,/g, '').replace(/[^\d.-]/g, '')
   if (!allowNegative) next = next.replace(/-/g, '')
@@ -31,6 +47,13 @@ function ProductImg({ src, alt, className, onClick }) {
     imageRequestRef.current = requestId
     setFailed(false)
     if (!safeSrc) {
+      setUrl(null)
+      return () => {
+        imageRequestRef.current = requestId + 1
+      }
+    }
+    if (isRecentlyBrokenProductImage(safeSrc)) {
+      setFailed(true)
       setUrl(null)
       return () => {
         imageRequestRef.current = requestId + 1
@@ -87,7 +110,10 @@ function ProductImg({ src, alt, className, onClick }) {
       alt={alt}
       className={className}
       onClick={onClick}
-      onError={() => setFailed(true)}
+      onError={() => {
+        markBrokenProductImage(safeSrc)
+        setFailed(true)
+      }}
       loading="lazy"
       decoding="async"
     />
