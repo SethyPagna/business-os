@@ -235,8 +235,8 @@ body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-
 
 .dark [data-portal-root='true'] .portal-nav-tab-active,
 [data-portal-root='true'].dark .portal-nav-tab-active {
-  background-color: #bae6fd !important;
-  color: #020617 !important;
+  background-color: #2563eb !important;
+  color: #ffffff !important;
 }
 
 [data-portal-root='true'] .portal-nav-tab-active {

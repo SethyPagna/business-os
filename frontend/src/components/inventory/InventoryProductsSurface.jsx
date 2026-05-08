@@ -138,7 +138,7 @@ export default function InventoryProductsSurface({
                                 {!productTagText ? <span className="truncate">{t('product') || 'Product'}</span> : null}
                               </div>
                             </div>
-                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1 text-right">
+                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1.5 text-right">
                               <div className="flex max-w-full items-center justify-end gap-1">
                                 <div className="min-w-0 max-w-[4.5rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                   {qty}
@@ -146,7 +146,7 @@ export default function InventoryProductsSurface({
                                 </div>
                                 <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
                               </div>
-                              <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
+                              <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="mt-0.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[12px] font-bold leading-none text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25">
                                 {t('adjust')}
                               </button>
                             </div>

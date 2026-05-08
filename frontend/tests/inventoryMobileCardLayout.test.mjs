@@ -17,7 +17,7 @@ assert.match(
 
 assert.match(
   inventoryProductsSource,
-  /className="flex max-w-\[8\.6rem\] shrink-0 flex-col items-end gap-1 text-right"[\s\S]*\{qty\}[\s\S]*\{slbl\}[\s\S]*\{t\('adjust'\)\}/,
+  /className="flex max-w-\[8\.6rem\] shrink-0 flex-col items-end gap-1\.5 text-right"[\s\S]*\{qty\}[\s\S]*\{slbl\}[\s\S]*className="mt-0\.5 rounded-full border border-blue-200 bg-blue-50 px-2\.5 py-1 text-\[12px\] font-bold[\s\S]*\{t\('adjust'\)\}/,
   'Quantity and stock status should share a compact line with a larger Adjust action below it',
 )
 
