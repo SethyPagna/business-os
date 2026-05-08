@@ -108,6 +108,13 @@ function manualChunks(id) {
     const normalized = id.replace(/\\/g, '/')
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
+    if (
+      normalized.includes('/src/components/catalog/CatalogPreviewSurface.jsx')
+      || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.jsx')
+      || normalized.includes('/src/components/catalog/CatalogProductsSection.jsx')
+    ) {
+      return 'catalog-preview'
+    }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (
       normalized.includes('/src/utils/mediaUpload.js')
