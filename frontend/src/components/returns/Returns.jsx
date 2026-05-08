@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Download, RotateCcw, Search, Undo2 } from 'lucide-react'
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Download, RotateCcw, Search, Undo2 } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
@@ -7,10 +7,6 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
-import ReturnDetailModal from './ReturnDetailModal'
-import EditReturnModal from './EditReturnModal'
-import NewReturnModal from './NewReturnModal'
-import NewSupplierReturnModal from './NewSupplierReturnModal'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
   beginTrackedRequest,
@@ -18,6 +14,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
+const EditReturnModal = lazy(() => import('./EditReturnModal'))
+const NewReturnModal = lazy(() => import('./NewReturnModal'))
+const NewSupplierReturnModal = lazy(() => import('./NewSupplierReturnModal'))
+const ReturnsListSurface = lazy(() => import('./ReturnsListSurface'))
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -124,7 +125,7 @@ export default function Returns() {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
             setLoading(false)
-            setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'ការបង្វិលត្រឡប់កំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
+            setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž€áŸ†áž–áž»áž„áž…áŸ†ážŽáž¶áž™áž–áŸáž›áž™áž¼ážšáž‡áž¶áž„ážŠáŸ‚áž›ážšáŸ†áž–áž¹áž„áž‘áž»áž€áŸ” ážŸáž¼áž˜áž…áž»áž…ážŸáŸ’ážšážŸáŸ‹ážáŸ’áž˜áž¸ áž¬ážáŸ’ážšáž¡áž”áŸ‹áž˜áž€ážœáž·áž‰áž”áž“áŸ’ážáž·áž…áž‘áŸ€ážáŸ”'))
           }, 15000)
         }
       }
@@ -144,9 +145,9 @@ export default function Returns() {
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         console.error('[Returns] load failed:', error?.message)
         if (!silent && !loadedOnceRef.current) {
-          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
+          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'áž˜áž·áž“áž¢áž¶áž…áž•áŸ’áž‘áž»áž€áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž”áž¶áž“áž‘áŸ'))
         } else if (!silent) {
-          setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពការបង្វិលត្រឡប់បានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
+          setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'áž˜áž·áž“áž¢áž¶áž…áž’áŸ’ážœáž¾áž”áž…áŸ’áž…áž»áž”áŸ’áž”áž“áŸ’áž“áž—áž¶áž–áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž”áž¶áž“áž‘áŸáŸ” áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰áž‘áž·áž“áŸ’áž“áž“áŸáž™áž…áž»áž„áž€áŸ’ážšáŸ„áž™ážŠáŸ‚áž›áž”áž¶áž“áž•áŸ’áž‘áž»áž€áŸ”'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)
@@ -370,13 +371,13 @@ export default function Returns() {
   }, [exportVisible, notify, selectedReturns])
 
   const exportItems = useMemo(() => ([
-    { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
-    selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'នាំចេញការត្រឡប់ដែលបានជ្រើស'), onClick: exportSelected, color: 'blue' } : null,
-    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+    { label: tr('export_visible_returns', 'Export visible returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
+    selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: exportSelected, color: 'blue' } : null,
+    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž”áŸ’ážšáž—áŸáž‘ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž…áž“áŸ’áž›áŸ„áŸ‡áž–áŸáž›ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
     scope !== CUSTOMER_SCOPE
-      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
-      : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
+      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹áž‘áŸ…áž¢áŸ’áž“áž€áž•áŸ’áž‚ážáŸ‹áž•áŸ’áž‚áž„áŸ‹'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
+      : { label: tr('export_customer_returns', 'Export customer returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹áž–áž¸áž¢ážáž·ážáž·áž‡áž“'), onClick: () => exportVisible(customerRows, 'returns-customer') },
   ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns, yearFilter])
 
   const filterSections = useMemo(() => ([
@@ -597,251 +598,79 @@ export default function Returns() {
           setReturnPage(1)
         }}
       />
-
-      <div className="card hidden overflow-hidden sm:block">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
-              <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label="Select all returns"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('return_number', 'Return #')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reference', 'Reference')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{scope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('type', 'Type')}</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('amount', 'Amount')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
-              ) : returnSections.map((section) => {
-                const isCollapsed = collapsedReturnSections.has(section.id)
-                return (
-                <Fragment key={section.id}>
-                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={8} className="px-4 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={isSelectionScopeFullySelected(section.ids)}
-                            ref={(node) => {
-                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                            }}
-                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                            aria-label={`Select ${section.label}`}
-                          />
-                          <span>{section.label}</span>
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400">{section.ids.length}</span>
-                          <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
-                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                            {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                          </button>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                  {!isCollapsed ? section.groups.map((group) => (
-                    <Fragment key={group.id}>
-                      {showReturnActionGroups ? (
-                        <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                          <td colSpan={8} className="px-6 py-2">
-                            <div className="flex flex-wrap items-center gap-3 text-xs">
-                              <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded"
-                                  checked={isSelectionScopeFullySelected(group.ids)}
-                                  ref={(node) => {
-                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                  }}
-                                  onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                  aria-label={`Select ${group.label}`}
-                                />
-                                <span>{group.label}</span>
-                              </label>
-                              <span className="text-slate-400">{group.items.length}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                      {group.items.map((ret) => {
-                        const retScope = normalizeScope(ret.return_scope)
-                        const typeLabel = getReturnTypeLabel(ret, tr)
-                        return (
-                          <tr key={ret.id} className="table-row cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/10" onClick={() => setDetailRet(ret)}>
-                            <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={selectedIds.has(Number(ret.id))}
-                                onChange={() => toggleSelected(ret.id)}
-                                aria-label={`Select ${ret.return_number}`}
-                              />
-                            </td>
-                            <td className="whitespace-nowrap px-4 py-2.5 font-mono font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
-                            <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-500">{fmtTime(ret.created_at)}</td>
-                            <td className="px-4 py-2.5">
-                              {ret.receipt_number
-                                ? <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{ret.receipt_number}</span>
-                                : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
-                            </td>
-                            <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</td>
-                            <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{ret.reason || '-'}</td>
-                            <td className="px-4 py-2.5">
-                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">{renderAmount(ret)}</td>
-                          </tr>
-                        )
-                      })}
-                    </Fragment>
-                  )) : null}
-                </Fragment>
-              )})}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="space-y-2 sm:hidden">
-        {loading ? (
-          <div className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</div>
-        ) : returnSections.map((section) => {
-          const isCollapsed = collapsedReturnSections.has(section.id)
-          return (
-          <div key={section.id} className="space-y-2">
-            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={isSelectionScopeFullySelected(section.ids)}
-                    ref={(node) => {
-                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                    }}
-                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
-                  />
-                  <span>{section.label}</span>
-                  <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
-                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-            {!isCollapsed ? section.groups.map((group) => (
-              <div key={group.id} className="space-y-2">
-                {showReturnActionGroups ? (
-                  <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={isSelectionScopeFullySelected(group.ids)}
-                        ref={(node) => {
-                          if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                        }}
-                        onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                        aria-label={`Select ${group.label}`}
-                      />
-                      <span>{group.label}</span>
-                      <span className="text-slate-400">{group.items.length}</span>
-                    </label>
-                  </div>
-                ) : null}
-                {group.items.map((ret) => {
-                  const retScope = normalizeScope(ret.return_scope)
-                  return (
-                    <div key={ret.id} className="card cursor-pointer p-3" onClick={() => setDetailRet(ret)}>
-                      <div className="mb-2 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded"
-                          checked={selectedIds.has(Number(ret.id))}
-                          onChange={() => toggleSelected(ret.id)}
-                          aria-label={`Select ${ret.return_number}`}
-                        />
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</div>
-                          <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
-                          <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
-                          <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
-                        </div>
-                        <div className="flex-shrink-0 text-right">
-                          {renderAmount(ret)}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )) : null}
-          </div>
-        )})}
-      </div>
+      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_returns_surface', 'Loading returns...', 'Loading returns...')}</div>}>
+        <ReturnsListSurface
+          collapsedReturnSections={collapsedReturnSections}
+          CUSTOMER_SCOPE={CUSTOMER_SCOPE}
+          filtered={filtered}
+          fmtTime={fmtTime}
+          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+          loading={loading}
+          normalizeScope={normalizeScope}
+          renderAmount={renderAmount}
+          returnSections={returnSections}
+          scope={scope}
+          selectAllRef={selectAllRef}
+          selectedIds={selectedIds}
+          setDetailRet={setDetailRet}
+          showReturnActionGroups={showReturnActionGroups}
+          SUPPLIER_SCOPE={SUPPLIER_SCOPE}
+          t={t}
+          toggleReturnSection={toggleReturnSection}
+          toggleSelected={toggleSelected}
+          toggleSelectAll={toggleSelectAll}
+          toggleSelectionScope={toggleSelectionScope}
+          tr={tr}
+          visibleIds={visibleIds}
+        />
+      </Suspense>
 
       {detailRet ? (
-        <ReturnDetailModal
-          ret={detailRet}
-          onClose={() => setDetailRet(null)}
-          onEdit={normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : null}
-          fmtUSD={fmtUSD}
-          fmtKHR={fmtKHR}
-        />
+        <Suspense fallback={null}>
+          <ReturnDetailModal
+            ret={detailRet}
+            onClose={() => setDetailRet(null)}
+            onEdit={normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : null}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
       ) : null}
 
       {editRet ? (
-        <EditReturnModal
-          ret={editRet}
-          onClose={() => setEditRet(null)}
-          onSuccess={loadReturns}
-          fmtUSD={fmtUSD}
-          notify={notify}
-        />
+        <Suspense fallback={null}>
+          <EditReturnModal
+            ret={editRet}
+            onClose={() => setEditRet(null)}
+            onSuccess={loadReturns}
+            fmtUSD={fmtUSD}
+            notify={notify}
+          />
+        </Suspense>
       ) : null}
 
       {showCustomerForm ? (
-        <NewReturnModal
-          onClose={() => setShowCustomerForm(false)}
-          onSuccess={loadReturns}
-          fmtUSD={fmtUSD}
-          notify={notify}
-        />
+        <Suspense fallback={null}>
+          <NewReturnModal
+            onClose={() => setShowCustomerForm(false)}
+            onSuccess={loadReturns}
+            fmtUSD={fmtUSD}
+            notify={notify}
+          />
+        </Suspense>
       ) : null}
 
       {showSupplierForm ? (
-        <NewSupplierReturnModal
-          onClose={() => setShowSupplierForm(false)}
-          onSuccess={loadReturns}
-          notify={notify}
-          fmtUSD={fmtUSD}
-          fmtKHR={fmtKHR}
-        />
+        <Suspense fallback={null}>
+          <NewSupplierReturnModal
+            onClose={() => setShowSupplierForm(false)}
+            onSuccess={loadReturns}
+            notify={notify}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

@@ -1,16 +1,12 @@
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { ChevronDown, ChevronRight, Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
+﻿import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
-import Receipt from '../receipt/Receipt'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge'
-import SaleDetailModal from './SaleDetailModal'
-import ExportModal from './ExportModal'
-import SalesImportModal from './SalesImportModal'
+import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
@@ -22,6 +18,11 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+const Receipt = lazy(() => import('../receipt/Receipt'))
+const SaleDetailModal = lazy(() => import('./SaleDetailModal'))
+const ExportModal = lazy(() => import('./ExportModal'))
+const SalesImportModal = lazy(() => import('./SalesImportModal'))
+const SalesListSurface = lazy(() => import('./SalesListSurface'))
 
 function multiMatch(text, terms) {
   return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
@@ -84,7 +85,7 @@ export default function Sales() {
     if (value && value !== key) return value
     return settings?.language === 'km' ? fallbackKm : fallbackEn
   }, [settings?.language, t])
-  const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
+  const exportLabel = translateOr('export', 'Export', 'áž“áž¶áŸ†áž…áŸáž‰')
   const salesDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
     const year = Number(yearFilter)
@@ -506,12 +507,12 @@ export default function Sales() {
   }, [filtered])
 
   const salesExportItems = useMemo(() => ([
-    { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
-    selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
-    statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
+    { label: translateOr('export_visible_sales', 'Export visible sales', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšáž›áž€áŸ‹ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
+    selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšáž›áž€áŸ‹ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: handleExportSelected, color: 'blue' } : null,
+    statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáŸ’ážáž¶áž“áž—áž¶áž– ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž…áž“áŸ’áž›áŸ„áŸ‡áž–áŸáž›ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
-    { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
+    { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'ážšáž”áž¶áž™áž€áž¶ážšážŽáŸáž›áž˜áŸ’áž¢áž·ážáž€áž¶ážšáž›áž€áŸ‹'), onClick: () => setShowExport(true), color: 'green' },
   ].filter(Boolean)), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, translateOr, yearFilter])
 
   const salesFilterSections = useMemo(() => ([
@@ -530,9 +531,9 @@ export default function Sales() {
     },
     {
       id: 'year',
-      label: translateOr('year', 'Year', 'ឆ្នាំ'),
+      label: translateOr('year', 'Year', 'áž†áŸ’áž“áž¶áŸ†'),
       options: [
-        { id: 'all', label: translateOr('all_years', 'All years', 'គ្រប់ឆ្នាំ'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        { id: 'all', label: translateOr('all_years', 'All years', 'áž‚áŸ’ážšáž”áŸ‹áž†áŸ’áž“áž¶áŸ†'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
         ...availableYears.map((year) => ({
           id: `year-${year}`,
           label: year,
@@ -547,9 +548,9 @@ export default function Sales() {
     },
     {
       id: 'month',
-      label: translateOr('month', 'Month', 'ខែ'),
+      label: translateOr('month', 'Month', 'ážáŸ‚'),
       options: [
-        { id: 'all', label: translateOr('all_months', 'All months', 'គ្រប់ខែ'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        { id: 'all', label: translateOr('all_months', 'All months', 'áž‚áŸ’ážšáž”áŸ‹ážáŸ‚'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
         ...Array.from({ length: 12 }, (_, index) => {
           const month = String(index + 1)
           return {
@@ -579,18 +580,18 @@ export default function Sales() {
     } : null,
     {
       id: 'grouping',
-      label: translateOr('group_by', 'Group by', 'ដាក់ជាក្រុមតាម'),
+      label: translateOr('group_by', 'Group by', 'ážŠáž¶áž€áŸ‹áž‡áž¶áž€áŸ’ážšáž»áž˜ážáž¶áž˜'),
       options: [
-        { id: 'time', label: translateOr('group_by_time', 'Time only', 'ពេលវេលាប៉ុណ្ណោះ'), active: salesGroupMode === 'time', onClick: () => setSalesGroupMode('time') },
-        { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'ពេលវេលា + ស្ថានភាព'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
+        { id: 'time', label: translateOr('group_by_time', 'Time only', 'áž–áŸáž›ážœáŸáž›áž¶áž”áŸ‰áž»ážŽáŸ’ážŽáŸ„áŸ‡'), active: salesGroupMode === 'time', onClick: () => setSalesGroupMode('time') },
+        { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'áž–áŸáž›ážœáŸáž›áž¶ + ážŸáŸ’ážáž¶áž“áž—áž¶áž–'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
       ],
     },
     {
       id: 'sort',
-      label: translateOr('sort', 'Sort', 'តម្រៀប'),
+      label: translateOr('sort', 'Sort', 'ážáž˜áŸ’ážšáŸ€áž”'),
       options: [
-        { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ថ្មីបំផុតមុន'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
-        { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
+        { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ážáŸ’áž˜áž¸áž”áŸ†áž•áž»ážáž˜áž»áž“'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
+        { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'áž…áž¶ážŸáŸ‹áž”áŸ†áž•áž»ážáž˜áž»áž“'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
       ],
     },
   ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
@@ -601,7 +602,13 @@ export default function Sales() {
   )
   const showSalesActionGroups = salesGroupMode === 'time+action'
 
-  if (selectedSale) return <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
+  if (selectedSale) {
+    return (
+      <Suspense fallback={null}>
+        <Receipt sale={selectedSale} settings={settings} onClose={() => setSelectedSale(null)} />
+      </Suspense>
+    )
+  }
   if (loadError && !loading && !sales.length) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
@@ -679,17 +686,17 @@ export default function Sales() {
       {filtered.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{filtered.length} {t('sales') || 'sales'}</span>
-          <span className="text-gray-400">·</span>
+          <span className="text-gray-400">Â·</span>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
           {statusFilter === 'all' ? (
             <>
-              <span className="text-gray-400">·</span>
+              <span className="text-gray-400">Â·</span>
               <span className="text-green-600 dark:text-green-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'completed').length} {t('summary_completed') || 'completed'}</span>
             </>
           ) : null}
           {pendingRevenue > 0 ? (
             <>
-              <span className="text-gray-400">·</span>
+              <span className="text-gray-400">Â·</span>
               <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>
                 {fmtUSD(pendingRevenue)} {t('summary_on_hold') || 'on hold'}
               </span>
@@ -700,270 +707,65 @@ export default function Sales() {
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 
-      <div className="card hidden flex-col sm:flex">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 760 }}>
-            <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700/50">
-              <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={filteredIds.length > 0 && selectedIds.size === filteredIds.length}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label="Select all sales"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_number')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('status')}</th>
-                <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 lg:table-cell">{t('cashier')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('payment_method')}</th>
-                <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('branch')}</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('total')}</th>
-                <th className="hidden px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('items')}</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{t('actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
-              ) : salesSections.map((section) => {
-                const isCollapsed = collapsedSalesSections.has(section.id)
-                return (
-                <Fragment key={section.id}>
-                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={10} className="px-4 py-2">
-                      <div className="flex items-center justify-between gap-3 text-xs">
-                        <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={isSelectionScopeFullySelected(section.ids)}
-                            ref={(node) => {
-                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                            }}
-                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                            aria-label={`Select ${section.label}`}
-                          />
-                          <span>{section.label}</span>
-                          <span className="text-slate-400">{section.ids.length} sale{section.ids.length === 1 ? '' : 's'}</span>
-                        </label>
-                        <button
-                          type="button"
-                          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
-                          onClick={() => toggleSalesSection(section.id)}
-                        >
-                          {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {!isCollapsed ? section.groups.map((group) => (
-                    <Fragment key={group.id}>
-                      {showSalesActionGroups ? (
-                        <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                          <td colSpan={10} className="px-6 py-2">
-                            <div className="flex flex-wrap items-center gap-3 text-xs">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={isSelectionScopeFullySelected(group.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                }}
-                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                aria-label={`Select ${group.label}`}
-                              />
-                              <span className="font-medium text-slate-600 dark:text-slate-300">{group.label}</span>
-                              <span className="text-slate-400">{group.items.length}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                      {group.items.map((sale) => {
-                    const items = Array.isArray(sale.items) ? sale.items : []
-                    const totalUsd = sale.total_usd || sale.total || 0
-                    const totalKhr = sale.total_khr || 0
-                    const status = sale.sale_status || 'completed'
-                    const branchLabel = getSaleBranchLabel(sale)
-                    return (
-                      <tr
-                        key={sale.id}
-                        className={`table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10 ${status === 'cancelled' ? 'opacity-60' : ''}`}
-                        onClick={() => setDetailSale(sale)}
-                      >
-                        <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={selectedIds.has(Number(sale.id))}
-                            onChange={() => toggleSelected(sale.id)}
-                            aria-label={`Select ${sale.receipt_number}`}
-                          />
-                        </td>
-                        <td className="px-4 py-2.5 font-mono font-medium text-blue-600 dark:text-blue-400">{sale.receipt_number}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">{fmtTime(sale.created_at)}</td>
-                        <td className="px-4 py-2.5"><StatusBadge status={status} t={t} /></td>
-                        <td className="hidden px-4 py-2.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td>
-                        <td className="px-4 py-2.5"><span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span></td>
-                        <td className="hidden px-4 py-2.5 text-xs text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
-                          {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
-                        </td>
-                        <td className="hidden px-4 py-2.5 text-center text-gray-500 md:table-cell">{items.length}</td>
-                        <td className="px-4 py-2.5 text-center" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            onClick={() => setSelectedSale(sale)}
-                            className="rounded-lg px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/20"
-                          >
-                            {t('reprint')}
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                      })}
-                    </Fragment>
-                  )) : null}
-                </Fragment>
-              )})}
-            </tbody>
-          </table>
-        </div>
-        <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          {filtered.length} {t('sales')} · {fmtUSD(revenue)}
-        </div>
-      </div>
-
-      <div className="space-y-2 sm:hidden">
-        {loading ? (
-          <div className="py-10 text-center text-gray-400">{t('loading')}</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
-        ) : salesSections.map((section) => {
-          const isCollapsed = collapsedSalesSections.has(section.id)
-          return (
-          <div key={section.id} className="space-y-2">
-            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                <label className="inline-flex min-w-0 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={isSelectionScopeFullySelected(section.ids)}
-                    ref={(node) => {
-                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                    }}
-                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
-                  />
-                  <span>{section.label}</span>
-                  <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
-                </label>
-                <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSalesSection(section.id)}>
-                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                </button>
-              </div>
-            </div>
-            {!isCollapsed ? section.groups.map((group) => (
-              <div key={group.id} className="space-y-2">
-                {showSalesActionGroups ? (
-                  <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    <div className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={isSelectionScopeFullySelected(group.ids)}
-                        ref={(node) => {
-                          if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                        }}
-                        onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                        aria-label={`Select ${group.label}`}
-                      />
-                      <span>{group.label}</span>
-                      <span className="text-slate-400">{group.items.length}</span>
-                    </div>
-                  </div>
-                ) : null}
-                {group.items.map((sale) => {
-              const items = Array.isArray(sale.items) ? sale.items : []
-              const totalUsd = sale.total_usd || sale.total || 0
-              const totalKhr = sale.total_khr || 0
-              const status = sale.sale_status || 'completed'
-              const branchLabel = getSaleBranchLabel(sale)
-              return (
-                <div key={sale.id} className="card cursor-pointer p-3 active:bg-blue-50 dark:active:bg-blue-900/10" onClick={() => setDetailSale(sale)}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded"
-                          checked={selectedIds.has(Number(sale.id))}
-                          onChange={() => toggleSelected(sale.id)}
-                          onClick={(event) => event.stopPropagation()}
-                          aria-label={`Select ${sale.receipt_number}`}
-                        />
-                        <span className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
-                        <span className="text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
-                        <span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span>
-                        <StatusBadge status={status} t={t} />
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                        {sale.cashier_name ? <span>{sale.cashier_name}</span> : null}
-                        {branchLabel ? <span>· {branchLabel}</span> : null}
-                        <span>· {items.length} {t('items')}</span>
-                      </div>
-                    </div>
-                    <div className="flex-shrink-0 text-right">
-                      <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
-                      {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
-                      <button className="mt-1 text-xs text-blue-500 underline" onClick={(event) => { event.stopPropagation(); setSelectedSale(sale) }}>
-                        {t('reprint')}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
-                })}
-              </div>
-            )) : null}
-          </div>
-        )})}
-      </div>
+      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{translateOr('loading_sales_surface', 'Loading sales...', 'Loading sales...')}</div>}>
+        <SalesListSurface
+          collapsedSalesSections={collapsedSalesSections}
+          filtered={filtered}
+          filteredIds={filteredIds}
+          fmtKHR={fmtKHR}
+          fmtTime={fmtTime}
+          fmtUSD={fmtUSD}
+          getSaleBranchLabel={getSaleBranchLabel}
+          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+          loading={loading}
+          revenue={revenue}
+          salesSections={salesSections}
+          selectAllRef={selectAllRef}
+          selectedIds={selectedIds}
+          setDetailSale={setDetailSale}
+          setSelectedSale={setSelectedSale}
+          showSalesActionGroups={showSalesActionGroups}
+          t={t}
+          toggleSalesSection={toggleSalesSection}
+          toggleSelected={toggleSelected}
+          toggleSelectAll={toggleSelectAll}
+          toggleSelectionScope={toggleSelectionScope}
+        />
+      </Suspense>
 
       {detailSale ? (
-        <SaleDetailModal
-          sale={detailSale}
-          settings={settings}
-          onClose={() => setDetailSale(null)}
-          onStatusChange={handleStatusChange}
-          onAttachMembership={handleAttachMembership}
-          onPrint={(sale) => setSelectedSale(sale)}
-          t={t}
-          fmtUSD={fmtUSD}
-          fmtKHR={fmtKHR}
-        />
+        <Suspense fallback={null}>
+          <SaleDetailModal
+            sale={detailSale}
+            settings={settings}
+            onClose={() => setDetailSale(null)}
+            onStatusChange={handleStatusChange}
+            onAttachMembership={handleAttachMembership}
+            onPrint={(sale) => setSelectedSale(sale)}
+            t={t}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
       ) : null}
 
       {showExport ? (
-        <ExportModal onClose={() => setShowExport(false)} t={t} fmtUSD={fmtUSD} />
+        <Suspense fallback={null}>
+          <ExportModal onClose={() => setShowExport(false)} t={t} fmtUSD={fmtUSD} />
+        </Suspense>
       ) : null}
 
       {showImport ? (
-        <SalesImportModal
-          onClose={() => setShowImport(false)}
-          onDone={() => {
-            setShowImport(false)
-            loadSales()
-          }}
-        />
+        <Suspense fallback={null}>
+          <SalesImportModal
+            onClose={() => setShowImport(false)}
+            onDone={() => {
+              setShowImport(false)
+              loadSales()
+            }}
+          />
+        </Suspense>
       ) : null}
     </div>
   )
