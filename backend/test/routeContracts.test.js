@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 
 let failed = 0
 
@@ -119,6 +121,16 @@ runTest('activity routes include admin-only user filters for attribution review'
   assert.match(inventorySource, /isAdminControlUser/)
   assert.match(actionHistorySource, /created_by_id\s*=\s*\?/)
   assert.match(actionHistorySource, /isAdminControlUser/)
+})
+
+runTest('upload serving is local-first with bounded object-store fallback', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8')
+  assert.match(source, /function\s+serveLocalUpload\(/)
+  assert.match(source, /function\s+getObjectStreamWithTimeout\(/)
+  assert.match(source, /Object storage read timed out after/)
+  assert.match(source, /function\s+findBackupUploadFallback\(/)
+  assert.match(source, /fs\.copyFileSync\(fallbackPath,\s*activePath\)/)
+  assert.match(source, /if\s*\(serveLocalUpload\(req,\s*res,\s*fileName,\s*activePath\)\)\s*return/)
 })
 
 runTest('sales search uses joined customer membership data instead of a missing sales column', () => {

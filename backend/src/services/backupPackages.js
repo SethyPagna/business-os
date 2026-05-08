@@ -12,6 +12,12 @@ const { putObject, listObjects, getObjectStorageDriver, getObjectStream } = requ
 const OBJECT_COPY_CONCURRENCY = 2
 const PROGRESS_MIN_INTERVAL_MS = 350
 const PROGRESS_PERCENT_STEP = 2
+const BACKUP_REMOTE_LIST_TIMEOUT_MS = 1200
+const BACKUP_REMOTE_LIST_CACHE_MS = 30 * 1000
+let remoteBackupVersionCache = {
+  at: 0,
+  objects: [],
+}
 
 function getDb() {
   return require('../database').db
@@ -746,11 +752,21 @@ async function listBackupVersions({ limit = 50, timeoutMs = 8000 } = {}) {
     versions.set(local.packageId, local)
   }
   let objects = []
+  const cacheFresh = remoteBackupVersionCache.at
+    && (Date.now() - remoteBackupVersionCache.at) < BACKUP_REMOTE_LIST_CACHE_MS
   try {
-    objects = await listObjects('backups/', {
-      maxKeys: Math.max(100, Math.min(5000, safeLimit * 32)),
-      timeoutMs,
-    })
+    if (cacheFresh) {
+      objects = remoteBackupVersionCache.objects
+    } else {
+      objects = await listObjects('backups/', {
+        maxKeys: Math.max(100, Math.min(5000, safeLimit * 32)),
+        timeoutMs: Math.max(500, Math.min(Number(timeoutMs || BACKUP_REMOTE_LIST_TIMEOUT_MS), BACKUP_REMOTE_LIST_TIMEOUT_MS)),
+      })
+      remoteBackupVersionCache = {
+        at: Date.now(),
+        objects,
+      }
+    }
   } catch (error) {
     console.warn(`[Backup] R2 backup version listing unavailable: ${error?.message || error}`)
     return Array.from(versions.values())

@@ -75,6 +75,7 @@ const {
 const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
 let databaseMaintenanceTimer = null
+const uploadFallbackCache = new Map()
 
 const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'index-',
@@ -162,22 +163,147 @@ function applyCoreMiddleware(target) {
   target.use(requestContextMiddleware)
 }
 
+function normalizeUploadFileName(value = '') {
+  return String(value || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .pop() || ''
+}
+
+function getSafeActiveUploadPath(fileName = '') {
+  const safeName = normalizeUploadFileName(fileName)
+  if (!safeName) return ''
+  const absolutePath = path.resolve(UPLOADS_PATH, safeName)
+  const uploadsRoot = path.resolve(UPLOADS_PATH)
+  if (absolutePath !== uploadsRoot && absolutePath.startsWith(`${uploadsRoot}${path.sep}`)) return absolutePath
+  return ''
+}
+
+function findBackupUploadFallback(fileName = '') {
+  const safeName = normalizeUploadFileName(fileName)
+  if (!safeName) return ''
+  const cached = uploadFallbackCache.get(safeName)
+  if (cached && fs.existsSync(cached)) return cached
+  const backupRoots = Array.from(new Set([
+    path.join(path.dirname(UPLOADS_PATH), 'backups'),
+    path.join(STORAGE_ROOT, 'backups'),
+  ]))
+  let best = { path: '', size: -1, mtimeMs: 0 }
+  for (const backupRoot of backupRoots) {
+    if (!fs.existsSync(backupRoot)) continue
+    let entries = []
+    try {
+      entries = fs.readdirSync(backupRoot, { withFileTypes: true })
+    } catch (_) {
+      continue
+    }
+    const backupDirs = entries
+      .filter((entry) => entry.isDirectory() && /^datasync-/i.test(entry.name))
+      .map((entry) => {
+        const absolutePath = path.join(backupRoot, entry.name)
+        try {
+          return { entry, mtimeMs: fs.statSync(absolutePath).mtimeMs || 0 }
+        } catch (_) {
+          return { entry, mtimeMs: 0 }
+        }
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, 80)
+    for (const { entry } of backupDirs) {
+      if (!entry.isDirectory() || !/^datasync-/i.test(entry.name)) continue
+      const candidate = path.join(backupRoot, entry.name, 'objects', 'uploads', safeName)
+      try {
+        const stats = fs.statSync(candidate)
+        if (!stats.isFile()) continue
+        if (stats.size > best.size || (stats.size === best.size && stats.mtimeMs > best.mtimeMs)) {
+          best = { path: candidate, size: stats.size, mtimeMs: stats.mtimeMs }
+        }
+      } catch (_) {}
+    }
+  }
+  if (best.path) uploadFallbackCache.set(safeName, best.path)
+  return best.path
+}
+
+function inferUploadContentType(fileName = '') {
+  const ext = path.extname(String(fileName || '').toLowerCase())
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.png') return 'image/png'
+  if (ext === '.webp') return 'image/webp'
+  if (ext === '.gif') return 'image/gif'
+  if (ext === '.mp4') return 'video/mp4'
+  if (ext === '.pdf') return 'application/pdf'
+  return 'application/octet-stream'
+}
+
+function serveLocalUpload(req, res, fileName = '', sourcePath = '') {
+  const safeName = normalizeUploadFileName(fileName)
+  const absolutePath = sourcePath || getSafeActiveUploadPath(safeName)
+  if (!safeName || !absolutePath || !fs.existsSync(absolutePath)) return false
+  setUploadStaticHeaders(res, absolutePath)
+  res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400')
+  if (req.method === 'HEAD') {
+    const stats = fs.statSync(absolutePath)
+    res.setHeader('Content-Type', inferUploadContentType(safeName))
+    res.setHeader('Content-Length', String(stats.size))
+    res.status(200).end()
+    return true
+  }
+  res.sendFile(absolutePath)
+  return true
+}
+
+async function getObjectStreamWithTimeout(key, timeoutMs = 2500) {
+  let timer = null
+  try {
+    return await Promise.race([
+      getObjectStream(key),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Object storage read timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 function mountStaticAssets(target) {
   // Uploads live in the configured S3-compatible object store for Docker releases.
   // when a frontend build exists.
   if (isObjectStorageEnabled()) {
     target.get('/uploads/*', async (req, res) => {
+      const fileName = normalizeUploadFileName(req.params[0] || '')
+      const activePath = getSafeActiveUploadPath(fileName)
+      if (serveLocalUpload(req, res, fileName, activePath)) return
+      const backupPath = findBackupUploadFallback(fileName)
+      if (backupPath) {
+        try {
+          fs.mkdirSync(UPLOADS_PATH, { recursive: true })
+          if (activePath && !fs.existsSync(activePath)) fs.copyFileSync(backupPath, activePath)
+        } catch (_) {}
+        if (serveLocalUpload(req, res, fileName, fs.existsSync(activePath) ? activePath : backupPath)) return
+      }
       try {
-        const key = `uploads/${String(req.params[0] || '').replace(/^\/+/, '')}`
-        const object = await getObjectStream(key)
+        const key = `uploads/${fileName}`
+        const object = await getObjectStreamWithTimeout(key)
         if (!object?.body) return res.status(404).type('text/plain; charset=utf-8').send('File not found')
         if (object.contentType) res.setHeader('Content-Type', object.contentType)
         if (object.contentLength) res.setHeader('Content-Length', String(object.contentLength))
         setUploadStaticHeaders(res, key)
+        if (req.method === 'HEAD') return res.status(200).end()
         pipeline(object.body, res, (error) => {
           if (error && !res.headersSent) res.status(500).end()
         })
       } catch (_) {
+        const fallbackPath = findBackupUploadFallback(fileName)
+        if (fallbackPath) {
+          try {
+            fs.mkdirSync(UPLOADS_PATH, { recursive: true })
+            if (activePath && !fs.existsSync(activePath)) fs.copyFileSync(fallbackPath, activePath)
+          } catch (_) {}
+          if (serveLocalUpload(req, res, fileName, fs.existsSync(activePath) ? activePath : fallbackPath)) return
+        }
         res.status(404).type('text/plain; charset=utf-8').send('File not found')
       }
     })

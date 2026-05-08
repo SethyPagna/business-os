@@ -13,7 +13,7 @@
  *   api/methods.js   ??all domain API methods
  */
 
-import { apiFetch, setSyncServerUrl, setSyncToken, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
+import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.js'
 import { connectWS, disconnectWS, reconnectWS } from './api/websocket.js'
 import { dexieDb }                 from './api/localDb.js'
 import { STORAGE_KEYS }            from './constants.js'
@@ -643,6 +643,10 @@ const staticApi = {
       dexieDb.settings.delete('sync_server_url').catch(() => {})
       disconnectWS()
     }
+  },
+
+  getSyncServerUrl() {
+    return getSyncServerUrl()
   },
 
   setSyncToken(token) {

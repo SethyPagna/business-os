@@ -10,7 +10,7 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
-const REMOTE_PUBLIC_URL = process.env.BOS_REMOTE_PUBLIC_URL || 'https://leangcosmetics.dpdns.org'
+const REMOTE_PUBLIC_URL = process.env.BOS_REMOTE_PUBLIC_URL || 'https://leangcosmetics.dpdns.org/public'
 const REMOTE_ADMIN_URL = process.env.BOS_REMOTE_ADMIN_URL || 'https://admin.leangcosmetics.dpdns.org'
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
 const PROFILE = readArg('--profile') || 'exhaustive'
@@ -278,20 +278,35 @@ async function runFullApiAudit() {
     reportDir: fullAuditDir,
   }
   if (result.code !== 0) {
-    addFinding(0, 'full-audit', 'Current full app audit failed', summary.fullAudit)
-    throw new Error(`full-app-audit failed with exit ${result.code}`)
+    addFinding(1, 'full-audit', 'Current full app audit failed; continuing browser performance audit', summary.fullAudit)
   }
   const fullSummaryPath = path.join(fullAuditDir, 'summary.json')
-  const fullSummary = JSON.parse(await fs.readFile(fullSummaryPath, 'utf8'))
+  let fullSummary = {}
+  try {
+    fullSummary = JSON.parse(await fs.readFile(fullSummaryPath, 'utf8'))
+  } catch (error) {
+    addFinding(1, 'full-audit', 'Full app audit summary could not be read', {
+      reportDir: fullAuditDir,
+      error: error?.message || String(error),
+    })
+  }
   summary.fullAudit.ok = fullSummary?.audit?.ok === true
   summary.fullAudit.findingCount = Array.isArray(fullSummary?.findings) ? fullSummary.findings.length : 0
   summary.fullAudit.health = fullSummary?.health || {}
+  if (Array.isArray(fullSummary?.findings)) {
+    for (const finding of fullSummary.findings) {
+      addFinding(Number(finding.priority ?? 1), finding.area || 'full-audit', finding.message || 'Full audit finding', {
+        ...finding,
+        source: 'full-app-audit',
+      })
+    }
+  }
   summary.artifacts = {
     ...summary.artifacts,
     ...(fullSummary?.artifacts || {}),
   }
   if (!summary.fullAudit.ok || summary.fullAudit.findingCount) {
-    addFinding(0, 'full-audit', 'Full app audit returned findings', {
+    addFinding(1, 'full-audit', 'Full app audit returned findings; browser audit continued', {
       findingCount: summary.fullAudit.findingCount,
       reportDir: fullAuditDir,
     })
@@ -581,13 +596,18 @@ async function performSearchInteraction(page, routeName) {
     const input = page.locator(selector).first()
     if (await input.count().catch(() => 0)) {
       if (!(await input.isVisible().catch(() => false))) continue
+      const fillStarted = performance.now()
       await input.fill('QA')
+      const responseMs = Math.round(performance.now() - fillStarted)
       await page.waitForTimeout(250)
+      const settleMs = Math.round(performance.now() - fillStarted)
       await input.fill('')
       return {
         name: `${routeName}:search`,
         ok: true,
-        ms: Math.round(performance.now() - started),
+        ms: responseMs,
+        settleMs,
+        setupMs: Math.round(fillStarted - started),
       }
     }
   }
@@ -619,7 +639,6 @@ async function dismissTransientUi(page) {
 }
 
 async function clickNamedButton(page, label, routeName) {
-  const started = performance.now()
   await dismissTransientUi(page)
   const button = page.getByRole('button', { name: label }).first()
   if (!(await button.count().catch(() => 0))) {
@@ -628,9 +647,21 @@ async function clickNamedButton(page, label, routeName) {
   if (!(await button.isVisible().catch(() => false)) || !(await button.isEnabled().catch(() => false))) {
     return { name: `${routeName}:button:${label}`, ok: false, skipped: true, ms: 0, reason: 'Button not visible/enabled' }
   }
+  const started = performance.now()
   try {
     await button.click({ timeout: BUTTON_RESPONSE_FAIL_MS })
+    const responseMs = Math.round(performance.now() - started)
     await page.waitForTimeout(75)
+    const settleMs = Math.round(performance.now() - started)
+    const cleanupStarted = performance.now()
+    await dismissTransientUi(page)
+    return {
+      name: `${routeName}:button:${label}`,
+      ok: true,
+      ms: responseMs,
+      settleMs,
+      cleanupMs: Math.round(performance.now() - cleanupStarted),
+    }
   } catch (error) {
     await dismissTransientUi(page)
     return {
@@ -640,19 +671,9 @@ async function clickNamedButton(page, label, routeName) {
       error: error?.message || String(error),
     }
   }
-  const responseMs = Math.round(performance.now() - started)
-  const cleanupStarted = performance.now()
-  await dismissTransientUi(page)
-  return {
-    name: `${routeName}:button:${label}`,
-    ok: true,
-    ms: responseMs,
-    cleanupMs: Math.round(performance.now() - cleanupStarted),
-  }
 }
 
 async function clickTestIdButton(page, testId, routeName, { waitForProgress = false } = {}) {
-  const started = performance.now()
   await dismissTransientUi(page)
   const button = page.locator(`[data-testid="${testId}"]`).first()
   if (!(await button.count().catch(() => 0))) {
@@ -661,8 +682,11 @@ async function clickTestIdButton(page, testId, routeName, { waitForProgress = fa
   if (!(await button.isVisible().catch(() => false)) || !(await button.isEnabled().catch(() => false))) {
     return { name: `${routeName}:testid:${testId}`, ok: false, skipped: true, ms: 0, reason: 'Button not visible/enabled' }
   }
+  const started = performance.now()
+  let responseMs = 0
   try {
     await button.click({ timeout: BUTTON_RESPONSE_FAIL_MS })
+    responseMs = Math.round(performance.now() - started)
   } catch (error) {
     return {
       name: `${routeName}:testid:${testId}`,
@@ -671,7 +695,6 @@ async function clickTestIdButton(page, testId, routeName, { waitForProgress = fa
       error: error?.message || String(error),
     }
   }
-  const responseMs = Math.round(performance.now() - started)
   let progressMs = null
   if (waitForProgress) {
     const progressStarted = performance.now()
@@ -680,10 +703,12 @@ async function clickTestIdButton(page, testId, routeName, { waitForProgress = fa
     progressMs = Math.round(performance.now() - progressStarted)
   }
   await page.waitForTimeout(75)
+  const settleMs = Math.round(performance.now() - started)
   return {
     name: `${routeName}:testid:${testId}`,
     ok: true,
     ms: responseMs,
+    settleMs,
     progressMs,
   }
 }
@@ -826,6 +851,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
 
   if (route.name === 'public_catalog') {
     await page.mouse.wheel(0, 1200)
+    const visibilityStarted = performance.now()
     await page.waitForTimeout(600)
     const navVisibility = await page.evaluate(() => {
       const labels = ['About', 'Products', 'Membership', 'FAQ', 'Beauty Assistant']
@@ -854,7 +880,8 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     interactions.push({
       name: `${route.name}:pinned-nav-scroll`,
       ok: navStillVisible,
-      ms: 600,
+      ms: Math.round(performance.now() - visibilityStarted - 600),
+      settleMs: 600,
       visibleCount,
       navVisibility,
     })
@@ -992,7 +1019,12 @@ async function auditBrowserProfile(profile) {
 }
 
 async function auditRemoteReadOnly() {
-  const publicResult = await requestJson(REMOTE_PUBLIC_URL, { timeoutMs: 30_000 })
+  let publicResult = null
+  try {
+    publicResult = await requestJson(REMOTE_PUBLIC_URL, { timeoutMs: 30_000 })
+  } catch (error) {
+    publicResult = { ok: false, status: 0, ms: 0, error: error?.message || String(error), headers: {} }
+  }
   let adminResult = null
   try {
     adminResult = await requestJson(REMOTE_ADMIN_URL, { timeoutMs: 30_000, redirect: 'manual' })

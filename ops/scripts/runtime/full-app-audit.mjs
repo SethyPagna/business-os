@@ -520,7 +520,7 @@ async function pollSystemJob(state, jobId, label, options = {}) {
 
 async function auditRemotePublic() {
   const checks = [
-    { name: 'remote public website', url: 'https://leangcosmetics.dpdns.org/', redirect: 'follow' },
+    { name: 'remote public website', url: 'https://leangcosmetics.dpdns.org/public', redirect: 'follow' },
     { name: 'remote admin entry', url: 'https://admin.leangcosmetics.dpdns.org/', redirect: 'manual' },
   ]
   for (const check of checks) {

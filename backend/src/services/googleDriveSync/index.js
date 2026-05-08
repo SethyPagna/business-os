@@ -33,6 +33,8 @@ const DRIVE_SYNC_DEFAULT_INTERVAL_SECONDS = 6 * 60 * 60
 const DRIVE_SYNC_REUSE_BACKUP_MAX_AGE_MS = 15 * 60 * 1000
 const DRIVE_RESUMABLE_THRESHOLD_BYTES = 5 * 1024 * 1024
 const DRIVE_RESUMABLE_CHUNK_BYTES = 8 * 1024 * 1024
+const DRIVE_FETCH_TIMEOUT_MS = 15 * 1000
+const DRIVE_TOKEN_REFRESH_SKEW_MS = 60 * 1000
 
 const SETTINGS_KEYS = {
   enabled: 'google_drive_sync_enabled',
@@ -67,6 +69,10 @@ const runtimeState = {
   uploadedBytes: 0,
   totalBytes: 0,
   retryCount: 0,
+  accessToken: '',
+  accessTokenExpiresAt: 0,
+  accessTokenKey: '',
+  accessTokenPromise: null,
 }
 
 const pendingOauthStates = new Map()
@@ -284,23 +290,105 @@ function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function buildAccessTokenKey(config) {
+  return crypto
+    .createHash('sha256')
+    .update(`${trim(config?.clientId)}:${trim(config?.refreshToken)}`)
+    .digest('hex')
+}
+
+function clearCachedAccessToken() {
+  runtimeState.accessToken = ''
+  runtimeState.accessTokenExpiresAt = 0
+  runtimeState.accessTokenKey = ''
+  runtimeState.accessTokenPromise = null
+}
+
+function describeFetchFailure(error, label, timedOut = false) {
+  if (timedOut || error?.name === 'AbortError') {
+    return `${label} timed out. Check the server network connection and try again.`
+  }
+  const cause = error?.cause || {}
+  const detail = [
+    cause.code,
+    cause.errno,
+    cause.message,
+    error?.message,
+  ].filter(Boolean).join(' - ')
+  return detail ? `${label} failed: ${detail}` : `${label} failed.`
+}
+
+async function fetchWithTimeout(requestUrl, options = {}, { label = 'Network request', timeoutMs = DRIVE_FETCH_TIMEOUT_MS, retries = 2 } = {}) {
+  let lastError = null
+  const safeRetries = Math.max(1, Number(retries || 1))
+  for (let attempt = 1; attempt <= safeRetries; attempt += 1) {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, Math.max(1000, Number(timeoutMs || DRIVE_FETCH_TIMEOUT_MS)))
+    try {
+      return await fetch(requestUrl, {
+        ...options,
+        signal: options.signal || controller.signal,
+      })
+    } catch (error) {
+      lastError = new Error(describeFetchFailure(error, label, timedOut))
+      lastError.cause = error
+      if (attempt >= safeRetries || options.signal?.aborted) throw lastError
+      await sleep(350 * attempt)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  throw lastError || new Error(`${label} failed.`)
+}
+
 async function exchangeRefreshToken(config) {
+  const cacheKey = buildAccessTokenKey(config)
+  if (
+    runtimeState.accessToken
+    && runtimeState.accessTokenKey === cacheKey
+    && runtimeState.accessTokenExpiresAt > Date.now() + DRIVE_TOKEN_REFRESH_SKEW_MS
+  ) {
+    return runtimeState.accessToken
+  }
+  if (runtimeState.accessTokenPromise && runtimeState.accessTokenKey === cacheKey) {
+    return runtimeState.accessTokenPromise
+  }
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
     refresh_token: config.refreshToken,
     grant_type: 'refresh_token',
   })
-  const response = await fetch(GOOGLE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-  const json = await response.json().catch(() => ({}))
-  if (!response.ok || !trim(json.access_token)) {
-    throw new Error(json.error_description || json.error || `Google token refresh failed (${response.status})`)
+  runtimeState.accessTokenKey = cacheKey
+  runtimeState.accessTokenPromise = (async () => {
+    const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    }, { label: 'Google token refresh', retries: 3 })
+    const json = await response.json().catch(() => ({}))
+    if (!response.ok || !trim(json.access_token)) {
+      clearCachedAccessToken()
+      throw new Error(json.error_description || json.error || `Google token refresh failed (${response.status})`)
+    }
+    runtimeState.accessToken = trim(json.access_token)
+    runtimeState.accessTokenExpiresAt = Date.now() + Math.max(60, Number(json.expires_in || 3600)) * 1000
+    runtimeState.accessTokenKey = cacheKey
+    return runtimeState.accessToken
+  })()
+  try {
+    return await runtimeState.accessTokenPromise
+  } finally {
+    runtimeState.accessTokenPromise = null
   }
-  return trim(json.access_token)
 }
 
 async function exchangeAuthorizationCode(payload) {
@@ -328,13 +416,13 @@ async function exchangeAuthorizationCode(payload) {
 
 async function driveApiRequest(config, requestUrl, options = {}) {
   const accessToken = await exchangeRefreshToken(config)
-  const response = await fetch(requestUrl, {
+  const response = await fetchWithTimeout(requestUrl, {
     ...options,
     headers: {
       authorization: `Bearer ${accessToken}`,
       ...(options.headers || {}),
     },
-  })
+  }, { label: 'Google Drive request', retries: 3 })
   if (response.status === 204) return null
   const json = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -345,13 +433,13 @@ async function driveApiRequest(config, requestUrl, options = {}) {
 
 async function driveApiUpload(config, requestUrl, options = {}) {
   const accessToken = await exchangeRefreshToken(config)
-  const response = await fetch(requestUrl, {
+  const response = await fetchWithTimeout(requestUrl, {
     ...options,
     headers: {
       authorization: `Bearer ${accessToken}`,
       ...(options.headers || {}),
     },
-  })
+  }, { label: 'Google Drive upload', retries: 3 })
   const json = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(json?.error?.message || `Google Drive upload failed (${response.status})`)
@@ -361,11 +449,11 @@ async function driveApiUpload(config, requestUrl, options = {}) {
 
 async function fetchDriveUserProfile(config, accessToken = '') {
   const token = accessToken || await exchangeRefreshToken(config)
-  const response = await fetch(`${GOOGLE_DRIVE_API}/about?fields=user(displayName,emailAddress)`, {
+  const response = await fetchWithTimeout(`${GOOGLE_DRIVE_API}/about?fields=user(displayName,emailAddress)`, {
     headers: {
       authorization: `Bearer ${token}`,
     },
-  })
+  }, { label: 'Google profile lookup', retries: 3 })
   const json = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(json?.error?.message || `Google profile lookup failed (${response.status})`)
   return {
@@ -1254,6 +1342,7 @@ async function finalizeGoogleDriveOAuth({ state, code }) {
   }, tokens.accessToken)
 
   resetDriveSyncRootState()
+  clearCachedAccessToken()
   writeSettingsMap({
     [SETTINGS_KEYS.clientId]: pending.clientId,
     [SETTINGS_KEYS.clientSecretEncrypted]: encryptSecret(pending.clientSecret),
@@ -1300,6 +1389,7 @@ function saveDriveSyncPreferences(payload = {}) {
 
 function disconnectDriveSync() {
   clearDriveSyncMappings()
+  clearCachedAccessToken()
   writeSettingsMap({
     [SETTINGS_KEYS.refreshTokenEncrypted]: null,
     [SETTINGS_KEYS.rootFolderId]: null,
