@@ -118,6 +118,15 @@ function manualChunks(id) {
       return 'media-tools'
     }
     if (
+      normalized.includes('/src/components/shared/PortalMenu.jsx')
+      || normalized.includes('/src/components/catalog/portalLanguagePacks.mjs')
+      || normalized.includes('/src/components/catalog/portalContentI18n.mjs')
+      || normalized.includes('/src/components/catalog/portalTranslateController.mjs')
+      || normalized.includes('/src/components/catalog/portalEditorUtils.mjs')
+    ) {
+      return 'portal-tools'
+    }
+    if (
       normalized.includes('/src/components/products/ProductDetailModal.jsx')
       || normalized.includes('/src/components/inventory/ProductDetailModal.jsx')
       || normalized.includes('/src/utils/productBatches.mjs')

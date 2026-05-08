@@ -32,9 +32,6 @@ import {
 } from 'lucide-react'
 import enTranslations from '../../lang/en.json'
 import kmTranslations from '../../lang/km.json'
-import ImageGalleryLightbox from '../shared/ImageGalleryLightbox'
-import FilePickerModal from '../files/FilePickerModal'
-import PortalMenu from '../shared/PortalMenu'
 import { useIsPageActive } from '../shared/pageActivity'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import {
@@ -96,6 +93,9 @@ import {
 
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
 const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))
+const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
+const FilePickerModal = lazy(() => import('../files/FilePickerModal'))
+const PortalMenu = lazy(() => import('../shared/PortalMenu'))
 
 function getAboutBlockLabel(type) {
   if (type === 'image') return 'Image block'
@@ -4286,70 +4286,84 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
                   </div>
                   <div className="flex items-center gap-2">
                     {displayConfig.translateWidgetEnabled ? (
-                      <PortalMenu
-                        align="right"
-                        trigger={(
+                      <Suspense
+                        fallback={(
                           <button
                             type="button"
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-400 shadow-sm dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-300"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
+                            disabled
                           >
                             <Globe className="h-4 w-4" />
                           </button>
                         )}
-                        content={({ closeMenu }) => (
-                          <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
-                            <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                              {copy('publicTranslation', 'Language tools')}
+                      >
+                        <PortalMenu
+                          align="right"
+                          trigger={(
+                            <button
+                              type="button"
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                              aria-label={copy('publicTranslation', 'Language tools')}
+                              title={copy('publicTranslation', 'Language tools')}
+                            >
+                              <Globe className="h-4 w-4" />
+                            </button>
+                          )}
+                          content={({ closeMenu }) => (
+                            <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
+                              <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                {copy('publicTranslation', 'Language tools')}
+                              </div>
+                              {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => {
+                                const active = translateTarget === option.value && (
+                                  translateApplyState === 'applied'
+                                  || (option.value === 'original' && translateApplyState === 'idle')
+                                )
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                      active
+                                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                        : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                                    }`}
+                                    onClick={() => {
+                                      changeTranslateTarget(option.value)
+                                      closeMenu()
+                                    }}
+                                  >
+                                    <span>
+                                      {option.value === 'original'
+                                        ? copy('followApp', 'Original')
+                                        : option.kind === 'external'
+                                          ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
+                                          : option.label}
+                                    </span>
+                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                  </button>
+                                )
+                              })}
+                              {translateApplyMessage ? (
+                                <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
+                                  translateApplyState === 'failed'
+                                    ? 'text-rose-600 dark:text-rose-300'
+                                    : 'text-slate-500 dark:text-slate-400'
+                                }`}>
+                                  {translateApplyMessage}
+                                </div>
+                              ) : null}
+                              {externalTranslateTarget && !translateReady ? (
+                                <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                                  {copy('externalTranslationPreparing', 'Preparing external translation...')}
+                                </div>
+                              ) : null}
                             </div>
-                            {ALL_PUBLIC_TRANSLATE_OPTIONS.map((option) => {
-                              const active = translateTarget === option.value && (
-                                translateApplyState === 'applied'
-                                || (option.value === 'original' && translateApplyState === 'idle')
-                              )
-                              return (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                    active
-                                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                      : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
-                                  }`}
-                                  onClick={() => {
-                                    changeTranslateTarget(option.value)
-                                    closeMenu()
-                                  }}
-                                >
-                                  <span>
-                                    {option.value === 'original'
-                                      ? copy('followApp', 'Original')
-                                      : option.kind === 'external'
-                                        ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
-                                        : option.label}
-                                  </span>
-                                  {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                                </button>
-                              )
-                            })}
-                            {translateApplyMessage ? (
-                              <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
-                                translateApplyState === 'failed'
-                                  ? 'text-rose-600 dark:text-rose-300'
-                                  : 'text-slate-500 dark:text-slate-400'
-                              }`}>
-                                {translateApplyMessage}
-                              </div>
-                            ) : null}
-                            {externalTranslateTarget && !translateReady ? (
-                              <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                                {copy('externalTranslationPreparing', 'Preparing external translation...')}
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
-                      />
+                          )}
+                        />
+                      </Suspense>
                     ) : null}
                     <button
                       type="button"
@@ -4513,44 +4527,46 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
             </div>
           </div>
         ) : null}
-        <ImageGalleryLightbox
-          open={productGalleryView.open && !!productGalleryView.items.length}
-          title={productGalleryView.title}
-          images={productGalleryView.items}
-          index={productGalleryView.index}
-          onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
-          onIndexChange={(index) => setProductGalleryView((current) => ({ ...current, index }))}
-          labels={{
-            prev: copy('prevImage', 'Prev'),
-            next: copy('nextImage', 'Next'),
-            imageCount: copy('imageCount', '{current}/{total}'),
-            dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-          }}
-          renderImage={(src, alt, className) => (
-            <ProductImg src={src} alt={alt} className={className} />
-          )}
-        />
-        <FilePickerModal
-          open={filePicker.open}
-          title={filePicker.title}
-          mediaType={filePicker.mediaType}
-          onClose={() => setFilePicker({ open: false, target: null, mediaType: 'image', title: 'Choose file' })}
-          onSelect={handleFilePickerSelect}
-        />
-        <ImageGalleryLightbox
-          open={portalImageView.open && !!portalImageView.images.length}
-          title={portalImageView.title}
-          images={portalImageView.images}
-          index={portalImageView.index}
-          onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
-          onIndexChange={(index) => setPortalImageView((current) => ({ ...current, index }))}
-          labels={{
-            prev: copy('prevImage', 'Prev'),
-            next: copy('nextImage', 'Next'),
-            imageCount: copy('imageCount', '{current}/{total}'),
-            dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-          }}
-        />
+        <Suspense fallback={null}>
+          <ImageGalleryLightbox
+            open={productGalleryView.open && !!productGalleryView.items.length}
+            title={productGalleryView.title}
+            images={productGalleryView.items}
+            index={productGalleryView.index}
+            onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
+            onIndexChange={(index) => setProductGalleryView((current) => ({ ...current, index }))}
+            labels={{
+              prev: copy('prevImage', 'Prev'),
+              next: copy('nextImage', 'Next'),
+              imageCount: copy('imageCount', '{current}/{total}'),
+              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+            }}
+            renderImage={(src, alt, className) => (
+              <ProductImg src={src} alt={alt} className={className} />
+            )}
+          />
+          <FilePickerModal
+            open={filePicker.open}
+            title={filePicker.title}
+            mediaType={filePicker.mediaType}
+            onClose={() => setFilePicker({ open: false, target: null, mediaType: 'image', title: 'Choose file' })}
+            onSelect={handleFilePickerSelect}
+          />
+          <ImageGalleryLightbox
+            open={portalImageView.open && !!portalImageView.images.length}
+            title={portalImageView.title}
+            images={portalImageView.images}
+            index={portalImageView.index}
+            onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
+            onIndexChange={(index) => setPortalImageView((current) => ({ ...current, index }))}
+            labels={{
+              prev: copy('prevImage', 'Prev'),
+              next: copy('nextImage', 'Next'),
+              imageCount: copy('imageCount', '{current}/{total}'),
+              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+            }}
+          />
+        </Suspense>
       </div>
     </div>
   )
