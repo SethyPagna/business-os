@@ -80,11 +80,17 @@ export default function Sales() {
     return username === 'admin' || roleCode === 'admin' || !!permissions.all
   }, [user])
 
+  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+    const candidate = fallbackKm || fallbackEn
+    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
+      ? fallbackEn
+      : candidate
+  }, [])
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
-    return settings?.language === 'km' ? fallbackKm : fallbackEn
-  }, [settings?.language, t])
+    return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
+  }, [cleanFallback, settings?.language, t])
   const exportLabel = translateOr('export', 'Export', 'áž“áž¶áŸ†áž…áŸáž‰')
   const salesDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
@@ -686,17 +692,17 @@ export default function Sales() {
       {filtered.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{filtered.length} {t('sales') || 'sales'}</span>
-          <span className="text-gray-400">Â·</span>
+          <span className="text-gray-400">|</span>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
           {statusFilter === 'all' ? (
             <>
-              <span className="text-gray-400">Â·</span>
+              <span className="text-gray-400">|</span>
               <span className="text-green-600 dark:text-green-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'completed').length} {t('summary_completed') || 'completed'}</span>
             </>
           ) : null}
           {pendingRevenue > 0 ? (
             <>
-              <span className="text-gray-400">Â·</span>
+              <span className="text-gray-400">|</span>
               <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>
                 {fmtUSD(pendingRevenue)} {t('summary_on_hold') || 'on hold'}
               </span>

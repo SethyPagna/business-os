@@ -44,6 +44,28 @@ export default function CatalogPreviewSurface({
   changeTranslateTarget,
   allPublicTranslateOptions,
 }) {
+  const handlePortalTabClick = (key) => {
+    setActiveTab(key)
+    if (!publicView || typeof window === 'undefined') return
+    window.setTimeout(() => {
+      const target = publicPortalNavRef?.current || previewSectionRef?.current
+      if (!target) return
+      const rect = target.getBoundingClientRect()
+      const top = Math.max(0, window.scrollY + rect.top - (window.innerWidth >= 640 ? 12 : 4))
+      window.scrollTo({ top, behavior: 'smooth' })
+    }, 0)
+  }
+
+  const pinnedNavStyle = publicView && publicPortalNavPinned ? {
+    position: 'fixed',
+    top: typeof window !== 'undefined' && window.innerWidth >= 640 ? '8px' : '0px',
+    left: `${typeof window !== 'undefined' ? Math.max(8, publicPortalNavMetrics.left || 0) : publicPortalNavMetrics.left}px`,
+    width: `${typeof window !== 'undefined'
+      ? Math.max(0, Math.min(publicPortalNavMetrics.width || window.innerWidth, window.innerWidth - 16))
+      : publicPortalNavMetrics.width}px`,
+    zIndex: 40,
+  } : undefined
+
   return (
     <div
       data-portal-root="true"
@@ -222,13 +244,7 @@ export default function CatalogPreviewSurface({
             >
               <div
                 className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88"
-                style={publicView && publicPortalNavPinned ? {
-                  position: 'fixed',
-                  top: typeof window !== 'undefined' && window.innerWidth >= 640 ? '8px' : '0px',
-                  left: `${publicPortalNavMetrics.left}px`,
-                  width: `${publicPortalNavMetrics.width}px`,
-                  zIndex: 40,
-                } : undefined}
+                style={pinnedNavStyle}
               >
                 <div className="overflow-x-auto" aria-label={copy('publicNavigation', 'Section navigation')}>
                   <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
@@ -240,10 +256,10 @@ export default function CatalogPreviewSurface({
                           type="button"
                           className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
                             activeTab === item.key
-                              ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-100 dark:text-slate-950 dark:ring-slate-600'
-                              : 'text-slate-600 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-700/80'
+                              ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-blue-600 dark:text-white dark:ring-blue-400/60'
+                              : 'text-slate-600 hover:bg-white dark:text-slate-100 dark:hover:bg-slate-700/80'
                           }`}
-                          onClick={() => setActiveTab(item.key)}
+                          onClick={() => handlePortalTabClick(item.key)}
                         >
                           <Icon className="h-4 w-4" />
                           <span className="whitespace-nowrap">{item.label}</span>

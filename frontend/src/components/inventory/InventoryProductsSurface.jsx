@@ -110,12 +110,12 @@ export default function InventoryProductsSurface({
                       const revenue = Math.max(0, p.revenue_usd || 0)
                       const productBrand = String(p.brand || '').trim()
                       const productCategory = String(p.category || '').trim()
-                      const productTagText = [productBrand, productCategory].filter(Boolean).join(' Â· ')
+                      const productTagText = [productBrand, productCategory].filter(Boolean).join(' | ')
                       return (
                         <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start gap-2">
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                            <div className="min-w-0">
+                              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                                 <input
                                   type="checkbox"
                                   className="mt-0.5 h-4 w-4 rounded"
@@ -127,27 +127,29 @@ export default function InventoryProductsSurface({
                                   onClick={(event) => event.stopPropagation()}
                                   aria-label={`${t('select') || 'Select'} ${p.name}`}
                                 />
-                                <div className="min-w-0 flex-1 pr-0.5">
-                                  <div className="truncate text-sm font-semibold text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
+                                <div className="min-w-0 pr-0.5">
+                                  <div className="line-clamp-2 break-words text-sm font-semibold leading-tight text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
                                 </div>
                               </div>
                               <div className="mt-1 flex items-start gap-1.5 pl-6 text-[9.5px] leading-3.5 text-gray-500 dark:text-gray-300">
                                 {productBrand ? <span className="max-w-[38%] shrink-0 truncate" title={productBrand}>{productBrand}</span> : null}
-                                {productBrand && productCategory ? <span className="shrink-0 text-gray-300 dark:text-gray-600">Â·</span> : null}
+                                {productBrand && productCategory ? <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span> : null}
                                 {productCategory ? <span className="min-w-0 flex-1 truncate" title={productCategory}>{productCategory}</span> : null}
                                 {!productTagText ? <span className="truncate">{t('product') || 'Product'}</span> : null}
                               </div>
                             </div>
-                            <div className="flex min-w-[4.35rem] max-w-[4.6rem] shrink-0 flex-col items-end gap-0.5 text-right">
-                              <div className="flex items-center justify-end gap-0.5">
-                                <div className="whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
+                            <div className="flex max-w-[7.8rem] shrink-0 flex-col items-end gap-1 text-right">
+                              <div className="grid justify-items-end gap-0.5">
+                                <div className="max-w-[7.8rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                   {qty}
                                   <span className="ml-1 text-[9px] font-normal text-gray-400">{p.unit}</span>
                                 </div>
-                                <span className={`whitespace-nowrap rounded-full px-1 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
-                                <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="px-0.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400">
-                                  {t('adjust')}
-                                </button>
+                                <div className="flex items-center justify-end gap-1">
+                                  <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
+                                  <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="px-0.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400">
+                                    {t('adjust')}
+                                  </button>
+                                </div>
                               </div>
                               {p.barcode ? (
                                 <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[8.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -173,7 +175,7 @@ export default function InventoryProductsSurface({
                             ) : null}
                           </div>
                           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                            <span>Sold {soldQty} Â· Rev {fmtUSD(revenue)}</span>
+                            <span>Sold {soldQty} | Rev {fmtUSD(revenue)}</span>
                             <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                           </div>
                         </div>
@@ -231,7 +233,7 @@ export default function InventoryProductsSurface({
                       </td>
                       <td colSpan={12} className="px-4 py-2">
                         <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          <span>{section.label} Â· {section.items.length} {(t('products') || 'products').toLowerCase()}</span>
+                          <span>{section.label} | {section.items.length} {(t('products') || 'products').toLowerCase()}</span>
                           <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleInventorySection(section.id)}>
                             {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                             {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
@@ -282,7 +284,7 @@ export default function InventoryProductsSurface({
                             const netRev = Math.max(0, p.revenue_usd || 0)
                             const netCogs = Math.max(0, p.cogs_usd || 0)
                             const profit = netRev - netCogs
-                            const productTagText = [p.brand, p.category].filter(Boolean).join(' Â· ')
+                            const productTagText = [p.brand, p.category].filter(Boolean).join(' | ')
                             return (
                               <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
                                 <td className="px-3 py-1" onClick={(event) => event.stopPropagation()}>

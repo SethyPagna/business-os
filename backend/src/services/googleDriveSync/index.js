@@ -744,7 +744,17 @@ async function queryResumableOffset(sessionUrl, fileSize) {
     throw error
   }
   if (response.ok) return fileSize
+  const text = await response.text().catch(() => '')
+  if (response.status === 400 && /invalid upload request/i.test(text)) {
+    const error = new Error('Google Drive upload session is no longer valid.')
+    error.code = 'drive_session_expired'
+    throw error
+  }
   return 0
+}
+
+function isInvalidUploadRequest(error) {
+  return /invalid upload request/i.test(String(error?.message || ''))
 }
 
 async function putResumableChunk(sessionUrl, file, start, end, signal = null) {
@@ -772,7 +782,12 @@ async function putResumableChunk(sessionUrl, file, start, end, signal = null) {
     throw error
   }
   if (!response.ok) {
-    throw new Error(json?.error?.message || `Google Drive resumable upload failed (${response.status})`)
+    const message = json?.error?.message || `Google Drive resumable upload failed (${response.status})`
+    const error = new Error(message)
+    if (response.status === 400 && /invalid upload request/i.test(message)) {
+      error.code = 'drive_session_expired'
+    }
+    throw error
   }
   return { done: true, offset: file.size, remote: json }
 }
@@ -780,6 +795,10 @@ async function putResumableChunk(sessionUrl, file, start, end, signal = null) {
 async function uploadDriveFileResumable(config, parentRemoteId, file, { existing = null, remoteFileId = '', progress = null, signal = null, throwIfCancelled = null } = {}) {
   let sessionUrl = trim(existing?.upload_session_url)
   let offset = 0
+  const requestedRemoteFileId = trim(remoteFileId)
+  const existingRemoteFileId = trim(existing?.remote_file_id)
+  const usableRemoteFileId = requestedRemoteFileId
+    || (existingRemoteFileId && !existingRemoteFileId.startsWith('pending:') ? existingRemoteFileId : '')
   const sameContent = trim(existing?.content_sha256) === file.contentSha256
     && Number(existing?.byte_size || 0) === Number(file.size || 0)
   if (sessionUrl && sameContent) {
@@ -792,7 +811,7 @@ async function uploadDriveFileResumable(config, parentRemoteId, file, { existing
     }
   }
   if (!sessionUrl) {
-    sessionUrl = await initiateDriveResumableSession(config, { remoteFileId, parentRemoteId, file })
+    sessionUrl = await initiateDriveResumableSession(config, { remoteFileId: usableRemoteFileId, parentRemoteId, file })
     offset = 0
   }
 
@@ -832,8 +851,8 @@ async function uploadDriveFileResumable(config, parentRemoteId, file, { existing
         return result.remote
       }
     } catch (error) {
-      if (error?.code === 'drive_session_expired') {
-        sessionUrl = await initiateDriveResumableSession(config, { remoteFileId, parentRemoteId, file })
+      if (error?.code === 'drive_session_expired' || isInvalidUploadRequest(error)) {
+        sessionUrl = await initiateDriveResumableSession(config, { remoteFileId: usableRemoteFileId, parentRemoteId, file })
         offset = 0
         retryCount += 1
         continue
@@ -844,7 +863,7 @@ async function uploadDriveFileResumable(config, parentRemoteId, file, { existing
       await new Promise((resolve) => setTimeout(resolve, retryCount * 500))
     }
   }
-  return { id: remoteFileId || existing?.remote_file_id }
+  return { id: usableRemoteFileId }
 }
 
 async function uploadDriveFile(config, parentRemoteId, file, options = {}) {

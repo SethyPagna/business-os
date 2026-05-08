@@ -5,20 +5,26 @@ const inventoryProductsSource = readFileSync(new URL('../src/components/inventor
 
 assert.match(
   inventoryProductsSource,
-  /const productBrand = String\(p\.brand \|\| ''\)\.trim\(\)[\s\S]*const productCategory = String\(p\.category \|\| ''\)\.trim\(\)[\s\S]*const productTagText = \[productBrand, productCategory\]\.filter\(Boolean\)\.join\(' Â· '\)/,
-  'Mobile inventory card should keep brand and category visible in the identity area',
+  /const productBrand = String\(p\.brand \|\| ''\)\.trim\(\)[\s\S]*const productCategory = String\(p\.category \|\| ''\)\.trim\(\)[\s\S]*const productTagText = \[productBrand, productCategory\]\.filter\(Boolean\)\.join\(' \| '\)/,
+  'Mobile inventory card should keep brand and category visible in the identity area without mojibake separators',
 )
 
 assert.match(
   inventoryProductsSource,
-  /className="flex min-w-\[4\.35rem\] max-w-\[4\.6rem\] shrink-0 flex-col items-end gap-0\.5 text-right"[\s\S]*\{p\.barcode\}/,
+  /className="grid grid-cols-\[minmax\(0,1fr\)_auto\] items-start gap-2"[\s\S]*className="flex max-w-\[7\.8rem\] shrink-0 flex-col items-end gap-1 text-right"[\s\S]*\{p\.barcode\}/,
   'Mobile inventory card should keep the barcode in the compact stock-controls area instead of dropping into a separate lower block',
 )
 
 assert.match(
   inventoryProductsSource,
-  /className="flex items-center justify-end gap-0\.5"[\s\S]*\{qty\}[\s\S]*\{slbl\}[\s\S]*\{t\('adjust'\)\}/,
-  'Quantity, stock status, and Adjust should share one compact inline control strip',
+  /className="grid justify-items-end gap-0\.5"[\s\S]*\{qty\}[\s\S]*\{slbl\}[\s\S]*\{t\('adjust'\)\}/,
+  'Quantity, stock status, and Adjust should stay in a protected compact control strip',
+)
+
+assert.match(
+  inventoryProductsSource,
+  /className="line-clamp-2 break-words text-sm font-semibold leading-tight text-gray-900 dark:text-white"/,
+  'Mobile inventory card should wrap long product names instead of letting them collide with stock controls',
 )
 
 assert.doesNotMatch(

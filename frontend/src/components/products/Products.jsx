@@ -175,11 +175,17 @@ export default function Products() {
   const syncChannelSource = String(syncChannel?.source || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+    const candidate = fallbackKm || fallbackEn
+    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
+      ? fallbackEn
+      : candidate
+  }, [])
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
-    return isKhmer ? fallbackKm : fallbackEn
-  }, [isKhmer, t])
+    return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
+  }, [cleanFallback, isKhmer, t])
   const [products,     setProducts]     = useState([])
   const [categories,   setCategories]   = useState([])
   const [units,        setUnits]        = useState([])
@@ -1971,8 +1977,8 @@ export default function Products() {
           </div>
         </div>
         {hasSelected ? (
-          <div className="border-t border-blue-100/80 px-3 py-2 dark:border-blue-900/40">
-            <div className="grid grid-cols-5 gap-0.75">
+          <div className="border-t border-blue-100/80 px-3 py-2.5 dark:border-blue-900/40">
+            <div className="grid grid-cols-5 gap-1">
               {[
                 { id: 'info', label: productChipLabels.info },
                 { id: 'pricing', label: productChipLabels.pricing },
@@ -1989,7 +1995,7 @@ export default function Products() {
                     }
                     setBulkEditMode(bulkEditMode===opt.id?null:opt.id); setBulkEditOpen(true); setBulkEditForm({})
                   }}
-                  className={`inline-flex h-7.5 min-w-0 items-center justify-center overflow-hidden rounded-xl border px-1 text-[9.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
+                  className={`inline-flex h-8 min-w-0 items-center justify-center overflow-hidden rounded-xl border px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${bulkEditMode===opt.id ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950' : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900'}`}>
                   <span className="truncate">{opt.label}</span>
                 </button>
               ))}

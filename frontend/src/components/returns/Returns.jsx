@@ -62,11 +62,17 @@ function exportReturnRows(rows = [], tr) {
 export default function Returns() {
   const { t, fmtUSD, fmtKHR, notify } = useApp()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
+    const candidate = fallbackKm || fallbackEn
+    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
+      ? fallbackEn
+      : candidate
+  }, [])
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
-    return isKhmer ? fallbackKm : fallbackEn
-  }, [isKhmer, t])
+    return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
+  }, [cleanFallback, isKhmer, t])
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('returns')
   const [scope, setScope] = useState(CUSTOMER_SCOPE)

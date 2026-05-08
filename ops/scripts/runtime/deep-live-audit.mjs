@@ -102,6 +102,10 @@ function safeName(value) {
   return String(value || 'artifact').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'artifact'
 }
 
+function escapeRegExp(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function addFinding(priority, area, message, extra = {}) {
   summary.findings.push({
     priority,
@@ -859,6 +863,53 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
       addFinding(0, 'public-nav', `${profileName}/public navigation not visible after scroll`, {
         navVisibility,
       })
+    }
+    const tabChecks = []
+    for (const label of ['About', 'Products', 'Membership', 'FAQ']) {
+      const tab = page.getByRole('button', { name: new RegExp(escapeRegExp(label), 'i') }).first()
+      const startedClick = performance.now()
+      await tab.click({ timeout: BUTTON_RESPONSE_FAIL_MS }).catch((error) => {
+        tabChecks.push({ label, ok: false, error: error?.message || String(error) })
+      })
+      if (tabChecks.some((entry) => entry.label === label && entry.ok === false)) continue
+      await page.waitForTimeout(120)
+      const check = await tab.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        const root = document.documentElement
+        return {
+          ok: rect.width > 0
+            && rect.height > 0
+            && rect.left >= -1
+            && rect.right <= window.innerWidth + 1
+            && style.visibility !== 'hidden'
+            && style.display !== 'none'
+            && style.color !== style.backgroundColor
+            && root.scrollWidth <= window.innerWidth + 2,
+          color: style.color,
+          backgroundColor: style.backgroundColor,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          viewportWidth: window.innerWidth,
+          documentWidth: root.scrollWidth,
+        }
+      }).catch((error) => ({ ok: false, error: error?.message || String(error) }))
+      tabChecks.push({
+        label,
+        ...check,
+        ms: Math.round(performance.now() - startedClick),
+      })
+    }
+    const tabsOk = tabChecks.every((entry) => entry.ok)
+    interactions.push({
+      name: `${route.name}:section-tabs`,
+      ok: tabsOk,
+      ms: tabChecks.reduce((max, entry) => Math.max(max, Number(entry.ms || 0)), 0),
+      tabChecks,
+    })
+    await saveScreenshot(page, `${profileName}-${route.name}-after-tab-clicks`)
+    if (!tabsOk) {
+      addFinding(0, 'public-nav', `${profileName}/public section tabs failed click/contrast/bounds checks`, { tabChecks })
     }
   }
 

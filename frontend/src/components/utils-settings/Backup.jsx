@@ -124,7 +124,7 @@ function JobProgressCard({ job, copy, onClear, onCancel }) {
         <div className="min-w-0">
           <div className="font-semibold">{job.message || copy('job_running', 'Working...')}</div>
           <div className="mt-1 text-xs opacity-80" data-testid="backup-job-meta">
-            {job.type || 'system job'} Â· {job.phase || job.status || 'queued'}
+            {job.type || 'system job'} | {job.phase || job.status || 'queued'}
           </div>
           {elapsed || job.updated_at ? (
             <div className="mt-1 text-xs opacity-80">

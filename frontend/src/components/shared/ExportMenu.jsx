@@ -27,7 +27,7 @@ export default function ExportMenu({
           aria-label={label}
         >
           <Download className={iconClassName} />
-          <span className="min-w-0 truncate whitespace-nowrap">{label}</span>
+          <span className={compact ? 'shrink-0 whitespace-nowrap' : 'min-w-0 truncate whitespace-nowrap'}>{label}</span>
         </button>
       )}
     />
