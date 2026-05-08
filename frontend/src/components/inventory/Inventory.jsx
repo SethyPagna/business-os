@@ -1,4 +1,4 @@
-﻿// ?? Inventory ????????????????????????????????????????????????????????????????
+﻿// ???? Inventory ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 // Main Inventory page ??sub-components imported from sibling files.
 
 import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -12,9 +12,9 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import SectionSwitcher from '../shared/SectionSwitcher.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
-import DualMoney from './DualMoney'
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
 const InventoryImportModal = lazy(() => import('./InventoryImportModal'))
+const InventoryProductsSurface = lazy(() => import('./InventoryProductsSurface'))
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
@@ -248,13 +248,13 @@ export default function Inventory() {
       : (branches.find((branch) => String(branch.id) === String(branchFilter))?.name || `Branch ${branchFilter}`)
     return {
       connected: false,
-      label: tr('rfid_not_connected', 'Not connected', 'មិនបានភ្ជាប់'),
+      label: tr('rfid_not_connected', 'Not connected', '????????????'),
       branchName,
       readerCount: Number(rfidStatus?.readerCount || 0),
-      activeSession: rfidStatus?.activeSession?.id ? `${tr('rfid_session', 'Session', 'សម័យ')} #${rfidStatus.activeSession.id}` : tr('rfid_no_active_session', 'No active RFID session', 'មិនមានសម័យ RFID កំពុងដំណើរការ'),
+      activeSession: rfidStatus?.activeSession?.id ? `${tr('rfid_session', 'Session', '????')} #${rfidStatus.activeSession.id}` : tr('rfid_no_active_session', 'No active RFID session', '?????????? RFID ?????????????'),
       queuedReads: 0,
       unknownTags: Number(rfidStatus?.exceptionCount || 0),
-      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} ${tr('rfid_tags_linked', 'tags linked', 'ស្លាកបានភ្ជាប់')}` : tr('rfid_no_reader_heartbeat', 'No reader heartbeat yet', 'មិនទាន់មាន heartbeat ពី reader'),
+      lastHeartbeat: rfidStatus?.tagCount ? `${rfidStatus.tagCount} ${tr('rfid_tags_linked', 'tags linked', '??????????????')}` : tr('rfid_no_reader_heartbeat', 'No reader heartbeat yet', '?????????? heartbeat ?? reader'),
     }
   }, [branchFilter, branches, rfidStatus, t, tr])
 
@@ -305,7 +305,7 @@ export default function Inventory() {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
             setLoading(false)
-            setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.', 'ស្តុកកំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
+            setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.', '???????????????????????????????????? ??????????????? ??????????????????????'))
           }, 15000)
         }
       }
@@ -391,7 +391,7 @@ export default function Inventory() {
           setStockStatsLoaded(true)
           setStatsRefreshError('')
         } else if (needsStatsData && loadedOnceRef.current) {
-          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្ថិតិស្តុកបានទេ។ កំពុងបង្ហាញតម្លៃចុងក្រោយដែលបានបញ្ជាក់។'))
+          setStatsRefreshError(tr('inventory_stats_refresh_failed', 'Inventory stats could not refresh. Showing the last confirmed values.', '????????????????????????????????????????? ??????????????????????????????????????'))
         }
         if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
@@ -456,7 +456,7 @@ export default function Inventory() {
         if (!silent && !loadedOnceRef.current) {
           setLoadError(e.message || 'Failed to load inventory')
         } else if (!silent) {
-          setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពស្តុកបានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
+          setLoadError(tr('inventory_refresh_failed', 'Inventory could not refresh right now. Showing the latest loaded data.', '??????????????????????????????????? ???????????????????????????????????????'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)
@@ -540,14 +540,14 @@ export default function Inventory() {
   }, [inventoryReasons, reasonDraft, reasonManager.type, saveReasonCatalog])
 
   const renameSavedReason = useCallback(async (entry) => {
-    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason', 'ប្ដូរឈ្មោះមូលហេតុដែលបានរក្សាទុក'), entry?.label || '')
+    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason', '???????????????????????????????'), entry?.label || '')
     if (!nextLabel) return
     const next = inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: nextLabel.trim() } : item)
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
 
   const deleteSavedReason = useCallback(async (entry) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm', `Delete saved reason "${entry?.label || ''}"?`, `លុបមូលហេតុ "${entry?.label || ''}"?`))) return
+    if (!window.confirm(tr('delete_saved_reason_confirm', `Delete saved reason "${entry?.label || ''}"?`, `?????????? "${entry?.label || ''}"?`))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
@@ -619,10 +619,10 @@ export default function Inventory() {
       }
     }
     const adjustConfirmLabel = adjustForm.type === 'set'
-      ? tr('confirm_set_stock', `Do you want to set stock for "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់កំណត់ស្តុកសម្រាប់ "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
+      ? tr('confirm_set_stock', `Do you want to set stock for "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
       : adjustForm.type === 'remove'
-        ? tr('confirm_remove_stock', `Do you want to remove stock from "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់ដកស្តុកពី "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
-        : tr('confirm_add_stock', `Do you want to add stock to "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `តើអ្នកចង់បន្ថែមស្តុកទៅ "${selectedAdjustProduct?.name || adjustModal?.name || 'ផលិតផលនេះ'}" មែនទេ?`)
+        ? tr('confirm_remove_stock', `Do you want to remove stock from "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
+        : tr('confirm_add_stock', `Do you want to add stock to "${selectedAdjustProduct?.name || adjustModal?.name || 'this product'}"?`, `?????????????????????? "${selectedAdjustProduct?.name || adjustModal?.name || '?????????'}" ??????`)
     if (!window.confirm(adjustConfirmLabel)) return
     setAdjustSaving(true)
     try {
@@ -669,7 +669,7 @@ export default function Inventory() {
     setMoveForm({
       mode: 'existing',
       destination_product_id: '',
-      destination_name: `${p.name} - ${tr('damaged', 'Damaged', 'ខូច')}`,
+      destination_name: `${p.name} - ${tr('damaged', 'Damaged', '???')}`,
       quantity: 1,
       branch_id: defaultBranchId,
       reason: 'broken',
@@ -738,7 +738,7 @@ export default function Inventory() {
   const handleMoveStock = async () => {
     if (moveSaving || !moveModal) return
     const qty = parseFloat(moveForm.quantity)
-    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'), 'error')
+    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity', '??????????????????'), 'error')
     const request = {
       sourceProductId: moveModal.id,
       destinationProductId: moveForm.mode === 'existing' ? Number(moveForm.destination_product_id || 0) : null,
@@ -761,21 +761,21 @@ export default function Inventory() {
       userName: user?.name || user?.username,
     }
     if (moveForm.mode === 'existing' && !request.destinationProductId) {
-      return notify(tr('choose_destination_product', 'Choose a destination product row.', 'សូមជ្រើសរើសជួរផលិតផលគោលដៅ។'), 'error')
+      return notify(tr('choose_destination_product', 'Choose a destination product row.', '??????????????????????????'), 'error')
     }
     if (moveForm.mode === 'new' && !String(moveForm.destination_name || '').trim()) {
-      return notify(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'), 'error')
+      return notify(tr('name_required_alert', 'Name is required', '?????????????'), 'error')
     }
     const moveTargetLabel = moveForm.mode === 'existing'
-      ? tr('existing_product', 'existing product', 'ផលិតផលដែលមានស្រាប់')
+      ? tr('existing_product', 'existing product', '??????????????????')
       : String(moveForm.destination_name || '').trim()
-    if (!window.confirm(tr('confirm_move_stock', `Do you want to move stock from "${moveModal.name}" to "${moveTargetLabel}"?`, `តើអ្នកចង់ផ្លាស់ទីស្តុកពី "${moveModal.name}" ទៅ "${moveTargetLabel}" មែនទេ?`))) return
+    if (!window.confirm(tr('confirm_move_stock', `Do you want to move stock from "${moveModal.name}" to "${moveTargetLabel}"?`, `???????????????????????? "${moveModal.name}" ?? "${moveTargetLabel}" ??????`))) return
     setMoveSaving(true)
     try {
       const result = await window.api.moveStockRow(request)
-      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
+      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'))
       actionHistory.pushAction({
-        label: `${tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}: ${moveModal.name}`,
+        label: `${tr('move_stock', 'Move stock', '?????????????')}: ${moveModal.name}`,
         undo: async () => {
           const undoResult = await window.api.moveStockRow({
             sourceProductId: result.destinationProductId || request.destinationProductId,
@@ -784,20 +784,20 @@ export default function Inventory() {
             quantity: qty,
             reason: `Undo: ${request.reason}`,
           })
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo បានបរាជ័យ'))
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo ?????????'))
           await load(true)
         },
         redo: async () => {
           const redoResult = await window.api.moveStockRow(request)
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo បានបរាជ័យ'))
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo ?????????'))
           await load(true)
         },
       })
-      notify(tr('stock_moved', 'Stock moved', 'បានផ្លាស់ទីស្តុក'))
+      notify(tr('stock_moved', 'Stock moved', '????????????????'))
       setMoveModal(null)
       await load(true)
     } catch (error) {
-      notify(error?.message || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'), 'error')
+      notify(error?.message || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'), 'error')
     } finally {
       setMoveSaving(false)
     }
@@ -807,24 +807,24 @@ export default function Inventory() {
     if (transferSaving || !transferModal) return
     const quantity = Number.parseFloat(transferForm.quantity)
     if (!transferForm.from_branch_id || !transferForm.to_branch_id) {
-      notify(tr('select_transfer_branches', 'Choose both source and destination branches.', 'សូមជ្រើសរើសទាំងសាខាដើម និងសាខាគោលដៅ។'), 'error')
+      notify(tr('select_transfer_branches', 'Choose both source and destination branches.', '?????????????????????? ?????????????'), 'error')
       return
     }
     if (transferForm.from_branch_id === transferForm.to_branch_id) {
-      notify(tr('transfer_branch_must_differ', 'Source and destination branches must be different.', 'សាខាដើម និងសាខាគោលដៅ ត្រូវតែខុសគ្នា។'), 'error')
+      notify(tr('transfer_branch_must_differ', 'Source and destination branches must be different.', '??????? ???????????? ???????????????'), 'error')
       return
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      notify(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'), 'error')
+      notify(tr('invalid_quantity', 'Invalid quantity', '??????????????????'), 'error')
       return
     }
     if (!String(transferForm.reason || '').trim()) {
-      notify(tr('transfer_reason_required', 'A transfer reason is required.', 'ត្រូវការមូលហេតុសម្រាប់ការផ្ទេរ។'), 'error')
+      notify(tr('transfer_reason_required', 'A transfer reason is required.', '???????????????????????????????'), 'error')
       return
     }
     const fromBranch = branches.find((branch) => String(branch.id) === String(transferForm.from_branch_id))
     const toBranch = branches.find((branch) => String(branch.id) === String(transferForm.to_branch_id))
-    if (!window.confirm(tr('confirm_transfer_stock', `Do you want to transfer ${quantity} from "${fromBranch?.name || transferForm.from_branch_id}" to "${toBranch?.name || transferForm.to_branch_id}"?`, `តើអ្នកចង់ផ្ទេរ ${quantity} ពី "${fromBranch?.name || transferForm.from_branch_id}" ទៅ "${toBranch?.name || transferForm.to_branch_id}" មែនទេ?`))) return
+    if (!window.confirm(tr('confirm_transfer_stock', `Do you want to transfer ${quantity} from "${fromBranch?.name || transferForm.from_branch_id}" to "${toBranch?.name || transferForm.to_branch_id}"?`, `?????????????? ${quantity} ?? "${fromBranch?.name || transferForm.from_branch_id}" ?? "${toBranch?.name || transferForm.to_branch_id}" ??????`))) return
 
     setTransferSaving(true)
     try {
@@ -838,9 +838,9 @@ export default function Inventory() {
         userId: user?.id,
         userName: user?.name || user?.username,
       })
-      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed', 'ការផ្ទេរស្តុកបានបរាជ័យ'))
+      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed', '??????????????????????'))
       actionHistory.pushAction({
-        label: `${tr('transfer', 'Transfer', 'ផ្ទេរ')}: ${transferModal.name}`,
+        label: `${tr('transfer', 'Transfer', '?????')}: ${transferModal.name}`,
         undo: async () => {
           const undoResult = await window.api.transferInventoryStock({
             productId: transferModal.id,
@@ -851,7 +851,7 @@ export default function Inventory() {
             userId: user?.id,
             userName: user?.name || user?.username,
           })
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo បានបរាជ័យ'))
+          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed', 'Undo ?????????'))
           await load(true)
         },
         redo: async () => {
@@ -864,15 +864,15 @@ export default function Inventory() {
             userId: user?.id,
             userName: user?.name || user?.username,
           })
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo បានបរាជ័យ'))
+          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed', 'Redo ?????????'))
           await load(true)
         },
       })
-      notify(tr('stock_transferred', 'Stock transferred', 'បានផ្ទេរស្តុក'))
+      notify(tr('stock_transferred', 'Stock transferred', '?????????????'))
       setTransferModal(null)
       await load(true)
     } catch (error) {
-      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed', 'ការផ្ទេរស្តុកបានបរាជ័យ'), 'error')
+      notify(error?.message || tr('stock_transfer_failed', 'Stock transfer failed', '??????????????????????'), 'error')
     } finally {
       setTransferSaving(false)
     }
@@ -1034,7 +1034,7 @@ export default function Inventory() {
       note: '',
       moveMode: 'existing',
       destinationProductId: '',
-      destinationName: `${product.name} - ${tr('damaged', 'Damaged', 'ខូច')}`,
+      destinationName: `${product.name} - ${tr('damaged', 'Damaged', '???')}`,
       sellingPriceUsd: product.selling_price_usd || '',
       specialPriceUsd: product.special_price_usd || '',
       discountEnabled: false,
@@ -1085,13 +1085,13 @@ export default function Inventory() {
 
   const applyInventoryBatchSession = useCallback(async () => {
     if (batchApplying || !inventoryBatch?.items?.length) return
-    if (!window.confirm(tr('confirm_apply_inventory_batch', `Do you want to apply ${inventoryBatch.items.length} inventory change(s)?`, `តើអ្នកចង់អនុវត្តការផ្លាស់ប្តូរស្តុក ${inventoryBatch.items.length} មែនទេ?`))) return
+    if (!window.confirm(tr('confirm_apply_inventory_batch', `Do you want to apply ${inventoryBatch.items.length} inventory change(s)?`, `??????????????????????????????????? ${inventoryBatch.items.length} ??????`))) return
     setBatchApplying(true)
     try {
       const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item) => {
         const quantity = Number.parseFloat(item.quantity)
         if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw new Error(tr('invalid_quantity', 'Invalid quantity', 'ចំនួនមិនត្រឹមត្រូវ'))
+          throw new Error(tr('invalid_quantity', 'Invalid quantity', '??????????????????'))
         }
         if (item.action === 'adjust') {
           const result = await window.api.adjustStock({
@@ -1099,12 +1099,12 @@ export default function Inventory() {
             productName: item.productName,
             type: item.adjustType,
             quantity,
-            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', 'កែសម្រួលស្តុក'),
+            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment', '?????????????'),
             branchId: item.branchId,
             unitCostUsd: item.unitCostUsd,
             unitCostKhr: item.unitCostKhr,
           })
-          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', 'ការកែសម្រួលបានបរាជ័យ'))
+          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed', '????????????????????'))
         } else if (item.action === 'transfer') {
           const result = await window.api.transferInventoryStock({
             productId: item.productId,
@@ -1113,7 +1113,7 @@ export default function Inventory() {
             quantity,
             reason: item.reason,
           })
-          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', 'ការផ្ទេរបានបរាជ័យ'))
+          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed', '?????????????????'))
         } else if (item.action === 'move') {
           const request = {
             sourceProductId: item.productId,
@@ -1135,12 +1135,12 @@ export default function Inventory() {
             }
           }
           const result = await window.api.moveStockRow(request)
-          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', 'ការផ្លាស់ទីស្តុកបានបរាជ័យ'))
+          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed', '?????????????????????????'))
         }
       })
       const failedItems = applyRun.failures.map((entry) => ({
         ...(entry.item || {}),
-        error: entry?.error?.message || tr('save_failed', 'Save failed', 'ការរក្សាទុកបានបរាជ័យ'),
+        error: entry?.error?.message || tr('save_failed', 'Save failed', '????????????????????'),
       }))
       const successCount = applyRun.successes.length
       await load(true)
@@ -1149,8 +1149,8 @@ export default function Inventory() {
         setSelectedProductIds(new Set())
         notify(
           successCount === 1
-            ? tr('batch_inventory_done_one', 'Applied inventory update.', 'បានអនុវត្តបច្ចុប្បន្នភាពស្តុក។')
-            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`, `${successCount} បច្ចុប្បន្នភាពស្តុកត្រូវបានអនុវត្ត។`),
+            ? tr('batch_inventory_done_one', 'Applied inventory update.', '??????????????????????????????')
+            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`, `${successCount} ???????????????????????????????????`),
         )
         return
       }
@@ -1160,7 +1160,7 @@ export default function Inventory() {
         tr(
           'batch_inventory_partial_failure',
           `${successCount} applied, ${failedItems.length} need review.`,
-          `${successCount} បានអនុវត្ត ហើយ ${failedItems.length} ត្រូវពិនិត្យឡើងវិញ។`,
+          `${successCount} ?????????? ??? ${failedItems.length} ???????????????????`,
         ),
         'warning',
       )
@@ -1371,10 +1371,10 @@ export default function Inventory() {
     return parts.filter(Boolean)
   }, [getInventoryGroupPriceLabel, t])
   const inventoryControlLabels = useMemo(() => ({
-    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} បានជ្រើស`),
+    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`, `${selectedProducts.length} ????????`),
     selectAll: `${t('select_all') || 'Select all'} (${visibleInventoryProducts.length})`,
-    batch: tr('inventory_batch_session', 'Batch', 'សម័យបាច់'),
-    reasons: tr('saved_reasons', 'Reasons', 'មូលហេតុ'),
+    batch: tr('inventory_batch_session', 'Batch', '????????'),
+    reasons: tr('saved_reasons', 'Reasons', '???????'),
   }), [selectedProducts.length, t, tr, visibleInventoryProducts.length])
   useEffect(() => {
     setCollapsedInventorySections((current) => {
@@ -1439,26 +1439,26 @@ export default function Inventory() {
     setInventoryProductPageSize(PAGE_SIZE_OPTIONS[nextIndex])
     setInventoryProductPage(1)
   }, [inventoryProductSafePageSize])
-  const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds', 'ចំនួនស្តុកទាប និងអស់ស្តុក ត្រូវបានគណនាពីកម្រិតកំណត់ស្តុក។')
-  const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page', 'តម្លៃស្តុក = បរិមាណវិជ្ជមាន x ថ្លៃដើមជាក់ស្តែង សម្រាប់ស្តុកដែលត្រូវគ្នាទាំងអស់ មិនមែនតែទំព័រដែលមើលឃើញទេ។')
-  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity', 'លក់សុទ្ធ = បរិមាណដែលបានលក់ - បរិមាណដែលបានត្រឡប់')
-  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds', 'ចំណូលដែលបង្ហាញ គឺជាចំណូលសុទ្ធ បន្ទាប់ពីបញ្ចុះតម្លៃ និងការសងប្រាក់ត្រឡប់។')
-  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS មិនរាប់បញ្ចូលបរិមាណដែលត្រូវបានស្តារវិញពីការត្រឡប់ដែលបានដាក់ចូលស្តុកឡើងវិញទេ។')
-  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS', 'ប្រាក់ចំណេញ = ចំណូល - COGS')
-  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.', 'សរុបការបញ្ចុះតម្លៃបង្ហាញការកាត់បន្ថយដែលចេញដោយហាង និងសមាជិកភាព ដែលត្រូវបានបែងចែកទៅផលិតផលដែលបានលក់។')
-  const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.', 'ថ្លៃដែលបានប្រមូល រួមបញ្ចូលពន្ធលើការលក់ និងថ្លៃដឹកជញ្ជូនពីការលក់ដែលបានបញ្ចប់។')
-  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', 'ការប្រគល់មកវិញ រួមបញ្ចូលការសងប្រាក់ជូនអតិថិជន និងករណីប្រគល់ទៅអ្នកផ្គត់ផ្គង់ ដើម្បីពិនិត្យផ្លូវស្ដារវិញទាំងអស់ក្នុងកន្លែងតែមួយ។')
+  const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds', '????????????? ??????????? ???????????????????????????????')
+  const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page', '?????????? = ?????????????? x ???????????????? ??????????????????????????????? ?????????????????????????')
+  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity', '???????? = ??????????????? - ??????????????????')
+  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds', '?????????????? ?????????????? ???????????????????? ?????????????????????')
+  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns', 'COGS ????????????????????????????????????????????????????????????????????????????')
+  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS', '??????????? = ????? - COGS')
+  const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.', '???????????????????????????????????????????????? ???????????? ???????????????????????????????????')
+  const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.', '???????????????? ????????????????????? ?????????????????????????????????????')
+  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.', '?????????????? ?????????????????????????????? ????????????????????????????? ??????????????????????????????????????????????????')
   const statsValue = (value) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
     products: t('products') || t('products_total') || 'Products',
     stockValue: t('stock_value') || 'Stock value',
     netSold: t('net_sold') || 'Net sold',
     revenue: t('revenue') || 'Revenue',
-    discounts: tr('discounts_combined', 'Discounts', 'ការបញ្ចុះតម្លៃ'),
+    discounts: tr('discounts_combined', 'Discounts', '??????????????'),
     cogs: t('cogs') || 'COGS',
-    grossProfit: tr('gross_profit', 'Gross Profit', 'ចំណេញដុល'),
-    feesCollected: tr('fees_collected', 'Fees collected', 'ថ្លៃដែលបានប្រមូល'),
-    returns: tr('returns_combined', 'Returns', 'ការប្រគល់មកវិញ'),
+    grossProfit: tr('gross_profit', 'Gross Profit', '????????'),
+    feesCollected: tr('fees_collected', 'Fees collected', '????????????????'),
+    returns: tr('returns_combined', 'Returns', '??????????????'),
   }
   const primaryStats = [
     {
@@ -1551,11 +1551,11 @@ export default function Inventory() {
       sub: t('allocated_to_products') || 'Allocated to sold products',
       detailSections: [
         {
-          title: tr('discount_breakdown', 'Discount breakdown', 'ការបំបែកការបញ្ចុះតម្លៃ'),
+          title: tr('discount_breakdown', 'Discount breakdown', '??????????????????????'),
           rows: [
             { label: t('store_discounts') || 'Store discounts', value: fmtUSD(totalStoreDiscounts) },
             { label: t('membership_discounts') || 'Membership discounts', value: fmtUSD(totalMembershipDiscounts) },
-            { label: tr('discounts_total', 'Total discounts', 'សរុបការបញ្ចុះតម្លៃ'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
+            { label: tr('discounts_total', 'Total discounts', '??????????????????'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
             { label: t('formula') || 'Formula', value: inventoryDiscountFormulaText },
           ],
         },
@@ -1570,7 +1570,7 @@ export default function Inventory() {
       sub: `${t('tax_collected') || 'Tax'} + ${t('delivery_fees') || 'Delivery'}`,
       detailSections: [
         {
-          title: tr('fees_breakdown', 'Fee breakdown', 'ការបំបែកថ្លៃសេវា'),
+          title: tr('fees_breakdown', 'Fee breakdown', '????????????????'),
           rows: [
             { label: t('tax_collected') || 'Tax collected', value: fmtUSD(taxDelivery.tax || 0) },
             { label: t('delivery_fees') || 'Delivery fees', value: fmtUSD(taxDelivery.delivery || 0) },
@@ -1690,9 +1690,9 @@ export default function Inventory() {
   }, [movementTimeMode, visibleMovementGroups])
 
   const stockStatusRows = useMemo(() => ([
-    { name: tr('in_stock', 'In Stock', 'មានស្តុក'), value: inStockCount },
-    { name: tr('low_stock', 'Low Stock', 'ស្តុកទាប'), value: lowStockCount },
-    { name: tr('out_of_stock', 'Out of Stock', 'អស់ស្តុក'), value: outStockCount },
+    { name: tr('in_stock', 'In Stock', '????????'), value: inStockCount },
+    { name: tr('low_stock', 'Low Stock', '????????'), value: lowStockCount },
+    { name: tr('out_of_stock', 'Out of Stock', '????????'), value: outStockCount },
   ]), [inStockCount, lowStockCount, outStockCount, tr])
 
   const topStockValueRows = useMemo(() => (
@@ -2014,10 +2014,10 @@ export default function Inventory() {
       summaryCards: [
         { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
         { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
-        { label: tr('stock_value', 'Stock Value', 'តម្លៃស្តុក'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', 'ចំណេញដុល')} ${fmtUSD(totalProfit)}` },
-        { label: tr('revenue', 'Revenue', 'ចំណូល'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', 'តម្លៃទំនិញដែលបានលក់')} ${fmtUSD(totalCOGS)}` },
-        { label: tr('low_stock', 'Low Stock', 'ស្តុកទាប'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', 'អស់ស្តុក')} ${outStockCount}` },
-        { label: tr('returns_count', 'Returns', 'ការប្រគល់មកវិញ'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', 'បានសងវិញ')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
+        { label: tr('stock_value', 'Stock Value', '??????????'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit', '????????')} ${fmtUSD(totalProfit)}` },
+        { label: tr('revenue', 'Revenue', '?????'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS', '???????????????????')} ${fmtUSD(totalCOGS)}` },
+        { label: tr('low_stock', 'Low Stock', '????????'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock', '????????')} ${outStockCount}` },
+        { label: tr('returns_count', 'Returns', '??????????????'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded', '????????')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
       ],
       metadataGroups: [
         {
@@ -2156,50 +2156,50 @@ export default function Inventory() {
   const inventoryExportItems = useMemo(() => {
     if (tab === 'movements') {
       return [
-        { label: tr('export_full_inventory_package', 'Export full inventory package', 'នាំចេញកញ្ចប់ស្តុកពេញលេញ'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
-        { label: tr('export_inventory_stats', 'Export inventory stats and calculations', 'នាំចេញស្ថិតិ និងការគណនាស្តុក'), onClick: () => exportInventoryStats('inventory-stats') },
+        { label: tr('export_full_inventory_package', 'Export full inventory package', '???????????????????????'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
+        { label: tr('export_inventory_stats', 'Export inventory stats and calculations', '???????????? ???????????????'), onClick: () => exportInventoryStats('inventory-stats') },
         'divider',
-        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`, 'នាំចេញក្រុមចលនាដែលកំពុងបង្ហាញ'), onClick: () => exportMovementGroups(visibleMovementGroups) },
-        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups', 'នាំចេញក្រុមចលនាដែលបានជ្រើស'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
+        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`, '?????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups) },
+        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups', '??????????????????????????'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
         movementYearFilter !== 'all' || movementMonthFilter !== 'all'
-          ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
+          ? { label: tr('export_filtered_time_range', 'Export filtered time range', '?????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
           : null,
         branchFilter !== 'all'
-          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements', 'នាំចេញចលនាតាមសាខាដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
+          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements', '????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
           : null,
         movFilter !== 'all'
-          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type', 'នាំចេញតាមប្រភេទសកម្មភាពដែលបានតម្រង'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
+          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type', '??????????????????????????????????'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
           : null,
         'divider',
-        { label: tr('export_inventory_summary', 'Export inventory summary', 'នាំចេញសង្ខេបស្តុក'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-        { label: tr('export_low_stock_summary', 'Export low-stock summary', 'នាំចេញសង្ខេបស្តុកទាប'), onClick: () => exportInventorySummary(summary.filter((product) => {
+        { label: tr('export_inventory_summary', 'Export inventory summary', '?????????????????'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+        { label: tr('export_low_stock_summary', 'Export low-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => {
           const qty = getStockQty(product)
           return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
         }), 'inventory-low-stock') },
-        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', 'នាំចេញសង្ខេបអស់ស្តុក'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
+        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
       ].filter(Boolean)
     }
 
     return [
-      { label: tr('export_full_inventory_package', 'Export full inventory package', 'នាំចេញកញ្ចប់ស្តុកពេញលេញ'), onClick: () => exportInventoryPackage('products'), color: 'green' },
-      { label: tr('export_inventory_stats', 'Export inventory stats and calculations', 'នាំចេញស្ថិតិ និងការគណនាស្តុក'), onClick: () => exportInventoryStats('inventory-stats') },
+      { label: tr('export_full_inventory_package', 'Export full inventory package', '???????????????????????'), onClick: () => exportInventoryPackage('products'), color: 'green' },
+      { label: tr('export_inventory_stats', 'Export inventory stats and calculations', '???????????? ???????????????'), onClick: () => exportInventoryStats('inventory-stats') },
       'divider',
-      { label: tr('export_visible_products', 'Export visible products', 'នាំចេញផលិតផលដែលកំពុងបង្ហាញ'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
+      { label: tr('export_visible_products', 'Export visible products', '??????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
       branchFilter !== 'all'
-        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products', 'នាំចេញផលិតផលតាមសាខាដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
+        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products', '??????????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
         : null,
       stockFilter !== 'all'
-        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'នាំចេញតាមស្ថានភាពស្តុកដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
+        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', '?????????????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
         : null,
       brandFilter !== 'all'
-        ? { label: tr('export_filtered_brand', 'Export filtered brand', 'នាំចេញតាមម៉ាកដែលបានតម្រង'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
+        ? { label: tr('export_filtered_brand', 'Export filtered brand', '????????????????????????'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
         : null,
-      { label: tr('export_full_inventory_summary', 'Export full inventory summary', 'នាំចេញសង្ខេបស្តុកទាំងមូល'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-      { label: tr('export_low_stock_summary', 'Export low-stock summary', 'នាំចេញសង្ខេបស្តុកទាប'), onClick: () => exportInventorySummary(summary.filter((product) => {
+      { label: tr('export_full_inventory_summary', 'Export full inventory summary', '????????????????????????'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
+      { label: tr('export_low_stock_summary', 'Export low-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => {
         const qty = getStockQty(product)
         return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
       }), 'inventory-low-stock') },
-      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', 'នាំចេញសង្ខេបអស់ស្តុក'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
+      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary', '????????????????????'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
     ].filter(Boolean)
   }, [
     branchFilter,
@@ -2498,16 +2498,16 @@ export default function Inventory() {
             <button
               onClick={() => setShowImport(true)}
               className="btn-secondary inline-flex min-w-[5.75rem] shrink-0 items-center justify-center whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
-              title={tr('import', 'Import', 'នាំចូល')}
+              title={tr('import', 'Import', '??????')}
             >
             <span className="inline-flex items-center gap-2">
               <Upload className="h-4 w-4" />
-              {tr('import', 'Import', 'នាំចូល')}
+              {tr('import', 'Import', '??????')}
             </span>
           </button>
           {showProductsSection ? (
             <ExportMenu
-              label={tr('export', 'Export', 'នាំចេញ')}
+              label={tr('export', 'Export', '??????')}
               items={inventoryExportItems}
               compact
             />
@@ -2541,7 +2541,7 @@ export default function Inventory() {
 
       {showInventoryStats ? (
       <>
-      {/* ?? Primary Stats bar ?? */}
+      {/* ???? Primary Stats bar ???? */}
       <p className="mb-1 text-[10px] text-gray-500 dark:text-gray-400">{t('tap_any_stat_for_details') || 'Tap any stat card for details.'}</p>
       <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
         {inventoryStatCards.map((stat) => (
@@ -2584,7 +2584,7 @@ export default function Inventory() {
         ))}
       </div>
 
-      {/* ?? Secondary Stats: Returns (compact) 繚 Tax 繚 Delivery ?? */}
+      {/* ???? Secondary Stats: Returns (compact) ? Tax ? Delivery ???? */}
       <div className="hidden grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         {/* Returns ??compact with inline note */}
         <div className="card px-3 py-2 border-l-2 border-orange-400">
@@ -2595,7 +2595,7 @@ export default function Inventory() {
           </div>
           <div className="text-[10px] text-gray-400 mt-0.5">
             {returnStats && returnStats.count > 0
-              ? `${returnStats.items} items 繚 refunded ${fmtUSD(returnStats.refund_usd)}`
+              ? `${returnStats.items} items ? refunded ${fmtUSD(returnStats.refund_usd)}`
               : t('no_returns')}
           </div>
         </div>
@@ -2669,7 +2669,7 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* ?? Tabs ?? */}
+      {/* ???? Tabs ???? */}
       </>
       )}
       {showInventoryTabs ? (
@@ -2683,7 +2683,7 @@ export default function Inventory() {
       </div>
       ) : null}
 
-      {/* ?? Filters ?? */}
+      {/* ???? Filters ???? */}
       {showInventorySections ? (
       <div className="mb-2 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
@@ -2746,9 +2746,9 @@ export default function Inventory() {
       </p>
       ) : null}
 
-      {/* ????????????????????????????????????????
+      {/* ????????????????????????????????????????????????????????????
           PRODUCTS TAB
-      ???????????????????????????????????????? */}
+      ???????????????????????????????????????????????????????????? */}
       {showProductsSection && (
         <>
           <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
@@ -2842,7 +2842,7 @@ export default function Inventory() {
                       title={tr(
                         'inventory_batch_hint',
                         'Select products, review each line in one session, then apply all stock changes together.',
-                        'ជ្រើសរើសផលិតផល ពិនិត្យមើលមួយជួរបន្ទាត់ក្នុងសម័យតែមួយ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                        '?????????????? ????????????????????????????????????? ????????????????????????????????????????????????????',
                       )}
                       aria-label={inventoryControlLabels.batch}
                     >
@@ -2884,361 +2884,47 @@ export default function Inventory() {
               ))}
             </div>
           ) : null}
-          {/* Mobile cards */}
-          <div className="space-y-2 sm:hidden">
-            {loading ? (
-              <div className="text-center py-10 text-gray-400">{t('loading')}</div>
-            ) : visibleInventoryProducts.length === 0 ? (
-              <div className="text-center py-10 text-gray-400">{t('no_data')}</div>
-            ) : inventoryProductSections.map((section) => {
-              const isCollapsed = collapsedInventorySections.has(section.id)
-              return (
-                <div key={section.id} className="space-y-2">
-                  <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-                    <div className="flex items-center justify-between gap-3">
-                      <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded"
-                          checked={isInventorySelectionScopeFullySelected(section.ids)}
-                          ref={(node) => {
-                            if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(section.ids)
-                          }}
-                          onChange={(event) => toggleInventorySelectionScope(section.ids, event.target.checked)}
-                          aria-label={`Select ${section.label}`}
-                        />
-                        <span>{section.label}</span>
-                        <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-                      </label>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
-                        onClick={() => toggleInventorySection(section.id)}
-                      >
-                        {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                        {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                      </button>
-                    </div>
-                  </div>
-                  {!isCollapsed ? section.groups.map((group) => {
-                    const groupCollapsed = collapsedInventoryGroups.has(group.key)
-                    const showGroupRow = group.hasMultipleItems
-                    return (
-                      <div key={group.key} className="space-y-2">
-                        {showGroupRow ? (
-                          <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
-                            <div className="flex items-start justify-between gap-3">
-                              <label className="flex min-w-0 items-start gap-2">
-                                <input
-                                  type="checkbox"
-                                  className="mt-1 h-4 w-4 rounded"
-                                  checked={isInventorySelectionScopeFullySelected(group.ids)}
-                                  ref={(node) => {
-                                    if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(group.ids)
-                                  }}
-                                  onChange={(event) => toggleInventorySelectionScope(group.ids, event.target.checked)}
-                                  aria-label={`Select ${group.name}`}
-                                />
-                                <button type="button" className="min-w-0 text-left" onClick={() => toggleInventoryGroup(group.key)}>
-                                  <div className="flex items-center gap-1.5">
-                                    {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                    <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
-                                    {getInventoryGroupSummaryParts(group, { includeCount: false }).map((part) => (
-                                      <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
-                                    ))}
-                                  </div>
-                                </button>
-                              </label>
-                            </div>
-                          </div>
-                        ) : null}
-                        {!groupCollapsed ? group.items.map((p) => {
-                          const qty = getStockQty(p)
-                          const isLow = qty > 0 && qty <= p.low_stock_threshold
-                          const isOut = qty <= (p.out_of_stock_threshold || 0)
-                          const scls = isOut ? 'bg-red-100 dark:bg-red-900/30 text-red-600' : isLow ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700' : 'bg-green-100 dark:bg-green-900/30 text-green-700'
-                          const slbl = isOut ? (t('out_of_stock') || 'Out') : isLow ? (t('low_stock') || 'Low') : (t('in_stock') || 'In Stock')
-                          const soldQty = Math.max(0, p.qty_sold || 0)
-                          const revenue = Math.max(0, p.revenue_usd || 0)
-                          const productBrand = String(p.brand || '').trim()
-                          const productCategory = String(p.category || '').trim()
-                          const productTagText = [productBrand, productCategory].filter(Boolean).join(' · ')
-                          return (
-                            <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-start gap-2">
-                                    <input
-                                      type="checkbox"
-                                      className="mt-0.5 h-4 w-4 rounded"
-                                      checked={selectedProductIds.has(Number(p.id))}
-                                      onChange={(event) => {
-                                        event.stopPropagation()
-                                        toggleSelectedProduct(p.id)
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                      aria-label={`${t('select') || 'Select'} ${p.name}`}
-                                    />
-                                    <div className="min-w-0 flex-1 pr-0.5">
-                                      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
-                                    </div>
-                                  </div>
-                                  <div className="mt-1 flex items-start gap-1.5 pl-6 text-[9.5px] leading-3.5 text-gray-500 dark:text-gray-300">
-                                    {productBrand ? (
-                                      <span className="max-w-[38%] shrink-0 truncate" title={productBrand}>{productBrand}</span>
-                                    ) : null}
-                                    {productBrand && productCategory ? <span className="shrink-0 text-gray-300 dark:text-gray-600">·</span> : null}
-                                    {productCategory ? (
-                                      <span className="min-w-0 flex-1 truncate" title={productCategory}>{productCategory}</span>
-                                    ) : null}
-                                    {!productTagText ? (
-                                      <span className="truncate">{t('product') || 'Product'}</span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                                <div className="flex min-w-[4.35rem] max-w-[4.6rem] shrink-0 flex-col items-end gap-0.5 text-right">
-                                  <div className="flex items-center justify-end gap-0.5">
-                                    <div className="whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
-                                      {qty}
-                                      <span className="ml-1 text-[9px] font-normal text-gray-400">{p.unit}</span>
-                                    </div>
-                                    <span className={`whitespace-nowrap rounded-full px-1 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
-                                    <button
-                                      onClick={(event) => { event.stopPropagation(); openAdjust(p) }}
-                                      className="px-0.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400"
-                                    >
-                                      {t('adjust')}
-                                    </button>
-                                  </div>
-                                  {p.barcode ? (
-                                    <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[8.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                                      {p.barcode}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="mt-1 flex items-center gap-2 pl-6">
-                                <div className="min-w-0">
-                                  <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                                </div>
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                                <span>Cost {fmtUSD(p.purchase_price_usd || 0)}</span>
-                                <span className="text-gray-300 dark:text-gray-600">|</span>
-                                <span>Price {fmtUSD(p.selling_price_usd || 0)}</span>
-                                {(p.special_price_usd || 0) > 0 ? (
-                                  <>
-                                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                                    <span>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || 0)}</span>
-                                  </>
-                                ) : null}
-                              </div>
-                              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                <span>Sold {soldQty} · Rev {fmtUSD(revenue)}</span>
-                                <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
-                              </div>
-                            </div>
-                          )
-                        }) : null}
-                      </div>
-                    )
-                  }) : null}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Desktop table */}
-          <div className="card overflow-hidden hidden sm:block">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-3 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">
-                      <span className="sr-only">{t('select') || 'Select'}</span>
-                    </th>
-                    <th className="text-left px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 min-w-[140px]">{t('product_name')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('current_stock')}</th>
-                    {branches.length > 1 && (
-                      <th className="text-left px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 hidden md:table-cell">{t('branches')}</th>
-                    )}
-                    <th className="text-center px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400">{t('status')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-red-600 dark:text-red-400 whitespace-nowrap">{t('cost')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">{t('price')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap hidden lg:table-cell">{t('stock_val')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap hidden xl:table-cell">{t('net_sold_header')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-green-700 dark:text-green-400 whitespace-nowrap hidden xl:table-cell">{t('revenue_header')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-orange-600 dark:text-orange-400 whitespace-nowrap hidden xl:table-cell">{t('cogs_header')}</th>
-                    <th className="text-right px-3 py-1.5 font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap hidden xl:table-cell">{t('profit_header')}</th>
-                    <th className="text-center px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('adjust_stock')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={13} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-                  ) : visibleInventoryProducts.length === 0 ? (
-                    <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t('no_data')}</td></tr>
-                  ) : inventoryProductSections.map((section) => {
-                    const isCollapsed = collapsedInventorySections.has(section.id)
-                    return (
-                      <Fragment key={section.id}>
-                        <tr className="bg-slate-50 dark:bg-slate-800/60">
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded"
-                              checked={isInventorySelectionScopeFullySelected(section.ids)}
-                              ref={(node) => {
-                                if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(section.ids)
-                              }}
-                              onChange={(event) => toggleInventorySelectionScope(section.ids, event.target.checked)}
-                              aria-label={`Select ${section.label}`}
-                            />
-                          </td>
-                          <td colSpan={12} className="px-4 py-2">
-                            <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                              <span>{section.label} · {section.items.length} {(t('products') || 'products').toLowerCase()}</span>
-                              <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleInventorySection(section.id)}>
-                                {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {!isCollapsed ? section.groups.map((group) => {
-                          const groupCollapsed = collapsedInventoryGroups.has(group.key)
-                          const showGroupRow = group.hasMultipleItems
-                          return (
-                            <Fragment key={group.key}>
-                              {showGroupRow ? (
-                                <tr className="bg-white dark:bg-gray-800/70">
-                                  <td className="px-3 py-2">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded"
-                                      checked={isInventorySelectionScopeFullySelected(group.ids)}
-                                      ref={(node) => {
-                                        if (node) node.indeterminate = isInventorySelectionScopePartiallySelected(group.ids)
-                                      }}
-                                      onChange={(event) => toggleInventorySelectionScope(group.ids, event.target.checked)}
-                                      aria-label={`Select ${group.name}`}
-                                    />
-                                  </td>
-                                  <td colSpan={12} className="px-4 py-1.5">
-                                    <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => toggleInventoryGroup(group.key)}>
-                                      {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
-                                      <span className="ml-2 flex flex-wrap gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-300">
-                                        {getInventoryGroupSummaryParts(group, { includeCount: false }).map((part) => (
-                                          <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
-                                        ))}
-                                      </span>
-                                    </button>
-                                  </td>
-                                </tr>
-                              ) : null}
-                              {!groupCollapsed ? group.items.map((p) => {
-                                const qty = getStockQty(p)
-                                const isLow = qty > 0 && qty <= p.low_stock_threshold
-                                const isOut = qty <= (p.out_of_stock_threshold || 0)
-                                const status = isOut ? { label:'Out', cls:'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs px-1.5 py-0.5 rounded-full' }
-                                             : isLow ? { label:'Low', cls:'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 text-xs px-1.5 py-0.5 rounded-full' }
-                                             :         { label:'OK',  cls:'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs px-1.5 py-0.5 rounded-full' }
-                                const netRev = Math.max(0, p.revenue_usd || 0)
-                                const netCogs = Math.max(0, p.cogs_usd || 0)
-                                const profit = netRev - netCogs
-                                const productTagText = [p.brand, p.category].filter(Boolean).join(' · ')
-                                return (
-                                  <tr key={p.id} className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10" onClick={() => setDetailProduct(p)}>
-                                    <td className="px-3 py-1" onClick={(event) => event.stopPropagation()}>
-                                      <input
-                                        type="checkbox"
-                                        className="h-4 w-4 rounded"
-                                        checked={selectedProductIds.has(Number(p.id))}
-                                        onChange={() => toggleSelectedProduct(p.id)}
-                                        aria-label={`${t('select') || 'Select'} ${p.name}`}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-1">
-                                      <div className="font-medium leading-tight text-gray-900 dark:text-white">{p.name}</div>
-                                      <div className="mt-0.5 text-[10px] leading-4 text-gray-400">
-                                        <span className="break-words">{productTagText || (t('product') || 'Product')}</span>
-                                      </div>
-                                      <div className="mt-1 flex flex-wrap gap-1">
-                                        <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
-                                        <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
-                                        {p.barcode ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">{p.barcode}</span> : null}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-1 text-right font-bold whitespace-nowrap text-gray-900 dark:text-white">
-                                      {qty} <span className="text-[10px] font-normal text-gray-400">{p.unit}</span>
-                                    </td>
-                                    {branches.length > 1 && (
-                                      <td className="hidden px-3 py-1 md:table-cell">
-                                        <div className="flex flex-wrap gap-0.5">
-                                          {(p.branch_stock || []).slice(0, 3).map((bs) => (
-                                            <span key={bs.branch_id} className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-                                              {bs.branch_name?.split(' ')[0]}: {bs?.quantity ?? 0}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </td>
-                                    )}
-                                    <td className="px-3 py-1 text-center"><span className={status.cls}>{status.label}</span></td>
-                                    <td className="px-3 py-1"><DualMoney usd={p.purchase_price_usd||p.cost_price_usd||0} khr={p.purchase_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                                    <td className="px-3 py-1">
-                                      <DualMoney usd={p.selling_price_usd||0} khr={p.selling_price_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
-                                      {(p.special_price_usd || 0) > 0 || (p.special_price_khr || 0) > 0 ? (
-                                        <div className="mt-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-                                          {t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}
-                                          {(p.special_price_khr || 0) > 0 ? ` / ${fmtKHR(p.special_price_khr || 0)}` : ''}
-                                        </div>
-                                      ) : null}
-                                    </td>
-                                    <td className="hidden px-3 py-1 lg:table-cell"><DualMoney usd={p.stock_value_usd||0} khr={p.stock_value_khr||0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                                    <td className="hidden px-3 py-1 text-right text-gray-500 xl:table-cell">{Math.max(0,p.qty_sold||0)}</td>
-                                    <td className="hidden px-3 py-1 xl:table-cell"><DualMoney usd={netRev} khr={0} fmtUSD={fmtUSD} fmtKHR={fmtKHR} /></td>
-                                    <td className="hidden px-3 py-1 text-right xl:table-cell">
-                                      <span className="text-xs font-medium text-orange-600 dark:text-orange-400">{fmtUSD(netCogs)}</span>
-                                    </td>
-                                    <td className="hidden px-3 py-1 xl:table-cell">
-                                      <div className={`text-right text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtUSD(profit)}</div>
-                                    </td>
-                                    <td className="px-3 py-1 text-center" onClick={e => e.stopPropagation()}>
-                                      <button onClick={() => openAdjust(p)} className="rounded px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-900/20">
-                                        {t('adjust')}
-                                      </button>
-                                    </td>
-                                  </tr>
-                                )
-                              }) : null}
-                            </Fragment>
-                          )
-                        }) : null}
-                      </Fragment>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_products', 'Loading inventory products...', 'Loading inventory products...')}</div>}>
+            <InventoryProductsSurface
+              InventoryBatchPreview={InventoryBatchPreview}
+              InventoryDiscountBadge={InventoryDiscountBadge}
+              branchFilter={branchFilter}
+              branches={branches}
+              collapsedInventoryGroups={collapsedInventoryGroups}
+              collapsedInventorySections={collapsedInventorySections}
+              fmtKHR={fmtKHR}
+              fmtUSD={fmtUSD}
+              getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
+              getStockQty={getStockQty}
+              inventoryProductSections={inventoryProductSections}
+              isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
+              isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
+              loading={loading}
+              openAdjust={openAdjust}
+              selectedProductIds={selectedProductIds}
+              setDetailProduct={setDetailProduct}
+              showProductsSection={showProductsSection}
+              t={t}
+              toggleInventoryGroup={toggleInventoryGroup}
+              toggleInventorySection={toggleInventorySection}
+              toggleInventorySelectionScope={toggleInventorySelectionScope}
+              toggleSelectedProduct={toggleSelectedProduct}
+              visibleInventoryProducts={visibleInventoryProducts}
+            />
+          </Suspense>
         </>
       )}
 
-      {/* ????????????????????????????????????????
+      {/* ????????????????????????????????????????????????????????????
           MOVEMENTS TAB
-      ???????????????????????????????????????? */}
+      ???????????????????????????????????????????????????????????? */}
       {showMovementsSection && (
         <>
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/60">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('grouped_movement_history', 'Grouped movement history', 'ប្រវត្តិចលនាដែលបានដាក់ជាក្រុម')}</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', 'ការផ្លាស់ប្តូរស្តុកដែលពាក់ព័ន្ធ ត្រូវបានដាក់ជាសកម្មភាពតែមួយ ដើម្បីងាយពិនិត្យការលក់ ការត្រឡប់ ការនាំចូល និងការផ្ទេរ។')}</div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('grouped_movement_history', 'Grouped movement history', '?????????????????????????????')}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">{tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.', '??????????????????????????????? ??????????????????????????? ?????????????????????? ????????? ????????? ????????????')}</div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <div className="text-xs text-gray-500 dark:text-gray-400">{visibleMovementGroups.length} groups · {visibleMovementRecordCount} records · {visibleMovementQuantity} quantity</div>
@@ -3249,11 +2935,11 @@ export default function Inventory() {
                       type="button"
                       className="btn-secondary px-2.5 py-1 text-[11px]"
                       onClick={() => {
-                        if (!window.confirm(tr('confirm_export_selected_movements', 'Do you want to export the selected movement groups?', 'តើអ្នកចង់នាំចេញក្រុមចលនាដែលបានជ្រើសមែនទេ?'))) return
+                        if (!window.confirm(tr('confirm_export_selected_movements', 'Do you want to export the selected movement groups?', '?????????????????????????????????????????'))) return
                         exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')
                       }}
                     >
-                      {tr('export_selected', 'Export selected', 'នាំចេញដែលបានជ្រើស')}
+                      {tr('export_selected', 'Export selected', '?????????????????')}
                     </button>
                     <button type="button" className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedMovementIds(new Set())}>
                       {t('clear') || 'Clear'}
@@ -3261,7 +2947,7 @@ export default function Inventory() {
                   </div>
                 ) : null}
                 <ExportMenu
-                  label={tr('export', 'Export', 'នាំចេញ')}
+                  label={tr('export', 'Export', '??????')}
                   items={inventoryExportItems}
                   compact
                 />
@@ -3278,7 +2964,7 @@ export default function Inventory() {
                   className={`btn-secondary px-2.5 py-1 text-[11px] ${showMovementDateFilter ? 'border-blue-400 text-blue-700 dark:text-blue-300' : ''}`}
                   onClick={() => setShowMovementDateFilter((current) => !current)}
                 >
-                  {tr('custom_range', 'Custom range', 'កំណត់ចន្លោះពេល')}
+                  {tr('custom_range', 'Custom range', '??????????????')}
                 </button>
                 <div className="max-w-full truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                   {movementDateRangeLabel}
@@ -3301,7 +2987,7 @@ export default function Inventory() {
             {showMovementDateFilter ? (
               <div className="mt-3 grid gap-3 sm:grid-cols-2 md:max-w-xl">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', 'កាលបរិច្ឆេទចាប់ផ្តើម')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date', '????????????????????')}</span>
                   <input
                     type="date"
                     className="input text-sm"
@@ -3310,7 +2996,7 @@ export default function Inventory() {
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date', 'កាលបរិច្ឆេទបញ្ចប់')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date', '?????????????????')}</span>
                   <input
                     type="date"
                     className="input text-sm"
@@ -3409,7 +3095,7 @@ export default function Inventory() {
                                   </div>
                                   <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{group.productSummary || 'Movement'}</div>
                                   <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
-                                    <span>{getMovementRecordCount(group)} {tr('records', 'records', 'កំណត់ត្រា')}</span>
+                                    <span>{getMovementRecordCount(group)} {tr('records', 'records', '?????????')}</span>
                                     {group.branchSummary ? <span>{group.branchSummary}</span> : null}
                                     {group.userSummary ? <span>{group.userSummary}</span> : null}
                                   </div>
@@ -3604,7 +3290,7 @@ export default function Inventory() {
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${MOV_COLORS[group.movement_type] || 'bg-gray-100 text-gray-600'}`}>
                                         {group.movementLabel}
                                       </span>
-                                      <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records', 'កំណត់ត្រា')}</span>
+                                      <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records', '?????????')}</span>
                                     </div>
                                     {group.reasonSummary ? <div className="mt-1 max-w-[220px] truncate text-[11px] text-gray-500">{group.reasonSummary}</div> : null}
                                   </td>
@@ -3724,10 +3410,10 @@ export default function Inventory() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white">
                   <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  {tr('rfid_inventory_title', 'RFID inventory', 'ស្តុក RFID')}
+                  {tr('rfid_inventory_title', 'RFID inventory', '????? RFID')}
                 </div>
                 <p className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
-                  {tr('rfid_inventory_desc', 'Manage reader readiness, EPC / TID mapping, stock counts, receiving, transfers, POS checks, and exceptions from one Inventory section.', 'គ្រប់គ្រង reader, ការភ្ជាប់ EPC / TID, រាប់ស្តុក, ទទួលទំនិញ, ផ្ទេរ, ពិនិត្យ POS និងករណីលើកលែងក្នុងផ្នែកស្តុកតែមួយ។')}
+                  {tr('rfid_inventory_desc', 'Manage reader readiness, EPC / TID mapping, stock counts, receiving, transfers, POS checks, and exceptions from one Inventory section.', '????????? reader, ????????? EPC / TID, ?????????, ?????????, ?????, ??????? POS ??????????????????????????????????')}
                 </p>
               </div>
               <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${rfidGatewayStatus.connected ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
@@ -3738,9 +3424,9 @@ export default function Inventory() {
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 [tr('rfid_reader_gateway', 'Reader gateway', 'Reader gateway'), `${rfidGatewayStatus.readerCount} ${tr('online', 'online', 'online')}`, rfidGatewayStatus.lastHeartbeat],
-                [tr('rfid_active_session', 'Active session', 'សម័យសកម្ម'), rfidGatewayStatus.activeSession, rfidGatewayStatus.branchName],
-                [tr('rfid_queued_reads', 'Queued reads', 'ការអានកំពុងរង់ចាំ'), rfidGatewayStatus.queuedReads, tr('rfid_awaiting_sync_apply', 'Awaiting sync/apply', 'កំពុងរង់ចាំ sync/apply')],
-                [tr('rfid_unknown_tags', 'Unknown tags', 'ស្លាកមិនស្គាល់'), rfidGatewayStatus.unknownTags, tr('rfid_need_product_mapping', 'Need product mapping', 'ត្រូវការភ្ជាប់ផលិតផល')],
+                [tr('rfid_active_session', 'Active session', '?????????'), rfidGatewayStatus.activeSession, rfidGatewayStatus.branchName],
+                [tr('rfid_queued_reads', 'Queued reads', '?????????????????'), rfidGatewayStatus.queuedReads, tr('rfid_awaiting_sync_apply', 'Awaiting sync/apply', '??????????? sync/apply')],
+                [tr('rfid_unknown_tags', 'Unknown tags', '??????????????'), rfidGatewayStatus.unknownTags, tr('rfid_need_product_mapping', 'Need product mapping', '????????????????????')],
               ].map(([label, value, note]) => (
                 <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
@@ -3757,11 +3443,11 @@ export default function Inventory() {
             <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_workflows', 'RFID workflows', 'ដំណើរការ RFID')}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{tr('rfid_workflows_desc', 'Choose a session type before readers start changing stock.', 'ជ្រើសប្រភេទសម័យ មុនពេល reader ចាប់ផ្តើមផ្លាស់ប្តូរស្តុក។')}</div>
+                  <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_workflows', 'RFID workflows', '???????? RFID')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{tr('rfid_workflows_desc', 'Choose a session type before readers start changing stock.', '??????????????? ?????? reader ??????????????????????????')}</div>
                 </div>
-                <button type="button" className="btn-primary px-3 py-1.5 text-xs" disabled title={tr('rfid_reader_gateway_required', 'Enable after a reader gateway is connected.', 'បើកបានក្រោយពេលភ្ជាប់ reader gateway។')}>
-                  {tr('rfid_start_stock_count', 'Start RFID stock count', 'ចាប់ផ្តើមរាប់ស្តុក RFID')}
+                <button type="button" className="btn-primary px-3 py-1.5 text-xs" disabled title={tr('rfid_reader_gateway_required', 'Enable after a reader gateway is connected.', '???????????????????? reader gateway?')}>
+                  {tr('rfid_start_stock_count', 'Start RFID stock count', '?????????????????? RFID')}
                 </button>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
@@ -3775,18 +3461,18 @@ export default function Inventory() {
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-              <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_tag_lookup_mapping', 'Tag lookup and mapping', 'ស្វែងរក និងភ្ជាប់ស្លាក')}</div>
+              <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_tag_lookup_mapping', 'Tag lookup and mapping', '??????? ??????????????')}</div>
               <div className="mt-2 grid gap-2">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">EPC / TID</span>
-                  <input className="input text-sm" placeholder={tr('rfid_paste_scan_tag_id', 'Paste or scan tag id', 'បិទភ្ជាប់ ឬស្កេនលេខស្លាក')} disabled title={tr('rfid_reader_not_connected_title', 'Reader integration is not connected yet.', 'មិនទាន់ភ្ជាប់ reader integration។')} />
+                  <input className="input text-sm" placeholder={tr('rfid_paste_scan_tag_id', 'Paste or scan tag id', '????????? ??????????????')} disabled title={tr('rfid_reader_not_connected_title', 'Reader integration is not connected yet.', '????????????? reader integration?')} />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('rfid_map_product_variant', 'Map to product or variant', 'ភ្ជាប់ទៅផលិតផល ឬវ៉ារ្យ៉ង់')}</span>
-                  <input className="input text-sm" placeholder={tr('rfid_search_product_tag_placeholder', 'Search product, SKU, barcode, or variant', 'ស្វែងរកផលិតផល SKU barcode ឬវ៉ារ្យ៉ង់')} disabled title={tr('rfid_mapping_title', 'Mapping turns reader scans into stock movements.', 'ការភ្ជាប់នេះបម្លែងការស្កេន reader ទៅជាចលនាស្តុក។')} />
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('rfid_map_product_variant', 'Map to product or variant', '?????????????? ??????????')}</span>
+                  <input className="input text-sm" placeholder={tr('rfid_search_product_tag_placeholder', 'Search product, SKU, barcode, or variant', '????????????? SKU barcode ??????????')} disabled title={tr('rfid_mapping_title', 'Mapping turns reader scans into stock movements.', '?????????????????????????? reader ??????????????')} />
                 </label>
                 <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                  {tr('rfid_barcode_fallback_note', 'Barcode fallback stays available for untagged products, offline readers, and emergency receiving.', 'Barcode fallback នៅតែប្រើបានសម្រាប់ផលិតផលមិនមានស្លាក reader ក្រៅបណ្ដាញ និងការទទួលទំនិញបន្ទាន់។')}
+                  {tr('rfid_barcode_fallback_note', 'Barcode fallback stays available for untagged products, offline readers, and emergency receiving.', 'Barcode fallback ??????????????????????????????????? reader ?????????? ???????????????????????')}
                 </div>
               </div>
             </div>
@@ -3795,21 +3481,21 @@ export default function Inventory() {
 
           {(rfidSection === 'all' || rfidSection === 'exceptions') ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
-            <div className="font-semibold">{tr('rfid_exceptions', 'RFID exceptions', 'ករណីលើកលែង RFID')}</div>
-            <div className="mt-1 text-xs">{tr('rfid_exceptions_desc', 'Wrong-location, unknown, missing, and extra tags stay in review until an authorized user applies or dismisses them.', 'ស្លាកខុសទីតាំង មិនស្គាល់ បាត់ ឬលើស នឹងនៅក្នុងការពិនិត្យរហូតដល់អ្នកមានសិទ្ធិអនុម័ត ឬបដិសេធ។')}</div>
+            <div className="font-semibold">{tr('rfid_exceptions', 'RFID exceptions', '?????????? RFID')}</div>
+            <div className="mt-1 text-xs">{tr('rfid_exceptions_desc', 'Wrong-location, unknown, missing, and extra tags stay in review until an authorized user applies or dismisses them.', '?????????????? ????????? ???? ???? ?????????????????????????????????????????????? ????????')}</div>
           </div>
           ) : null}
 
           {(rfidSection === 'all' || rfidSection === 'sessions') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_sessions', 'RFID sessions', 'សម័យ RFID')}</div>
-            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('rfid_sessions_desc', 'Branch, area, reader, ledger totals, confirmed tag presence, and manual apply results are audited per session.', 'សាខា តំបន់ reader សរុប ledger ស្លាកដែលបានបញ្ជាក់ និងលទ្ធផល apply ដោយដៃ ត្រូវបាន audit តាមសម័យ។')}</div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_sessions', 'RFID sessions', '???? RFID')}</div>
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('rfid_sessions_desc', 'Branch, area, reader, ledger totals, confirmed tag presence, and manual apply results are audited per session.', '???? ????? reader ???? ledger ?????????????????? ????????? apply ????? ???????? audit ????????')}</div>
           </div>
           ) : null}
 
           {(rfidSection === 'all' || rfidSection === 'overview') ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/70">
-            <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_implementation_checklist', 'Implementation checklist', 'បញ្ជីពិនិត្យការអនុវត្ត')}</div>
+            <div className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{tr('rfid_implementation_checklist', 'Implementation checklist', '??????????????????????')}</div>
             <div className="grid gap-2 md:grid-cols-3">
               {RFID_READER_REQUIREMENTS.map((item, index) => (
                 <div key={item.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
@@ -3823,7 +3509,7 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* ?? Adjust stock modal ?? */}
+      {/* ???? Adjust stock modal ???? */}
       {statDetail && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setStatDetail(null)}>
           <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
@@ -3877,7 +3563,7 @@ export default function Inventory() {
             <div className="modal-scroll p-4 space-y-3">
               {adjustTargetOptions.length > 1 ? (
                 <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target', 'គោលដៅកែសម្រួល')}</label>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target', '?????????????')}</label>
                   <select
                     className="input text-sm"
                     value={adjustForm.product_id || adjustModal.id}
@@ -3958,7 +3644,7 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">{t('reason')}</label>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
-                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
                   </button>
                 </div>
                 {reasonsByType.adjust.length ? (
@@ -3996,7 +3682,7 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer', 'ផ្ទេរ')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer', '?????')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <button type="button" onClick={() => setTransferModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
@@ -4005,9 +3691,9 @@ export default function Inventory() {
             </div>
             <div className="modal-scroll space-y-3 p-4">
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', 'សាខាដើម')}</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', '???????')}</span>
                 <select className="input text-sm" value={transferForm.from_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, from_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                  <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
                   {branches.map((branch) => {
                     const branchQty = Number((transferModal.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
                     return <option key={branch.id} value={branch.id}>{branch.name} ({branchQty})</option>
@@ -4015,9 +3701,9 @@ export default function Inventory() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', 'សាខាគោលដៅ')}</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', '?????????')}</span>
                 <select className="input text-sm" value={transferForm.to_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, to_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                  <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
                   {branches.map((branch) => (
                     <option key={branch.id} value={branch.id}>{branch.name}</option>
                   ))}
@@ -4031,7 +3717,7 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'transfer' })}>
-                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
                   </button>
                 </div>
                 {reasonsByType.transfer.length ? (
@@ -4048,11 +3734,11 @@ export default function Inventory() {
                     ))}
                   </div>
                 ) : null}
-                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder', 'Why is this stock moving between branches?', 'ហេតុអ្វីបានជាត្រូវផ្ទេរស្តុករវាងសាខា?')} />
+                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder', 'Why is this stock moving between branches?', '?????????????????????????????????????')} />
               </label>
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={handleTransferStock} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
-                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer', 'ផ្ទេរ')}
+                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer', '?????')}
                 </button>
                 <button type="button" onClick={() => setTransferModal(null)} className="btn-secondary text-sm" disabled={transferSaving}>
                   {t('cancel') || 'Cancel'}
@@ -4068,7 +3754,7 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock', '?????????????')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">{moveModal.name} - {getStockQty(moveModal)} {moveModal.unit}</div>
               </div>
               <button type="button" onClick={() => setMoveModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
@@ -4082,22 +3768,22 @@ export default function Inventory() {
                   className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
                   onClick={() => setMoveForm((current) => ({ ...current, mode: 'existing' }))}
                 >
-                  {tr('existing_row', 'Existing row', 'ជួរដែលមានស្រាប់')}
+                  {tr('existing_row', 'Existing row', '???????????????')}
                 </button>
                 <button
                   type="button"
                   className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
                   onClick={() => setMoveForm((current) => ({ ...current, mode: 'new' }))}
                 >
-                  {tr('quick_create_row', 'Quick-create row', 'បង្កើតជួររហ័ស')}
+                  {tr('quick_create_row', 'Quick-create row', '?????????????')}
                 </button>
               </div>
 
               {moveForm.mode === 'existing' ? (
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', 'ជួរផលិតផលគោលដៅ')}</span>
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', '??????????????')}</span>
                   <select className="input text-sm" value={moveForm.destination_product_id} onChange={(event) => setMoveForm((current) => ({ ...current, destination_product_id: event.target.value }))}>
-                    <option value="">{tr('choose_destination_product', 'Choose a destination product row', 'ជ្រើសរើសជួរផលិតផលគោលដៅ')}</option>
+                    <option value="">{tr('choose_destination_product', 'Choose a destination product row', '??????????????????????')}</option>
                     {summary.filter((product) => Number(product.id) !== Number(moveModal.id)).map((product) => (
                       <option key={product.id} value={product.id}>{product.name}</option>
                     ))}
@@ -4110,20 +3796,20 @@ export default function Inventory() {
                     <input className="input text-sm" value={moveForm.destination_name} onChange={(event) => setMoveForm((current) => ({ ...current, destination_name: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)', 'តម្លៃលក់ (USD)')}</span>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)', '???????? (USD)')}</span>
                     <input className="input text-sm" type="number" step="any" min="0" value={moveForm.selling_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, selling_price_usd: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}</span>
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)', '?????????? (USD)')}</span>
                     <input className="input text-sm" type="number" step="any" min="0" value={moveForm.special_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, special_price_usd: event.target.value }))} autoComplete="off" />
                   </label>
                   <label className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-200">
                     <input type="checkbox" checked={!!moveForm.discount_enabled} onChange={(event) => setMoveForm((current) => ({ ...current, discount_enabled: event.target.checked }))} />
-                    {tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}
+                    {tr('product_discount', 'Discounts', '???????????')}
                   </label>
                   {moveForm.discount_enabled ? (
                     <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)', 'ចំនួនបញ្ចុះតម្លៃ (USD)') : tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</span>
+                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)', '???????????????? (USD)') : tr('discount_percent', 'Percent off', '?????????????')}</span>
                       <input className="input text-sm" type="number" step="any" min="0" value={moveForm.discount_type === 'fixed' ? moveForm.discount_amount_usd : moveForm.discount_percent} onChange={(event) => setMoveForm((current) => current.discount_type === 'fixed' ? { ...current, discount_amount_usd: event.target.value } : { ...current, discount_percent: event.target.value })} autoComplete="off" />
                     </label>
                   ) : null}
@@ -4146,18 +3832,18 @@ export default function Inventory() {
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
                   <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'move' })}>
-                    {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                    {tr('manage_reasons', 'Manage reasons', '????????????????')}
                   </button>
                 </div>
                 <select className="input text-sm" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))}>
                   {reasonsByType.move.map((entry) => (
                     <option key={entry.id} value={entry.label}>{entry.label}</option>
                   ))}
-                  <option value="broken">{tr('reason_broken', 'Broken', 'ខូច')}</option>
-                  <option value="open">{tr('reason_opened', 'Opened', 'បានបើក')}</option>
-                  <option value="loose">{tr('reason_loose', 'Loose', 'រាយ')}</option>
-                  <option value="discount">{tr('reason_discount', 'Discount / promotion', 'បញ្ចុះតម្លៃ / ប្រូម៉ូសិន')}</option>
-                  <option value="special_price">{tr('reason_special_price', 'Special price', 'តម្លៃពិសេស')}</option>
+                  <option value="broken">{tr('reason_broken', 'Broken', '???')}</option>
+                  <option value="open">{tr('reason_opened', 'Opened', '??????')}</option>
+                  <option value="loose">{tr('reason_loose', 'Loose', '???')}</option>
+                  <option value="discount">{tr('reason_discount', 'Discount / promotion', '??????????? / ??????????')}</option>
+                  <option value="special_price">{tr('reason_special_price', 'Special price', '??????????')}</option>
                   <option value="other">{t('other') || 'Other'}</option>
                 </select>
               </label>
@@ -4166,7 +3852,7 @@ export default function Inventory() {
                 <textarea className="input min-h-[76px] text-sm" value={moveForm.note} onChange={(event) => setMoveForm((current) => ({ ...current, note: event.target.value }))} />
               </label>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</button>
+                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock', '?????????????')}</button>
                 <button type="button" onClick={() => setMoveModal(null)} className="btn-secondary text-sm" disabled={moveSaving}>{t('cancel') || 'Cancel'}</button>
               </div>
             </div>
@@ -4179,8 +3865,8 @@ export default function Inventory() {
           <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons', 'មូលហេតុដែលបានរក្សាទុក')}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, and row moves.', 'ប្រើមូលហេតុទូទៅឡើងវិញសម្រាប់ការកែសម្រួលស្តុក ការផ្ទេរ និងការផ្លាស់ទីជួរ។')}</div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons', '?????????????????????')}</h2>
+                <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, and row moves.', '???????????????????????????????????????????? ???????? ??????????????????')}</div>
               </div>
               <button type="button" onClick={() => setReasonManager((current) => ({ ...current, open: false }))} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
@@ -4204,7 +3890,7 @@ export default function Inventory() {
                   className="input flex-1 text-sm"
                   value={reasonDraft}
                   onChange={(event) => setReasonDraft(event.target.value)}
-                  placeholder={tr('new_reason_placeholder', 'Add a reusable reason', 'បន្ថែមមូលហេតុដែលអាចប្រើឡើងវិញ')}
+                  placeholder={tr('new_reason_placeholder', 'Add a reusable reason', '?????????????????????????????')}
                   autoComplete="off"
                 />
                 <button type="button" className="btn-primary px-3 text-sm" onClick={addSavedReason} disabled={savingReasons || !reasonDraft.trim()}>
@@ -4222,7 +3908,7 @@ export default function Inventory() {
                   </div>
                 )) : (
                   <div className="rounded-xl border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">
-                    {tr('no_saved_reasons', 'No saved reasons yet for this workflow.', 'មិនទាន់មានមូលហេតុដែលបានរក្សាទុកសម្រាប់ដំណើរការនេះទេ។')}
+                    {tr('no_saved_reasons', 'No saved reasons yet for this workflow.', '????????????????????????????????????????????????????')}
                   </div>
                 )}
               </div>
@@ -4236,12 +3922,12 @@ export default function Inventory() {
           <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-5xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session', 'សម័យបាច់')}</h2>
+                <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session', '????????')}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">
                   {tr(
                     'inventory_batch_session_desc',
                     'Review each selected product, then apply all stock changes together.',
-                    'ពិនិត្យមើលផលិតផលដែលបានជ្រើសរើសនីមួយៗ បន្ទាប់មកអនុវត្តការផ្លាស់ប្តូរស្តុកទាំងអស់ជាមួយគ្នា។',
+                    '???????????????????????????????????? ????????????????????????????????????????????????????',
                   )}
                 </div>
               </div>
@@ -4256,7 +3942,7 @@ export default function Inventory() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</div>
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {tr('current_stock', 'Current stock', 'ស្តុកបច្ចុប្បន្ន')} {item.stockQty} {item.unit || ''}
+                        {tr('current_stock', 'Current stock', '????????????????')} {item.stockQty} {item.unit || ''}
                       </div>
                       {item.error ? (
                         <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
@@ -4266,9 +3952,9 @@ export default function Inventory() {
                     </div>
                     <div className="flex items-center gap-2">
                       <select className="input text-xs" value={item.action} onChange={(event) => updateInventoryBatchLine(item.productId, { action: event.target.value, reason: '' })}>
-                        <option value="adjust">{tr('adjust_stock', 'Adjust stock', 'កែសម្រួលស្តុក')}</option>
-                        <option value="transfer">{tr('transfer', 'Transfer', 'ផ្ទេរ')}</option>
-                        <option value="move">{tr('move_stock', 'Move stock', 'ផ្លាស់ទីស្តុក')}</option>
+                        <option value="adjust">{tr('adjust_stock', 'Adjust stock', '?????????????')}</option>
+                        <option value="transfer">{tr('transfer', 'Transfer', '?????')}</option>
+                        <option value="move">{tr('move_stock', 'Move stock', '?????????????')}</option>
                       </select>
                       <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" onClick={() => removeInventoryBatchLine(item.productId)} disabled={batchApplying}>
                         {t('remove') || 'Remove'}
@@ -4304,16 +3990,16 @@ export default function Inventory() {
                     {item.action === 'transfer' ? (
                       <>
                         <label className="block lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', 'សាខាដើម')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch', '???????')}</span>
                           <select className="input text-sm" value={item.fromBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { fromBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                            <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
                             {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
                           </select>
                         </label>
                         <label className="block lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', 'សាខាគោលដៅ')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch', '?????????')}</span>
                           <select className="input text-sm" value={item.toBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { toBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch', 'ជ្រើសរើសសាខា')}</option>
+                            <option value="">{tr('choose_branch', 'Choose a branch', '????????????')}</option>
                             {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
                           </select>
                         </label>
@@ -4323,10 +4009,10 @@ export default function Inventory() {
                     {item.action === 'move' ? (
                       <>
                         <div className="lg:col-span-2">
-                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_row', 'Destination row', 'ជួរគោលដៅ')}</span>
+                          <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_row', 'Destination row', '????????')}</span>
                           <div className="flex gap-1">
-                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'existing' })}>{tr('existing_row', 'Existing', 'មានស្រាប់')}</button>
-                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'new' })}>{tr('new_row', 'New row', 'ជួរថ្មី')}</button>
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'existing' })}>{tr('existing_row', 'Existing', '?????????')}</button>
+                            <button type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${item.moveMode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`} onClick={() => updateInventoryBatchLine(item.productId, { moveMode: 'new' })}>{tr('new_row', 'New row', '???????')}</button>
                           </div>
                         </div>
                         <label className="block lg:col-span-2">
@@ -4337,9 +4023,9 @@ export default function Inventory() {
                         </label>
                         {item.moveMode === 'existing' ? (
                           <label className="block lg:col-span-4">
-                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', 'ជួរផលិតផលគោលដៅ')}</span>
+                            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row', '??????????????')}</span>
                             <select className="input text-sm" value={item.destinationProductId} onChange={(event) => updateInventoryBatchLine(item.productId, { destinationProductId: event.target.value })}>
-                              <option value="">{tr('choose_destination_product', 'Choose a destination product row', 'ជ្រើសរើសជួរផលិតផលគោលដៅ')}</option>
+                              <option value="">{tr('choose_destination_product', 'Choose a destination product row', '??????????????????????')}</option>
                               {summary.filter((product) => Number(product.id) !== Number(item.productId)).map((product) => (
                                 <option key={product.id} value={product.id}>{product.name}</option>
                               ))}
@@ -4358,7 +4044,7 @@ export default function Inventory() {
                       <span className="mb-1 flex items-center justify-between gap-2 text-[11px] font-medium text-gray-600 dark:text-gray-400">
                         <span>{t('reason') || 'Reason'}</span>
                         <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: item.action === 'move' ? 'move' : item.action === 'transfer' ? 'transfer' : 'adjust' })}>
-                          {tr('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
+                          {tr('manage_reasons', 'Manage reasons', '????????????????')}
                         </button>
                       </span>
                       <div className="space-y-2">
@@ -4381,11 +4067,11 @@ export default function Inventory() {
                             {reasonsByType.move.map((entry) => (
                               <option key={entry.id} value={entry.label}>{entry.label}</option>
                             ))}
-                            <option value="broken">{tr('reason_broken', 'Broken', 'ខូច')}</option>
-                            <option value="open">{tr('reason_opened', 'Opened', 'បានបើក')}</option>
-                            <option value="loose">{tr('reason_loose', 'Loose', 'រាយ')}</option>
-                            <option value="discount">{tr('reason_discount', 'Discount / promotion', 'បញ្ចុះតម្លៃ / ប្រូម៉ូសិន')}</option>
-                            <option value="special_price">{tr('reason_special_price', 'Special price', 'តម្លៃពិសេស')}</option>
+                            <option value="broken">{tr('reason_broken', 'Broken', '???')}</option>
+                            <option value="open">{tr('reason_opened', 'Opened', '??????')}</option>
+                            <option value="loose">{tr('reason_loose', 'Loose', '???')}</option>
+                            <option value="discount">{tr('reason_discount', 'Discount / promotion', '??????????? / ??????????')}</option>
+                            <option value="special_price">{tr('reason_special_price', 'Special price', '??????????')}</option>
                             <option value="other">{t('other') || 'Other'}</option>
                           </select>
                         ) : (
@@ -4406,7 +4092,7 @@ export default function Inventory() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn-primary text-sm" onClick={applyInventoryBatchSession} disabled={batchApplying || !inventoryBatch.items.length}>
-                  {batchApplying ? (t('saving') || 'Saving...') : tr('apply_changes', 'Apply changes', 'អនុវត្តការផ្លាស់ប្តូរ')}
+                  {batchApplying ? (t('saving') || 'Saving...') : tr('apply_changes', 'Apply changes', '?????????????????????')}
                 </button>
               </div>
             </div>
@@ -4444,6 +4130,8 @@ export default function Inventory() {
     </div>
   )
 }
+
+
 
 
 

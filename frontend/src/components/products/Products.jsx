@@ -1,7 +1,7 @@
-// ?�?� Products ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
+﻿// ?ï¿½?ï¿½ Products ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 // Main Products page ??all sub-modals imported from sibling files.
 
-import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
 import { useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
@@ -40,6 +40,7 @@ const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
 const VariantFormModal = lazy(() => import('./VariantFormModal'))
 const ProductForm = lazy(() => import('./ProductForm'))
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
+const ProductsListSurface = lazy(() => import('./ProductsListSurface'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const CREATED_MONTH_OPTIONS = [
   ['01', 'Jan'],
@@ -931,14 +932,14 @@ export default function Products() {
     ? `${productStart.toLocaleString()}-${productEnd.toLocaleString()} / ${Number(productTotal || 0).toLocaleString()}`
     : '0 / 0'
   const productSelectAllLabel = `${t('select_all') || 'Select all'} (${visibleProducts.length})`
-  const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`, `${selectedVisibleCount} បានជ្រើស`)
+  const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`, `${selectedVisibleCount} áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ`)
   const productChipLabels = useMemo(() => ({
-    info: tr('basic_info_short', 'Info', 'ទូទៅ'),
-    pricing: tr('pricing_short', 'Price', 'តម្លៃ'),
-    stock: tr('stock_short', 'Stock', 'ស្តុក'),
-    branch: tr('branch_short', 'Branch', 'សាខា'),
-    out: tr('out_short', 'Out', 'អស់'),
-    delete: tr('delete_short', 'Delete', 'លុប'),
+    info: tr('basic_info_short', 'Info', 'áž‘áž¼áž‘áŸ…'),
+    pricing: tr('pricing_short', 'Price', 'ážáž˜áŸ’áž›áŸƒ'),
+    stock: tr('stock_short', 'Stock', 'ážŸáŸ’ážáž»áž€'),
+    branch: tr('branch_short', 'Branch', 'ážŸáž¶ážáž¶'),
+    out: tr('out_short', 'Out', 'áž¢ážŸáŸ‹'),
+    delete: tr('delete_short', 'Delete', 'áž›áž»áž”'),
   }), [tr])
   const selectedProducts = useMemo(
     () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
@@ -1045,16 +1046,16 @@ export default function Products() {
   )
 
   const productExportItems = useMemo(() => ([
-    { label: tr('export_visible_products', 'Export visible products', 'នាំចេញផលិតផលដែលកំពុងបង្ហាញ'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
-    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products', 'នាំចេញផលិតផលដែលបានជ្រើស'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
-    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'នាំចេញតាមស្ថានភាពស្តុកដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
-    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category', 'នាំចេញតាមប្រភេទដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
-    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand', 'នាំចេញតាមម៉ាកដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
-    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier', 'នាំចេញតាមអ្នកផ្គត់ផ្គង់ដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
-    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch', 'នាំចេញតាមសាខាដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
-    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range', 'នាំចេញតាមពេលបង្កើតដែលបានតម្រង'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
+    { label: tr('export_visible_products', 'Export visible products', 'áž“áž¶áŸ†áž…áŸáž‰áž•áž›áž·ážáž•áž›ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
+    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products', 'áž“áž¶áŸ†áž…áŸáž‰áž•áž›áž·ážáž•áž›ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
+    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáŸ’ážáž¶áž“áž—áž¶áž–ážŸáŸ’ážáž»áž€ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
+    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž”áŸ’ážšáž—áŸáž‘ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
+    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž˜áŸ‰áž¶áž€ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
+    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž¢áŸ’áž“áž€áž•áŸ’áž‚ážáŸ‹áž•áŸ’áž‚áž„áŸ‹ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
+    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáž¶ážáž¶ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
+    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž–áŸáž›áž”áž„áŸ’áž€áž¾ážážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
     'divider',
-    { label: tr('export_full_product_list', 'Export full product list', 'នាំចេញបញ្ជីផលិតផលទាំងមូល'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
+    { label: tr('export_full_product_list', 'Export full product list', 'áž“áž¶áŸ†áž…áŸáž‰áž”áž‰áŸ’áž‡áž¸áž•áž›áž·ážáž•áž›áž‘áž¶áŸ†áž„áž˜áž¼áž›'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
   ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
@@ -1670,7 +1671,7 @@ export default function Products() {
           ) : null}
           {promotion.active ? (
             <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {p.discount_label || tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} {fmtUSD(promotion.applied_price_usd)}
+              {p.discount_label || tr('discounts', 'Discounts', 'áž”áž‰áŸ’áž…áž»áŸ‡ážáž˜áŸ’áž›áŸƒ')} {fmtUSD(promotion.applied_price_usd)}
             </div>
           ) : null}
         </td>
@@ -1731,7 +1732,7 @@ export default function Products() {
             {getProductGallery(p).length
               ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
-            <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ')} overlay />
+            <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'áž”áž‰áŸ’áž…áž»áŸ‡ážáž˜áŸ’áž›áŸƒ')} overlay />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
@@ -1817,7 +1818,7 @@ export default function Products() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      {/* ?�?� Single-row header ??compact on mobile, expanded on desktop ?�?� */}
+      {/* ?ï¿½?ï¿½ Single-row header ??compact on mobile, expanded on desktop ?ï¿½?ï¿½ */}
       <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h1 className="mr-1 flex min-w-0 flex-1 items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
           <PackageSearch className="h-5 w-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
@@ -1837,7 +1838,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* ?�?� Search row + Filter toggle ?�?� */}
+      {/* ?ï¿½?ï¿½ Search row + Filter toggle ?ï¿½?ï¿½ */}
       <div className="mb-3 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
           <input
@@ -1871,7 +1872,7 @@ export default function Products() {
 
       {refreshingProducts && !loading ? (
         <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-          {tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...')}
+          {tr('products_refreshing', 'Refreshing products...', 'áž€áŸ†áž–áž»áž„áž’áŸ’ážœáž¾áž”áž…áŸ’áž…áž»áž”áŸ’áž”áž“áŸ’áž“áž—áž¶áž–áž•áž›áž·ážáž•áž›...')}
         </div>
       ) : null}
 
@@ -2126,201 +2127,32 @@ export default function Products() {
         </div>
       ) : null}
 
-      {/* Desktop table */}
-      <div className="card sm:flex-1 sm:overflow-hidden flex-col hidden sm:flex">
-        <div className="overflow-auto sm:flex-1">
-          <table className="w-full text-sm table-bordered">
-            <thead className="sticky top-0 z-10">
-              <tr>
-                <th className="px-3 py-3 w-8">
-                  <input type="checkbox"
-                    className="rounded"
-                    checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
-                    ref={desktopSelectAllRef}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                  />
-                </th>
-                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold w-16">Image</th>
-                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('product_name')}</th>
-                <th className="text-left px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold hidden md:table-cell">{t('details') || 'Details'}</th>
-                <th className="text-right px-3 py-3 text-red-600 dark:text-red-400 font-semibold col-highlight-red">{t('cost_in_purchase')}</th>
-                <th className="text-right px-3 py-3 text-green-600 dark:text-green-400 font-semibold col-highlight-green">{t('selling_price_label')}</th>
-                <th className="text-right px-3 py-3 text-blue-600 dark:text-blue-400 font-semibold hidden lg:table-cell">{t('margin')}</th>
-                <th className="text-right px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('stock')}</th>
-                <th className="text-center px-3 py-3 text-gray-600 dark:text-gray-400 font-semibold">{t('status')}</th>
-                <th className="w-10 px-2 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{t('loading')}</td></tr>
-              : visibleProducts.length === 0 ? <tr><td colSpan={10} className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</td></tr>
-              : productSections.map((section) => {
-                const isCollapsed = collapsedProductSections.has(section.id)
-                return (
-                <Fragment key={section.id}>
-                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                    <td colSpan={10} className="px-4 py-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={isSelectionScopeFullySelected(section.ids)}
-                            ref={(node) => {
-                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                            }}
-                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                            aria-label={`Select ${section.label}`}
-                          />
-                          <span>{section.label}</span>
-                          <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-                        </label>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
-                          onClick={() => toggleProductSection(section.id)}
-                        >
-                          {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                          {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {!isCollapsed ? section.groups.map((group) => {
-                    const groupCollapsed = collapsedProductGroups.has(group.key)
-                    const showGroupRow = group.hasMultipleItems
-                    return (
-                      <Fragment key={group.key}>
-                        {showGroupRow ? (
-                          <tr
-                            className="bg-white/80 dark:bg-slate-900/45"
-                            data-product-jump-id={group.anchorId}
-                          >
-                            <td colSpan={10} className="px-4 py-2.5">
-                              <div className="flex items-center justify-between gap-3">
-                                <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-100">
-                                  <input
-                                    type="checkbox"
-                                    className="h-4 w-4 rounded"
-                                    checked={isSelectionScopeFullySelected(group.ids)}
-                                    ref={(node) => {
-                                      if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                    }}
-                                    onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                    aria-label={`Select ${group.name}`}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="inline-flex min-w-0 items-center gap-2 text-left"
-                                    onClick={() => toggleProductGroup(group.key)}
-                                  >
-                                    {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                    <span className="truncate">{group.name}</span>
-                                  </button>
-                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
-                                </label>
-                                <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
-                                  {getGroupSummaryParts(group).map((part) => (
-                                    <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
-                                  ))}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null}
-                        {!groupCollapsed || !showGroupRow ? group.items.map((product) => renderDesktopProductRow(product, { indented: showGroupRow })) : null}
-                      </Fragment>
-                    )
-                  }) : null}
-                </Fragment>
-              )})}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-400 dark:border-gray-700">
-          {visibleProducts.length} / {productTotal || allVisibleProducts.length} {t('products')}
-        </div>
-      </div>
-
-      {/* Mobile card list */}
-      <div className="flex-1 overflow-auto space-y-2 sm:hidden">
-        {loading ? <div className="text-center py-10 text-gray-400">{t('loading')}</div>
-        : visibleProducts.length===0 ? <div className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}</div>
-        : productSections.map((section) => {
-          const isCollapsed = collapsedProductSections.has(section.id)
-          return (
-          <div key={section.id} className="space-y-2">
-            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={isSelectionScopeFullySelected(section.ids)}
-                    ref={(node) => {
-                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                    }}
-                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
-                  />
-                  <span>{section.label}</span>
-                  <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-                </label>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
-                  onClick={() => toggleProductSection(section.id)}
-                >
-                  {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                  {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                </button>
-              </div>
-            </div>
-            {!isCollapsed ? section.groups.map((group) => {
-              const groupCollapsed = collapsedProductGroups.has(group.key)
-              const showGroupRow = group.hasMultipleItems
-              return (
-                <div key={group.key} className="space-y-2">
-                  {showGroupRow ? (
-                    <div
-                      className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/80"
-                      data-product-jump-id={group.anchorId}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <label className="flex min-w-0 items-start gap-2">
-                          <input
-                            type="checkbox"
-                            className="mt-1 h-4 w-4 rounded"
-                            checked={isSelectionScopeFullySelected(group.ids)}
-                            ref={(node) => {
-                              if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                            }}
-                            onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                            aria-label={`Select ${group.name}`}
-                          />
-                          <button type="button" className="min-w-0 text-left" onClick={() => toggleProductGroup(group.key)}>
-                            <div className="flex items-center gap-1.5">
-                              {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                              <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
-                              {getGroupSummaryParts(group, { includeCount: false }).map((part) => (
-                                <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
-                              ))}
-                            </div>
-                          </button>
-                        </label>
-                      </div>
-                    </div>
-                  ) : null}
-                  {!groupCollapsed || !showGroupRow ? group.items.map((product) => renderMobileProductCard(product, { indented: showGroupRow })) : null}
-                </div>
-              )
-            }) : null}
-          </div>
-        )})}
-      </div>
+      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_products_view', 'Loading product view...', 'Loading product view...')}</div>}>
+        <ProductsListSurface
+          allVisibleProducts={allVisibleProducts}
+          collapsedProductGroups={collapsedProductGroups}
+          collapsedProductSections={collapsedProductSections}
+          desktopSelectAllRef={desktopSelectAllRef}
+          getGroupSummaryParts={getGroupSummaryParts}
+          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+          loading={loading}
+          productSections={productSections}
+          productTotal={productTotal}
+          refreshingProducts={refreshingProducts}
+          renderDesktopProductRow={renderDesktopProductRow}
+          renderMobileProductCard={renderMobileProductCard}
+          selectedVisibleCount={selectedVisibleCount}
+          t={t}
+          toggleProductGroup={toggleProductGroup}
+          toggleProductSection={toggleProductSection}
+          toggleSelectAll={toggleSelectAll}
+          toggleSelectionScope={toggleSelectionScope}
+          tr={tr}
+          visibleIds={visibleIds}
+          visibleProducts={visibleProducts}
+        />
+      </Suspense>
 
       {/* Product detail modal */}
       {detailProduct && (
@@ -2467,5 +2299,7 @@ export default function Products() {
     </div>
   )
 }
+
+
 
 
