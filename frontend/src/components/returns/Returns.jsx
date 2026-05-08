@@ -133,7 +133,7 @@ export default function Returns() {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
             setLoading(false)
-            setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž€áŸ†áž–áž»áž„áž…áŸ†ážŽáž¶áž™áž–áŸáž›áž™áž¼ážšáž‡áž¶áž„ážŠáŸ‚áž›ážšáŸ†áž–áž¹áž„áž‘áž»áž€áŸ” ážŸáž¼áž˜áž…áž»áž…ážŸáŸ’ážšážŸáŸ‹ážáŸ’áž˜áž¸ áž¬ážáŸ’ážšáž¡áž”áŸ‹áž˜áž€ážœáž·áž‰áž”áž“áŸ’ážáž·áž…áž‘áŸ€ážáŸ”'))
+            setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'ការបង្វិលត្រឡប់កំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
           }, 15000)
         }
       }
@@ -153,9 +153,9 @@ export default function Returns() {
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         console.error('[Returns] load failed:', error?.message)
         if (!silent && !loadedOnceRef.current) {
-          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'áž˜áž·áž“áž¢áž¶áž…áž•áŸ’áž‘áž»áž€áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž”áž¶áž“áž‘áŸ'))
+          setLoadError(error?.message || tr('returns_load_failed', 'Failed to load returns', 'មិនអាចផ្ទុកការបង្វិលត្រឡប់បានទេ'))
         } else if (!silent) {
-          setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'áž˜áž·áž“áž¢áž¶áž…áž’áŸ’ážœáž¾áž”áž…áŸ’áž…áž»áž”áŸ’áž”áž“áŸ’áž“áž—áž¶áž–áž€áž¶ážšáž”áž„áŸ’ážœáž·áž›ážáŸ’ážšáž¡áž”áŸ‹áž”áž¶áž“áž‘áŸáŸ” áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰áž‘áž·áž“áŸ’áž“áž“áŸáž™áž…áž»áž„áž€áŸ’ážšáŸ„áž™ážŠáŸ‚áž›áž”áž¶áž“áž•áŸ’áž‘áž»áž€áŸ”'))
+          setLoadError(tr('returns_refresh_failed', 'Returns could not refresh right now. Showing the latest loaded data.', 'មិនអាចធ្វើបច្ចុប្បន្នភាពការបង្វិលត្រឡប់បានទេ។ កំពុងបង្ហាញទិន្នន័យចុងក្រោយដែលបានផ្ទុក។'))
         }
       } finally {
         window.clearTimeout(loadWatchdogRef.current)
@@ -389,13 +389,13 @@ export default function Returns() {
   }, [exportVisible, notify, selectedReturns])
 
   const exportItems = useMemo(() => ([
-    { label: tr('export_visible_returns', 'Export visible returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
-    selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: exportSelected, color: 'blue' } : null,
-    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž”áŸ’ážšáž—áŸáž‘ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž…áž“áŸ’áž›áŸ„áŸ‡áž–áŸáž›ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+    { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
+    selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'នាំចេញការត្រឡប់ដែលបានជ្រើស'), onClick: exportSelected, color: 'blue' } : null,
+    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
     scope !== CUSTOMER_SCOPE
-      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹áž‘áŸ…áž¢áŸ’áž“áž€áž•áŸ’áž‚ážáŸ‹áž•áŸ’áž‚áž„áŸ‹'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
-      : { label: tr('export_customer_returns', 'Export customer returns', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšážáŸ’ážšáž¡áž”áŸ‹áž–áž¸áž¢ážáž·ážáž·áž‡áž“'), onClick: () => exportVisible(customerRows, 'returns-customer') },
+      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
+      : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
   ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns, yearFilter])
 
   const filterSections = useMemo(() => ([

@@ -239,24 +239,25 @@ export default function CatalogPreviewSurface({
 
             <section
               ref={publicPortalNavRef}
-              className="pb-1"
+              className={`pb-1 ${publicView ? 'sticky top-1 z-40 sm:top-2' : ''}`}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
               <div
-                className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur dark:border-slate-700/80 dark:bg-slate-900/88"
+                className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur supports-[backdrop-filter]:bg-white/90 dark:border-slate-700/80 dark:bg-slate-900/92 dark:supports-[backdrop-filter]:bg-slate-900/86"
                 style={pinnedNavStyle}
               >
                 <div className="overflow-x-auto" aria-label={copy('publicNavigation', 'Section navigation')}>
                   <div className="inline-flex min-w-full items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
+                      const selected = activeTab === item.key
                       return (
                         <button
                           key={item.key}
                           type="button"
                           className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
-                            activeTab === item.key
-                              ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-blue-600 dark:text-white dark:ring-blue-400/60'
+                            selected
+                              ? 'portal-nav-tab-active shadow-sm ring-1 ring-slate-200 dark:ring-sky-100/80'
                               : 'text-slate-600 hover:bg-white dark:text-slate-100 dark:hover:bg-slate-700/80'
                           }`}
                           onClick={() => handlePortalTabClick(item.key)}

@@ -91,7 +91,7 @@ export default function Sales() {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
-  const exportLabel = translateOr('export', 'Export', 'áž“áž¶áŸ†áž…áŸáž‰')
+  const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
   const salesDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
     const year = Number(yearFilter)
@@ -513,12 +513,12 @@ export default function Sales() {
   }, [filtered])
 
   const salesExportItems = useMemo(() => ([
-    { label: translateOr('export_visible_sales', 'Export visible sales', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšáž›áž€áŸ‹ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
-    selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'áž“áž¶áŸ†áž…áŸáž‰áž€áž¶ážšáž›áž€áŸ‹ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: handleExportSelected, color: 'blue' } : null,
-    statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáŸ’ážáž¶áž“áž—áž¶áž– ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž…áž“áŸ’áž›áŸ„áŸ‡áž–áŸáž›ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
+    { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
+    selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
+    statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
+    yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
-    { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'ážšáž”áž¶áž™áž€áž¶ážšážŽáŸáž›áž˜áŸ’áž¢áž·ážáž€áž¶ážšáž›áž€áŸ‹'), onClick: () => setShowExport(true), color: 'green' },
+    { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
   ].filter(Boolean)), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, translateOr, yearFilter])
 
   const salesFilterSections = useMemo(() => ([
@@ -537,9 +537,9 @@ export default function Sales() {
     },
     {
       id: 'year',
-      label: translateOr('year', 'Year', 'áž†áŸ’áž“áž¶áŸ†'),
+      label: translateOr('year', 'Year', 'ឆ្នាំ'),
       options: [
-        { id: 'all', label: translateOr('all_years', 'All years', 'áž‚áŸ’ážšáž”áŸ‹áž†áŸ’áž“áž¶áŸ†'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
+        { id: 'all', label: translateOr('all_years', 'All years', 'គ្រប់ឆ្នាំ'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
         ...availableYears.map((year) => ({
           id: `year-${year}`,
           label: year,
@@ -554,9 +554,9 @@ export default function Sales() {
     },
     {
       id: 'month',
-      label: translateOr('month', 'Month', 'ážáŸ‚'),
+      label: translateOr('month', 'Month', 'ខែ'),
       options: [
-        { id: 'all', label: translateOr('all_months', 'All months', 'áž‚áŸ’ážšáž”áŸ‹ážáŸ‚'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
+        { id: 'all', label: translateOr('all_months', 'All months', 'គ្រប់ខែ'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
         ...Array.from({ length: 12 }, (_, index) => {
           const month = String(index + 1)
           return {
@@ -586,18 +586,18 @@ export default function Sales() {
     } : null,
     {
       id: 'grouping',
-      label: translateOr('group_by', 'Group by', 'ážŠáž¶áž€áŸ‹áž‡áž¶áž€áŸ’ážšáž»áž˜ážáž¶áž˜'),
+      label: translateOr('group_by', 'Group by', 'ដាក់ជាក្រុមតាម'),
       options: [
-        { id: 'time', label: translateOr('group_by_time', 'Time only', 'áž–áŸáž›ážœáŸáž›áž¶áž”áŸ‰áž»ážŽáŸ’ážŽáŸ„áŸ‡'), active: salesGroupMode === 'time', onClick: () => setSalesGroupMode('time') },
-        { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'áž–áŸáž›ážœáŸáž›áž¶ + ážŸáŸ’ážáž¶áž“áž—áž¶áž–'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
+        { id: 'time', label: translateOr('group_by_time', 'Time only', 'ពេលវេលាប៉ុណ្ណោះ'), active: salesGroupMode === 'time', onClick: () => setSalesGroupMode('time') },
+        { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'ពេលវេលា + ស្ថានភាព'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
       ],
     },
     {
       id: 'sort',
-      label: translateOr('sort', 'Sort', 'ážáž˜áŸ’ážšáŸ€áž”'),
+      label: translateOr('sort', 'Sort', 'តម្រៀប'),
       options: [
-        { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ážáŸ’áž˜áž¸áž”áŸ†áž•áž»ážáž˜áž»áž“'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
-        { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'áž…áž¶ážŸáŸ‹áž”áŸ†áž•áž»ážáž˜áž»áž“'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
+        { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ថ្មីបំផុតមុន'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
+        { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
       ],
     },
   ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])

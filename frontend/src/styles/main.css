@@ -233,6 +233,17 @@ body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-
   background-color: rgba(6, 78, 59, 0.26) !important;
 }
 
+.dark [data-portal-root='true'] .portal-nav-tab-active,
+[data-portal-root='true'].dark .portal-nav-tab-active {
+  background-color: #bae6fd !important;
+  color: #020617 !important;
+}
+
+[data-portal-root='true'] .portal-nav-tab-active {
+  background-color: #ffffff !important;
+  color: #020617 !important;
+}
+
 .dark [data-portal-root='true'] .text-slate-900,
 .dark [data-portal-root='true'] .text-gray-900,
 [data-portal-root='true'].dark .text-slate-900,

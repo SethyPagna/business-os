@@ -3052,66 +3052,85 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     window.scrollTo({ top, behavior: 'smooth' })
   }
 
+  const previewSurface = (
+    <Suspense
+      fallback={(
+        <div
+          data-portal-root="true"
+          className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+          style={{
+            ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+            background: portalBackground,
+          }}
+        >
+          <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+            <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+              {copy('loadingPortal', 'Loading customer portal...')}
+            </div>
+          </div>
+        </div>
+      )}
+    >
+      <CatalogPreviewSurface
+        publicView={publicView}
+        darkMode={darkMode}
+        portalBackground={portalBackground}
+        copy={copy}
+        canEdit={canEdit}
+        previewSectionRef={previewSectionRef}
+        onBackToEditor={() => document.getElementById('portal-editor-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        displayConfig={displayConfig}
+        versionedBusinessLogo={versionedBusinessLogo}
+        showBrandLabel={showBrandLabel}
+        previewTitle={previewTitle}
+        portalTabs={portalTabs}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        publicPortalNavRef={publicPortalNavRef}
+        publicPortalNavPinned={publicPortalNavPinned}
+        publicPortalNavMetrics={publicPortalNavMetrics}
+        catalogSection={renderCatalogSection()}
+        secondaryTabSection={renderSecondaryTabSection()}
+        publicScrollButtonsVisible={publicScrollButtonsVisible}
+        scrollPublicPortal={scrollPublicPortal}
+        productGalleryView={productGalleryView}
+        setProductGalleryView={setProductGalleryView}
+        filePicker={filePicker}
+        setFilePicker={setFilePicker}
+        handleFilePickerSelect={handleFilePickerSelect}
+        portalImageView={portalImageView}
+        setPortalImageView={setPortalImageView}
+        toggleTheme={toggleTheme}
+        translateTarget={translateTarget}
+        translateApplyState={translateApplyState}
+        translateApplyMessage={translateApplyMessage}
+        externalTranslateTarget={externalTranslateTarget}
+        translateReady={translateReady}
+        changeTranslateTarget={changeTranslateTarget}
+        allPublicTranslateOptions={ALL_PUBLIC_TRANSLATE_OPTIONS}
+      />
+    </Suspense>
+  )
+
+  if (!publicView) {
+    return (
+      <div
+        data-portal-root="true"
+        className="page-scroll flex-1 overflow-y-auto"
+        style={{ background: portalBackground }}
+      >
+        <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+          {canEdit ? editorPanel : null}
+          {previewSurface}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       {canEdit ? editorPanel : null}
-      <Suspense
-        fallback={(
-          <div
-            data-portal-root="true"
-            className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
-            style={{
-              ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
-              background: portalBackground,
-            }}
-          >
-            <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-              <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
-                {copy('loadingPortal', 'Loading customer portal...')}
-              </div>
-            </div>
-          </div>
-        )}
-      >
-        <CatalogPreviewSurface
-          publicView={publicView}
-          darkMode={darkMode}
-          portalBackground={portalBackground}
-          copy={copy}
-          canEdit={canEdit}
-          previewSectionRef={previewSectionRef}
-          onBackToEditor={() => document.getElementById('portal-editor-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-          displayConfig={displayConfig}
-          versionedBusinessLogo={versionedBusinessLogo}
-          showBrandLabel={showBrandLabel}
-          previewTitle={previewTitle}
-          portalTabs={portalTabs}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          publicPortalNavRef={publicPortalNavRef}
-          publicPortalNavPinned={publicPortalNavPinned}
-          publicPortalNavMetrics={publicPortalNavMetrics}
-          catalogSection={renderCatalogSection()}
-          secondaryTabSection={renderSecondaryTabSection()}
-          publicScrollButtonsVisible={publicScrollButtonsVisible}
-          scrollPublicPortal={scrollPublicPortal}
-          productGalleryView={productGalleryView}
-          setProductGalleryView={setProductGalleryView}
-          filePicker={filePicker}
-          setFilePicker={setFilePicker}
-          handleFilePickerSelect={handleFilePickerSelect}
-          portalImageView={portalImageView}
-          setPortalImageView={setPortalImageView}
-          toggleTheme={toggleTheme}
-          translateTarget={translateTarget}
-          translateApplyState={translateApplyState}
-          translateApplyMessage={translateApplyMessage}
-          externalTranslateTarget={externalTranslateTarget}
-          translateReady={translateReady}
-          changeTranslateTarget={changeTranslateTarget}
-          allPublicTranslateOptions={ALL_PUBLIC_TRANSLATE_OPTIONS}
-        />
-      </Suspense>
+      {previewSurface}
     </>
   )
 }

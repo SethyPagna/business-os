@@ -110,7 +110,7 @@ export default function InventoryProductsSurface({
                       const revenue = Math.max(0, p.revenue_usd || 0)
                       const productBrand = String(p.brand || '').trim()
                       const productCategory = String(p.category || '').trim()
-                      const productTagText = [productBrand, productCategory].filter(Boolean).join(' | ')
+                      const productTagText = [productBrand, productCategory, p.barcode].filter(Boolean).join(' | ')
                       return (
                         <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
@@ -128,34 +128,27 @@ export default function InventoryProductsSurface({
                                   aria-label={`${t('select') || 'Select'} ${p.name}`}
                                 />
                                 <div className="min-w-0 pr-0.5">
-                                  <div className="line-clamp-2 break-words text-sm font-semibold leading-tight text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
+                                  <div className="truncate text-sm font-semibold leading-tight text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
                                 </div>
                               </div>
-                              <div className="mt-1 flex items-start gap-1.5 pl-6 text-[9.5px] leading-3.5 text-gray-500 dark:text-gray-300">
-                                {productBrand ? <span className="max-w-[38%] shrink-0 truncate" title={productBrand}>{productBrand}</span> : null}
-                                {productBrand && productCategory ? <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span> : null}
-                                {productCategory ? <span className="min-w-0 flex-1 truncate" title={productCategory}>{productCategory}</span> : null}
+                              <div className="mt-1 min-w-0 truncate pl-6 text-[10px] leading-3.5 text-gray-500 dark:text-gray-300" title={productTagText}>
+                                {productTagText ? (
+                                  <span>{productTagText}</span>
+                                ) : null}
                                 {!productTagText ? <span className="truncate">{t('product') || 'Product'}</span> : null}
                               </div>
                             </div>
-                            <div className="flex max-w-[7.8rem] shrink-0 flex-col items-end gap-1 text-right">
-                              <div className="grid justify-items-end gap-0.5">
-                                <div className="max-w-[7.8rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
+                            <div className="flex max-w-[8.6rem] shrink-0 flex-col items-end gap-1 text-right">
+                              <div className="flex max-w-full items-center justify-end gap-1">
+                                <div className="min-w-0 max-w-[4.5rem] truncate whitespace-nowrap text-[11px] font-bold leading-none text-gray-900 dark:text-white">
                                   {qty}
                                   <span className="ml-1 text-[9px] font-normal text-gray-400">{p.unit}</span>
                                 </div>
-                                <div className="flex items-center justify-end gap-1">
-                                  <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
-                                  <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="px-0.5 py-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400">
-                                    {t('adjust')}
-                                  </button>
-                                </div>
+                                <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8.5px] font-medium ${scls}`}>{slbl}</span>
                               </div>
-                              {p.barcode ? (
-                                <span className="mt-0.5 max-w-full truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[8.5px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                                  {p.barcode}
-                                </span>
-                              ) : null}
+                              <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
+                                {t('adjust')}
+                              </button>
                             </div>
                           </div>
                           <div className="mt-1 flex items-center gap-2 pl-6">

@@ -70,10 +70,10 @@ export default function CatalogEditorSurface() {
   } = useCatalogPageContext()
 
   return (
-    <aside id="portal-editor-top" className="space-y-5">
+    <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-5 overflow-x-hidden">
       <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-wrap lg:overflow-visible lg:pb-0">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible xl:pb-0">
             {editorSections.map(([sectionId, sectionKey, label]) => (
               <button
                 key={sectionId}
@@ -89,7 +89,7 @@ export default function CatalogEditorSurface() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2 lg:flex lg:justify-end">
+          <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
               <button
                 type="button"
                 className="btn-secondary inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs sm:text-sm"
