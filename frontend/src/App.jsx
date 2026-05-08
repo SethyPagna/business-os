@@ -1,15 +1,12 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowDown, ArrowUp } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
 import { useApp } from './AppContext'
 import { getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
-import WriteConflictModal from './components/shared/WriteConflictModal'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
-import NotificationCenter from './components/shared/NotificationCenter'
-import BackgroundImportTracker from './components/shared/BackgroundImportTracker'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
@@ -223,6 +220,9 @@ const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
 const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
+const NotificationCenter = lazyWithRetry(() => import('./components/shared/NotificationCenter'), 'notification-center')
+const BackgroundImportTracker = lazyWithRetry(() => import('./components/shared/BackgroundImportTracker'), 'background-import-tracker')
+const WriteConflictModal = lazyWithRetry(() => import('./components/shared/WriteConflictModal'), 'write-conflict-modal')
 const PAGE_COMPONENTS = {
   dashboard: Dashboard,
   products: Products,
@@ -876,6 +876,20 @@ function PageLoader() {
   )
 }
 
+function NotificationCenterFallback({ compact = false }) {
+  return (
+    <button
+      type="button"
+      className={`relative inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-400 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 ${compact ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 w-10'}`}
+      aria-label="Notifications"
+      title="Notifications"
+      disabled
+    >
+      <Bell className={compact ? 'h-4 w-4' : 'h-[18px] w-[18px]'} />
+    </button>
+  )
+}
+
 function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }) {
   const PageComponent = PAGE_COMPONENTS[pageId] || Dashboard
   const isActive = pageId === activePageId
@@ -1124,7 +1138,9 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <NotificationCenter compact visibility="desktop" />
+          <Suspense fallback={<NotificationCenterFallback compact />}>
+            <NotificationCenter compact visibility="desktop" />
+          </Suspense>
           <QuickPreferenceToggles />
         </div>
       </div>
@@ -1150,7 +1166,9 @@ export default function App() {
             }}
           />
           {syncUrl && !canWriteToServer ? <ReadOnlyServerBanner /> : null}
-          <BackgroundImportTracker />
+          <Suspense fallback={null}>
+            <BackgroundImportTracker />
+          </Suspense>
           {mountedPages.map((mountedPage) => (
             <PageSlot
               key={mountedPage}
@@ -1165,11 +1183,13 @@ export default function App() {
 
       <Notification notification={notification} />
       <GlobalScrollControls />
-      <WriteConflictModal
-        conflict={writeConflict}
-        onClose={dismissWriteConflict}
-        onReload={reloadWriteConflict}
-      />
+      <Suspense fallback={null}>
+        <WriteConflictModal
+          conflict={writeConflict}
+          onClose={dismissWriteConflict}
+          onReload={reloadWriteConflict}
+        />
+      </Suspense>
       <SyncErrorBanner
         error={syncError}
         onDismiss={clearSyncError}

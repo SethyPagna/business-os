@@ -124,6 +124,9 @@ function manualChunks(id) {
     ) {
       return 'product-detail'
     }
+    if (normalized.includes('/src/components/shared/NotificationCenter.jsx')) return 'notification-center'
+    if (normalized.includes('/src/components/shared/BackgroundImportTracker.jsx')) return 'background-import-tracker'
+    if (normalized.includes('/src/components/shared/WriteConflictModal.jsx')) return 'write-conflict-modal'
     if (normalized.includes('/src/api/')) return 'app-api'
     if (normalized.includes('/src/app/')) return 'app-shell'
     if (normalized.includes('/src/components/shared/')) return 'app-shared'
