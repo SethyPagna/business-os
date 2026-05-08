@@ -100,6 +100,19 @@ function emitBuildManifest() {
   }
 }
 
+const deferredModulePreloadPrefixes = [
+  'assets/file-picker-modal-',
+  'assets/image-lightbox-',
+  'assets/notification-center-',
+  'assets/background-import-tracker-',
+  'assets/write-conflict-modal-',
+  'assets/vendor-zxing-',
+]
+
+function shouldDeferModulePreload(dep) {
+  return deferredModulePreloadPrefixes.some((prefix) => dep.includes(prefix))
+}
+
 function manualChunks(id) {
   // Keep the shared vendor graph stable while still letting route chunks stay
   // small enough that first-open admin pages do not drag the whole app shell
@@ -125,10 +138,14 @@ function manualChunks(id) {
     if (
       normalized.includes('/src/utils/mediaUpload.js')
       || normalized.includes('/src/utils/favicon')
-      || normalized.includes('/src/components/shared/ImageGalleryLightbox')
-      || normalized.includes('/src/components/files/FilePickerModal')
     ) {
-      return 'media-tools'
+      return 'media-upload-utils'
+    }
+    if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
+      return 'image-lightbox'
+    }
+    if (normalized.includes('/src/components/files/FilePickerModal')) {
+      return 'file-picker-modal'
     }
     if (
       normalized.includes('/src/components/shared/PortalMenu.jsx')
@@ -171,6 +188,11 @@ export default defineConfig({
     // the backend asset resolver, so the shipped build can stay lean.
     emptyOutDir: true,
     sourcemap: false,
+    modulePreload: {
+      resolveDependencies(_filename, deps) {
+        return deps.filter((dep) => !shouldDeferModulePreload(dep))
+      },
+    },
     // Inline only files below 1 byte (effectively disables inlining)
     // Prevents base64 data: URLs for small images which confuse CSP/CORS
     assetsInlineLimit: 1,
