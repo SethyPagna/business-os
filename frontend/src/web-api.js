@@ -641,7 +641,6 @@ const staticApi = {
     window.api.setSyncToken(token)
   },
 
-  ...methods,
   unlockOfflineVault,
   lockOfflineVault,
   getOfflineVaultState() {

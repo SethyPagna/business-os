@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
 import { useApp } from './AppContext'
-import { getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
+import { getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
@@ -1023,6 +1023,12 @@ export default function App() {
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
+  const requestedAdminPage = getAdminPageFromPath(pathname)
+
+  useEffect(() => {
+    if (!user || !requestedAdminPage || requestedAdminPage === page) return
+    if (canAccessPage(requestedAdminPage)) setPage(requestedAdminPage)
+  }, [canAccessPage, page, requestedAdminPage, setPage, user])
 
   const accessDeniedNode = useMemo(() => <AccessDenied />, [AccessDenied])
 

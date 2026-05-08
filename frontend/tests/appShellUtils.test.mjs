@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { getMountedPageLimit, isPublicCatalogPath, shouldWarmPageEntries, updateMountedPages } from '../src/app/appShellUtils.mjs'
+import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCatalogPath, shouldWarmPageEntries, updateMountedPages } from '../src/app/appShellUtils.mjs'
 
 let failed = 0
 const appContextSource = readFileSync(new URL('../src/AppContext.jsx', import.meta.url), 'utf8')
@@ -16,14 +16,29 @@ function runTest(name, fn) {
   }
 }
 
-runTest('isPublicCatalogPath matches only public SPA-style paths', () => {
-  assert.equal(isPublicCatalogPath('/catalog'), true)
-  assert.equal(isPublicCatalogPath('/products/new'), true)
+runTest('isPublicCatalogPath leaves admin routes for the authenticated app shell', () => {
+  assert.equal(isPublicCatalogPath('/public'), true)
+  assert.equal(isPublicCatalogPath('/customer-portal'), true)
+  assert.equal(isPublicCatalogPath('/leang-cosmetics'), true)
+  assert.equal(isPublicCatalogPath('/catalog'), false)
+  assert.equal(isPublicCatalogPath('/products/new'), false)
+  assert.equal(isPublicCatalogPath('/inventory'), false)
+  assert.equal(isPublicCatalogPath('/login'), false)
   assert.equal(isPublicCatalogPath('/'), false)
   assert.equal(isPublicCatalogPath('/health'), false)
   assert.equal(isPublicCatalogPath('/api/products'), false)
   assert.equal(isPublicCatalogPath('/uploads/image.jpg'), false)
   assert.equal(isPublicCatalogPath('/assets/app.js'), false)
+})
+
+runTest('admin path helpers map direct admin URLs to app pages', () => {
+  assert.equal(isAdminAppPath('/products'), true)
+  assert.equal(isAdminAppPath('/public'), false)
+  assert.equal(getAdminPageFromPath('/products'), 'products')
+  assert.equal(getAdminPageFromPath('/inventory/movements'), 'inventory')
+  assert.equal(getAdminPageFromPath('/point-of-sale'), 'pos')
+  assert.equal(getAdminPageFromPath('/audit-log'), 'audit_log')
+  assert.equal(getAdminPageFromPath('/login'), '')
 })
 
 runTest('updateMountedPages keeps order and max size while de-duplicating', () => {
