@@ -370,13 +370,14 @@ function isCacheableStaticPath(pathname) {
 async function appShellFallback(request) {
   const cache = await caches.open(APP_SHELL_CACHE)
   try {
-    const response = await fetch(request)
+    const response = await fetch(request, { cache: 'no-store' })
     const cached = await cache.match('/index.html') || await cache.match('/')
-    if (response && response.ok && response.type === 'basic') {
+    if (response && response.ok && response.type === 'basic' && !response.redirected) {
       cache.put('/index.html', response.clone()).catch(() => {})
       return response
     }
-    if (cached) return cached
+    // Do not hide Cloudflare Access/login redirects or app-owned HTTP errors
+    // behind an old cached shell. Cached shell is only for true offline failure.
     return response
   } catch (error) {
     const cached = await cache.match('/index.html') || await cache.match('/')
@@ -390,12 +391,13 @@ async function networkFirstStatic(request) {
   const cached = await cache.match(request)
 
   try {
-    const response = await fetch(request)
-    if (response && response.ok && response.type === 'basic') {
+    const response = await fetch(request, { cache: 'no-store' })
+    if (response && response.ok && response.type === 'basic' && !response.redirected) {
       cache.put(request, response.clone()).catch(() => {})
       return response
     }
-    if (cached) return cached
+    // Returning the live error/redirect prevents stale hashed chunks from
+    // masking an expired Access session or a bad deployment.
     return response
   } catch (error) {
     if (cached) return cached

@@ -87,6 +87,10 @@ runTest('service worker serves cached app shell for offline navigations only', (
   assert.match(source, /isNeverCachedPath/)
   assert.match(source, /\/api\//)
   assert.match(source, /\/uploads\//)
+  assert.match(source, /fetch\(request, \{ cache: 'no-store' \}\)/)
+  assert.match(source, /!response\.redirected/)
+  assert.match(source, /Cached shell is only for true offline failure/)
+  assert.doesNotMatch(source, /if \(cached\) return cached\s+return response/)
 })
 
 runTest('successful login reconnects websocket writes immediately', () => {
