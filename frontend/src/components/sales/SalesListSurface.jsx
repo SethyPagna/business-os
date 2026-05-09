@@ -26,10 +26,12 @@ export default function SalesListSurface({
   toggleSelectAll,
   toggleSelectionScope,
 }) {
+  const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
+
   return (
     <>
-      <div className="card hidden flex-col sm:flex">
-        <div className="overflow-x-auto">
+      <div className="card hidden flex-col sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem] sm:overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-sm" style={{ minWidth: 760 }}>
             <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700/50">
               <tr>
@@ -56,7 +58,20 @@ export default function SalesListSurface({
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('loading')}</td></tr>
+                skeletonRows.map((row) => (
+                  <tr key={`sale-skeleton-${row}`} className="animate-pulse">
+                    <td className="px-3 py-3"><div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="h-4 w-40 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                  </tr>
+                ))
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
               ) : salesSections.map((section) => {
@@ -165,11 +180,11 @@ export default function SalesListSurface({
           </table>
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          {filtered.length} {t('sales')} · {fmtUSD(revenue)}
+          {filtered.length} {t('sales')} | {fmtUSD(revenue)}
         </div>
       </div>
 
-      <div className="space-y-2 sm:hidden">
+      <div className="min-h-[32rem] space-y-2 sm:hidden">
         {loading ? (
           <div className="py-10 text-center text-gray-400">{t('loading')}</div>
         ) : filtered.length === 0 ? (
@@ -246,8 +261,8 @@ export default function SalesListSurface({
                             </div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                               {sale.cashier_name ? <span>{sale.cashier_name}</span> : null}
-                              {branchLabel ? <span>· {branchLabel}</span> : null}
-                              <span>· {items.length} {t('items')}</span>
+                              {branchLabel ? <span>| {branchLabel}</span> : null}
+                              <span>| {items.length} {t('items')}</span>
                             </div>
                           </div>
                           <div className="flex-shrink-0 text-right">

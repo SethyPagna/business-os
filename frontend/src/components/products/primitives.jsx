@@ -103,7 +103,14 @@ function ProductImg({ src, alt, className, onClick }) {
     }
   }, [safeSrc])
 
-  if (!url || failed) return null
+  if (!url || failed) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`bg-gray-100 text-gray-400 dark:bg-gray-700/80 dark:text-gray-500 ${className || ''}`}
+      />
+    )
+  }
   return (
     <img
       src={url}

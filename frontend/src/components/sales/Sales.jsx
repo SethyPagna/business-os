@@ -725,8 +725,7 @@ export default function Sales() {
         </div>
       ) : null}
 
-      {filtered.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
+      <div className={`mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20 ${filtered.length > 0 ? '' : 'invisible'}`}>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{filtered.length} {t('sales') || 'sales'}</span>
           <span className="text-gray-400">|</span>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
@@ -744,8 +743,7 @@ export default function Sales() {
               </span>
             </>
           ) : null}
-        </div>
-      )}
+      </div>
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 

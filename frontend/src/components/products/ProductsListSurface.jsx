@@ -25,10 +25,12 @@ export default function ProductsListSurface({
   visibleIds,
   visibleProducts,
 }) {
+  const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
+
   return (
     <>
-      <div className="card sm:flex-1 sm:overflow-hidden flex-col hidden sm:flex">
-        <div className="overflow-auto sm:flex-1">
+      <div className="card hidden flex-col sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem] sm:overflow-hidden">
+        <div className="min-h-0 overflow-auto sm:flex-1">
           <table className="w-full text-sm table-bordered">
             <thead className="sticky top-0 z-10">
               <tr>
@@ -137,8 +139,23 @@ export default function ProductsListSurface({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto space-y-2 sm:hidden">
-        {loading ? <div className="text-center py-10 text-gray-400">{t('loading')}</div>
+      <div className="min-h-[32rem] flex-1 overflow-auto space-y-2 sm:hidden">
+        {loading ? (
+          <div className="space-y-2">
+            {skeletonRows.slice(0, 6).map((row) => (
+              <div key={`product-mobile-skeleton-${row}`} className="card animate-pulse p-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-8 w-full rounded bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
         : visibleProducts.length === 0 ? <div className="text-center py-10 text-gray-400">{refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'áž€áŸ†áž–áž»áž„áž’áŸ’ážœáž¾áž”áž…áŸ’áž…áž»áž”áŸ’áž”áž“áŸ’áž“áž—áž¶áž–áž•áž›áž·ážáž•áž›...') : t('no_data')}</div>
         : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)

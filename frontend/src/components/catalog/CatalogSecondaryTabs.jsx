@@ -408,7 +408,7 @@ function CatalogAboutSection(props) {
     <section className="space-y-4">
       <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-slate-700/80 dark:bg-slate-900/88">
         <div
-          className="relative overflow-hidden text-white"
+          className="relative min-h-[34rem] overflow-hidden text-white sm:min-h-[30rem]"
           style={{
             backgroundColor: heroGradientStart,
             backgroundImage: heroBackground,
@@ -417,9 +417,9 @@ function CatalogAboutSection(props) {
           }}
         >
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.12),rgba(15,23,42,0.38))] dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.12),rgba(15,23,42,0.5))]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.24),_transparent_36%)]" />
+          <div className="absolute inset-0 bg-black/0" />
           <div className="relative z-10 grid gap-6 px-6 py-8 sm:px-8 sm:py-10 xl:grid-cols-[1.08fr,0.92fr] xl:items-end">
-            <div className="max-w-3xl">
+            <div className="min-h-[17rem] max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/14 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/90 backdrop-blur">
                 <Store className="h-3.5 w-3.5" />
                 {aboutTitle}
@@ -466,7 +466,7 @@ function CatalogAboutSection(props) {
                   {previewConfig.businessTagline ? <div className="notranslate mt-2 text-sm text-white/90 sm:text-base" translate="no">{previewConfig.businessTagline}</div> : null}
                 </div>
               </div>
-              <p className="notranslate mt-5 max-w-2xl text-sm leading-7 text-white sm:text-base" translate="no">
+              <p className="notranslate mt-5 min-h-[5.25rem] max-w-2xl text-sm leading-7 text-white sm:text-base" translate="no">
                 {introText}
               </p>
             </div>
@@ -524,7 +524,7 @@ function CatalogAboutSection(props) {
           </div>
         </div>
 
-        <div className="space-y-5 p-5 sm:p-6">
+        <div className="min-h-[20rem] space-y-5 p-5 sm:p-6">
           <div className="grid gap-4 lg:grid-cols-2">
             {storyText ? (
               <div className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-slate-700 dark:from-slate-900 dark:to-slate-800">

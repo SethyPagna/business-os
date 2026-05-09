@@ -2107,8 +2107,7 @@ export default function Products() {
             </div>
           )}
       </div>
-      {initialOptions.length ? (
-        <div className="mb-2 flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/85 p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900/75">
+      <div className={`mb-2 flex min-h-10 items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/85 p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900/75 ${initialOptions.length ? '' : 'invisible'}`}>
           <button
             type="button"
             className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
@@ -2129,7 +2128,6 @@ export default function Products() {
             </button>
           ))}
         </div>
-      ) : null}
 
       <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_products_view', 'Loading product view...', 'Loading product view...')}</div>}>
         <ProductsListSurface

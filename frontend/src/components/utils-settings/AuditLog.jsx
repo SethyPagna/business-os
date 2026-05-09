@@ -171,6 +171,7 @@ export default function AuditLog() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
+  const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -694,7 +695,7 @@ export default function AuditLog() {
         </div>
       ) : null}
 
-      <div className="card hidden flex-col overflow-hidden sm:flex">
+      <div className="card hidden flex-col overflow-hidden sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem]">
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[860px] text-sm table-bordered">
             <thead className="sticky top-0 z-10">
@@ -720,7 +721,18 @@ export default function AuditLog() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
               {loading && !hasLoadedOnce ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+                skeletonRows.map((row) => (
+                  <tr key={`audit-skeleton-${row}`} className="animate-pulse">
+                    <td className="px-3 py-3"><div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-40 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                  </tr>
+                ))
               ) : !hasLoadedOnce ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
               ) : visibleLogs.length === 0 ? (
@@ -830,9 +842,19 @@ export default function AuditLog() {
         </div>
       </div>
 
-      <div className="space-y-2 sm:hidden">
+      <div className="min-h-[32rem] space-y-2 sm:hidden">
         {loading && !hasLoadedOnce ? (
-          <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
+          <div className="space-y-2">
+            {skeletonRows.slice(0, 6).map((row) => (
+              <div key={`audit-mobile-skeleton-${row}`} className="card animate-pulse p-3">
+                <div className="space-y-2">
+                  <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-3 w-2/3 rounded bg-slate-100 dark:bg-slate-800" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : !hasLoadedOnce ? (
           <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
         ) : visibleLogs.length === 0 ? (
