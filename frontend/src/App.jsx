@@ -133,6 +133,18 @@ function buildChunkRecoveryUrl(reason = 'chunk-reload') {
   return url.toString()
 }
 
+async function clearStaleShellCaches() {
+  if (typeof window === 'undefined' || !('caches' in window)) return
+  try {
+    const keys = await window.caches.keys()
+    await Promise.all(
+      keys
+        .filter((key) => key.startsWith('business-os-app-shell-') || key.startsWith('business-os-static-'))
+        .map((key) => window.caches.delete(key)),
+    )
+  } catch (_) {}
+}
+
 function triggerChunkRecoveryReload(marker) {
   try {
     sessionStorage.setItem(marker, '1')
@@ -140,11 +152,13 @@ function triggerChunkRecoveryReload(marker) {
 
   if (typeof window === 'undefined') return false
   const target = buildChunkRecoveryUrl(`chunk:${marker}`)
-  if (target) {
-    window.location.replace(target)
-  } else {
-    window.location.reload()
+  const reload = () => {
+    if (target) window.location.replace(target)
+    else window.location.reload()
   }
+  clearStaleShellCaches()
+    .catch(() => {})
+    .finally(reload)
   return true
 }
 

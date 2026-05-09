@@ -51,6 +51,7 @@ import {
 } from '../../utils/loaders.mjs'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.js'
 import { aggregateInitialOptions } from '../../utils/initials.mjs'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
@@ -845,12 +846,7 @@ export default function POS() {
   const resolveProductImage = useCallback((src) => {
     const raw = String(src || '').trim()
     if (!raw) return ''
-    if (raw.startsWith('http') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw
-    if (raw.startsWith('/uploads/')) {
-      const base = window.api?.getSyncServerUrl?.() || localStorage.getItem('businessos_sync_server') || ''
-      return base ? `${base.replace(/\/$/, '')}${raw}` : raw
-    }
-    return raw
+    return resolvePublicAssetUrl(raw)
   }, [])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */

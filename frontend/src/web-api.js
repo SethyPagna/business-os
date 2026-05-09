@@ -40,6 +40,10 @@ let offlineVaultIdleTimer = null
 let methodsModulePromise = null
 const lazyApiMethodCache = new Map()
 
+function sanitizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/$/, '')
+}
+
 function loadMethodsModule() {
   if (!methodsModulePromise) methodsModulePromise = import('./api/methods.js')
   return methodsModulePromise
@@ -647,6 +651,23 @@ const staticApi = {
 
   getSyncServerUrl() {
     return getSyncServerUrl()
+  },
+
+  setPublicAssetBaseUrl(url) {
+    const clean = sanitizeBaseUrl(url)
+    try {
+      if (clean) localStorage.setItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, clean)
+      else localStorage.removeItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL)
+    } catch (_) {}
+    return clean
+  },
+
+  getPublicAssetBaseUrl() {
+    try {
+      return sanitizeBaseUrl(localStorage.getItem(STORAGE_KEYS.PUBLIC_ASSET_BASE_URL) || '')
+    } catch (_) {
+      return ''
+    }
   },
 
   setSyncToken(token) {

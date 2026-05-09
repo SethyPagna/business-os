@@ -440,6 +440,11 @@ export function AppProvider({ children, publicMode = false }) {
     if (payload?.system?.serverStartTime) {
       safeStorageSet(localStorage, STORAGE_KEYS.SERVER_START_TIME, String(payload.system.serverStartTime))
     }
+    if (payload?.system?.publicAssetBaseUrl) {
+      const publicAssetBaseUrl = String(payload.system.publicAssetBaseUrl || '').replace(/\/$/, '')
+      safeStorageSet(localStorage, STORAGE_KEYS.PUBLIC_ASSET_BASE_URL, publicAssetBaseUrl)
+      window.api?.setPublicAssetBaseUrl?.(publicAssetBaseUrl)
+    }
 
     return {
       user: nextUser,
@@ -816,7 +821,22 @@ export function AppProvider({ children, publicMode = false }) {
             credentials: 'include',
             redirect: 'manual',
           })
-            .then((r) => setSyncServerUnreachable(isCloudflareAccessRedirectResponse(r) || !isReachableServerResponseStatus(r)))
+            .then((r) => {
+              if (isCloudflareAccessRedirectResponse(r)) {
+                setSyncServerUnreachable(false)
+                if (hasStoredSession) {
+                  window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+                    detail: {
+                      code: 'cloudflare_access_required',
+                      error: 'Please sign in again to continue.',
+                      reason: 'cloudflare_access_redirect',
+                    },
+                  }))
+                }
+                return
+              }
+              setSyncServerUnreachable(!isReachableServerResponseStatus(r))
+            })
             .catch(() => setSyncServerUnreachable(true))
         } else {
           setAuthReady(true)

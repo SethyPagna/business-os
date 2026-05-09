@@ -1,5 +1,7 @@
 'use strict'
 
+const fs = require('fs')
+const path = require('path')
 const {
   ACTIVE_ENV_FILE,
   ANALYTICS_ENGINE,
@@ -20,6 +22,7 @@ const {
   PUBLIC_BASE_URL,
   R2_PUBLIC_BASE_URL,
   REDIS_URL,
+  RUNTIME_DIR,
   S3_ACCESS_KEY_ID,
   S3_BUCKET,
   S3_ENDPOINT,
@@ -104,6 +107,53 @@ function probeDatabase() {
   }
 }
 
+function getSafeTableCount(table) {
+  try {
+    const { db } = require('../database')
+    return Number(db.prepare(`SELECT COUNT(*) AS count FROM "${String(table).replace(/"/g, '""')}"`).get()?.count || 0)
+  } catch (_) {
+    return 0
+  }
+}
+
+function readCurrentBusinessCounts() {
+  return {
+    products: getSafeTableCount('products'),
+    product_batches: getSafeTableCount('product_batches'),
+    branch_stock: getSafeTableCount('branch_stock'),
+    branch_batch_stock: getSafeTableCount('branch_batch_stock'),
+    sales: getSafeTableCount('sales'),
+    returns: getSafeTableCount('returns'),
+    import_jobs: getSafeTableCount('import_jobs'),
+    users: getSafeTableCount('users'),
+    organizations: getSafeTableCount('organizations'),
+  }
+}
+
+function findLatestVerifiedReleaseBackup() {
+  const backupRoot = path.resolve(RUNTIME_DIR, 'ops/runtime/docker-release/backups')
+  try {
+    if (!fs.existsSync(backupRoot)) return null
+    const directories = fs.readdirSync(backupRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => b.localeCompare(a))
+    for (const directory of directories) {
+      const manifestPath = path.join(backupRoot, directory, 'manifest.json')
+      if (!fs.existsSync(manifestPath)) continue
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+      return {
+        id: directory,
+        path: manifestPath,
+        createdAt: manifest?.createdAt || null,
+        appImage: manifest?.app?.image || null,
+        databaseFile: manifest?.database?.file || null,
+      }
+    }
+  } catch (_) {}
+  return null
+}
+
 async function probeQueue() {
   try {
     const queueStatus = await initializeBullQueue()
@@ -151,6 +201,13 @@ async function buildIntegrationDoctor(options = {}) {
   const queue = await probeQueue()
   const backup = await probeBackups()
   const analytics = getDuckDbRuntimeStatus()
+  const currentBusinessCounts = readCurrentBusinessCounts()
+  const latestVerifiedReleaseBackup = findLatestVerifiedReleaseBackup()
+  const restoreNeeded = Boolean(
+    latestVerifiedReleaseBackup
+    && Number(currentBusinessCounts.products || 0) > 0
+    && Number(currentBusinessCounts.products || 0) < 1000
+  )
 
   let objectStorageTest = null
   if (runObjectStoreTest) {
@@ -232,6 +289,16 @@ async function buildIntegrationDoctor(options = {}) {
       authorizedRedirectUris: googleLogin.authorizedRedirectUris,
     },
     backup,
+    runtimeData: {
+      ...status(!restoreNeeded, restoreNeeded
+        ? 'Catalog row counts are far below normal business scale while a newer verified release backup exists.'
+        : 'Runtime row counts look consistent with a populated business catalog.'),
+      composeProject: trim(process.env.COMPOSE_PROJECT_NAME || 'business-os'),
+      postgresVolumeHint: trim(process.env.BUSINESS_OS_POSTGRES_VOLUME || ''),
+      counts: currentBusinessCounts,
+      latestVerifiedReleaseBackup,
+      restoreNeeded,
+    },
   }
 
   const criticalOk = [
@@ -253,6 +320,8 @@ async function buildIntegrationDoctor(options = {}) {
       parquetStore: PARQUET_STORE,
       publicUrl: CLOUDFLARE_PUBLIC_URL || '',
       adminUrl: CLOUDFLARE_ADMIN_URL || '',
+      composeProject: trim(process.env.COMPOSE_PROJECT_NAME || 'business-os'),
+      postgresVolumeHint: trim(process.env.BUSINESS_OS_POSTGRES_VOLUME || ''),
     },
     secrets,
     expectedOauth: buildExpectedOauthChecklist(driveRedirectUri),

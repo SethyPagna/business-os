@@ -18,6 +18,25 @@ let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
 let wsIntentionalClose = false
 
+function hasStoredAuthSession() {
+  if (typeof window === 'undefined') return false
+  try {
+    return !!(window.sessionStorage.getItem('businessos_user') || window.localStorage.getItem('businessos_user'))
+  } catch (_) {
+    return false
+  }
+}
+
+function isProtectedAdminHost() {
+  if (typeof window === 'undefined') return false
+  try {
+    const hostname = String(window.location?.hostname || '').trim()
+    return /^admin\./i.test(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
+  } catch (_) {
+    return false
+  }
+}
+
 function shouldDebugWs() {
   try {
     if (typeof window === 'undefined') return false
@@ -37,6 +56,7 @@ function logWs(level, ...args) {
 export function connectWS() {
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return
+  if (isProtectedAdminHost() && !hasStoredAuthSession()) return
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   if (Date.now() < wsSuppressReconnectUntil) return
@@ -174,6 +194,14 @@ export function isWSConnected() {
 }
 
 if (typeof window !== 'undefined') {
+  window.addEventListener('auth:unauthorized', () => {
+    wsSuppressReconnectUntil = Date.now() + 60_000
+    reconnectAttempts = 0
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      wsIntentionalClose = true
+      try { ws.close(1000, 'auth-required') } catch (_) {}
+    }
+  })
   window.addEventListener('online', () => {
     wsSuppressReconnectUntil = 0
     if (getSyncServerUrl()) connectWS()

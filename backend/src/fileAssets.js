@@ -5,7 +5,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { spawnSync } = require('child_process')
 const { pipeline } = require('stream/promises')
-const { UPLOADS_PATH } = require('./config')
+const { UPLOADS_PATH, PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, R2_PUBLIC_BASE_URL } = require('./config')
 const { deleteObject, deleteObjects, getObjectStream, isObjectStorageEnabled, listObjects, putObject } = require('./objectStore')
 const { loadSharp } = require('./optionalSharp')
 const { validateUploadedBuffer } = require('./uploadSecurity')
@@ -729,10 +729,18 @@ function collectUsage(publicPath) {
   return usages
 }
 
+function resolveBrowserPublicPath(publicPath = '') {
+  const normalized = normalizeUploadPublicPath(publicPath)
+  if (!isUploadPublicPath(normalized)) return normalized
+  const base = String(R2_PUBLIC_BASE_URL || PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || '').trim().replace(/\/$/, '')
+  return base ? `${base}${normalized}` : normalized
+}
+
 function serializeAssetRow(row = {}) {
   const usages = collectUsage(row.public_path)
   return {
     ...row,
+    browser_public_path: resolveBrowserPublicPath(row.public_path),
     usageCount: usages.length,
     usages,
     canDelete: usages.length === 0,

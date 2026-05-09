@@ -62,7 +62,7 @@ const {
 } = require('../organizationContext')
 const { sanitizeSettingsSnapshot } = require('../settingsSnapshot')
 const { classifyRequestAccess } = require('../accessControl')
-const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL } = require('../config')
+const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, R2_PUBLIC_BASE_URL } = require('../config')
 const { buildRuntimeDescriptor } = require('../runtimeState')
 const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards')
 
@@ -134,6 +134,21 @@ function buildPublicBaseUrl(req) {
   const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').split(',')[0].trim()
   if (!host) return ''
   return `${proto}://${host}`
+}
+
+function isLocalOrigin(value) {
+  try {
+    const url = new URL(String(value || ''))
+    return /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(String(url.hostname || '').trim())
+  } catch (_) {
+    return false
+  }
+}
+
+function resolvePublicAssetBaseUrl(req) {
+  const requestBaseUrl = buildPublicBaseUrl(req)
+  if (isLocalOrigin(requestBaseUrl)) return requestBaseUrl
+  return R2_PUBLIC_BASE_URL || PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || requestBaseUrl || null
 }
 
 function resolvePasswordResetRedirect(req, redirectTo) {
@@ -367,6 +382,7 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
   return {
     syncServerUrl: PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || null,
     adminServerUrl: CLOUDFLARE_ADMIN_URL || null,
+    publicAssetBaseUrl: resolvePublicAssetBaseUrl(req),
     requiresToken: access.tokenRequired,
     hasConfiguredToken: access.hasConfiguredToken,
     accessMode: access.mode,

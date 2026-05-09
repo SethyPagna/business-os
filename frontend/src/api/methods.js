@@ -614,7 +614,7 @@ export async function getAppBootstrap() {
         authError: error?.message || 'Please sign in again to continue.',
       }
     }
-    if (isNetErr(error)) {
+    if (isNetErr(error) || isTransientGatewayError(error?.status)) {
       const localBootstrap = await buildLocalBootstrap()
       return {
         ...localBootstrap,

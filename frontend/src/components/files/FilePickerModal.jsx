@@ -7,19 +7,21 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.mjs'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 
 function AssetPreview({ asset }) {
+  const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100">
-        <img src={asset.public_path} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={previewUrl} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
       </div>
     )
   }
   if (asset?.media_type === 'video') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-slate-100">
-        <video src={asset.public_path} className="h-full w-full object-cover" muted preload="metadata" />
+        <video src={previewUrl} className="h-full w-full object-cover" muted preload="metadata" />
       </div>
     )
   }
@@ -196,7 +198,7 @@ export default function FilePickerModal({
                         {tr('select', 'Select')}
                       </button>
                     )}
-                    <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                    <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
                       <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       <span className="sm:hidden">{tr('copy', 'Copy').slice(0, 4)}</span>
                     </button>

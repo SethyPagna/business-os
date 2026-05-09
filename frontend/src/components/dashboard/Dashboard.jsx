@@ -17,6 +17,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
+import { isInvalidSessionError } from '../../api/http.js'
 
 const DASHBOARD_FILTER_STORAGE_PREFIX = 'bos_dashboard_filters:'
 const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX}last`
@@ -251,6 +252,10 @@ export default function Dashboard() {
       return data
     } catch (error) {
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
+      if (isInvalidSessionError(error)) {
+        setSummaryError('Please sign in again to continue.')
+        return null
+      }
       console.error('[Dashboard] getDashboard failed:', error.message)
       setSummaryError(error?.message || 'Dashboard summary failed to load.')
       return null
@@ -285,6 +290,10 @@ export default function Dashboard() {
       return data
     } catch (error) {
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
+      if (isInvalidSessionError(error)) {
+        setAnalyticsError('Please sign in again to continue.')
+        return null
+      }
       console.error('[Dashboard] getAnalytics failed:', error.message)
       setAnalyticsError(error?.message || 'Dashboard analytics failed to load.')
       return null

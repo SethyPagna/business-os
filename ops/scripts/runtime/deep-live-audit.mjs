@@ -319,12 +319,25 @@ async function runFullApiAudit() {
 }
 
 async function loginForAudit(context, page = null) {
-  const response = await context.request.post(`${BASE_URL}/api/auth/login`, {
-    data: { username: USERNAME, password: PASSWORD },
-    timeout: 20_000,
-  })
-  if (!response.ok()) {
-    throw new Error(`Audit login failed: HTTP ${response.status()}`)
+  let response = null
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    response = await context.request.post(`${BASE_URL}/api/auth/login`, {
+      data: { username: USERNAME, password: PASSWORD },
+      timeout: 20_000,
+    })
+    if (response.ok()) break
+    if (response.status() !== 429 || attempt === 3) {
+      throw new Error(`Audit login failed: HTTP ${response.status()}`)
+    }
+    const retryAfterHeader = response.headers()['retry-after']
+    const retryAfterSeconds = Number.parseInt(String(retryAfterHeader || ''), 10)
+    const waitMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? retryAfterSeconds * 1_000
+      : 2_000 * (attempt + 1)
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
+  if (!response?.ok()) {
+    throw new Error(`Audit login failed: HTTP ${response?.status?.() ?? 'unknown'}`)
   }
   const payload = await response.json()
   if (!payload?.success || !payload?.user) {
@@ -375,31 +388,8 @@ async function isLoginScreen(page) {
   }).catch(() => false)
 }
 
-async function ensureAuditLogin(page, authState) {
-  await page.evaluate(({ userJson, expiry, baseUrl }) => {
-    try {
-      window.sessionStorage.setItem('businessos_user', userJson)
-      window.sessionStorage.setItem('businessos_user_expiry', expiry)
-      window.localStorage.setItem('businessos_session_duration', 'session')
-      window.localStorage.setItem('businessos_sync_server', baseUrl)
-    } catch (_) {}
-  }, { ...authState, baseUrl: BASE_URL }).catch(() => {})
-
-  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
-  if (!(await isLoginScreen(page))) return
-
-  await page.fill('#login-username', USERNAME)
-  await page.fill('#login-password', PASSWORD)
-  await page.selectOption('#session-duration', 'session').catch(() => {})
-  try {
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/api/auth/login'), { timeout: 20_000 }).catch(() => null),
-      page.click('button[type="submit"]'),
-    ])
-    await page.waitForFunction(() => !document.querySelector('#login-username, #login-password'), null, { timeout: 20_000 })
-    return
-  } catch (_) {
-    const refreshedState = await loginForAudit(page.context(), page)
+async function ensureAuditLogin(page, authState = null) {
+  if (authState?.userJson) {
     await page.evaluate(({ userJson, expiry, baseUrl }) => {
       try {
         window.sessionStorage.setItem('businessos_user', userJson)
@@ -407,9 +397,36 @@ async function ensureAuditLogin(page, authState) {
         window.localStorage.setItem('businessos_session_duration', 'session')
         window.localStorage.setItem('businessos_sync_server', baseUrl)
       } catch (_) {}
-    }, { ...refreshedState, baseUrl: BASE_URL }).catch(() => {})
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+    }, { ...authState, baseUrl: BASE_URL }).catch(() => {})
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
   }
+
+  if (!(await isLoginScreen(page))) return
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.fill('#login-username', USERNAME)
+    await page.fill('#login-password', PASSWORD)
+    await page.selectOption('#session-duration', 'session').catch(() => {})
+    const loginResponse = await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/api/auth/login'), { timeout: 20_000 }).catch(() => null),
+      page.click('button[type="submit"]'),
+    ]).then(([response]) => response)
+
+    if (loginResponse?.status?.() === 429) {
+      await page.waitForTimeout(3_000 * (attempt + 1))
+      continue
+    }
+
+    try {
+      await page.waitForFunction(() => !document.querySelector('#login-username, #login-password'), null, { timeout: 20_000 })
+      return
+    } catch (_) {
+      if (attempt === 2) break
+      await page.waitForTimeout(1_500 * (attempt + 1))
+    }
+  }
+
+  throw new Error('Deep audit browser login did not complete successfully')
 }
 
 async function installPerfObservers(page) {
@@ -939,7 +956,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
   const started = performance.now()
   const url = `${BASE_URL}${route.path === '/' ? '/' : route.path}?__bos_deep=${Date.now()}&profile=${encodeURIComponent(profileName)}`
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
-  if (authenticated && authState && await isLoginScreen(page)) {
+  if (authenticated && await isLoginScreen(page)) {
     await ensureAuditLogin(page, authState)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
   }
@@ -1102,17 +1119,16 @@ async function auditBrowserProfile(profile) {
     viewport: profile.viewport,
   }
   try {
-    const authState = await loginForAudit(context)
     const page = await context.newPage()
     await installPerfObservers(page)
     collectors = await attachCollectors(page)
     await page.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await ensureAuditLogin(page, authState)
+    await ensureAuditLogin(page)
     await waitForRouteReady(page, ADMIN_ROUTES[0])
     await saveScreenshot(page, `${profile.name}-login-complete`)
 
     for (const route of ADMIN_ROUTES) {
-      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true, authState))
+      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true))
     }
     for (const route of PUBLIC_ROUTES) {
       profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, false))
@@ -1223,11 +1239,16 @@ async function compareWithPreviousBaseline() {
   for (const dir of previous) {
     try {
       const stat = await fs.stat(dir)
-      candidates.push({ dir, mtimeMs: stat.mtimeMs })
+      const summaryPath = path.join(dir, 'summary.json')
+      const parsedSummary = JSON.parse(await fs.readFile(summaryPath, 'utf8'))
+      const auditOk = parsedSummary?.audit?.ok === true
+      const profile = String(parsedSummary?.audit?.profile || '').trim().toLowerCase()
+      candidates.push({ dir, mtimeMs: stat.mtimeMs, auditOk, profile })
     } catch (_) {}
   }
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  const latest = candidates[0]?.dir
+  const latest = candidates.find((candidate) => candidate.auditOk && (!PROFILE || candidate.profile === PROFILE))?.dir
+    || candidates.find((candidate) => candidate.auditOk)?.dir
   if (!latest) return
   const previousPerfPath = path.join(latest, 'performance.json')
   let previousPerf = []

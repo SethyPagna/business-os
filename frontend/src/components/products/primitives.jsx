@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ImageOff } from 'lucide-react'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map()
@@ -72,12 +73,7 @@ function ProductImg({ src, alt, className, onClick }) {
       }
     }
     if (safeSrc.startsWith('/uploads/')) {
-      const base = String(
-        (typeof window !== 'undefined' && window.api?.getSyncServerUrl?.())
-          || localStorage.getItem('businessos_sync_server')
-          || '',
-      )
-      setUrl(base ? `${base.replace(/\/$/, '')}${safeSrc}` : safeSrc)
+      setUrl(resolvePublicAssetUrl(safeSrc))
       return () => {
         imageRequestRef.current = requestId + 1
       }

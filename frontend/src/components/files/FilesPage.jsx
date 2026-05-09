@@ -24,6 +24,7 @@ import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.mjs'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.mjs'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -32,17 +33,18 @@ import {
 } from '../../utils/loaders.mjs'
 
 function AssetPreview({ asset }) {
+  const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
-        <img src={asset.public_path} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={previewUrl} alt={asset.original_name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
       </div>
     )
   }
   if (asset?.media_type === 'video') {
     return (
       <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
-        <video src={asset.public_path} className="h-full w-full object-cover" controls preload="none" />
+        <video src={previewUrl} className="h-full w-full object-cover" controls preload="none" />
       </div>
     )
   }
@@ -112,9 +114,10 @@ function compactTabLabel(label) {
 }
 
 function downloadAssetFile(asset) {
-  if (!asset?.public_path || typeof document === 'undefined') return
+  const downloadUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
+  if (!downloadUrl || typeof document === 'undefined') return
   const link = document.createElement('a')
-  link.href = asset.public_path
+  link.href = downloadUrl
   link.download = asset.original_name || ''
   link.rel = 'noreferrer'
   document.body.appendChild(link)
@@ -404,7 +407,12 @@ export default function FilesPage() {
   async function handleCopySelectedPaths() {
     if (!selectedAssets.length) return
     try {
-      await navigator.clipboard?.writeText(selectedAssets.map((asset) => asset.public_path).filter(Boolean).join('\n'))
+      await navigator.clipboard?.writeText(
+        selectedAssets
+          .map((asset) => resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path)
+          .filter(Boolean)
+          .join('\n'),
+      )
       notify(tr('copied', 'Copied'), 'success')
     } catch {
       notify(tr('copy_failed', 'Copy failed'), 'error')
@@ -730,7 +738,7 @@ export default function FilesPage() {
                     <AssetPreview asset={asset} />
                     <div className="mt-3 min-w-0">
                       <div className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name}>{asset.original_name}</div>
-                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={asset.public_path}>{asset.public_path}</div>
+                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path}>{resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path}</div>
                       <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
                         <span className="text-right">{formatFileSize(asset.byte_size)}</span>
@@ -739,7 +747,7 @@ export default function FilesPage() {
                       </div>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
+                      <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path).catch(() => {})} title={tr('copy', 'Copy')}>
                         <Copy className="inline h-4 w-4 sm:mr-2" />
                         <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       </button>

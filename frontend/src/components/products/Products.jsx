@@ -23,6 +23,7 @@ import { aggregateInitialOptions, compareInitialKeys } from '../../utils/initial
 import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -699,12 +700,7 @@ export default function Products() {
   const resolveImageUrl = (src) => {
     const raw = String(src || '').trim()
     if (!raw) return ''
-    if (raw.startsWith('http') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw
-    if (raw.startsWith('/uploads/')) {
-      const base = String((window.api?.getSyncServerUrl?.()) || localStorage.getItem('businessos_sync_server') || '')
-      return base ? `${base.replace(/\/$/, '')}${raw}` : raw
-    }
-    return raw
+    return resolvePublicAssetUrl(raw)
   }
 
   const getProductGallery = (product) => normalizeGallery(product?.image_gallery, product?.image_path || null)

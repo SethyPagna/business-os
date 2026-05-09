@@ -6,6 +6,7 @@ import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { useApp } from '../../AppContext'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 
 /**
  * 1. useContactSelection
@@ -354,9 +355,8 @@ export function ImportModal({ type, onClose, onDone }) {
       return
     }
     try {
-      const baseUrl = String(window.api.getSyncServerUrl?.() || '').replace(/\/$/, '')
       const headers = { 'bypass-tunnel-reminder': 'true' }
-      const response = await fetch(`${baseUrl}${path}`, { headers, credentials: 'include' })
+      const response = await fetch(resolvePublicAssetUrl(path), { headers, credentials: 'include' })
       if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
       loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
     } catch (error) {

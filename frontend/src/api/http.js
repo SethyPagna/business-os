@@ -58,6 +58,25 @@ export const FRONTEND_BUILD_INFO = {
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
 }
 
+function hasStoredAuthSession() {
+  if (typeof window === 'undefined') return false
+  try {
+    return !!(window.sessionStorage.getItem('businessos_user') || window.localStorage.getItem('businessos_user'))
+  } catch (_) {
+    return false
+  }
+}
+
+function isProtectedAdminHost() {
+  if (typeof window === 'undefined') return false
+  try {
+    const hostname = String(window.location?.hostname || '').trim()
+    return /^admin\./i.test(hostname) && !/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(hostname)
+  } catch (_) {
+    return false
+  }
+}
+
 const REQUIRED_RUNTIME_API_PATTERNS = [
   /^\/api\/products\/search(?:\?|$)/,
   /^\/api\/products\/filters(?:\?|$)/,
@@ -215,12 +234,24 @@ export function isCloudflareAccessRedirectResponse(response) {
 
 function createCloudflareAccessError(path) {
   const error = new Error('Cloudflare Access sign-in is required before Business OS can reach the server.')
-  error.status = 0
+  error.status = 401
   error.code = 'cloudflare_access_required'
   error.path = normalizeApiPath(path)
   error.reason = 'cloudflare_access_redirect'
-  error.transientGateway = true
+  error.transientGateway = false
   return error
+}
+
+function dispatchUnauthorized(detail = {}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+    detail: {
+      code: detail.code || 'invalid_session',
+      error: detail.error || 'Please sign in again to continue.',
+      reason: detail.reason || null,
+      path: detail.path || null,
+    },
+  }))
 }
 
 export function shouldCompareRuntimeVersions(serverRuntime = {}, frontendBuildInfo = FRONTEND_BUILD_INFO) {
@@ -309,7 +340,12 @@ export function isWriteBlockedError(error) {
 }
 
 export function isInvalidSessionError(error) {
-  return !!(error && (error.code === 'invalid_session' || (Number(error.status) === 401 && /sign in again|invalid session/i.test(String(error.message || '')))))
+  return !!(error && (
+    error.code === 'invalid_session'
+    || error.code === 'cloudflare_access_required'
+    || error.reason === 'cloudflare_access_redirect'
+    || (Number(error.status) === 401 && /sign in again|invalid session|cloudflare access/i.test(String(error.message || '')))
+  ))
 }
 
 export function requireLiveServerWrite(channel, options = {}) {
@@ -491,7 +527,14 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     const res = await fetch(`${base}${path}`, requestInit)
     clearTimeout(timer)
     if (isCloudflareAccessRedirectResponse(res)) {
-      throw createCloudflareAccessError(path)
+      const accessError = createCloudflareAccessError(path)
+      dispatchUnauthorized({
+        code: accessError.code,
+        error: accessError.message,
+        reason: accessError.reason,
+        path: accessError.path,
+      })
+      throw accessError
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -502,12 +545,12 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
       if (typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
-        window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-          detail: {
-            code: parsed?.code || 'invalid_session',
-            error: parsed.error || 'Please sign in again to continue.',
-          },
-        }))
+        dispatchUnauthorized({
+          code: parsed?.code || 'invalid_session',
+          error: parsed?.error || 'Please sign in again to continue.',
+          reason: parsed?.reason || null,
+          path,
+        })
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
@@ -571,7 +614,7 @@ function shouldDispatchUnauthorized(path, status, parsed) {
 
 function isConnectivityError(error) {
   if (!error) return false
-  if (error.code === 'cloudflare_access_required') return true
+  if (isInvalidSessionError(error)) return false
   if (isTransientGatewayError(error?.status)) return true
   if (isNetErr(error)) return true
   const name = String(error?.name || '').toLowerCase()
@@ -607,6 +650,7 @@ function setServerHealth(online) {
 
 async function pingServerHealth() {
   if (!syncServerUrl) return
+  if (isProtectedAdminHost() && !hasStoredAuthSession()) return
   try {
     const res = await fetch(`${syncServerUrl}/health`, {
       signal: AbortSignal.timeout(4000),
@@ -615,7 +659,12 @@ async function pingServerHealth() {
       redirect: 'manual',
     })
     if (isCloudflareAccessRedirectResponse(res)) {
-      setServerHealth(false)
+      dispatchUnauthorized({
+        code: 'cloudflare_access_required',
+        error: 'Please sign in again to continue.',
+        reason: 'cloudflare_access_redirect',
+        path: '/health',
+      })
       return
     }
     if (res.ok) {
@@ -880,6 +929,10 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
               logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
               throw e
             }
+            if (isInvalidSessionError(e)) {
+              logCall(channel, 'auth-required', Date.now() - t0, false)
+              throw e
+            }
             const localResult = await localPromise
             if (hasUsableLocalData(localResult)) {
               if (isTransientGatewayError(e?.status)) {
@@ -899,6 +952,10 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
           } catch (e) {
             if (isApiVersionMismatchError(e)) {
               logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
+              throw e
+            }
+            if (isInvalidSessionError(e)) {
+              logCall(channel, 'auth-required', Date.now() - t0, false)
               throw e
             }
             noteReadFailure(channel, e, 'local-fallback', t0)
