@@ -29,6 +29,7 @@ export default function PaginationControls({
   className = '',
   compact = false,
   compactPageInput = false,
+  editablePageInput = true,
 }) {
   const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
   const total = Math.max(0, Number(totalItems || 0))
@@ -40,11 +41,33 @@ export default function PaginationControls({
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
-  const [compactPageDraft, setCompactPageDraft] = useState(String(safePage))
+  const [pageDraft, setPageDraft] = useState(String(safePage))
 
   useEffect(() => {
-    setCompactPageDraft(String(safePage))
+    setPageDraft(String(safePage))
   }, [safePage])
+
+  const commitPageDraft = (value = pageDraft) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10)
+    if (!Number.isFinite(parsed)) {
+      setPageDraft(String(safePage))
+      return
+    }
+    const next = clampPage(parsed, total, safePageSize)
+    onPageChange?.(next)
+    setPageDraft(String(next))
+  }
+
+  const handlePageInputKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      commitPageDraft(event.currentTarget.value)
+      event.currentTarget.blur()
+    } else if (event.key === 'Escape') {
+      setPageDraft(String(safePage))
+      event.currentTarget.blur()
+    }
+  }
 
   if (total <= 0) return null
 
@@ -85,29 +108,12 @@ export default function PaginationControls({
                   inputMode="numeric"
                   aria-label={pageLabel}
                   className="h-7 w-6 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                  value={compactPageDraft}
+                  value={pageDraft}
                   onChange={(event) => {
-                    setCompactPageDraft(event.target.value.replace(/[^\d]/g, '') || '')
+                    setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')
                   }}
-                  onBlur={() => {
-                    const parsed = Number.parseInt(String(compactPageDraft || '').trim(), 10)
-                    if (!Number.isFinite(parsed)) {
-                      setCompactPageDraft(String(safePage))
-                      return
-                    }
-                    const next = clampPage(parsed, total, safePageSize)
-                    onPageChange?.(next)
-                    setCompactPageDraft(String(next))
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      event.currentTarget.blur()
-                    } else if (event.key === 'Escape') {
-                      setCompactPageDraft(String(safePage))
-                      event.currentTarget.blur()
-                    }
-                  }}
+                  onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                  onKeyDown={handlePageInputKeyDown}
                 />
                 <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
               </div>
@@ -159,9 +165,26 @@ export default function PaginationControls({
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="min-w-24 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
-            {pageLabel} {safePage} {ofLabel} {totalPages}
-          </span>
+          {editablePageInput ? (
+            <div className="inline-flex min-w-24 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
+              <span className="sr-only">{pageLabel}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label={pageLabel}
+                className="h-5 w-8 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
+                value={pageDraft}
+                onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                onKeyDown={handlePageInputKeyDown}
+              />
+              <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+            </div>
+          ) : (
+            <span className="min-w-24 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
+              {pageLabel} {safePage} {ofLabel} {totalPages}
+            </span>
+          )}
           <button
             type="button"
             className="inline-flex h-8 w-8 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"

@@ -243,7 +243,9 @@ function isSpaFallbackEligible(pathname) {
 }
 
 function setNoStoreHeaders(res) {
-  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
 }
 
 function setHtmlNoCacheHeaders(res) {
@@ -269,6 +271,7 @@ function setTunnelSecurityHeaders(req, res) {
 
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')
   res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-XSS-Protection', '0')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.setHeader('Permissions-Policy', buildPermissionsPolicy(req))
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none')
@@ -296,10 +299,7 @@ function setTunnelSecurityHeaders(req, res) {
       `script-src-elem 'self' 'unsafe-inline' 'wasm-unsafe-eval'${portalTranslateElemEvalSource}${portalTranslateScriptSources}`,
     ].join('; '),
   )
-  const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || '').split(',')[0].trim().toLowerCase()
-  if (proto === 'https') {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-  }
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   res.setHeader('bypass-tunnel-reminder', 'true')
 }
 
@@ -355,6 +355,8 @@ function setUploadStaticHeaders(res, filePath) {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
   res.setHeader('Content-Disposition', `inline; filename="${safeName.replace(/"/g, '')}"`)
+  res.removeHeader?.('Pragma')
+  res.removeHeader?.('Expires')
 }
 
 function mapServerError(error) {

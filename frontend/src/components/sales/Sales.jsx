@@ -6,6 +6,7 @@ import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
+import PaginationControls, { clampPage, paginateItems } from '../shared/PaginationControls.jsx'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -57,6 +58,8 @@ export default function Sales() {
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
   const [salesGroupMode, setSalesGroupMode] = useState('time')
   const [salesSortDirection, setSalesSortDirection] = useState('desc')
+  const [salesPage, setSalesPage] = useState(1)
+  const [salesPageSize, setSalesPageSize] = useState(50)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState(() => new Set())
   const selectAllRef = useRef(null)
   const loadedOnceRef = useRef(false)
@@ -312,7 +315,7 @@ export default function Sales() {
     [sales],
   )
 
-  const searchTerms = search.trim().split(/\s+/).filter(Boolean)
+  const searchTerms = useMemo(() => search.trim().split(/\s+/).filter(Boolean), [search])
   const filtered = useMemo(() => sales.filter((sale) => {
     if (statusFilter !== 'all' && (sale.sale_status || 'completed') !== statusFilter) return false
     if (!searchTerms.length) return true
@@ -320,7 +323,7 @@ export default function Sales() {
     return multiMatch(haystack, searchTerms)
   }), [monthFilter, sales, searchTerms, statusFilter, yearFilter])
 
-  const salesSections = useMemo(
+  const allSalesSections = useMemo(
     () => buildTimeActionSections(filtered, {
       getDate: (sale) => sale?.created_at,
       getItemId: (sale) => Number(sale?.id),
@@ -333,6 +336,39 @@ export default function Sales() {
       sortDirection: salesSortDirection,
     }),
     [filtered, monthFilter, salesGroupMode, salesSortDirection, t, timeGroupingMode, yearFilter],
+  )
+
+  const allVisibleSales = useMemo(
+    () => allSalesSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+    [allSalesSections],
+  )
+
+  useEffect(() => {
+    setSalesPage(1)
+  }, [monthFilter, salesGroupMode, salesPageSize, salesSortDirection, search, statusFilter, userFilter, yearFilter])
+
+  useEffect(() => {
+    setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
+  }, [allVisibleSales.length, salesPageSize])
+
+  const pagedSales = useMemo(
+    () => paginateItems(allVisibleSales, salesPage, salesPageSize),
+    [allVisibleSales, salesPage, salesPageSize],
+  )
+
+  const salesSections = useMemo(
+    () => buildTimeActionSections(pagedSales, {
+      getDate: (sale) => sale?.created_at,
+      getItemId: (sale) => Number(sale?.id),
+      getActionKey: (sale) => sale?.sale_status || 'completed',
+      getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+      year: yearFilter,
+      month: monthFilter,
+      timeMode: timeGroupingMode,
+      groupMode: salesGroupMode,
+      sortDirection: salesSortDirection,
+    }),
+    [monthFilter, pagedSales, salesGroupMode, salesSortDirection, t, timeGroupingMode, yearFilter],
   )
 
   const visibleSales = useMemo(
@@ -712,6 +748,20 @@ export default function Sales() {
       )}
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
+
+      <PaginationControls
+        className="mb-3"
+        page={salesPage}
+        pageSize={salesPageSize}
+        totalItems={allVisibleSales.length}
+        label={t('sales') || 'sales'}
+        t={t}
+        onPageChange={setSalesPage}
+        onPageSizeChange={(size) => {
+          setSalesPageSize(size)
+          setSalesPage(1)
+        }}
+      />
 
       <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{translateOr('loading_sales_surface', 'Loading sales...', 'Loading sales...')}</div>}>
         <SalesListSurface

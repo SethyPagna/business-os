@@ -303,7 +303,7 @@ export function requireLiveServerWrite(channel, options = {}) {
     })
   }
 
-  if (!_serverOnline) {
+  if (!_serverOnline && typeof navigator !== 'undefined' && navigator.onLine === false) {
     const message = options.offlineMessage || 'Server is offline. Changes are invalid until the server reconnects.'
     dispatchWriteBlocked(channel, message, {
       reason: 'server_offline',
@@ -345,7 +345,15 @@ function sleep(ms) {
 function hasUsableLocalData(value) {
   if (value == null) return false
   if (Array.isArray(value)) return value.length > 0
-  if (typeof value === 'object') return Object.keys(value).length > 0
+  if (typeof value === 'object') {
+    if (Array.isArray(value.items)) {
+      return value.items.length > 0 || Number(value.total || 0) > 0
+    }
+    if (Array.isArray(value.rows)) {
+      return value.rows.length > 0 || Number(value.total || 0) > 0
+    }
+    return Object.keys(value).length > 0
+  }
   return true
 }
 
@@ -888,7 +896,7 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
     })
   }
 
-  if (!_serverOnline) {
+  if (!_serverOnline && typeof navigator !== 'undefined' && navigator.onLine === false) {
     const message = 'Server is offline. Changes are invalid until the server reconnects.'
     logCall(channel, 'server-offline-write-blocked', 0, false)
     dispatchWriteBlocked(channel, message, {
@@ -904,6 +912,10 @@ export async function route(channel, serverFn, localFn, isWrite = false) {
   }
 
   try {
+    // Do not let a stale failed health probe block real user actions. Tunnel
+    // edge hiccups can mark the browser offline for a few seconds even though
+    // the next write would succeed; try the write and let the request result
+    // decide whether the operation is valid.
     const result = await serverFn()
     cacheInvalidate(channel.split(':')[0])
     setServerHealth(true)

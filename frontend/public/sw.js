@@ -371,9 +371,12 @@ async function appShellFallback(request) {
   const cache = await caches.open(APP_SHELL_CACHE)
   try {
     const response = await fetch(request)
+    const cached = await cache.match('/index.html') || await cache.match('/')
     if (response && response.ok && response.type === 'basic') {
       cache.put('/index.html', response.clone()).catch(() => {})
+      return response
     }
+    if (cached) return cached
     return response
   } catch (error) {
     const cached = await cache.match('/index.html') || await cache.match('/')
@@ -390,7 +393,9 @@ async function networkFirstStatic(request) {
     const response = await fetch(request)
     if (response && response.ok && response.type === 'basic') {
       cache.put(request, response.clone()).catch(() => {})
+      return response
     }
+    if (cached) return cached
     return response
   } catch (error) {
     if (cached) return cached

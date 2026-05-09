@@ -176,8 +176,24 @@ runTest('setTunnelSecurityHeaders emits strict internal CSP with wasm support an
   assert.match(csp, /manifest-src 'self'/)
   assert.match(csp, /worker-src 'self' blob:/)
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff')
+  assert.equal(headers.get('X-XSS-Protection'), '0')
+  assert.equal(headers.get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains')
   const permissionsPolicy = headers.get('Permissions-Policy') || ''
   assert.equal(permissionsPolicy, 'geolocation=(), camera=(self), microphone=(), usb=(), payment=()')
+})
+
+runTest('no-store helper emits scanner-friendly cache directives', () => {
+  const { setNoStoreHeaders } = require('../src/serverUtils')
+  const headers = new Map()
+  const res = {
+    setHeader(name, value) {
+      headers.set(String(name), String(value))
+    },
+  }
+  setNoStoreHeaders(res)
+  assert.equal(headers.get('Cache-Control'), 'private, no-store, no-cache, must-revalidate')
+  assert.equal(headers.get('Pragma'), 'no-cache')
+  assert.equal(headers.get('Expires'), '0')
 })
 
 runTest('setTunnelSecurityHeaders scopes Google Translate eval allowance to customer portal routes', () => {

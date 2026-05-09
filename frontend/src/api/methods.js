@@ -1717,7 +1717,16 @@ export const getAuditLogs = (params = {}) => {
     },
     async () => {
       const rows = await dexieDb.audit_logs.orderBy('created_at').reverse().limit(params?.pageSize || 50).toArray()
-      return { items: rows, total: rows.length, page: 1, pageSize: rows.length || Number(params?.pageSize || 50), totalPages: 1, filters: { users: [] } }
+      return {
+        items: rows,
+        total: rows.length,
+        page: 1,
+        pageSize: rows.length || Number(params?.pageSize || 50),
+        totalPages: 1,
+        filters: { users: [] },
+        source: 'local',
+        partial: true,
+      }
     },
   )
 }

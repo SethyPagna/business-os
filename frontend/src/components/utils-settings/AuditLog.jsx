@@ -4,6 +4,7 @@ import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import PaginationControls, { clampPage } from '../shared/PaginationControls.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.mjs'
 import {
@@ -167,6 +168,7 @@ export default function AuditLog() {
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
   const loadedOnceRef = useRef(false)
@@ -282,8 +284,27 @@ export default function AuditLog() {
       const data = await withLoaderTimeout(() => window.api.getAuditLogs(params), 'Audit log', 20000)
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       const rows = Array.isArray(data) ? data : (data?.items || [])
+      const nextTotal = Number(Array.isArray(data) ? rows.length : data?.total || rows.length)
+      const emptyLocalFallback = !Array.isArray(data)
+        && data?.partial === true
+        && data?.source === 'local'
+        && rows.length === 0
+        && nextTotal === 0
+      if (emptyLocalFallback) {
+        if (!loadedOnceRef.current) {
+          setError('Audit log is still waiting for the server. No cached entries are available yet.')
+        } else if (!silent) {
+          setError('Audit log could not refresh right now. Showing the latest loaded data.')
+        }
+        return
+      }
+      const clampedPage = clampPage(page, nextTotal, pageSize)
+      if (clampedPage !== page) {
+        setPage(clampedPage)
+        return
+      }
       setLogs(rows)
-      setTotalLogs(Number(Array.isArray(data) ? rows.length : data?.total || rows.length))
+      setTotalLogs(nextTotal)
       setAuditUsers(Array.isArray(data?.filters?.users) ? data.filters.users : [])
       didLoadRows = true
     } catch (err) {
@@ -302,6 +323,7 @@ export default function AuditLog() {
       }
       if (didLoadRows) {
         loadedOnceRef.current = true
+        setHasLoadedOnce(true)
       }
       if (!silent) setLoading(false)
     }
@@ -319,7 +341,7 @@ export default function AuditLog() {
       return
     }
     aliveRef.current = true
-    const needsVisibleReload = !loadedOnceRef.current || logs.length === 0 || !!error
+    const needsVisibleReload = !loadedOnceRef.current || !!error
     if (pageLoadRequestedRef.current) {
       load(needsVisibleReload ? false : true)
       return
@@ -408,8 +430,6 @@ export default function AuditLog() {
     () => visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)),
     [visibleLogs],
   )
-  const totalPages = useMemo(() => Math.max(1, Math.ceil((Number(totalLogs) || 0) / pageSize)), [pageSize, totalLogs])
-
   const selectedLogs = useMemo(
     () => visibleLogs.filter((log) => selectedIds.has(Number(log.id))),
     [selectedIds, visibleLogs],
@@ -630,16 +650,6 @@ export default function AuditLog() {
           }}
           compact
         />
-        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <span>{t('rows') || 'Rows'}</span>
-          <select
-            className="input h-9 w-20 py-1 text-xs"
-            value={pageSize}
-            onChange={(event) => setPageSize(Number(event.target.value) || 50)}
-          >
-            {[50, 100, 200].map((size) => <option key={size} value={size}>{size}</option>)}
-          </select>
-        </label>
       </div>
 
       {selectedLogs.length > 0 ? (
@@ -653,6 +663,21 @@ export default function AuditLog() {
       ) : null}
 
       <p className="mb-3 text-xs text-gray-400">{t('audit_log_desc') || 'Click a row to see full details.'}</p>
+
+      <PaginationControls
+        className="mb-3"
+        page={page}
+        pageSize={pageSize}
+        totalItems={totalLogs}
+        label={copy('entries', 'entries', 'កំណត់ត្រា')}
+        t={t}
+        pageSizeOptions={[20, 50, 100, 200]}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
 
       {error ? (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
@@ -694,7 +719,9 @@ export default function AuditLog() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-              {loading ? (
+              {loading && !hasLoadedOnce ? (
+                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+              ) : !hasLoadedOnce ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
               ) : visibleLogs.length === 0 ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
@@ -798,22 +825,15 @@ export default function AuditLog() {
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
+        <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
           <span>{visibleLogs.length} / {totalLogs || visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
-          <div className="flex items-center gap-2">
-            <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-              {t('previous') || 'Previous'}
-            </button>
-            <span>{page} / {totalPages}</span>
-            <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-              {t('next') || 'Next'}
-            </button>
-          </div>
         </div>
       </div>
 
       <div className="space-y-2 sm:hidden">
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
+          <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
+        ) : !hasLoadedOnce ? (
           <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
         ) : visibleLogs.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>

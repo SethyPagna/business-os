@@ -19,8 +19,8 @@ assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose d
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')
 assert.match(app, /buildChunkRecoveryUrl/, 'chunk recovery should use a cache-busting recovery URL')
 assert.match(app, /window\.history\.replaceState/, 'successful boot should clean recovery params from the URL')
-assert.match(app, /business_os_page_loader_retry:\$\{window\.location\.pathname\}:\$\{FRONTEND_BUILD_HASH \|\| 'dev'\}/, 'page loader retries should be scoped per build hash')
-assert.match(app, /window\.location\.replace\(target\)/, 'stalled chunk recovery should use hard location replacement')
+assert.match(app, /business_os_page_loader_warning:\$\{window\.location\.pathname\}:\$\{FRONTEND_BUILD_HASH \|\| 'dev'\}/, 'page loader warnings should be scoped per build hash')
+assert.match(app, /window\.location\.replace\(target\)/, 'failed chunk recovery should use hard location replacement')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

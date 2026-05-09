@@ -194,116 +194,76 @@ function normalizeFaqItems(input) {
     .filter((item) => item.question && item.answer)
 }
 
-function buildFaqStarterItems() {
-  const seed = Date.now()
-  return [
-    {
-      id: `faq-${seed}-1`,
-      question: 'How do I choose products for my skin type?',
-      answer: 'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.',
-    },
-    {
-      id: `faq-${seed}-2`,
-      question: 'Are the products shown here available in store?',
-      answer: 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.',
-    },
-    {
-      id: `faq-${seed}-3`,
-      question: 'How do I check my membership points?',
-      answer: 'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.',
-    },
-    {
-      id: `faq-${seed}-4`,
-      question: 'How does Share & Reward work?',
-      answer: 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.',
-    },
-    {
-      id: `faq-${seed}-5`,
-      question: 'How can I contact Leang Cosmetics for more accurate advice?',
-      answer: 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.',
-    },
-    {
-      id: `faq-${seed}-6`,
-      question: 'Do you have products for sensitive skin?',
-      answer: 'Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.',
-    },
-    {
-      id: `faq-${seed}-7`,
-      question: 'Can I ask whether a product is original or from a specific brand line?',
-      answer: 'Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.',
-    },
-    {
-      id: `faq-${seed}-8`,
-      question: 'Do you sell skincare, makeup, hair care, and body care together?',
-      answer: 'Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.',
-    },
-    {
-      id: `faq-${seed}-9`,
-      question: 'Can the store help me build a full routine?',
-      answer: 'Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.',
-    },
-    {
-      id: `faq-${seed}-10`,
-      question: 'What should I do if an item is out of stock?',
-      answer: 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.',
-    },
-    {
-      id: `faq-${seed}-11`,
-      question: 'Can I ask for products within a specific budget?',
-      answer: 'Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.',
-    },
-    {
-      id: `faq-${seed}-12`,
-      question: 'Do you have gift-friendly items or bundles?',
-      answer: 'Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.',
-    },
-    {
-      id: `faq-${seed}-13`,
-      question: 'Can I ask for alternatives if my preferred brand is unavailable?',
-      answer: 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.',
-    },
-    {
-      id: `faq-${seed}-14`,
-      question: 'Can I check whether a product is suitable for oily, dry, or combination skin?',
-      answer: 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.',
-    },
-    {
-      id: `faq-${seed}-15`,
-      question: 'Do you also carry hair, body, and fragrance products?',
-      answer: 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.',
-    },
-  ]
+const FAQ_STARTER_TEXT = [
+  ['1', 'How do I choose products for my skin type?', 'Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.'],
+  ['2', 'Are the products shown here available in store?', 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.'],
+  ['3', 'How do I check my membership points?', 'Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.'],
+  ['4', 'How does Share & Reward work?', 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.'],
+  ['5', 'How can I contact Leang Cosmetics for more accurate advice?', 'Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.'],
+  ['6', 'Do you have products for sensitive skin?', 'Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.'],
+  ['7', 'Can I ask whether a product is original or from a specific brand line?', 'Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.'],
+  ['8', 'Do you sell skincare, makeup, hair care, and body care together?', 'Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.'],
+  ['9', 'Can the store help me build a full routine?', 'Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.'],
+  ['10', 'What should I do if an item is out of stock?', 'If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.'],
+  ['11', 'Can I ask for products within a specific budget?', 'Yes. Tell us your budget and what category you want, and we can narrow options from the current catalog.'],
+  ['12', 'Do you have gift-friendly items or bundles?', 'Yes. Ask the store team or use the assistant to explore perfumes, makeup, skincare, and beauty gifts that fit the occasion.'],
+  ['13', 'Can I ask for alternatives if my preferred brand is unavailable?', 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.'],
+  ['14', 'Can I check whether a product is suitable for oily, dry, or combination skin?', 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.'],
+  ['15', 'Do you also carry hair, body, and fragrance products?', 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.'],
+]
+
+const AI_FAQ_STARTER_TEXT = [
+  ['16', 'What details help the AI recommend better products?', 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.'],
+  ['17', 'Does the AI only recommend products available at Leang Cosmetics?', 'Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.'],
+  ['18', 'Should I trust the AI as medical or skin-treatment advice?', 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.'],
+  ['19', 'Why does the assistant sometimes suggest several options instead of one product?', 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.'],
+  ['20', 'Can the assistant explain why a product was recommended?', 'Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.'],
+]
+
+const FAQ_TRANSLATION_LOOKUP = new Map(
+  [...FAQ_STARTER_TEXT, ...AI_FAQ_STARTER_TEXT].flatMap(([index, question, answer]) => [
+    [question.trim().toLowerCase(), `starterFaq.${index}.question`],
+    [answer.trim().toLowerCase(), `starterFaq.${index}.answer`],
+  ]),
+)
+
+function translatedPortalText(t, key, fallback) {
+  const fullKey = 'portalEditor.' + key
+  const value = typeof t === 'function' ? t(fullKey) : ''
+  return value && value !== fullKey ? value : fallback
 }
 
-function buildAiFaqStarterItems() {
+function translateConfiguredFaqText(t, value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const key = FAQ_TRANSLATION_LOOKUP.get(text.toLowerCase())
+  return key ? translatedPortalText(t, key, text) : text
+}
+
+function localizeConfiguredFaqItems(items, t) {
+  return normalizeFaqItems(items).map((item) => ({
+    ...item,
+    question: translateConfiguredFaqText(t, item.question),
+    answer: translateConfiguredFaqText(t, item.answer),
+  }))
+}
+
+function buildFaqStarterItems(t) {
   const seed = Date.now()
-  return [
-    {
-      id: `faq-ai-${seed}-1`,
-      question: 'What details help the AI recommend better products?',
-      answer: 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.',
-    },
-    {
-      id: `faq-ai-${seed}-2`,
-      question: 'Does the AI only recommend products available at Leang Cosmetics?',
-      answer: 'Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.',
-    },
-    {
-      id: `faq-ai-${seed}-3`,
-      question: 'Should I trust the AI as medical or skin-treatment advice?',
-      answer: 'No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.',
-    },
-    {
-      id: `faq-ai-${seed}-4`,
-      question: 'Why does the assistant sometimes suggest several options instead of one product?',
-      answer: 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.',
-    },
-    {
-      id: `faq-ai-${seed}-5`,
-      question: 'Can the assistant explain why a product was recommended?',
-      answer: 'Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.',
-    },
-  ]
+  return FAQ_STARTER_TEXT.map(([index, question, answer]) => ({
+    id: `faq-${seed}-${index}`,
+    question: translatedPortalText(t, `starterFaq.${index}.question`, question),
+    answer: translatedPortalText(t, `starterFaq.${index}.answer`, answer),
+  }))
+}
+
+function buildAiFaqStarterItems(t) {
+  const seed = Date.now()
+  return AI_FAQ_STARTER_TEXT.map(([index, question, answer]) => ({
+    id: `faq-ai-${seed}-${index}`,
+    question: translatedPortalText(t, `starterFaq.${index}.question`, question),
+    answer: translatedPortalText(t, `starterFaq.${index}.answer`, answer),
+  }))
 }
 
 /** Convert hex color to rgba for layered hero background gradients. */
@@ -2243,11 +2203,11 @@ export default function CatalogPage({ publicView = false }) {
   }
 
   function addFaqStarterSet() {
-    mergeFaqStarterItems(buildFaqStarterItems())
+    mergeFaqStarterItems(buildFaqStarterItems(t))
   }
 
   function addAiFaqStarterSet() {
-    mergeFaqStarterItems(buildAiFaqStarterItems())
+    mergeFaqStarterItems(buildAiFaqStarterItems(t))
   }
 
   function updateFaqItem(itemId, key, value) {
@@ -2856,7 +2816,9 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     )
   }
 
-  const publicFaqItems = Array.isArray(displayConfig.faqItems) ? displayConfig.faqItems.filter((item) => item?.question && item?.answer) : []
+  const publicFaqItems = Array.isArray(displayConfig.faqItems)
+    ? localizeConfiguredFaqItems(displayConfig.faqItems, t).filter((item) => item?.question && item?.answer)
+    : []
   const aiUsageSummary = assistantUsage || null
   const questionCharLimit = Math.max(280, Math.min(1500, Number(assistantRequestPolicy?.questionMaxChars || 700) || 700))
   const handleUploadSubmissionImages = async () => {

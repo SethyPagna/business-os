@@ -551,7 +551,7 @@ router.get('/audit-logs', authToken, requirePermission('audit_log'), (req, res) 
       params.push(parseInt(userId, 10) || userId)
     }
     if (search) {
-      where.push(`lower(coalesce(user_name, '') || ' ' || coalesce(action, '') || ' ' || coalesce(entity, '') || ' ' || coalesce(entity_id::text, '') || ' ' || coalesce(details, '')) LIKE ?`)
+      where.push(`lower(coalesce(user_name, '') || ' ' || coalesce(action, '') || ' ' || coalesce(entity, '') || ' ' || coalesce(table_name, '') || ' ' || coalesce(CAST(record_id AS TEXT), '') || ' ' || coalesce(CAST(entity_id AS TEXT), '') || ' ' || coalesce(device_name, '') || ' ' || coalesce(device_tz, '') || ' ' || coalesce(client_time, '') || ' ' || coalesce(details, '') || ' ' || coalesce(new_value, '')) LIKE ?`)
       params.push(`%${search.toLowerCase()}%`)
     }
 

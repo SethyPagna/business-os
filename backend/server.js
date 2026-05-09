@@ -315,6 +315,7 @@ function mountStaticAssets(target) {
 
   target.get(['/', '/index.html'], (req, res, next) => {
     if (!isConfiguredCustomerPortalHost(req)) return next()
+    setNoStoreHeaders(res)
     return res.redirect(302, '/public')
   })
 

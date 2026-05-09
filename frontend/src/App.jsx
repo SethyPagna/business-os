@@ -71,6 +71,7 @@ const ADMIN_PAGE_SEQUENCE = [
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
+const PAGE_LOADER_STALL_WARNING_MS = 15000
 const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
 const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 
@@ -190,9 +191,7 @@ function lazyWithRetry(importer, key) {
 
         if (shouldRetryChunk(marker)) {
           triggerChunkRecoveryReload(marker)
-          await new Promise((resolve) => window.setTimeout(resolve, 1400))
-          clearRetryMarker(marker)
-          throw createChunkReloadStallError(key)
+          return await new Promise(() => {})
         }
 
         clearRetryMarker(marker)
@@ -459,12 +458,6 @@ function useChunkWarmup(user) {
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
     if (shouldSkipBackgroundWarmup()) return undefined
-    if (!shouldWarmPageEntries({
-      viewportWidth: Number(window.innerWidth || 0),
-      coarsePointer: typeof window.matchMedia === 'function' ? !!window.matchMedia('(pointer: coarse)').matches : false,
-    })) {
-      return undefined
-    }
 
     let cancelled = false
     let idleId = null
@@ -479,12 +472,14 @@ function useChunkWarmup(user) {
       await runWarmupBatches(importers, 1)
     }
 
-    timeoutId = window.setTimeout(runWarmup, 700)
+    const isSmallOrTouch = Number(window.innerWidth || 0) < 768
+      || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+    timeoutId = window.setTimeout(runWarmup, isSmallOrTouch ? 2200 : 900)
 
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 1800 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 4500 : 2200 })
     } else {
-      followupId = window.setTimeout(runWarmup, 1400)
+      followupId = window.setTimeout(runWarmup, isSmallOrTouch ? 3500 : 1600)
     }
 
     return () => {
@@ -823,24 +818,16 @@ function PageLoader() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setStalled(true)
-      console.warn('[PageLoader] Page bundle is still loading. If this repeats, reload to fetch the current build assets.')
       try {
-        const key = `business_os_page_loader_retry:${window.location.pathname}:${FRONTEND_BUILD_HASH || 'dev'}`
+        const key = `business_os_page_loader_warning:${window.location.pathname}:${FRONTEND_BUILD_HASH || 'dev'}`
         if (!window.sessionStorage.getItem(key)) {
           window.sessionStorage.setItem(key, String(Date.now()))
-          window.setTimeout(() => {
-            const target = buildChunkRecoveryUrl('page-loader')
-            if (target) {
-              window.location.replace(target)
-            } else {
-              window.location.reload()
-            }
-          }, 1800)
+          console.warn('[PageLoader] Page bundle is still loading. The app shell is waiting instead of forcing a reload.')
         }
       } catch {
-        // Ignore storage access problems and keep the manual reload button available.
+        console.warn('[PageLoader] Page bundle is still loading. The app shell is waiting instead of forcing a reload.')
       }
-    }, 10000)
+    }, PAGE_LOADER_STALL_WARNING_MS)
     return () => window.clearTimeout(timer)
   }, [])
 
@@ -851,7 +838,7 @@ function PageLoader() {
         <p className="text-sm">{stalled ? 'Page bundle is still loading' : 'Loading...'}</p>
         {stalled ? (
           <p className="mt-1 max-w-xs text-xs text-gray-500 dark:text-gray-400">
-            The app is waiting for this page chunk. Reloading fetches the latest build without leaving the app shell stuck.
+            The app is still fetching this page chunk. Reload only if the connection has recovered and the page does not continue.
           </p>
         ) : null}
         {stalled ? (

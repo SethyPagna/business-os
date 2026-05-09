@@ -160,6 +160,7 @@ export default function Inventory() {
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
   const [statsRefreshError, setStatsRefreshError] = useState('')
   const [movements,     setMovements]     = useState([])
+  const [movementsLoaded, setMovementsLoaded] = useState(false)
   const [movementMeta,  setMovementMeta]  = useState({ total: 0, page: 1, pageSize: 50, totalPages: 1 })
   const [branches,      setBranches]      = useState([])
   const [returnStats,   setReturnStats]   = useState(null)
@@ -227,6 +228,7 @@ export default function Inventory() {
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
   const pendingLoadRef = useRef(null)
+  const latestLoadRef = useRef(null)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory' })
   const movementTimeMode = useMemo(
     () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
@@ -397,19 +399,35 @@ export default function Inventory() {
         }
         if (needsMovementData && Array.isArray(movs)) {
           setMovements(movs || [])
+          setMovementsLoaded(true)
           setMovementMeta((current) => ({
             ...current,
             total: movs.length,
             totalPages: 1,
           }))
         } else if (needsMovementData && movs && typeof movs === 'object') {
-          setMovements(Array.isArray(movs.items) ? movs.items : [])
-          setMovementMeta({
-            total: Number(movs.total || 0),
-            page: Number(movs.page || movementMeta.page) || 1,
-            pageSize: Number(movs.pageSize || movementMeta.pageSize) || movementMeta.pageSize,
-            totalPages: Number(movs.totalPages || 1) || 1,
-          })
+          const total = Number(movs.total || 0)
+          const pageSize = Number(movs.pageSize || movementMeta.pageSize) || movementMeta.pageSize
+          const responsePage = Number(movs.page || movementMeta.page) || 1
+          const totalPages = Number(movs.totalPages || 1) || 1
+          const clampedPage = clampPage(responsePage, total, pageSize)
+          if (clampedPage !== responsePage) {
+            setMovementMeta({
+              total,
+              page: clampedPage,
+              pageSize,
+              totalPages,
+            })
+          } else {
+            setMovements(Array.isArray(movs.items) ? movs.items : [])
+            setMovementsLoaded(true)
+            setMovementMeta({
+              total,
+              page: responsePage,
+              pageSize,
+              totalPages,
+            })
+          }
         }
         if (needsRfidData && rfid?.item) setRfidStatus(rfid.item)
         if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
@@ -471,7 +489,8 @@ export default function Inventory() {
       if (pending) {
         pendingLoadRef.current = null
         queueMicrotask(() => {
-          load(Boolean(pending?.silent), { force: true }).catch(() => {})
+          const nextLoad = latestLoadRef.current || load
+          nextLoad(Boolean(pending?.silent), { force: true }).catch(() => {})
         })
       }
     })
@@ -499,6 +518,9 @@ export default function Inventory() {
     stockFilter,
     tr,
   ])
+  useEffect(() => {
+    latestLoadRef.current = load
+  }, [load])
 
   useEffect(() => {
     if (!isActive) {
@@ -940,7 +962,8 @@ export default function Inventory() {
 
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
-  }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementUserFilter, searchMode])
+    if (needsMovementData) setMovementsLoaded(false)
+  }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementUserFilter, needsMovementData, searchMode])
 
   useEffect(() => {
     if (!isActive || !loadedOnceRef.current || !needsProductSummary) return
@@ -2470,6 +2493,7 @@ export default function Inventory() {
   const showProductsSection = showInventorySections && tab === 'products'
   const showMovementsSection = showInventorySections && tab === 'movements'
   const showRfidSection = showInventorySections && tab === 'rfid'
+  const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
   const selectInventorySection = (nextSection) => {
     setInventorySection(nextSection)
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
@@ -2744,7 +2768,9 @@ export default function Inventory() {
           ? `${totalProducts} ${t('products')||'products'} - ${t('tap_for_details')||'click a row for details'}`
           : tab === 'rfid'
             ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
-            : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${visibleMovementRecordCount} records - ${visibleMovementQuantity} quantity - ${t('tap_for_details')||'click a row for details'}`}
+            : isMovementsFirstLoad
+              ? `${t('loading') || 'Loading'} ${t('movements') || 'movements'}...`
+              : `${visibleMovementGroups.length} grouped ${t('movements')||'movements'} - ${visibleMovementRecordCount} records - ${visibleMovementQuantity} quantity - ${t('tap_for_details')||'click a row for details'}`}
       </p>
       ) : null}
 
@@ -2932,7 +2958,7 @@ export default function Inventory() {
             inventoryExportItems={inventoryExportItems}
             isMovementScopeFullySelected={isMovementScopeFullySelected}
             isMovementScopePartiallySelected={isMovementScopePartiallySelected}
-            loading={loading}
+            loading={loading || isMovementsFirstLoad}
             movementDateRangeLabel={movementDateRangeLabel}
             movementEndDate={movementEndDate}
             movementMeta={movementMeta}
