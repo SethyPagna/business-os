@@ -1,8 +1,6 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
-
-\restrict Gm8Rg3K4c1s807NNyNVsGA18i5cLqeGgsUlgB7O8ilE9VwayNQyG6yE1JPOlUh1
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -1997,7 +1995,4 @@ CREATE INDEX idx_return_item_batch_allocations_return_item ON public.return_item
 --
 -- PostgreSQL database dump complete
 --
-
-\unrestrict Gm8Rg3K4c1s807NNyNVsGA18i5cLqeGgsUlgB7O8ilE9VwayNQyG6yE1JPOlUh1
-
 

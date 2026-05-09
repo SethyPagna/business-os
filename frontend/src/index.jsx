@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { AppProvider } from './AppContext'
+import { isPublicCatalogPath } from './app/appShellUtils.mjs'
 import './styles/main.css'
 import {
   isGuardableStyleSheetError,
@@ -164,12 +165,25 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
+function scheduleFormFieldAccessibility() {
+  if (typeof window === 'undefined') return
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => installFormFieldAccessibility(), { timeout: 2000 })
+    return
+  }
+  window.setTimeout(() => installFormFieldAccessibility(), 750)
+}
+
 registerOfflineAppShell()
-installFormFieldAccessibility()
+scheduleFormFieldAccessibility()
+
+const publicCatalogMode = typeof window !== 'undefined'
+  ? isPublicCatalogPath(window.location.pathname)
+  : false
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AppProvider>
+    <AppProvider publicMode={publicCatalogMode}>
       <App />
     </AppProvider>
   </React.StrictMode>

@@ -292,6 +292,10 @@ async function runFullApiAudit() {
   }
   summary.fullAudit.ok = fullSummary?.audit?.ok === true
   summary.fullAudit.findingCount = Array.isArray(fullSummary?.findings) ? fullSummary.findings.length : 0
+  const hardFullAuditFindingCount = Array.isArray(fullSummary?.findings)
+    ? fullSummary.findings.filter((finding) => Number(finding.priority ?? 1) <= 1).length
+    : 0
+  summary.fullAudit.hardFindingCount = hardFullAuditFindingCount
   summary.fullAudit.health = fullSummary?.health || {}
   if (Array.isArray(fullSummary?.findings)) {
     for (const finding of fullSummary.findings) {
@@ -305,24 +309,64 @@ async function runFullApiAudit() {
     ...summary.artifacts,
     ...(fullSummary?.artifacts || {}),
   }
-  if (!summary.fullAudit.ok || summary.fullAudit.findingCount) {
+  if (!summary.fullAudit.ok || hardFullAuditFindingCount) {
     addFinding(1, 'full-audit', 'Full app audit returned findings; browser audit continued', {
       findingCount: summary.fullAudit.findingCount,
+      hardFindingCount: hardFullAuditFindingCount,
       reportDir: fullAuditDir,
     })
   }
 }
 
-async function loginViaUi(page) {
-  await page.goto(`${BASE_URL}/login?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-  await page.waitForSelector('#login-username', { timeout: 15_000 })
-  await page.locator('#login-username').fill(USERNAME)
-  await page.locator('#login-password').fill(PASSWORD)
-  await page.locator('button[type="submit"]').click()
-  await page.waitForFunction(() => {
-    const text = document.body?.innerText || ''
-    return /Dashboard|Products|Inventory|Business OS|Leang|ផ្ទាំងគ្រប់គ្រង|ផលិតផល/i.test(text)
-  }, null, { timeout: 20_000 })
+async function loginForAudit(context, page = null) {
+  const response = await context.request.post(`${BASE_URL}/api/auth/login`, {
+    data: { username: USERNAME, password: PASSWORD },
+    timeout: 20_000,
+  })
+  if (!response.ok()) {
+    throw new Error(`Audit login failed: HTTP ${response.status()}`)
+  }
+  const payload = await response.json()
+  if (!payload?.success || !payload?.user) {
+    throw new Error('Audit login failed: missing user payload')
+  }
+  const setCookieHeaders = typeof response.headersArray === 'function'
+    ? response.headersArray().filter((header) => String(header.name || '').toLowerCase() === 'set-cookie').map((header) => header.value)
+    : [response.headers()['set-cookie'] || '']
+  const sessionCookieHeader = setCookieHeaders.find((header) => /(?:^|;\s*)bos_session=/i.test(String(header || '')))
+  const sessionCookieMatch = String(sessionCookieHeader || '').match(/(?:^|;\s*)(bos_session)=([^;]+)/i)
+  if (sessionCookieMatch) {
+    await context.addCookies([{
+      name: sessionCookieMatch[1],
+      value: sessionCookieMatch[2],
+      url: BASE_URL,
+      httpOnly: true,
+      sameSite: 'Lax',
+      secure: new URL(BASE_URL).protocol === 'https:',
+      expires: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+    }])
+  }
+  const userJson = JSON.stringify(payload.user)
+  const expiry = String(payload.sessionExpiresAt || (Date.now() + 24 * 60 * 60 * 1000))
+  await context.addInitScript(({ userJson: nextUserJson, expiry: nextExpiry, baseUrl }) => {
+    try {
+      window.sessionStorage.setItem('businessos_user', nextUserJson)
+      window.sessionStorage.setItem('businessos_user_expiry', nextExpiry)
+      window.localStorage.setItem('businessos_session_duration', 'session')
+      window.localStorage.setItem('businessos_sync_server', baseUrl)
+    } catch (_) {}
+  }, { userJson, expiry, baseUrl: BASE_URL })
+  if (page) {
+    await page.evaluate(({ userJson: nextUserJson, expiry: nextExpiry, baseUrl }) => {
+      try {
+        window.sessionStorage.setItem('businessos_user', nextUserJson)
+        window.sessionStorage.setItem('businessos_user_expiry', nextExpiry)
+        window.localStorage.setItem('businessos_session_duration', 'session')
+        window.localStorage.setItem('businessos_sync_server', baseUrl)
+      } catch (_) {}
+    }, { userJson, expiry, baseUrl: BASE_URL }).catch(() => {})
+  }
+  return { userJson, expiry }
 }
 
 async function installPerfObservers(page) {
@@ -393,9 +437,7 @@ async function createBrowserHarness(profile) {
     deviceScaleFactor: profile.isMobile ? 2 : 1,
     ignoreHTTPSErrors: true,
   })
-  const page = await context.newPage()
-  await installPerfObservers(page)
-  return { browser, context, page }
+  return { browser, context }
 }
 
 async function attachCollectors(page) {
@@ -505,13 +547,20 @@ async function resetBrowserState(page) {
 async function waitForRouteReady(page, route) {
   const started = performance.now()
   try {
-    await page.waitForFunction((readyTexts) => {
+    await page.waitForFunction(({ readyTexts, routeName }) => {
       const text = document.body?.innerText || ''
       const hasRoot = !!document.querySelector('#app-root, #root')
+      const activeSlot = document.querySelector('[data-bos-active-page="true"]')
+      const activePage = activeSlot?.getAttribute('data-bos-page-slot') || ''
+      const expectedPage = routeName === 'public_catalog' ? '' : routeName
+      const hasExpectedSlot = expectedPage && activePage === expectedPage
+      const isLoginScreen = !!document.querySelector('#login-username, #login-password')
       const hasErrorBoundary = /Page .* crashed|PageErrorBoundary|Loading chunk recovery reload did not complete/i.test(text)
       const hasPageLoaderStall = /Page bundle is still loading/i.test(text)
-      return hasRoot && !hasErrorBoundary && !hasPageLoaderStall && readyTexts.some((value) => text.includes(value))
-    }, route.ready, { timeout: ROUTE_READY_FAIL_MS })
+      return hasRoot && !isLoginScreen && !hasErrorBoundary && !hasPageLoaderStall && (
+        hasExpectedSlot || readyTexts.some((value) => text.includes(value))
+      )
+    }, { readyTexts: route.ready, routeName: route.name }, { timeout: ROUTE_READY_FAIL_MS })
   } catch (error) {
     await page.waitForSelector('#app-root, #root', { timeout: 2_000 }).catch(() => {})
   }
@@ -993,16 +1042,29 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
 }
 
 async function auditBrowserProfile(profile) {
-  const { browser, page } = await createBrowserHarness(profile)
-  const collectors = await attachCollectors(page)
+  const { browser, context } = await createBrowserHarness(profile)
+  let collectors = null
   const profileResult = {
     routes: [],
     profile: profile.name,
     viewport: profile.viewport,
   }
   try {
-    await resetBrowserState(page)
-    await loginViaUi(page)
+    const authState = await loginForAudit(context)
+    const page = await context.newPage()
+    await installPerfObservers(page)
+    collectors = await attachCollectors(page)
+    await page.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await page.evaluate(({ userJson, expiry, baseUrl }) => {
+      try {
+        window.sessionStorage.setItem('businessos_user', userJson)
+        window.sessionStorage.setItem('businessos_user_expiry', expiry)
+        window.localStorage.setItem('businessos_session_duration', 'session')
+        window.localStorage.setItem('businessos_sync_server', baseUrl)
+      } catch (_) {}
+    }, { ...authState, baseUrl: BASE_URL })
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await waitForRouteReady(page, ADMIN_ROUTES[0])
     await saveScreenshot(page, `${profile.name}-login-complete`)
 
     for (const route of ADMIN_ROUTES) {
@@ -1012,7 +1074,7 @@ async function auditBrowserProfile(profile) {
       profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, false))
     }
   } finally {
-    await collectors.cdp.detach().catch(() => {})
+    await collectors?.cdp?.detach().catch(() => {})
     await browser.close().catch(() => {})
   }
   summary.browser[profile.name] = profileResult

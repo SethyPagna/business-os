@@ -383,6 +383,31 @@ class PostgresCompatDatabase {
       `, [orgId])
     }
 
+    const branchState = this.queryRows(`
+      SELECT
+        COUNT(*) FILTER (WHERE is_active = 1) AS active_count,
+        COUNT(*) FILTER (WHERE is_active = 1 AND is_default = 1) AS default_count
+      FROM branches
+    `)[0] || {}
+    if (Number(branchState.active_count || 0) <= 0) {
+      this.queryRows(`
+        INSERT INTO branches (name, location, phone, manager, notes, is_default, is_active, updated_at)
+        VALUES ('Main Store', NULL, NULL, NULL, 'Default branch created during runtime bootstrap.', 1, 1, CURRENT_TIMESTAMP)
+      `)
+    } else if (Number(branchState.default_count || 0) <= 0) {
+      const firstActiveBranch = this.queryRows(`
+        SELECT id
+        FROM branches
+        WHERE is_active = 1
+        ORDER BY id ASC
+        LIMIT 1
+      `)[0]
+      if (firstActiveBranch?.id) {
+        this.queryRows('UPDATE branches SET is_default = 0')
+        this.queryRows('UPDATE branches SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [firstActiveBranch.id])
+      }
+    }
+
     const roleRows = [
       ['Admin', 'admin', 1, DEFAULT_ROLE_PERMISSIONS.admin],
       ['Manager', 'manager', 0, DEFAULT_ROLE_PERMISSIONS.manager],

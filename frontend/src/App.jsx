@@ -10,7 +10,6 @@ import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.js'
 import { createCircularFaviconDataUrl } from './utils/favicon'
 import { withLoaderTimeout } from './utils/loaders.mjs'
-import Dashboard from './components/dashboard/Dashboard'
 
 /**
  * Frontend application shell.
@@ -23,6 +22,7 @@ import Dashboard from './components/dashboard/Dashboard'
  */
 
 const PAGE_IMPORTERS = {
+  dashboard: () => import('./components/dashboard/Dashboard'),
   products: () => import('./components/products/Products'),
   pos: () => import('./components/pos/POS'),
   sales: () => import('./components/sales/Sales'),
@@ -50,10 +50,6 @@ const WARMUP_PAGE_IDS = [
   'products',
   'pos',
   'inventory',
-  'sales',
-  'returns',
-  'contacts',
-  'backup',
 ]
 
 const ADMIN_PAGE_SEQUENCE = [
@@ -203,6 +199,7 @@ function lazyWithRetry(importer, key) {
   })
 }
 
+const Dashboard = lazyWithRetry(PAGE_IMPORTERS.dashboard, 'dashboard')
 const Products = lazyWithRetry(PAGE_IMPORTERS.products, 'products')
 const POS = lazyWithRetry(PAGE_IMPORTERS.pos, 'pos')
 const Sales = lazyWithRetry(PAGE_IMPORTERS.sales, 'sales')
@@ -474,12 +471,12 @@ function useChunkWarmup(user) {
 
     const isSmallOrTouch = Number(window.innerWidth || 0) < 768
       || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
-    timeoutId = window.setTimeout(runWarmup, isSmallOrTouch ? 2200 : 900)
+    timeoutId = window.setTimeout(runWarmup, isSmallOrTouch ? 9000 : 6500)
 
     if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 4500 : 2200 })
+      idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
     } else {
-      followupId = window.setTimeout(runWarmup, isSmallOrTouch ? 3500 : 1600)
+      followupId = window.setTimeout(runWarmup, isSmallOrTouch ? 11000 : 8000)
     }
 
     return () => {
@@ -876,6 +873,8 @@ function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }) {
   return (
     <div
       key={pageId}
+      data-bos-page-slot={pageId}
+      data-bos-active-page={isActive ? 'true' : 'false'}
       style={{
         display: isActive ? 'flex' : 'none',
         flex: '1 1 0%',

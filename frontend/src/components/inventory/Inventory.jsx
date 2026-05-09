@@ -1,5 +1,4 @@
-﻿// ???? Inventory ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
-// Main Inventory page ??sub-components imported from sibling files.
+﻿// Main Inventory page sub-components imported from sibling files.
 
 import { Fragment, Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ArrowRightLeft, Boxes, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Package, Upload, X } from 'lucide-react'
@@ -2379,6 +2378,27 @@ export default function Inventory() {
           })),
         ],
       } : null,
+      {
+        id: 'group',
+        label: t('groups') || 'Groups',
+        options: [
+          { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
+          { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter('grouped') },
+          { id: 'parent-only', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter('parent') },
+          { id: 'variant-only', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter('variant') },
+          { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter('standalone') },
+        ],
+      },
+      {
+        id: 'stock',
+        label: t('stock_status') || 'Stock',
+        options: [
+          { id: 'all', label: t('all') || 'All', active: stockFilter === 'all', onClick: () => setStockFilter('all') },
+          { id: 'in-stock', label: t('in_stock') || 'In stock', active: stockFilter === 'in_stock', onClick: () => setStockFilter(stockFilter === 'in_stock' ? 'all' : 'in_stock') },
+          { id: 'low', label: t('low_stock') || 'Low stock', active: stockFilter === 'low', onClick: () => setStockFilter(stockFilter === 'low' ? 'all' : 'low') },
+          { id: 'out', label: t('out_of_stock') || 'Out of stock', active: stockFilter === 'out', onClick: () => setStockFilter(stockFilter === 'out' ? 'all' : 'out') },
+        ],
+      },
       inventoryBrands.length ? {
         id: 'brand',
         label: t('brand') || 'Brand',
@@ -2392,26 +2412,6 @@ export default function Inventory() {
           })),
         ],
       } : null,
-      {
-        id: 'group',
-        label: t('product_group') || 'Product group',
-          options: [
-            { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter('grouped') },
-            { id: 'parent-only', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter('parent') },
-            { id: 'variant-only', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter('variant') },
-            { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter('standalone') },
-          ],
-      },
-      {
-        id: 'stock',
-        label: t('stock_status') || 'Stock status',
-        options: [
-          { id: 'all', label: t('all_stock') || 'All stock', active: stockFilter === 'all', onClick: () => setStockFilter('all') },
-          { id: 'in-stock', label: t('in_stock') || 'In stock', active: stockFilter === 'in_stock', onClick: () => setStockFilter(stockFilter === 'in_stock' ? 'all' : 'in_stock') },
-          { id: 'low', label: t('low_stock') || 'Low stock', active: stockFilter === 'low', onClick: () => setStockFilter(stockFilter === 'low' ? 'all' : 'low') },
-          { id: 'out', label: t('out_of_stock') || 'Out of stock', active: stockFilter === 'out', onClick: () => setStockFilter(stockFilter === 'out' ? 'all' : 'out') },
-        ],
-      },
     ].filter(Boolean)
   }, [
     branchFilter,
@@ -2456,7 +2456,7 @@ export default function Inventory() {
     return [
       branchFilter !== 'all',
       brandFilter !== 'all',
-        groupFilter !== 'grouped',
+      groupFilter !== 'grouped',
       stockFilter !== 'all',
       inventoryInitialFilter !== 'all',
     ].filter(Boolean).length
@@ -2465,7 +2465,7 @@ export default function Inventory() {
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
-      setGroupFilter('grouped')
+    setGroupFilter('grouped')
     setStockFilter('all')
     setInventoryInitialFilter('all')
     setMovFilter('all')

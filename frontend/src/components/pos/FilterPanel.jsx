@@ -138,6 +138,29 @@ export default function POSFilterPanel({
         </div>
       ) : null}
 
+      {branches.length > 1 ? (
+        <div>
+          <SectionLabel icon={Building2}>{T('branch', 'Branch')}</SectionLabel>
+          <div className="flex flex-wrap gap-1">
+            <button
+              onClick={() => setBranchFilter('all')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === 'all')}`}
+            >
+              {T('all', 'All')}
+            </button>
+            {branches.map((branch) => (
+              <button
+                key={branch.id}
+                onClick={() => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id))}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === String(branch.id))}`}
+              >
+                {branch.name}{branch.is_default ? ' (Default)' : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {brands.length > 0 ? (
         <div>
           <SectionLabel icon={Tags}>{T('brand', 'Brand')}</SectionLabel>
@@ -159,29 +182,6 @@ export default function POSFilterPanel({
                 }`}
               >
                 {brand}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {branches.length > 1 ? (
-        <div>
-          <SectionLabel icon={Building2}>{T('branch', 'Branch')}</SectionLabel>
-          <div className="flex flex-wrap gap-1">
-            <button
-              onClick={() => setBranchFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === 'all')}`}
-            >
-              {T('all', 'All')}
-            </button>
-            {branches.map((branch) => (
-              <button
-                key={branch.id}
-                onClick={() => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id))}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === String(branch.id))}`}
-              >
-                {branch.name}{branch.is_default ? ' (Default)' : ''}
               </button>
             ))}
           </div>

@@ -264,10 +264,11 @@ function AccessDenied({ t }) {
   )
 }
 
-export function AppProvider({ children }) {
+export function AppProvider({ children, publicMode = false }) {
   // The provider owns the app session lifecycle and hands lightweight helpers
   // to page components so business workflows do not duplicate global state.
   const [user,                setUser]                = useState(() => {
+    if (publicMode) return null
     // Recover the signed-in user from sessionStorage/localStorage depending on
     // the last chosen login duration.
     try {
@@ -296,7 +297,7 @@ export function AppProvider({ children }) {
   const writeBlockedNoticeAtRef = useRef(0)
   const lastNotificationRef = useRef({ message: '', type: '', at: 0 })
   const syncErrorLogAtRef = useRef({})
-  const [authReady, setAuthReady] = useState(() => !getStoredUserPayload())
+  const [authReady, setAuthReady] = useState(() => publicMode || !getStoredUserPayload())
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
@@ -452,6 +453,8 @@ export function AppProvider({ children }) {
   // ?? Sync event listeners (loadSettings is now defined above) ?????????????
   const debounceRef = useRef({})
   useEffect(() => {
+    if (publicMode) return undefined
+
     const onUpdate = (e) => {
       const { channel } = e.detail
       if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
@@ -677,7 +680,7 @@ export function AppProvider({ children }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized)
       Object.values(debounceRef.current).forEach(clearTimeout)
     }
-  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, t, user])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, publicMode, t, user])
 
   // ?? OTP login event listener ?????????????????????????????????????????????
   useEffect(() => {
@@ -751,6 +754,13 @@ export function AppProvider({ children }) {
     if (startupDone.current) return
     startupDone.current = true
 
+    if (publicMode) {
+      setAuthReady(true)
+      setSyncConnected(false)
+      setSyncServerUnreachable(false)
+      return
+    }
+
     // Non-blocking async sync URL discovery ??activates the sync server
     // connection without blocking the initial render.
     const discoverSyncUrl = async () => {
@@ -820,7 +830,7 @@ export function AppProvider({ children }) {
     
     // Start discovery in background (no await, doesn't block UI render)
     discoverSyncUrl()
-  }, [applyBootstrapPayload, handleUnauthorizedSession, syncUrl, loadSettings])
+  }, [applyBootstrapPayload, handleUnauthorizedSession, publicMode, syncUrl, loadSettings])
 
   // ?? Theme and CSS variables ???????????????????????????????????????????????
   useEffect(() => {
