@@ -6,6 +6,7 @@ import {
   buildApiRequestDedupeKey,
   createApiVersionMismatchError,
   isTransientGatewayError,
+  isCloudflareAccessRedirectResponse,
   isReachableServerResponseStatus,
   route,
   shouldCompareRuntimeVersions,
@@ -177,6 +178,38 @@ await runTest('health connectivity check treats auth failures as reachable but g
   assert.equal(isReachableServerResponseStatus(500), true)
   assert.equal(isReachableServerResponseStatus(530), false)
   assert.equal(isReachableServerResponseStatus(0), false)
+})
+
+await runTest('api requests detect Cloudflare Access redirects without following them cross-origin', async () => {
+  resetApiState()
+  setSyncServerUrl('https://admin.example.test')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = (...args) => {
+    calls.push(args)
+    return Promise.resolve(new Response('', {
+      status: 302,
+      headers: { Location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/admin.example.test?redirect_url=%2Fapi%2Fproducts' },
+    }))
+  }
+
+  try {
+    await assert.rejects(
+      () => apiFetch('GET', '/api/products', undefined, 1000),
+      (error) => error?.code === 'cloudflare_access_required',
+    )
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0][1]?.redirect, 'manual')
+    assert.equal(calls[0][1]?.credentials, 'include')
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('Cloudflare Access redirect classifier handles opaque browser redirects', () => {
+  assert.equal(isCloudflareAccessRedirectResponse({ type: 'opaqueredirect' }), true)
+  assert.equal(isCloudflareAccessRedirectResponse(new Response('', { status: 200 })), false)
 })
 
 await runTest('read routes return fallback on transient gateway errors without sync:error', async () => {

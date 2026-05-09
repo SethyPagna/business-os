@@ -5,7 +5,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.js'
-import { cacheClearAll, FRONTEND_BUILD_INFO, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
+import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.js'
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
@@ -811,8 +811,12 @@ export function AppProvider({ children, publicMode = false }) {
               })
           }
 
-          fetch(`${effectiveUrl}/health`, { signal: AbortSignal.timeout?.(6000) })
-            .then((r) => setSyncServerUnreachable(!isReachableServerResponseStatus(r)))
+          fetch(`${effectiveUrl}/health`, {
+            signal: AbortSignal.timeout?.(6000),
+            credentials: 'include',
+            redirect: 'manual',
+          })
+            .then((r) => setSyncServerUnreachable(isCloudflareAccessRedirectResponse(r) || !isReachableServerResponseStatus(r)))
             .catch(() => setSyncServerUnreachable(true))
         } else {
           setAuthReady(true)

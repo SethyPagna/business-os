@@ -152,7 +152,12 @@ function clamp(value, min, max) {
 function loadImageElement(src) {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.crossOrigin = 'anonymous'
+    try {
+      const url = new URL(String(src || ''), window.location.href)
+      if (url.origin !== window.location.origin && !url.protocol.startsWith('data') && !url.protocol.startsWith('blob')) {
+        img.crossOrigin = 'anonymous'
+      }
+    } catch (_) {}
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error('Failed to load image for editing'))
     img.src = src

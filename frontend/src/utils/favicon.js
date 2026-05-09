@@ -5,10 +5,23 @@ function clamp(value, min, max) {
 const faviconDataUrlCache = new Map()
 const MAX_FAVICON_CACHE_ITEMS = 12
 
+function shouldUseAnonymousCors(source) {
+  const raw = String(source || '').trim()
+  if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return false
+  try {
+    const url = new URL(raw, window.location.href)
+    return url.origin !== window.location.origin
+  } catch (_) {
+    return false
+  }
+}
+
 function loadImage(source) {
   return new Promise((resolve, reject) => {
     const image = new Image()
-    image.crossOrigin = 'anonymous'
+    if (shouldUseAnonymousCors(source)) {
+      image.crossOrigin = 'anonymous'
+    }
     image.decoding = 'async'
     image.onload = () => resolve(image)
     image.onerror = () => reject(new Error('Failed to load favicon source'))

@@ -52,6 +52,7 @@ const INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_
 const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_000, 15_000)
 const API_MISMATCH_COOLDOWN_MS = 30_000
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
+const CLOUDFLARE_ACCESS_LOGIN_RE = /(?:^|\/\/)[^/]*cloudflareaccess\.com\/cdn-cgi\/access\/login|\/cdn-cgi\/access\/login/i
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
@@ -196,6 +197,29 @@ function createApiError(status, parsed, text) {
   error.attempted = parsed?.attempted || null
   error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
   error.actualUpdatedAt = parsed?.actualUpdatedAt || null
+  return error
+}
+
+export function isCloudflareAccessRedirectResponse(response) {
+  if (!response) return false
+  if (response.type === 'opaqueredirect') return true
+  const status = Number(response.status || 0)
+  const url = String(response.url || '')
+  if (CLOUDFLARE_ACCESS_LOGIN_RE.test(url)) return true
+  if (status >= 300 && status < 400) {
+    const location = response.headers?.get?.('Location') || response.headers?.get?.('location') || ''
+    return CLOUDFLARE_ACCESS_LOGIN_RE.test(location)
+  }
+  return false
+}
+
+function createCloudflareAccessError(path) {
+  const error = new Error('Cloudflare Access sign-in is required before Business OS can reach the server.')
+  error.status = 0
+  error.code = 'cloudflare_access_required'
+  error.path = normalizeApiPath(path)
+  error.reason = 'cloudflare_access_redirect'
+  error.transientGateway = true
   return error
 }
 
@@ -458,6 +482,7 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
       method: normalizedMethod,
       headers,
       credentials: 'include',
+      redirect: 'manual',
       signal: ctrl.signal,
     }
     if (methodAllowsRequestBody(normalizedMethod) && body !== undefined) {
@@ -465,6 +490,9 @@ export async function apiFetch(method, path, body, timeoutMs = SYNC.REQUEST_TIME
     }
     const res = await fetch(`${base}${path}`, requestInit)
     clearTimeout(timer)
+    if (isCloudflareAccessRedirectResponse(res)) {
+      throw createCloudflareAccessError(path)
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const parsed = (() => { try { return JSON.parse(text) } catch { return null } })()
@@ -543,6 +571,7 @@ function shouldDispatchUnauthorized(path, status, parsed) {
 
 function isConnectivityError(error) {
   if (!error) return false
+  if (error.code === 'cloudflare_access_required') return true
   if (isTransientGatewayError(error?.status)) return true
   if (isNetErr(error)) return true
   const name = String(error?.name || '').toLowerCase()
@@ -582,7 +611,13 @@ async function pingServerHealth() {
     const res = await fetch(`${syncServerUrl}/health`, {
       signal: AbortSignal.timeout(4000),
       headers: { 'bypass-tunnel-reminder': 'true' },
+      credentials: 'include',
+      redirect: 'manual',
     })
+    if (isCloudflareAccessRedirectResponse(res)) {
+      setServerHealth(false)
+      return
+    }
     if (res.ok) {
       const payload = await res.clone().json().catch(() => null)
       if (payload) checkRuntimeVersionFromHealth(payload)

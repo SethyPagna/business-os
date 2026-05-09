@@ -8,6 +8,8 @@ const webApiSource = readFileSync(new URL('../src/web-api.js', import.meta.url),
 const localDbSource = readFileSync(new URL('../src/api/localDb.js', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.jsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.jsx', import.meta.url), 'utf8')
+const faviconSource = readFileSync(new URL('../src/utils/favicon.js', import.meta.url), 'utf8')
+const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.jsx', import.meta.url), 'utf8')
 
 assert.doesNotMatch(
   indexSource,
@@ -79,6 +81,24 @@ assert.match(
   catalogSource,
   /if \(raw\.startsWith\('blob:'\) \|\| raw\.startsWith\('data:'\)\) return raw/,
   'Portal preview cache-busting should not append version params onto temporary blob or data URLs',
+)
+
+assert.match(
+  faviconSource,
+  /function shouldUseAnonymousCors\(source\)/,
+  'Favicon canvas processing should decide CORS per URL instead of forcing protected same-origin uploads through anonymous CORS',
+)
+
+assert.match(
+  faviconSource,
+  /url\.origin !== window\.location\.origin/,
+  'Same-origin upload favicons should load without anonymous CORS so Cloudflare Access redirects do not become CORS cascades',
+)
+
+assert.match(
+  userProfileSource,
+  /url\.origin !== window\.location\.origin[\s\S]*img\.crossOrigin = 'anonymous'/,
+  'Avatar crop editing should only enable anonymous CORS for external images',
 )
 
 console.log('PASS admin shell and media save guards protect Cloudflare Access and blob previews')
