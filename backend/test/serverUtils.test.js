@@ -254,6 +254,10 @@ runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for t
   const hashedEntry = collectHeaders('C:/app/frontend/dist/assets/index-CUAKXD3j.js')
   assert.equal(hashedEntry.get('Cache-Control'), 'public, max-age=31536000, immutable')
 
+  const serviceWorker = collectHeaders('C:/app/frontend/dist/sw.js')
+  assert.equal(serviceWorker.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
+  assert.equal(serviceWorker.get('Service-Worker-Allowed'), '/')
+
   const scannerEngine = collectHeaders('C:/app/frontend/dist/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm.wasm')
   assert.equal(scannerEngine.get('Content-Type'), 'application/wasm')
   assert.equal(scannerEngine.get('Cache-Control'), 'public, max-age=31536000, immutable')

@@ -369,6 +369,49 @@ async function loginForAudit(context, page = null) {
   return { userJson, expiry }
 }
 
+async function isLoginScreen(page) {
+  return page.evaluate(() => {
+    return !!document.querySelector('#login-username, #login-password')
+  }).catch(() => false)
+}
+
+async function ensureAuditLogin(page, authState) {
+  await page.evaluate(({ userJson, expiry, baseUrl }) => {
+    try {
+      window.sessionStorage.setItem('businessos_user', userJson)
+      window.sessionStorage.setItem('businessos_user_expiry', expiry)
+      window.localStorage.setItem('businessos_session_duration', 'session')
+      window.localStorage.setItem('businessos_sync_server', baseUrl)
+    } catch (_) {}
+  }, { ...authState, baseUrl: BASE_URL }).catch(() => {})
+
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+  if (!(await isLoginScreen(page))) return
+
+  await page.fill('#login-username', USERNAME)
+  await page.fill('#login-password', PASSWORD)
+  await page.selectOption('#session-duration', 'session').catch(() => {})
+  try {
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/api/auth/login'), { timeout: 20_000 }).catch(() => null),
+      page.click('button[type="submit"]'),
+    ])
+    await page.waitForFunction(() => !document.querySelector('#login-username, #login-password'), null, { timeout: 20_000 })
+    return
+  } catch (_) {
+    const refreshedState = await loginForAudit(page.context(), page)
+    await page.evaluate(({ userJson, expiry, baseUrl }) => {
+      try {
+        window.sessionStorage.setItem('businessos_user', userJson)
+        window.sessionStorage.setItem('businessos_user_expiry', expiry)
+        window.localStorage.setItem('businessos_session_duration', 'session')
+        window.localStorage.setItem('businessos_sync_server', baseUrl)
+      } catch (_) {}
+    }, { ...refreshedState, baseUrl: BASE_URL }).catch(() => {})
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+  }
+}
+
 async function installPerfObservers(page) {
   await page.addInitScript(() => {
     window.__bosPerf = {
@@ -436,6 +479,7 @@ async function createBrowserHarness(profile) {
     hasTouch: profile.isMobile,
     deviceScaleFactor: profile.isMobile ? 2 : 1,
     ignoreHTTPSErrors: true,
+    serviceWorkers: 'block',
   })
   return { browser, context }
 }
@@ -552,13 +596,17 @@ async function waitForRouteReady(page, route) {
       const hasRoot = !!document.querySelector('#app-root, #root')
       const activeSlot = document.querySelector('[data-bos-active-page="true"]')
       const activePage = activeSlot?.getAttribute('data-bos-page-slot') || ''
+      const activeText = activeSlot?.innerText || ''
       const expectedPage = routeName === 'public_catalog' ? '' : routeName
       const hasExpectedSlot = expectedPage && activePage === expectedPage
+      const scanText = expectedPage ? activeText : text
+      const hasReadyText = readyTexts.some((value) => scanText.includes(value))
       const isLoginScreen = !!document.querySelector('#login-username, #login-password')
       const hasErrorBoundary = /Page .* crashed|PageErrorBoundary|Loading chunk recovery reload did not complete/i.test(text)
       const hasPageLoaderStall = /Page bundle is still loading/i.test(text)
+      const hasOnlyLoadingShell = expectedPage && /\bLoading\.\.\.|Page bundle is still loading/i.test(activeText)
       return hasRoot && !isLoginScreen && !hasErrorBoundary && !hasPageLoaderStall && (
-        hasExpectedSlot || readyTexts.some((value) => text.includes(value))
+        expectedPage ? (hasExpectedSlot && hasReadyText && !hasOnlyLoadingShell) : hasReadyText
       )
     }, { readyTexts: route.ready, routeName: route.name }, { timeout: ROUTE_READY_FAIL_MS })
   } catch (error) {
@@ -875,7 +923,7 @@ function analyzeRoute(profileName, route, routeResult, networkEntries, perf, con
   }
 }
 
-async function auditRoute(page, collectors, profileName, route, authenticated = true) {
+async function auditRoute(page, collectors, profileName, route, authenticated = true, authState = null) {
   collectors.reset()
   await page.evaluate(() => {
     window.__bosResetPerf?.()
@@ -891,6 +939,10 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
   const started = performance.now()
   const url = `${BASE_URL}${route.path === '/' ? '/' : route.path}?__bos_deep=${Date.now()}&profile=${encodeURIComponent(profileName)}`
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+  if (authenticated && authState && await isLoginScreen(page)) {
+    await ensureAuditLogin(page, authState)
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+  }
   const domContentLoadedMs = Math.round(performance.now() - started)
   await page.waitForLoadState('load', { timeout: 45_000 }).catch(() => {})
   const readyMs = await waitForRouteReady(page, route)
@@ -1055,20 +1107,12 @@ async function auditBrowserProfile(profile) {
     await installPerfObservers(page)
     collectors = await attachCollectors(page)
     await page.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await page.evaluate(({ userJson, expiry, baseUrl }) => {
-      try {
-        window.sessionStorage.setItem('businessos_user', userJson)
-        window.sessionStorage.setItem('businessos_user_expiry', expiry)
-        window.localStorage.setItem('businessos_session_duration', 'session')
-        window.localStorage.setItem('businessos_sync_server', baseUrl)
-      } catch (_) {}
-    }, { ...authState, baseUrl: BASE_URL })
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await ensureAuditLogin(page, authState)
     await waitForRouteReady(page, ADMIN_ROUTES[0])
     await saveScreenshot(page, `${profile.name}-login-complete`)
 
     for (const route of ADMIN_ROUTES) {
-      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true))
+      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true, authState))
     }
     for (const route of PUBLIC_ROUTES) {
       profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, false))
