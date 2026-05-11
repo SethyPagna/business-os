@@ -18,6 +18,7 @@ export default function ActionHistoryBar({
   align = 'left',
   className = '',
   t,
+  summaryMode = 'full',
 }) {
   const app = useApp()
   const [open, setOpen] = useState(false)
@@ -36,6 +37,13 @@ export default function ActionHistoryBar({
     ? 'right-0'
     : 'left-0'
   const hasItems = !!((history.undoItems || []).length || (history.redoItems || []).length || recordedItems.length)
+  const compactSummaryLabel = undoItems.length
+    ? `${undoItems.length} ${T('undo', 'Undo').toLowerCase()}`
+    : redoItems.length
+      ? `${redoItems.length} ${T('redo', 'Redo').toLowerCase()}`
+      : recordedItems.length
+        ? `${recordedItems.length} ${T('history', 'History').toLowerCase()}`
+        : T('no_recent_actions', 'No recent actions')
 
   return (
     <div className={`relative flex w-full min-w-0 flex-wrap items-center gap-2 ${wrapperAlign} ${className}`.trim()}>
@@ -64,10 +72,16 @@ export default function ActionHistoryBar({
           </select>
         ) : null}
         <div className="hidden min-w-0 items-center gap-2 md:flex">
-          {undoItems.length ? <span className="truncate text-slate-500">{T('undo', 'Undo')}: {undoItems.join(' / ')}</span> : null}
-          {redoItems.length ? <span className="truncate text-slate-400">{T('redo', 'Redo')}: {redoItems.join(' / ')}</span> : null}
-          {!undoItems.length && !redoItems.length && recordedItems.length ? <span className="truncate text-slate-500">{recordedItems[0]?.label}</span> : null}
-          {!undoItems.length && !redoItems.length && !recordedItems.length ? <span>{T('no_recent_actions', 'No recent actions')}</span> : null}
+          {summaryMode === 'compact' ? (
+            <span className="truncate text-slate-500">{compactSummaryLabel}</span>
+          ) : (
+            <>
+              {undoItems.length ? <span className="truncate text-slate-500">{T('undo', 'Undo')}: {undoItems.join(' / ')}</span> : null}
+              {redoItems.length ? <span className="truncate text-slate-400">{T('redo', 'Redo')}: {redoItems.join(' / ')}</span> : null}
+              {!undoItems.length && !redoItems.length && recordedItems.length ? <span className="truncate text-slate-500">{recordedItems[0]?.label}</span> : null}
+              {!undoItems.length && !redoItems.length && !recordedItems.length ? <span>{T('no_recent_actions', 'No recent actions')}</span> : null}
+            </>
+          )}
         </div>
         <button
           type="button"

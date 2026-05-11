@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
 import { useDeferredValue } from 'react'
 import { useMemo } from 'react'
@@ -9,7 +10,7 @@ import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
+import { ThreeDotMenu, DetailModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
@@ -25,6 +26,8 @@ import {
   parseStoredContactOptions,
   serializeContactOptions,
 } from './contactOptionUtils'
+
+const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
 
 function SupplierForm({ supplier, onSave, onClose, t }) {
   const init = supplier
@@ -749,7 +752,11 @@ function SuppliersTab({ t, notify, active = true }) {
       />
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
-      {modal === 'import' ? <ImportModal type="supplier" onClose={() => setModal(null)} onDone={load} /> : null}
+      {modal === 'import' ? (
+        <Suspense fallback={null}>
+          <ContactImportModal type="supplier" onClose={() => setModal(null)} onDone={load} />
+        </Suspense>
+      ) : null}
       {modal === 'detail' && selected ? (
         <DetailModal
           item={selected}

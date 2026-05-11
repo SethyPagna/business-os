@@ -1,14 +1,13 @@
 // Contacts
 // Main Contacts page. All-in-one export/import lives here at the page level.
 
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { downloadZipFiles } from '../../utils/csv'
 import { CustomersTab } from './CustomersTab'
 import { SuppliersTab } from './SuppliersTab'
 import { DeliveryTab } from './DeliveryTab'
-import { ImportModal } from './shared'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -19,6 +18,8 @@ const TABS = (t) => [
   { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Warehouse },
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
 ]
+
+const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
 
 function ImportTypePicker({ onSelect, onClose, t }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
@@ -215,14 +216,16 @@ export default function Contacts() {
         <ImportTypePicker onSelect={handleTypeSelected} onClose={() => setModal(null)} t={t} />
       ) : null}
       {modal === 'import' && importType ? (
-        <ImportModal
-          type={importType}
-          onClose={() => {
-            setModal(null)
-            setImportType(null)
-          }}
-          onDone={handleImportDone}
-        />
+        <Suspense fallback={null}>
+          <ContactImportModal
+            type={importType}
+            onClose={() => {
+              setModal(null)
+              setImportType(null)
+            }}
+            onDone={handleImportDone}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

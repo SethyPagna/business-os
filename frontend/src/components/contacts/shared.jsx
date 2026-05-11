@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
 import Modal from '../shared/Modal'
-import FilePickerModal from '../files/FilePickerModal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls.jsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog.jsx'
 import { useApp } from '../../AppContext'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
 
 /**
  * 1. useContactSelection
@@ -179,6 +177,10 @@ export function ContactTable({
   renderRow,
   renderCard,
   totalCount,
+  page: controlledPage,
+  pageSize: controlledPageSize,
+  onPageChange: onControlledPageChange,
+  onPageSizeChange: onControlledPageSizeChange,
   onRetry,
   loadingLabel = 'Loading contacts...',
   loadingDetails = 'Fetching contact records and grouped filters.',
@@ -187,10 +189,14 @@ export function ContactTable({
   const selectAllRef = useRef(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+  const usingControlledPagination = Number.isFinite(Number(controlledPage)) && Number.isFinite(Number(controlledPageSize))
+  const activePage = usingControlledPagination ? Number(controlledPage) : page
+  const activePageSize = usingControlledPagination ? Number(controlledPageSize) : pageSize
+  const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const totalItems = Number.isFinite(Number(totalCount)) ? Number(totalCount) : rows.length
   const pagedRows = useMemo(
-    () => paginateItems(rows, page, pageSize),
-    [page, pageSize, rows],
+    () => (usingControlledPagination ? rows : paginateItems(rows, activePage, activePageSize)),
+    [activePage, activePageSize, rows, usingControlledPagination],
   )
 
   useEffect(() => {
@@ -199,12 +205,13 @@ export function ContactTable({
   }, [selectAll?.indeterminate])
 
   useEffect(() => {
+    if (usingControlledPagination) return
     setPage(1)
-  }, [rows, totalItems])
+  }, [rows, totalItems, usingControlledPagination])
 
   if (loading && !rows.length) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         <LoadingWatchdog
           loading
           timeoutMs={5000}
@@ -212,8 +219,60 @@ export function ContactTable({
           details={loadingDetails}
           onRetry={onRetry}
         />
-        <div className="rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
-          {typeof t === 'function' ? (t('loading') || 'Loading...') : 'Loading...'}
+        <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
+              <tr>
+                <th className="w-10 px-3 py-2">
+                  <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                </th>
+                {columns.map((column, index) => (
+                  <th key={`contact-skeleton-head-${index}`} className="px-3 py-2">
+                    {column}
+                  </th>
+                ))}
+                <th className="w-12 px-3 py-2 text-right">
+                  <div className="ml-auto h-4 w-6 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
+              {skeletonRows.map((row) => (
+                <tr key={`contact-skeleton-row-${row}`} className="animate-pulse">
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                  </td>
+                  {columns.map((_, index) => (
+                    <td key={`contact-skeleton-cell-${row}-${index}`} className="px-3 py-3">
+                      <div className={`h-4 rounded bg-slate-100 dark:bg-slate-800 ${index === 0 ? 'w-32' : index >= columns.length - 2 ? 'w-20' : 'w-24'}`} />
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 text-right">
+                    <div className="ml-auto h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="space-y-3 md:hidden">
+          {skeletonRows.slice(0, 6).map((row) => (
+            <div key={`contact-mobile-skeleton-${row}`} className="card animate-pulse p-3">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-5 w-36 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800" />
+                </div>
+                <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-4 rounded bg-slate-100 dark:bg-slate-800" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     )
@@ -231,13 +290,18 @@ export function ContactTable({
     <>
       <PaginationControls
         className="mb-2"
-        page={page}
-        pageSize={pageSize}
+        page={activePage}
+        pageSize={activePageSize}
         totalItems={totalItems}
         label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
         t={t}
-        onPageChange={setPage}
+        onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
         onPageSizeChange={(size) => {
+          if (usingControlledPagination) {
+            onControlledPageSizeChange?.(size)
+            onControlledPageChange?.(1)
+            return
+          }
           setPageSize(size)
           setPage(1)
         }}
@@ -282,256 +346,3 @@ export function ContactTable({
   )
 }
 
-/**
- * 5. ImportModal
- * 5.1 Shared CSV import surface for customers/suppliers/delivery contacts.
- * 5.2 Uses the server import-job pipeline so large files do not render thousands of rows.
- */
-function countCsvDataRows(text) {
-  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim())
-  return Math.max(0, lines.length - 1)
-}
-
-const CONTACT_IMPORT_CONFIG = {
-  customer: {
-    label: 'Customers',
-    jobType: 'customers',
-    fields: ['name', 'membership_number', 'contact_options', 'phone', 'email', 'address', 'company', 'notes'],
-  },
-  supplier: {
-    label: 'Suppliers',
-    jobType: 'suppliers',
-    fields: ['name', 'contact_options', 'phone', 'email', 'address', 'company', 'contact_person', 'notes'],
-  },
-  deliveryContact: {
-    label: 'Delivery',
-    jobType: 'delivery_contacts',
-    fields: ['name', 'contact_options', 'phone', 'area', 'address', 'notes'],
-  },
-}
-
-export function ImportModal({ type, onClose, onDone }) {
-  const { notify, t } = useApp()
-  const config = CONTACT_IMPORT_CONFIG[type]
-  const [csvText, setCsvText] = useState('')
-  const [fileName, setFileName] = useState('')
-  const [conflictMode, setConflictMode] = useState('merge')
-  const [fieldRules, setFieldRules] = useState({})
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [filesOpen, setFilesOpen] = useState(false)
-  const [rowCount, setRowCount] = useState(0)
-  const aliveRef = useRef(true)
-  const inFlightRef = useRef(false)
-
-  const typeLabel = config?.label || 'Contacts'
-  const fieldList = config?.fields || []
-
-  useEffect(() => () => {
-    aliveRef.current = false
-  }, [])
-
-  const loadCsvText = (text, name) => {
-    const nextText = String(text || '')
-    const nextCount = countCsvDataRows(nextText)
-    setCsvText(nextText)
-    setFileName(String(name || 'contacts.csv'))
-    setRowCount(nextCount)
-    setResult(null)
-    if (!nextCount) notify('Choose a CSV with at least one data row.', 'error')
-  }
-
-  const handlePickFile = async () => {
-    const picked = await window.api.openCSVDialog?.()
-    if (!picked?.content) return
-    loadCsvText(picked.content, picked.name || 'contacts.csv')
-  }
-
-  const handleChooseExistingFile = async (publicPath, asset) => {
-    const path = String(publicPath || '').trim()
-    if (!path) return
-    if (!/\.csv($|\?)/i.test(path) && asset?.mime_type !== 'text/csv') {
-      notify('Choose a CSV file from Files.', 'error')
-      return
-    }
-    try {
-      const headers = { 'bypass-tunnel-reminder': 'true' }
-      const response = await fetch(resolvePublicAssetUrl(path), { headers, credentials: 'include' })
-      if (!response.ok) throw new Error(`Could not read ${asset?.original_name || path}`)
-      loadCsvText(await response.text(), asset?.original_name || path.split('/').pop() || 'contacts.csv')
-    } catch (error) {
-      notify(error?.message || 'Failed to load CSV from Files', 'error')
-    }
-  }
-
-  const handleDownloadTemplate = () => {
-    window.api.downloadImportTemplate(type)
-  }
-
-  const applyContactRulePreset = (preset) => {
-    const rule = preset === 'use_imported'
-      ? 'use_imported'
-      : preset === 'keep_existing'
-        ? 'keep_existing'
-        : 'merge_blank_only'
-    const fields = fieldList.filter((field) => field !== 'name')
-    setFieldRules({ __preset: preset, ...Object.fromEntries(fields.map((field) => [field, rule])) })
-  }
-
-  const handleImport = async () => {
-    if (!config?.jobType) {
-      notify('Unsupported import type', 'error')
-      return
-    }
-    if (!rowCount) {
-      notify('Choose a CSV file first.', 'error')
-      return
-    }
-    if (inFlightRef.current) return
-
-    inFlightRef.current = true
-    setLoading(true)
-    try {
-      const created = await window.api.createImportJob({
-        type: config.jobType,
-        policy: {
-          source: 'contacts_modal',
-          conflictMode,
-          fieldRules,
-        },
-      })
-      const job = created?.job || created
-      if (!job?.id) throw new Error('Import job was not created')
-      await window.api.uploadImportJobCsv({
-        jobId: job.id,
-        text: csvText,
-        fileName: fileName || `${config.jobType}.csv`,
-      })
-      await window.api.startImportJob(job.id)
-      const response = {
-        imported: 0,
-        updated: 0,
-        failed: 0,
-        queued: rowCount,
-        jobId: job.id,
-        errors: [],
-        conflictMode,
-      }
-      setResult(response || null)
-      notify(`Import analysis started: ${rowCount} row(s) queued. Review and approve it from the top progress bar.`, 'success')
-    } catch (error) {
-      notify(error?.message || 'Import failed', 'error')
-    } finally {
-      inFlightRef.current = false
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Modal title={`Import ${typeLabel}`} onClose={onClose} wide>
-      <div className="space-y-4">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Large files are processed in the background. Choose a conflict policy now; the server will validate, match, import, and report row errors without rendering every row.
-        </p>
-
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary text-sm" onClick={handleDownloadTemplate}>
-            Download template
-          </button>
-          <button type="button" className="btn-secondary text-sm" onClick={handlePickFile}>
-            Choose CSV
-          </button>
-          <button type="button" className="btn-secondary text-sm" onClick={() => setFilesOpen(true)}>
-            Files
-          </button>
-          <div className="min-w-0 flex-1 truncate rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-400">
-            {fileName || 'No file selected'}
-          </div>
-        </div>
-
-        {rowCount ? (
-          <div className="grid gap-2 text-center text-xs sm:grid-cols-3">
-            <div className="rounded-lg bg-slate-50 p-2 dark:bg-zinc-800/70">
-              <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{rowCount}</div>
-              <div className="text-slate-500 dark:text-slate-400">Rows queued</div>
-            </div>
-            <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
-              <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{conflictMode}</div>
-              <div className="text-blue-600 dark:text-blue-400">Default conflict action</div>
-            </div>
-            <div className="rounded-lg bg-emerald-50 p-2 dark:bg-emerald-900/20">
-              <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300">Job</div>
-              <div className="text-emerald-600 dark:text-emerald-400">Background import</div>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div>
-            <label htmlFor="contacts-conflict-mode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Default conflict action
-            </label>
-            <select
-              id="contacts-conflict-mode"
-              name="contacts_conflict_mode"
-              className="input"
-              value={conflictMode}
-              onChange={(event) => setConflictMode(event.target.value)}
-            >
-              <option value="skip">Skip existing records</option>
-              <option value="merge">Merge into empty fields</option>
-              <option value="overwrite">Overwrite existing records</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="contacts-field-rule-preset" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Contact detail handling
-            </label>
-            <select
-              id="contacts-field-rule-preset"
-              className="input"
-              value={fieldRules.__preset || 'merge_blank_only'}
-              onChange={(event) => applyContactRulePreset(event.target.value)}
-            >
-              <option value="merge_blank_only">Fill blanks only</option>
-              <option value="keep_existing">Keep existing</option>
-              <option value="use_imported">Use imported</option>
-            </select>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Conflicts focus on same name, same phone/email/contact info, and duplicate membership numbers. Blank customer membership IDs stay auto-generated.
-            </p>
-          </div>
-        </div>
-
-        {result ? (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-800/70">
-            {result?.queued ? <div>Queued: {Number(result.queued || 0)} row(s) for analysis. Review and approve it from the top progress bar.</div> : null}
-            <div>Imported: {Number(result?.imported || 0)}</div>
-            <div>Updated: {Number(result?.updated || 0)}</div>
-            <div>Failed: {Number(result?.failed || 0)}</div>
-            {result?.jobId ? <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Job: {result.jobId}</div> : null}
-            {Array.isArray(result?.errors) && result.errors.length ? (
-              <div className="mt-2 max-h-32 overflow-y-auto rounded border border-red-200 bg-red-50 p-2 text-xs text-red-600 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-300">
-                {result.errors.map((message, index) => <div key={`${message}-${index}`}>{message}</div>)}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={loading || !rowCount} onClick={handleImport}>
-            {loading ? 'Importing...' : 'Import'}
-          </button>
-          <button type="button" className="btn-secondary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-      <FilePickerModal
-        open={filesOpen}
-        title="Choose CSV from Files"
-        mediaType="document"
-        onClose={() => setFilesOpen(false)}
-        onSelect={handleChooseExistingFile}
-      />
-    </Modal>
-  )
-}

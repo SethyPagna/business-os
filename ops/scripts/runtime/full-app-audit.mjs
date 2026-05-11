@@ -4,6 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
+import { FULL_AUDIT_ROUTES } from './audit-manifest.mjs'
+import { loginWithFetch } from './audit-auth.mjs'
+import { writeFullAuditHtmlReport } from './audit-report-html.mjs'
 
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
@@ -17,26 +20,7 @@ const SMOKE_PREFIX = process.env.BOS_AUDIT_PREFIX || `QA Audit ${Date.now()}`
 const REQUEST_TIMEOUT_MS = Number(process.env.BOS_AUDIT_REQUEST_TIMEOUT_MS || 45_000)
 const JOB_TIMEOUT_MS = Number(process.env.BOS_AUDIT_JOB_TIMEOUT_MS || 60_000)
 
-const ROUTES = [
-  { name: 'dashboard', path: '/', api: ['/api/dashboard'] },
-  { name: 'pos', path: '/pos', api: ['/api/products/search?page=1&pageSize=10&include=branch_stock,images,batches,family'] },
-  { name: 'products', path: '/products', api: ['/api/products/search?page=1&pageSize=20', '/api/products/filters', '/api/products/stats'] },
-  { name: 'inventory', path: '/inventory', api: ['/api/inventory/stats?group=1', '/api/inventory/products/search?group=1&page=1&pageSize=20', '/api/inventory/movements?page=1&pageSize=20'] },
-  { name: 'sales', path: '/sales', api: ['/api/sales?page=1&pageSize=20'] },
-  { name: 'returns', path: '/returns', api: ['/api/returns?page=1&pageSize=20'] },
-  { name: 'imports', path: '/imports', api: ['/api/import-jobs?page=1&pageSize=20', '/api/import-jobs/queue/status'] },
-  { name: 'backup', path: '/backup', api: ['/api/system/drive-sync/status', '/api/system/backups/versions?limit=10', '/api/system/integration-doctor'] },
-  { name: 'files', path: '/files', api: ['/api/files?mediaType=all'] },
-  { name: 'contacts', path: '/contacts', api: ['/api/customers', '/api/suppliers', '/api/delivery-contacts'] },
-  { name: 'branches', path: '/branches', api: ['/api/branches', '/api/branches/summary', '/api/branches/stock-integrity'] },
-  { name: 'users', path: '/users', api: ['/api/users', '/api/roles'] },
-  { name: 'audit_log', path: '/audit-log', api: ['/api/system/audit-logs?page=1&pageSize=20'] },
-  { name: 'settings', path: '/settings', api: ['/api/settings', '/api/settings/meta'] },
-  { name: 'receipt_settings', path: '/receipt-settings', api: ['/api/settings'] },
-  { name: 'server', path: '/server', api: ['/api/system/config', '/api/runtime/version'] },
-  { name: 'loyalty_points', path: '/loyalty-points', api: ['/api/settings'] },
-  { name: 'public_catalog', path: '/public', api: ['/api/portal/catalog/meta', '/api/portal/catalog/products?page=1&pageSize=20'] },
-]
+const ROUTES = FULL_AUDIT_ROUTES
 
 const summary = {
   audit: {
@@ -143,18 +127,15 @@ function recordApi(name, result, critical = true) {
 
 async function login() {
   const started = performance.now()
-  const response = await fetchWithTimeout(`${BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+  const session = await loginWithFetch({
+    baseUrl: BASE_URL,
+    username: USERNAME,
+    password: PASSWORD,
+    timeoutMs: REQUEST_TIMEOUT_MS,
   })
-  const payload = await response.json().catch(() => ({}))
   const ms = Math.round(performance.now() - started)
-  summary.api.push({ name: 'auth login', status: response.status, ok: response.ok, ms })
-  assert(response.ok, `Login failed (${response.status}): ${payload?.error || 'unknown error'}`)
-  const cookie = String(response.headers.get('set-cookie') || '').split(';')[0]
-  assert(cookie.startsWith('bos_session='), 'Login did not return a session cookie')
-  return { cookie }
+  summary.api.push({ name: 'auth login', status: session.response.status, ok: session.response.ok, ms })
+  return { cookie: session.cookieHeader }
 }
 
 async function captureHealth(state, phase) {
@@ -557,6 +538,7 @@ async function writeSummary() {
   summary.audit.finishedAt = new Date().toISOString()
   summary.audit.durationMs = Math.round(performance.now() - startMs)
   summary.audit.ok = !summary.findings.some((finding) => Number(finding.priority || 0) <= 1)
+  summary.artifacts.htmlReport = path.join(REPORT_DIR, 'summary.html')
   await fs.mkdir(REPORT_DIR, { recursive: true })
   await fs.writeFile(path.join(REPORT_DIR, 'summary.json'), JSON.stringify(summary, null, 2), 'utf8')
 }
@@ -576,6 +558,10 @@ async function main() {
   await auditRemotePublic()
   await captureHealth(state, 'after')
   await writeSummary()
+  await writeFullAuditHtmlReport({
+    reportDir: REPORT_DIR,
+    summary,
+  })
   console.log(JSON.stringify({
     ok: summary.audit.ok,
     reportDir: REPORT_DIR,

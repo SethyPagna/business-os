@@ -1,15 +1,16 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy } from 'react'
 import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
 import { useDeferredValue } from 'react'
 import { useMemo } from 'react'
 import { useRef } from 'react'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
-import { ThreeDotMenu, DetailModal, ImportModal, ContactTable, useContactSelection } from './shared'
+import { ThreeDotMenu, DetailModal, ContactTable, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.mjs'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.mjs'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.mjs'
@@ -37,6 +38,8 @@ function tr(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
 }
+
+const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
 
 export function generateCustomerMembershipNumber(seed = '') {
   void seed
@@ -233,6 +236,7 @@ function CustomersTab({ t, notify, active = true }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
+  const pointsRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
@@ -243,6 +247,9 @@ function CustomersTab({ t, notify, active = true }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
+  const [customerPage, setCustomerPage] = useState(1)
+  const [customerPageSize, setCustomerPageSize] = useState(50)
+  const [customerTotal, setCustomerTotal] = useState(0)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
@@ -252,11 +259,16 @@ function CustomersTab({ t, notify, active = true }) {
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify })
-  const customerQuery = useMemo(() => ({
+  const customerFilters = useMemo(() => ({
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
   }), [deferredSearch, monthFilter, yearFilter])
+  const customerQuery = useMemo(() => ({
+    ...customerFilters,
+    page: customerPage,
+    pageSize: customerPageSize,
+  }), [customerFilters, customerPage, customerPageSize])
 
   const filteredBySearch = useMemo(() => customers.filter((customer) => {
     const query = deferredSearch.toLowerCase().trim()
@@ -327,7 +339,7 @@ function CustomersTab({ t, notify, active = true }) {
       label: tr(t, 'group_by', 'Group by'),
       options: [
         { id: 'group-time', label: tr(t, 'date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
-        { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
+        { id: 'group-alphabet', label: tr(t, 'alphabetical', 'A-Z / Khmer'), active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
       ],
     },
     {
@@ -365,6 +377,19 @@ function CustomersTab({ t, notify, active = true }) {
     },
 
   ]), [availableYears, groupMode, monthFilter, sortDirection, t, yearFilter])
+  const displayContactFilterSections = useMemo(() => (
+    contactFilterSections.map((section) => {
+      if (section.id !== 'group') return section
+      return {
+        ...section,
+        options: section.options.map((option) => (
+          option.id === 'group-alphabet' && isBrokenLocalizedString(option.label)
+            ? { ...option, label: tr(t, 'alphabetical', 'A-Z / Khmer') }
+            : option
+        )),
+      }
+    })
+  ), [contactFilterSections, t])
   const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
@@ -394,6 +419,42 @@ function CustomersTab({ t, notify, active = true }) {
     userName: user?.name,
   }), [user?.id, user?.name])
 
+  const mergePointSummaries = useCallback((summaries = []) => {
+    const pointMap = new Map(
+      (Array.isArray(summaries) ? summaries : [])
+        .map((row) => [Number(row?.customer_id || 0), row])
+        .filter(([customerId]) => customerId > 0),
+    )
+    if (!pointMap.size) return
+    const applyPoints = (customer = {}) => {
+      const summary = pointMap.get(Number(customer?.id || 0))
+      if (!summary) return customer
+      return {
+        ...customer,
+        points_earned: Number(summary.points_earned || 0),
+        points_deducted: Number(summary.points_deducted || 0),
+        points_redeemed: Number(summary.points_redeemed || 0),
+        points_rewarded: Number(summary.points_rewarded || 0),
+        points_balance: Number(summary.points_balance || 0),
+      }
+    }
+    setCustomers((current) => current.map(applyPoints))
+    setSelected((current) => (current ? applyPoints(current) : current))
+  }, [])
+
+  const refreshPointSummaries = useCallback(async (customerIds, label = 'Customer point summaries') => {
+    const ids = [...new Set((Array.isArray(customerIds) ? customerIds : []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))]
+    if (!ids.length) return
+    const requestId = beginTrackedRequest(pointsRequestRef)
+    try {
+      const summaries = await withLoaderTimeout(() => window.api.getCustomerPointSummaries({ ids: ids.join(',') }), label, 15000)
+      if (!isTrackedRequestCurrent(pointsRequestRef, requestId)) return
+      mergePointSummaries(summaries)
+    } catch (_) {
+      if (!isTrackedRequestCurrent(pointsRequestRef, requestId)) return
+    }
+  }, [mergePointSummaries])
+
   const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -409,11 +470,19 @@ function CustomersTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const data = await withLoaderTimeout(() => window.api.getCustomers(customerQuery), label, 20000)
+        const baseQuery = { ...customerQuery, includePoints: '0' }
+        const data = await withLoaderTimeout(() => window.api.getCustomers(baseQuery), label, 12000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setCustomers(Array.isArray(data) ? data : [])
+        const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
+        setCustomers(items)
+        setCustomerTotal(Number(data?.total || items.length || 0))
+        if (data && !Array.isArray(data)) {
+          setCustomerPage(Number(data.page || customerPage) || 1)
+          setCustomerPageSize(Number(data.pageSize || customerPageSize) || customerPageSize)
+        }
         loadedOnceRef.current = true
         setLoadError('')
+        void refreshPointSummaries(items.map((customer) => customer?.id), `${label} points`)
       } catch (error) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = error?.message || 'Failed to load customers'
@@ -438,12 +507,17 @@ function CustomersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [customerQuery, notify, t])
+  }, [customerPage, customerPageSize, customerQuery, notify, refreshPointSummaries, t])
+
+  useEffect(() => {
+    setCustomerPage(1)
+  }, [customerFilters])
 
   useEffect(() => {
     if (!active) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(pointsRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
       return undefined
@@ -452,6 +526,7 @@ function CustomersTab({ t, notify, active = true }) {
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(pointsRequestRef)
       loadPromiseRef.current = null
     }
   }, [active, load])
@@ -613,7 +688,7 @@ function CustomersTab({ t, notify, active = true }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory} />
+      <ActionHistoryBar history={actionHistory} summaryMode="compact" />
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <label htmlFor="customer-search" className="sr-only">{tr(t, 'search_customers_placeholder', 'Search customers')}</label>
@@ -626,7 +701,7 @@ function CustomersTab({ t, notify, active = true }) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <span className="whitespace-nowrap text-sm text-gray-400">{visibleCustomers.length}</span>
+          <span className="whitespace-nowrap text-sm text-gray-400">{customerTotal || visibleCustomers.length}</span>
         </div>
 
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
@@ -651,7 +726,7 @@ function CustomersTab({ t, notify, active = true }) {
           <FilterMenu
             label={tr(t, 'filters', 'Filters')}
             activeCount={activeFilterCount}
-            sections={contactFilterSections}
+      sections={displayContactFilterSections}
             onClear={() => {
               setYearFilter('all')
               setMonthFilter('all')
@@ -707,7 +782,11 @@ function CustomersTab({ t, notify, active = true }) {
         columns={customerColumns}
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}
-        totalCount={visibleCustomers.length}
+        totalCount={customerTotal || visibleCustomers.length}
+        page={customerPage}
+        pageSize={customerPageSize}
+        onPageChange={setCustomerPage}
+        onPageSizeChange={setCustomerPageSize}
         onRetry={() => load({ silent: false, label: 'Customers retry' })}
         loadingLabel={tr(t, 'loading_customers', 'Loading customers...')}
         loadingDetails={tr(t, 'contacts_loading_details', 'Fetching customers, filters, and grouped sections.')}
@@ -847,7 +926,11 @@ function CustomersTab({ t, notify, active = true }) {
       />
 
       {modal === 'form' ? <CustomerForm customer={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
-      {modal === 'import' ? <ImportModal type="customer" onClose={() => setModal(null)} onDone={load} /> : null}
+      {modal === 'import' ? (
+        <Suspense fallback={null}>
+          <ContactImportModal type="customer" onClose={() => setModal(null)} onDone={load} />
+        </Suspense>
+      ) : null}
       {modal === 'detail' && selected ? (
         <DetailModal
           item={selected}

@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
+import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles } from './audit-manifest.mjs'
+import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audit-auth.mjs'
+import { writeDeepAuditHtmlReport } from './audit-report-html.mjs'
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
@@ -32,35 +35,7 @@ const BUTTON_RESPONSE_WARN_MS = 300
 const BUTTON_RESPONSE_FAIL_MS = 1_500
 const LONG_RUNNING_API_RE = /\/api\/(?:backups|system\/drive-sync\/jobs|system\/jobs|import-jobs\/[^/]+\/(?:start|approve|preflight))/i
 
-const ADMIN_ROUTES = [
-  { name: 'dashboard', path: '/', ready: ['Business OS', 'Dashboard', 'Products'] },
-  { name: 'products', path: '/products', ready: ['Products', 'Import', 'Export', 'Manage'] },
-  { name: 'inventory', path: '/inventory', ready: ['Inventory', 'Products', 'Movements'] },
-  { name: 'pos', path: '/pos', ready: ['Point of Sale', 'POS', 'Cart'] },
-  { name: 'sales', path: '/sales', ready: ['Sales', 'Receipt', 'Search'] },
-  { name: 'returns', path: '/returns', ready: ['Returns', 'Return', 'Search'] },
-  { name: 'backup', path: '/backup', ready: ['Backup', 'Drive', 'Versions'] },
-  { name: 'files', path: '/files', ready: ['Library', 'Files', 'Upload'] },
-  { name: 'contacts', path: '/contacts', ready: ['Customers', 'Suppliers', 'Contacts'] },
-  { name: 'branches', path: '/branches', ready: ['Branches', 'Branch', 'Stock'] },
-  { name: 'users', path: '/users', ready: ['Users', 'Roles', 'Permissions'] },
-  { name: 'audit_log', path: '/audit-log', ready: ['Audit Log', 'Activity', 'Filters'] },
-  { name: 'settings', path: '/settings', ready: ['Settings', 'Business', 'Appearance'] },
-  { name: 'receipt_settings', path: '/receipt-settings', ready: ['Receipt', 'Template', 'Preview'] },
-  { name: 'server', path: '/server', ready: ['Server', 'Runtime', 'Health'] },
-  { name: 'loyalty_points', path: '/loyalty-points', ready: ['Loyalty', 'Points', 'Membership'] },
-]
-
-const PUBLIC_ROUTES = [
-  { name: 'public_catalog', path: '/public', ready: ['About', 'Products', 'Membership', 'FAQ'] },
-]
-
-const PROFILES = PROFILE === 'fast'
-  ? [{ name: 'desktop', viewport: { width: 1365, height: 900 }, isMobile: false }]
-  : [
-    { name: 'desktop', viewport: { width: 1365, height: 900 }, isMobile: false },
-    { name: 'mobile', viewport: { width: 390, height: 844 }, isMobile: true },
-  ]
+const PROFILES = getAuditProfiles(PROFILE)
 
 const summary = {
   audit: {
@@ -319,67 +294,17 @@ async function runFullApiAudit() {
 }
 
 async function loginForAudit(context, page = null) {
-  let response = null
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    response = await context.request.post(`${BASE_URL}/api/auth/login`, {
-      data: { username: USERNAME, password: PASSWORD },
-      timeout: 20_000,
-    })
-    if (response.ok()) break
-    if (response.status() !== 429 || attempt === 3) {
-      throw new Error(`Audit login failed: HTTP ${response.status()}`)
-    }
-    const retryAfterHeader = response.headers()['retry-after']
-    const retryAfterSeconds = Number.parseInt(String(retryAfterHeader || ''), 10)
-    const waitMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-      ? retryAfterSeconds * 1_000
-      : 2_000 * (attempt + 1)
-    await new Promise((resolve) => setTimeout(resolve, waitMs))
-  }
-  if (!response?.ok()) {
-    throw new Error(`Audit login failed: HTTP ${response?.status?.() ?? 'unknown'}`)
-  }
-  const payload = await response.json()
-  if (!payload?.success || !payload?.user) {
-    throw new Error('Audit login failed: missing user payload')
-  }
-  const setCookieHeaders = typeof response.headersArray === 'function'
-    ? response.headersArray().filter((header) => String(header.name || '').toLowerCase() === 'set-cookie').map((header) => header.value)
-    : [response.headers()['set-cookie'] || '']
-  const sessionCookieHeader = setCookieHeaders.find((header) => /(?:^|;\s*)bos_session=/i.test(String(header || '')))
-  const sessionCookieMatch = String(sessionCookieHeader || '').match(/(?:^|;\s*)(bos_session)=([^;]+)/i)
-  if (sessionCookieMatch) {
-    await context.addCookies([{
-      name: sessionCookieMatch[1],
-      value: sessionCookieMatch[2],
-      url: BASE_URL,
-      httpOnly: true,
-      sameSite: 'Lax',
-      secure: new URL(BASE_URL).protocol === 'https:',
-      expires: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-    }])
-  }
-  const userJson = JSON.stringify(payload.user)
-  const expiry = String(payload.sessionExpiresAt || (Date.now() + 24 * 60 * 60 * 1000))
-  await context.addInitScript(({ userJson: nextUserJson, expiry: nextExpiry, baseUrl }) => {
-    try {
-      window.sessionStorage.setItem('businessos_user', nextUserJson)
-      window.sessionStorage.setItem('businessos_user_expiry', nextExpiry)
-      window.localStorage.setItem('businessos_session_duration', 'session')
-      window.localStorage.setItem('businessos_sync_server', baseUrl)
-    } catch (_) {}
-  }, { userJson, expiry, baseUrl: BASE_URL })
+  const session = await loginWithFetch({
+    baseUrl: BASE_URL,
+    username: USERNAME,
+    password: PASSWORD,
+    timeoutMs: 20_000,
+  })
+  const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
   if (page) {
-    await page.evaluate(({ userJson: nextUserJson, expiry: nextExpiry, baseUrl }) => {
-      try {
-        window.sessionStorage.setItem('businessos_user', nextUserJson)
-        window.sessionStorage.setItem('businessos_user_expiry', nextExpiry)
-        window.localStorage.setItem('businessos_session_duration', 'session')
-        window.localStorage.setItem('businessos_sync_server', baseUrl)
-      } catch (_) {}
-    }, { userJson, expiry, baseUrl: BASE_URL }).catch(() => {})
+    await hydratePlaywrightPage(page, storageState)
   }
-  return { userJson, expiry }
+  return storageState
 }
 
 async function isLoginScreen(page) {
@@ -390,14 +315,7 @@ async function isLoginScreen(page) {
 
 async function ensureAuditLogin(page, authState = null) {
   if (authState?.userJson) {
-    await page.evaluate(({ userJson, expiry, baseUrl }) => {
-      try {
-        window.sessionStorage.setItem('businessos_user', userJson)
-        window.sessionStorage.setItem('businessos_user_expiry', expiry)
-        window.localStorage.setItem('businessos_session_duration', 'session')
-        window.localStorage.setItem('businessos_sync_server', baseUrl)
-      } catch (_) {}
-    }, { ...authState, baseUrl: BASE_URL }).catch(() => {})
+    await hydratePlaywrightPage(page, { ...authState, baseUrl: BASE_URL })
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
   }
 
@@ -431,12 +349,32 @@ async function ensureAuditLogin(page, authState = null) {
 
 async function installPerfObservers(page) {
   await page.addInitScript(() => {
+    const bosSelectorFor = (element) => {
+      if (!element || typeof element !== 'object' || !('nodeType' in element) || element.nodeType !== 1) return ''
+      const parts = []
+      let current = element
+      while (current && current.nodeType === 1 && parts.length < 4) {
+        const tag = String(current.tagName || '').toLowerCase()
+        if (!tag) break
+        const id = current.id ? `#${current.id}` : ''
+        const classNames = typeof current.className === 'string'
+          ? current.className.trim().split(/\s+/).filter(Boolean).slice(0, 4).map((value) => `.${value}`).join('')
+          : ''
+        parts.unshift(`${tag}${id}${classNames}`)
+        current = current.parentElement
+      }
+      return parts.join(' > ')
+    }
     window.__bosPerf = {
       longTasks: [],
       layoutShift: 0,
       layoutShifts: [],
       lcp: 0,
       lcpEntries: [],
+      lcpSelector: '',
+      shiftSourceSelector: '',
+      inp: 0,
+      inpEntries: [],
     }
     window.__bosResetPerf = () => {
       window.__bosPerf.longTasks = []
@@ -444,6 +382,10 @@ async function installPerfObservers(page) {
       window.__bosPerf.layoutShifts = []
       window.__bosPerf.lcp = 0
       window.__bosPerf.lcpEntries = []
+      window.__bosPerf.lcpSelector = ''
+      window.__bosPerf.shiftSourceSelector = ''
+      window.__bosPerf.inp = 0
+      window.__bosPerf.inpEntries = []
       try { performance.clearResourceTimings() } catch (_) {}
       try { performance.clearMarks() } catch (_) {}
       try { performance.clearMeasures() } catch (_) {}
@@ -468,6 +410,12 @@ async function installPerfObservers(page) {
             value: entry.value || 0,
             startTime: entry.startTime,
           })
+          const sourceNode = Array.isArray(entry.sources)
+            ? entry.sources.find((source) => source?.node instanceof Element)?.node
+            : null
+          if (sourceNode) {
+            window.__bosPerf.shiftSourceSelector = bosSelectorFor(sourceNode)
+          }
         }
       }).observe({ type: 'layout-shift', buffered: true })
     } catch (_) {}
@@ -480,8 +428,25 @@ async function installPerfObservers(page) {
             size: entry.size || 0,
             url: entry.url || '',
           })
+          window.__bosPerf.lcpSelector = bosSelectorFor(entry.element)
         }
       }).observe({ type: 'largest-contentful-paint', buffered: true })
+    } catch (_) {}
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const duration = Number(entry.duration || entry.processingEnd || 0)
+          if (duration <= 0) continue
+          if (duration >= window.__bosPerf.inp) {
+            window.__bosPerf.inp = duration
+          }
+          window.__bosPerf.inpEntries.push({
+            name: entry.name || '',
+            startTime: entry.startTime || 0,
+            duration,
+          })
+        }
+      }).observe({ type: 'event', buffered: true, durationThreshold: 16 })
     } catch (_) {}
   })
 }
@@ -829,27 +794,14 @@ async function clickTestIdButton(page, testId, routeName, { waitForProgress = fa
 
 async function runRouteInteractions(page, route) {
   const interactions = []
-  if (['products', 'inventory', 'pos', 'sales', 'returns', 'audit_log', 'files', 'contacts', 'backup'].includes(route.name)) {
+  if (route?.interactions?.search) {
     interactions.push(await performSearchInteraction(page, route.name))
   }
-  const buttonMap = {
-    products: ['Import', 'Export', 'Manage', 'Product'],
-    inventory: ['Filters'],
-    pos: ['Filters'],
-    sales: ['Filters'],
-    returns: ['Filters'],
-    audit_log: ['Filters', 'Export'],
-    backup: ['Refresh'],
-    files: ['Upload'],
-    contacts: ['Add'],
-  }
-  for (const label of buttonMap[route.name] || []) {
+  for (const label of route?.interactions?.primaryButtons || []) {
     interactions.push(await clickNamedButton(page, label, route.name))
   }
-  if (route.name === 'backup') {
-    interactions.push(await clickTestIdButton(page, 'backup-doctor-refresh', route.name))
-    interactions.push(await clickTestIdButton(page, 'backup-export-create', route.name, { waitForProgress: true }))
-    interactions.push(await clickTestIdButton(page, 'backup-drive-sync-now', route.name, { waitForProgress: true }))
+  for (const action of route?.interactions?.testIdButtons || []) {
+    interactions.push(await clickTestIdButton(page, action.testId, route.name, { waitForProgress: !!action.waitForProgress }))
   }
   return interactions
 }
@@ -965,14 +917,15 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
   const readyMs = await waitForRouteReady(page, route)
   await page.waitForTimeout(500)
   const screenshot = await saveScreenshot(page, `${profileName}-${route.name}-ready`)
+  const loadPerf = await collectPerfSnapshot(page)
   const interactions = authenticated ? await runRouteInteractions(page, route) : []
 
   if (route.name === 'public_catalog') {
     await page.mouse.wheel(0, 1200)
     const visibilityStarted = performance.now()
     await page.waitForTimeout(600)
-    const navVisibility = await page.evaluate(() => {
-      const labels = ['About', 'Products', 'Membership', 'FAQ', 'Beauty Assistant']
+    const pinnedNavLabels = route?.interactions?.pinnedNavLabels || ['About', 'Products', 'Membership', 'FAQ', 'Beauty Assistant']
+    const navVisibility = await page.evaluate((labels) => {
       return labels.map((label) => {
         const elements = Array.from(document.querySelectorAll('a,button,[role="tab"],[role="link"],nav *'))
         const match = elements.find((element) => (element.textContent || '').trim().includes(label))
@@ -992,6 +945,8 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
           bottom: Math.round(rect.bottom),
         }
       })
+    }, pinnedNavLabels).catch(() => {
+      return []
     })
     const visibleCount = navVisibility.filter((entry) => entry.visibleNearTop).length
     const navStillVisible = visibleCount >= 3
@@ -1010,7 +965,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
       })
     }
     const tabChecks = []
-    for (const label of ['About', 'Products', 'Membership', 'FAQ']) {
+    for (const label of route?.interactions?.tabs || ['About', 'Products', 'Membership', 'FAQ']) {
       const tab = page.getByRole('button', { name: new RegExp(escapeRegExp(label), 'i') }).first()
       const startedClick = performance.now()
       await tab.click({ timeout: BUTTON_RESPONSE_FAIL_MS }).catch((error) => {
@@ -1058,7 +1013,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     }
   }
 
-  const perf = await collectPerfSnapshot(page)
+  const postInteractionPerf = await collectPerfSnapshot(page)
   await page.context().tracing.stop({ path: tracePath }).catch(() => {})
   artifacts.traces.push(tracePath)
 
@@ -1094,7 +1049,8 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     readyMs,
     screenshot,
     interactions,
-    performance: perf,
+    performance: loadPerf,
+    postInteractionPerformance: postInteractionPerf,
     failedRequests,
   })
 
@@ -1106,7 +1062,7 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     readyMs,
     screenshot,
   }
-  analyzeRoute(profileName, route, routeResult, networkEntries, perf, consoleEntries, failedRequests, interactions)
+  analyzeRoute(profileName, route, routeResult, networkEntries, loadPerf, consoleEntries, failedRequests, interactions)
   return routeResult
 }
 
@@ -1120,15 +1076,16 @@ async function auditBrowserProfile(profile) {
   }
   try {
     const page = await context.newPage()
+    const authState = await loginForAudit(context, page)
     await installPerfObservers(page)
     collectors = await attachCollectors(page)
     await page.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await ensureAuditLogin(page)
+    await ensureAuditLogin(page, authState)
     await waitForRouteReady(page, ADMIN_ROUTES[0])
     await saveScreenshot(page, `${profile.name}-login-complete`)
 
     for (const route of ADMIN_ROUTES) {
-      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true))
+      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true, authState))
     }
     for (const route of PUBLIC_ROUTES) {
       profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, false))
@@ -1288,6 +1245,7 @@ async function main() {
   summary.audit.finishedAt = new Date().toISOString()
   summary.audit.durationMs = Math.round(new Date(summary.audit.finishedAt).getTime() - new Date(summary.audit.startedAt).getTime())
   summary.artifacts = { ...summary.artifacts, ...artifacts }
+  summary.artifacts.htmlReport = path.join(REPORT_DIR, 'summary.html')
   summary.audit.ok = !summary.findings.some(isFailingFinding)
 
   await writeJson('summary.json', summary)
@@ -1295,6 +1253,13 @@ async function main() {
   await writeJson('performance.json', performanceReport)
   await writeJson('console.json', consoleReport)
   await writeJson('artifacts.json', artifacts)
+  await writeDeepAuditHtmlReport({
+    reportDir: REPORT_DIR,
+    summary,
+    performanceReport,
+    networkReport,
+    consoleReport,
+  })
 
   console.log(JSON.stringify({
     ok: summary.audit.ok,
