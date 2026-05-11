@@ -6,8 +6,6 @@ import { BookUser, Download, Truck, Upload, Users, Warehouse } from 'lucide-reac
 import { useApp } from '../../AppContext'
 import { downloadZipFiles } from '../../utils/csv'
 import { CustomersTab } from './CustomersTab'
-import { SuppliersTab } from './SuppliersTab'
-import { DeliveryTab } from './DeliveryTab'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -20,6 +18,59 @@ const TABS = (t) => [
 ]
 
 const ContactImportModal = lazy(() => import('./ContactImportModal.jsx'))
+const loadSuppliersTab = () => import('./SuppliersTab.jsx')
+const loadDeliveryTab = () => import('./DeliveryTab.jsx')
+const SuppliersTab = lazy(() => loadSuppliersTab().then((module) => ({ default: module.SuppliersTab })))
+const DeliveryTab = lazy(() => loadDeliveryTab().then((module) => ({ default: module.DeliveryTab })))
+
+function ContactTabFallback({ t, label }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
+        <div className="mb-2 h-4 w-32 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {(typeof t === 'function' ? t('loading') : '') || 'Loading'} {label}...
+        </p>
+      </div>
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 md:block">
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/70">
+          <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="h-4 w-28 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="ml-auto h-9 w-24 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700" />
+        </div>
+        <div className="space-y-3 px-4 py-4">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={`contacts-tab-fallback-row-${index}`} className="grid grid-cols-[32px,1.2fr,1fr,1fr,1fr,32px] items-center gap-3">
+              <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-2 md:hidden">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={`contacts-tab-fallback-card-${index}`} className="rounded-xl border border-slate-200 bg-white/90 px-3 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-4 w-28 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="h-4 w-20 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              </div>
+              <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function ImportTypePicker({ onSelect, onClose, t }) {
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
@@ -68,6 +119,14 @@ export default function Contacts() {
   const [modal, setModal] = useState(null)
   const [importType, setImportType] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
+
+  const prefetchTab = (tabId) => {
+    if (tabId === 'suppliers') {
+      void loadSuppliersTab()
+    } else if (tabId === 'delivery') {
+      void loadDeliveryTab()
+    }
+  }
 
   const handleExportAll = async () => {
     try {
@@ -196,6 +255,8 @@ export default function Contacts() {
           <button
             key={id}
             onClick={() => setTab(id)}
+            onMouseEnter={() => prefetchTab(id)}
+            onFocus={() => prefetchTab(id)}
             className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors sm:px-5 ${
               tab === id
                 ? 'border-blue-600 text-blue-600'
@@ -209,8 +270,16 @@ export default function Contacts() {
       </div>
 
       {tab === 'customers' && <CustomersTab key={`c-${reloadKey}`} t={t} notify={notify} active={isActive} />}
-      {tab === 'suppliers' && <SuppliersTab key={`s-${reloadKey}`} t={t} notify={notify} active={isActive} />}
-      {tab === 'delivery' && <DeliveryTab key={`d-${reloadKey}`} t={t} notify={notify} active={isActive} />}
+      {tab === 'suppliers' ? (
+        <Suspense fallback={<ContactTabFallback t={t} label={t('suppliers') || 'suppliers'} />}>
+          <SuppliersTab key={`s-${reloadKey}`} t={t} notify={notify} active={isActive} />
+        </Suspense>
+      ) : null}
+      {tab === 'delivery' ? (
+        <Suspense fallback={<ContactTabFallback t={t} label={t('pos_delivery') || 'delivery'} />}>
+          <DeliveryTab key={`d-${reloadKey}`} t={t} notify={notify} active={isActive} />
+        </Suspense>
+      ) : null}
 
       {modal === 'pickImportType' ? (
         <ImportTypePicker onSelect={handleTypeSelected} onClose={() => setModal(null)} t={t} />
