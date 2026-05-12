@@ -202,6 +202,7 @@ function CustomersTab({ t, notify, active = true }) {
     })
   ), [contactFilterSections, t])
   const activeFilterCount = [yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'].filter(Boolean).length
+  const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
   const toggleSectionCollapsed = (sectionId) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -601,7 +602,12 @@ function CustomersTab({ t, notify, active = true }) {
       <ContactTable
         loading={loading}
         rows={displayRows}
-        emptyLabel={tr(t, 'no_customers', 'No customers')}
+        emptyLabel={
+          hasActiveCustomerSearchOrFilters
+            ? tr(t, 'no_matching_customers', 'No matching customers')
+            : tr(t, 'no_customers', 'No customers')
+        }
+        compactEmptyState={hasActiveCustomerSearchOrFilters}
         columns={customerColumns}
         selectAll={selectAllProp}
         selectedCount={selectedIds.size}

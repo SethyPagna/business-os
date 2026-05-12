@@ -172,6 +172,7 @@ export function ContactTable({
   loading,
   rows = [],
   emptyLabel = 'No records',
+  compactEmptyState = false,
   columns = [],
   selectAll,
   renderRow,
@@ -280,7 +281,13 @@ export function ContactTable({
 
   if (!rows.length) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
+      <div
+        className={
+          compactEmptyState
+            ? 'rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-4 text-center text-xs text-gray-500 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-gray-400'
+            : 'rounded-xl border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400'
+        }
+      >
         {emptyLabel}
       </div>
     )
