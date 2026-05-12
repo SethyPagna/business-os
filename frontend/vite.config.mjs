@@ -134,6 +134,9 @@ function manualChunks(id) {
     ) {
       return 'catalog-preview'
     }
+    if (normalized.includes('/src/utils/initials.mjs')) {
+      return 'initials-utils'
+    }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (
       normalized.includes('/src/utils/mediaUpload.js')

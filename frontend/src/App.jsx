@@ -77,6 +77,17 @@ const NARROW_PAGE_ENTRY_WARMUP_IDS = new Set([
   'backup',
 ])
 
+const DELAYED_CHUNK_WARMUP_PAGE_IDS = new Set([
+  'contacts',
+  'users',
+  'audit_log',
+  'receipt_settings',
+  'settings',
+  'files',
+  'server',
+  'backup',
+])
+
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
@@ -476,7 +487,7 @@ function useVisibilityRecovery() {
   }, [])
 }
 
-function useChunkWarmup(user) {
+function useChunkWarmup(user, activePageId) {
   // Only warm chunks after a user exists so public routes stay lightweight.
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
@@ -497,12 +508,13 @@ function useChunkWarmup(user) {
 
     const isSmallOrTouch = Number(window.innerWidth || 0) < 768
       || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
-    timeoutId = window.setTimeout(runWarmup, isSmallOrTouch ? 9000 : 6500)
+    const shouldDelayWarmup = DELAYED_CHUNK_WARMUP_PAGE_IDS.has(activePageId)
+    timeoutId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 6000 : 4500) : (isSmallOrTouch ? 9000 : 6500))
 
-    if ('requestIdleCallback' in window) {
+    if (!shouldDelayWarmup && 'requestIdleCallback' in window) {
       idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
     } else {
-      followupId = window.setTimeout(runWarmup, isSmallOrTouch ? 11000 : 8000)
+      followupId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 7000 : 5500) : (isSmallOrTouch ? 11000 : 8000))
     }
 
     return () => {
@@ -517,7 +529,7 @@ function useChunkWarmup(user) {
         window.clearTimeout(followupId)
       }
     }
-  }, [user])
+  }, [activePageId, user])
 }
 
 function useDataWarmup(user, canAccessPage) {
@@ -1026,7 +1038,7 @@ export default function App() {
   const mountedPages = useMountedPages(page)
 
   useVisibilityRecovery()
-  useChunkWarmup(authReady ? user : null)
+  useChunkWarmup(authReady ? user : null, page)
   useDataWarmup(authReady ? user : null, canAccessPage)
   usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
 
