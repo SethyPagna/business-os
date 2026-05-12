@@ -708,7 +708,7 @@ export default function Sales() {
         />
       </div>
 
-      <ActionHistoryBar history={actionHistory} className="mb-3" />
+      <ActionHistoryBar history={actionHistory} className="mb-3" summaryMode="compact" />
 
       {selectedSales.length > 0 ? (
         <div className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/95 px-2.5 py-2 text-sm shadow-sm backdrop-blur dark:border-blue-900/40 dark:bg-blue-900/30">
