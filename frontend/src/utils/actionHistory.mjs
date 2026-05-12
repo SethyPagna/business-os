@@ -14,7 +14,7 @@ function normalizeEntry(entry = {}, index = 0) {
   }
 }
 
-export function useActionHistory({ limit = 10, notify, scope = 'global' } = {}) {
+export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true } = {}) {
   const { user } = useApp()
   const [undoStack, setUndoStack] = useState([])
   const [redoStack, setRedoStack] = useState([])
@@ -47,15 +47,17 @@ export function useActionHistory({ limit = 10, notify, scope = 'global' } = {}) 
   }, [isAdmin, limit, scope, userFilter])
 
   useEffect(() => {
+    if (!enabled) return
     refreshServerItems()
-  }, [refreshServerItems])
+  }, [enabled, refreshServerItems])
 
   useEffect(() => {
+    if (!enabled) return
     if (!isAdmin || typeof window === 'undefined' || !window.api?.getUsers) return
     window.api.getUsers()
       .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
       .catch(() => setUserOptions([]))
-  }, [isAdmin])
+  }, [enabled, isAdmin])
 
   const pushAction = useCallback((entry) => {
     const nextEntry = normalizeEntry(entry)

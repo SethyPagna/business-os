@@ -58,7 +58,7 @@ export default function ActionHistoryBar({
           <History className="h-3.5 w-3.5 text-slate-400" />
           <span className="hidden sm:inline">{T('history', 'History')}</span>
         </button>
-        {history.isAdmin && Array.isArray(history.userOptions) && history.userOptions.length ? (
+        {history.isAdmin ? (
           <select
             className="max-w-[7.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 sm:max-w-32"
             value={history.userFilter || 'all'}
@@ -66,7 +66,7 @@ export default function ActionHistoryBar({
             title={T('filter_by_user', 'Filter by user')}
           >
             <option value="all">{T('all_users', 'All users')}</option>
-            {history.userOptions.map((option) => (
+            {(Array.isArray(history.userOptions) ? history.userOptions : []).map((option) => (
               <option key={option.id} value={option.id}>{option.name || option.username || `User ${option.id}`}</option>
             ))}
           </select>

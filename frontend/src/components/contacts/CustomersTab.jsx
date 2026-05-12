@@ -65,10 +65,11 @@ function CustomersTab({ t, notify, active = true }) {
   const [sortDirection, setSortDirection] = useState('desc')
   const [groupMode, setGroupMode] = useState('time')
   const [collapsedSections, setCollapsedSections] = useState(() => new Set())
+  const [historyReady, setHistoryReady] = useState(false)
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
   const customerFilters = useMemo(() => ({
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
@@ -322,6 +323,18 @@ function CustomersTab({ t, notify, active = true }) {
   useEffect(() => {
     setCustomerPage(1)
   }, [customerFilters])
+
+  useEffect(() => {
+    if (!active) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [active, loading])
 
   useEffect(() => {
     if (!active) {
