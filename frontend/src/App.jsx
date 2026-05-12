@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Bell } from 'lucide-react'
 import { useApp } from './AppContext'
-import { getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
+import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.mjs'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.mjs'
 import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
@@ -64,6 +64,18 @@ const ADMIN_PAGE_SEQUENCE = [
   'server',
   'backup',
 ]
+
+const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 1
+const NARROW_PAGE_ENTRY_WARMUP_IDS = new Set([
+  'contacts',
+  'users',
+  'audit_log',
+  'receipt_settings',
+  'settings',
+  'files',
+  'server',
+  'backup',
+])
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
@@ -545,9 +557,11 @@ function useDataWarmup(user, canAccessPage) {
 }
 
 function usePageEntryWarmup(user, activePageId, canAccessPage) {
-  // When the user enters the later admin stack, immediately warm the current
-  // page and the remaining pages in that sequence. This closes the gap between
-  // "first app login" warmup and "I navigated here much later" cold starts.
+  // When the user enters the later admin stack, narrow the warmup only for the
+  // heavier late-stack pages. Warming the whole remaining admin sequence was
+  // pulling a lot of unrelated route code into the same first visit on pages
+  // like Contacts, but the earlier pages can still benefit from broader
+  // warmup without paying that specific penalty.
   useEffect(() => {
     if (!user || !ADMIN_PAGE_SEQUENCE.includes(activePageId) || typeof window === 'undefined') return undefined
     if (!shouldWarmPageEntries({
@@ -561,15 +575,18 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
     let idleId = null
     let timerId = null
     const currentIndex = ADMIN_PAGE_SEQUENCE.indexOf(activePageId)
-    const remainingPageIds = ADMIN_PAGE_SEQUENCE.slice(currentIndex)
-    const importerLoaders = remainingPageIds
+    const shouldNarrowWarmup = NARROW_PAGE_ENTRY_WARMUP_IDS.has(activePageId)
+    const upcomingPageIds = shouldNarrowWarmup
+      ? ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1, currentIndex + 1 + PAGE_ENTRY_WARMUP_AHEAD_COUNT)
+      : ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1)
+    const importerLoaders = upcomingPageIds
       .map((pageId) => {
         const importer = PAGE_IMPORTERS[pageId]
         if (!importer) return null
         return () => importWithTimeout(importer, pageId).catch(() => null)
       })
       .filter(Boolean)
-    const dataLoaders = remainingPageIds.flatMap((pageId) => getPageEntryWarmupLoaders(pageId, canAccessPage))
+    const dataLoaders = upcomingPageIds.flatMap((pageId) => getPageEntryWarmupLoaders(pageId, canAccessPage))
 
     const run = async () => {
       if (cancelled) return
@@ -579,7 +596,9 @@ function usePageEntryWarmup(user, activePageId, canAccessPage) {
       ])
     }
 
-    if ('requestIdleCallback' in window) {
+    if (shouldNarrowWarmup) {
+      timerId = window.setTimeout(run, 3600)
+    } else if ('requestIdleCallback' in window) {
       idleId = window.requestIdleCallback(run, { timeout: 2500 })
     } else {
       timerId = window.setTimeout(run, 1800)
@@ -733,6 +752,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const { t } = useApp()
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
+  const [showVerboseMessage, setShowVerboseMessage] = useState(false)
   const wasOfflineRef = useRef(false)
 
   useEffect(() => {
@@ -754,7 +774,6 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   }, [canWriteToServer, syncUrl])
 
   const offline = !!syncUrl && !canWriteToServer
-  if (!offline && !total && !showRecovered && !vaultLocked && !appUpdate && !conflictsNeedReview) return null
   const syncing = Number(pendingSync?.syncing || 0)
   const failed = Number(pendingSync?.failed || 0)
   const ready = !!syncUrl && canWriteToServer
@@ -769,12 +788,12 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
       : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
   const priority = appUpdate
-    ? { title: 'New version ready', message: 'Update available', tone: 'info' }
-    : conflictsNeedReview
-      ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
-      : vaultLocked
-        ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
-        : null
+    ? { title: 'Update ready', message: 'Tap update now', tone: 'info' }
+      : conflictsNeedReview
+        ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
+        : vaultLocked
+          ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
+          : null
   const toneClass = priority?.tone === 'danger'
     ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200'
     : priority?.tone === 'info'
@@ -782,42 +801,97 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
       : ready
         ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
         : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+  const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
+  const message = priority?.message || `${label}${statusSuffix}`
+  const compactAppUpdate = !!appUpdate && !offline && !total && !vaultLocked && !conflictsNeedReview
+  const shouldShowVerboseImmediately = (!!priority && !compactAppUpdate) || total > 0 || offline
+
+  useEffect(() => {
+    if (compactAppUpdate) {
+      setShowVerboseMessage(false)
+      return undefined
+    }
+    if (!offline && !ready && !priority && !showRecovered) {
+      setShowVerboseMessage(false)
+      return undefined
+    }
+    if (shouldShowVerboseImmediately) {
+      setShowVerboseMessage(true)
+      return undefined
+    }
+    setShowVerboseMessage(false)
+    const timer = window.setTimeout(() => setShowVerboseMessage(true), 1400)
+    return () => window.clearTimeout(timer)
+  }, [offline, ready, priority, showRecovered, shouldShowVerboseImmediately])
+
+  if (!offline && !total && !showRecovered && !vaultLocked && !appUpdate && !conflictsNeedReview) return null
+
   return (
-    <div className={`border-b px-4 py-2 text-xs ${toneClass}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="min-w-0">
-          <strong>{priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')}</strong>
-          <span className="ml-2">{priority?.message || `${label}${statusSuffix}`}</span>
-          {total ? (
-            <span className="ml-2 opacity-75">
-              {total} {t('pending') || 'pending'}{syncing ? `, ${syncing} ${t('syncing') || 'syncing'}` : ''}{failed ? `, ${failed} ${t('failed') || 'failed'}` : ''}{oldest ? `, since ${oldest}` : ''}
-            </span>
-          ) : null}
-        </span>
-        {appUpdate ? (
-          <span className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded-full border border-current px-3 py-1 font-semibold"
-              onClick={onUpdateNow}
-            >
-              Update now
-            </button>
-            <button type="button" className="rounded-full px-3 py-1 opacity-75 hover:opacity-100" onClick={onDismissUpdate}>
-              Later
-            </button>
-          </span>
-        ) : null}
-        {total ? (
-          <button
-            type="button"
-            className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!ready}
-            onClick={() => window.api?.retryPendingSyncNow?.().catch(() => {})}
-          >
-            {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
-          </button>
-        ) : null}
+    <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${compactAppUpdate ? 'w-[min(calc(100vw-1rem),34rem)]' : showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
+      <div className={`pointer-events-auto rounded-2xl border ${compactAppUpdate ? 'px-3 py-1.5' : 'px-3 py-2'} text-xs shadow-lg backdrop-blur-sm ${toneClass}`}>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <strong className="shrink-0">{title}</strong>
+              {compactAppUpdate ? (
+                <span className="text-[11px] opacity-80">{message}</span>
+              ) : !showVerboseMessage ? (
+                <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-medium opacity-80">
+                  {ready ? (t('status_ready') || 'Ready') : (t('status_active') || 'Active')}
+                </span>
+              ) : null}
+            </div>
+            {showVerboseMessage ? (
+              <div className="mt-1 text-[11px] leading-4 opacity-90">
+                {message}
+              </div>
+            ) : null}
+            {total ? (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 opacity-80">
+                <span className="rounded-full border border-current/20 px-2 py-0.5">
+                  {total} {t('pending') || 'pending'}
+                </span>
+                {syncing ? (
+                  <span className="rounded-full border border-current/20 px-2 py-0.5">
+                    {syncing} {t('syncing') || 'syncing'}
+                  </span>
+                ) : null}
+                {failed ? (
+                  <span className="rounded-full border border-current/20 px-2 py-0.5">
+                    {failed} {t('failed') || 'failed'}
+                  </span>
+                ) : null}
+                {oldest ? <span className="truncate">since {oldest}</span> : null}
+              </div>
+            ) : null}
+          </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {appUpdate ? (
+                <>
+                  <button
+                    type="button"
+                    className={`rounded-full border border-current font-semibold ${compactAppUpdate ? 'px-2.5 py-0.5 text-[11px]' : 'px-3 py-1'}`}
+                    onClick={onUpdateNow}
+                  >
+                    Update now
+                  </button>
+                  <button type="button" className={`rounded-full opacity-75 hover:opacity-100 ${compactAppUpdate ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1'}`} onClick={onDismissUpdate}>
+                    Later
+                  </button>
+                </>
+            ) : null}
+            {total ? (
+              <button
+                type="button"
+                className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!ready}
+                onClick={() => window.api?.retryPendingSyncNow?.().catch(() => {})}
+              >
+                {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -925,6 +999,7 @@ export default function App() {
     canAccessPage,
     AccessDenied,
     setPage,
+    navigateTo,
     settings,
     writeConflict,
     dismissWriteConflict,
@@ -1013,9 +1088,22 @@ export default function App() {
     }
   }, [notify, t, user])
 
+  const [, setLocationVersion] = useState(0)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleLocationChange = () => setLocationVersion((value) => value + 1)
+    window.addEventListener('popstate', handleLocationChange)
+    window.addEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange)
+      window.removeEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
+    }
+  }, [])
+
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
-  const requestedAdminPage = getAdminPageFromPath(pathname)
+  const requestedAdminPage = pathname === '/' ? 'dashboard' : getAdminPageFromPath(pathname)
 
   useEffect(() => {
     if (!user || !requestedAdminPage || requestedAdminPage === page) return
@@ -1086,10 +1174,6 @@ export default function App() {
     return <PublicCatalogView />
   }
 
-  if (!user) {
-    return <Login />
-  }
-
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -1099,6 +1183,10 @@ export default function App() {
         </div>
       </div>
     )
+  }
+
+  if (!user) {
+    return <Login />
   }
 
   return (
@@ -1127,7 +1215,7 @@ export default function App() {
             </div>
             <button
               type="button"
-              onClick={() => setPage('server')}
+              onClick={() => navigateTo('server')}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
             >
               <span>{t('sync_server_title') || 'Sync Server'}</span>
@@ -1192,7 +1280,7 @@ export default function App() {
         onDismiss={clearSyncError}
         onGoToServer={() => {
           clearSyncError()
-          setPage('server')
+          navigateTo('server')
         }}
       />
     </div>
