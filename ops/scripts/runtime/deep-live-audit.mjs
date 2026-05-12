@@ -979,6 +979,12 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
   const screenshot = await saveScreenshot(page, `${profileName}-${route.name}-ready`)
   const loadPerf = await collectPerfSnapshot(page)
   const interactions = authenticated ? await runRouteInteractions(page, route) : []
+  if (route?.postInteractionWaitUntil === 'networkidle') {
+    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+  }
+  if (Number(route?.postInteractionSettleMs || 0) > 0) {
+    await page.waitForTimeout(Number(route.postInteractionSettleMs))
+  }
 
   if (route.name === 'public_catalog') {
     await page.mouse.wheel(0, 1200)

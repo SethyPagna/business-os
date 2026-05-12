@@ -96,6 +96,7 @@ export const ROUTE_MANIFEST = [
     path: '/files',
     ready: ['Library', 'Files', 'Upload'],
     criticalApis: ['/api/files?mediaType=all'],
+    postInteractionWaitUntil: 'networkidle',
     interactions: {
       search: true,
       // Upload opens an OS/file-picker style flow that contaminates subsequent
