@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, lazy, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
@@ -43,6 +43,7 @@ export default function Sales() {
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState([])
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState([])
@@ -70,6 +71,7 @@ export default function Sales() {
   const membershipActionRef = useRef(new Set())
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify })
+  const deferredSearch = useDeferredValue(search)
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
@@ -132,7 +134,7 @@ export default function Sales() {
         const params = {
           ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
           ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
-          ...(search.trim() ? { search: search.trim() } : {}),
+          ...(debouncedSearch ? { search: debouncedSearch } : {}),
           ...salesDateRange,
         }
         const result = await withLoaderTimeout(() => window.api.getSales(params), 'Sales', 20000)
@@ -162,7 +164,14 @@ export default function Sales() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [isAdmin, salesDateRange, search, statusFilter, translateOr, userFilter])
+  }, [debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   useEffect(() => {
     if (!isActive) {
@@ -313,7 +322,7 @@ export default function Sales() {
     [sales],
   )
 
-  const searchTerms = useMemo(() => search.trim().split(/\s+/).filter(Boolean), [search])
+  const searchTerms = useMemo(() => deferredSearch.trim().split(/\s+/).filter(Boolean), [deferredSearch])
   const filtered = useMemo(() => sales.filter((sale) => {
     if (statusFilter !== 'all' && (sale.sale_status || 'completed') !== statusFilter) return false
     if (!searchTerms.length) return true
