@@ -29,6 +29,26 @@ const ADMIN_ROUTE_PAGE_BY_SEGMENT = new Map([
   ['server', 'server'],
 ])
 const ADMIN_AUTH_ROUTE_SEGMENTS = new Set(['login', 'admin', 'app'])
+export const APP_NAVIGATION_EVENT = 'bos:navigation'
+const ADMIN_PATH_BY_PAGE = new Map([
+  ['dashboard', '/'],
+  ['products', '/products'],
+  ['pos', '/pos'],
+  ['inventory', '/inventory'],
+  ['sales', '/sales'],
+  ['returns', '/returns'],
+  ['branches', '/branches'],
+  ['contacts', '/contacts'],
+  ['catalog', '/catalog'],
+  ['loyalty_points', '/loyalty-points'],
+  ['users', '/users'],
+  ['audit_log', '/audit-log'],
+  ['receipt_settings', '/receipt-settings'],
+  ['backup', '/backup'],
+  ['settings', '/settings'],
+  ['files', '/files'],
+  ['server', '/server'],
+])
 
 // Keep a small working set of pages mounted so tab switches still feel quick
 // without letting the shell drag around every hidden page forever.
@@ -52,6 +72,10 @@ export function getAdminPageFromPath(pathname) {
   if (value === '/') return ''
   const segment = value.split('/').filter(Boolean)[0] || ''
   return ADMIN_ROUTE_PAGE_BY_SEGMENT.get(segment) || ''
+}
+
+export function getAdminPathForPage(pageId) {
+  return ADMIN_PATH_BY_PAGE.get(String(pageId || '').trim()) || '/'
 }
 
 export function isAdminAppPath(pathname) {

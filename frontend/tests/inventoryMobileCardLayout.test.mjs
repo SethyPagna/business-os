@@ -29,7 +29,7 @@ assert.match(
 
 assert.match(
   inventoryProductsSource,
-  /className="truncate text-sm font-semibold leading-tight text-gray-900 dark:text-white"/,
+  /className="truncate text-\[13px\] font-semibold leading-\[1\.05rem\] text-gray-900 dark:text-white"/,
   'Mobile inventory card should ellipsize long product names instead of letting them collide with stock controls',
 )
 

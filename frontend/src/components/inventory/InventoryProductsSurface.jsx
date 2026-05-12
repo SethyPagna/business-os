@@ -113,7 +113,7 @@ export default function InventoryProductsSurface({
                         <div key={p.id} className="card cursor-pointer px-3 py-2.5" onClick={() => setDetailProduct(p)}>
                           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                             <div className="min-w-0">
-                              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
+                              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5">
                                 <input
                                   type="checkbox"
                                   className="mt-0.5 h-4 w-4 rounded"
@@ -126,7 +126,7 @@ export default function InventoryProductsSurface({
                                   aria-label={`${t('select') || 'Select'} ${p.name}`}
                                 />
                                 <div className="min-w-0 pr-0.5">
-                                  <div className="truncate text-sm font-semibold leading-tight text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
+                                  <div className="truncate text-[13px] font-semibold leading-[1.05rem] text-gray-900 dark:text-white" title={p.name}>{p.name}</div>
                                 </div>
                               </div>
                               <div className="mt-1 min-w-0 truncate pl-6 text-[10px] leading-3.5 text-gray-500 dark:text-gray-300" title={productTagText}>
