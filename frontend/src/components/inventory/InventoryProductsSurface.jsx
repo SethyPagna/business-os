@@ -86,14 +86,12 @@ export default function InventoryProductsSurface({
                             />
                             <button type="button" className="min-w-0 text-left" onClick={() => toggleInventoryGroup(group.key)}>
                               <div className="flex items-center gap-1.5">
-                                {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
+                                {groupCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
+                                <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-white">{group.name}</span>
+                                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{group.items.length}</span>
                               </div>
-                              <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
-                                {getInventoryGroupSummaryParts(group, { includeCount: false }).map((part) => (
-                                  <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{part}</span>
-                                ))}
+                              <div className="mt-0.5 truncate pl-[1.15rem] text-[10px] text-slate-500 dark:text-slate-300">
+                                {getInventoryGroupSummaryParts(group, { includeCount: false }).join(' | ')}
                               </div>
                             </button>
                           </label>
