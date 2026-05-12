@@ -169,6 +169,8 @@ export default function AuditLog() {
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+  const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
+  const [initialMobileRevealReady, setInitialMobileRevealReady] = useState(false)
   const [detailLog, setDetailLog] = useState(null)
   const [error, setError] = useState(null)
   const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
@@ -222,12 +224,15 @@ export default function AuditLog() {
   const copy = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const override = auditFallbacks[key]
     if (override && typeof override === 'object') {
-      return isKhmer ? override.km : override.en
+      if (isKhmer && override.km && !isBrokenLocalizedString(override.km)) return override.km
+      if (override.en && !isBrokenLocalizedString(override.en)) return override.en
+      return key
     }
-    if (isKhmer && typeof override === 'string') return override
+    if (isKhmer && typeof override === 'string' && !isBrokenLocalizedString(override)) return override
     const value = t(key)
     if (value && value !== key && !isBrokenLocalizedString(value)) return value
-    return isKhmer ? fallbackKm : fallbackEn
+    if (isKhmer && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+    return isBrokenLocalizedString(fallbackEn) ? key : fallbackEn
   }, [auditFallbacks, isKhmer, t])
 
   const actionLabel = useCallback((action) => {
@@ -408,11 +413,58 @@ export default function AuditLog() {
     sortDirection,
   }), [actionLabel, groupMode, monthFilter, orderedLogs, sortDirection, timeMode, yearFilter])
   const showActionGroups = groupMode === 'time+action'
+  const isInitialDesktopLoad = loading && !hasLoadedOnce
+  const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
   const visibleLogs = useMemo(
     () => groupedSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
     [groupedSections],
   )
+  const showMobileLoadingOverlay = hasLoadedOnce && visibleLogs.length > 0 && (!initialMobileRevealReady || loading)
+
+  useEffect(() => {
+    if (initialDesktopRevealReady || loading) return
+    if (!visibleLogs.length || error) {
+      setInitialDesktopRevealReady(true)
+      return
+    }
+    let cancelled = false
+    let nestedFrame = null
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) setInitialDesktopRevealReady(true)
+      })
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
+    }
+  }, [error, initialDesktopRevealReady, loading, visibleLogs.length])
+
+  useEffect(() => {
+    if (loading) {
+      setInitialMobileRevealReady(false)
+      return
+    }
+    if (initialMobileRevealReady) return
+    if (!visibleLogs.length || error) {
+      setInitialMobileRevealReady(true)
+      return
+    }
+    let cancelled = false
+    let nestedFrame = null
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) setInitialMobileRevealReady(true)
+      })
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
+    }
+  }, [error, initialMobileRevealReady, loading, visibleLogs.length])
 
   useEffect(() => {
     const validIds = new Set(visibleLogs.map((log) => Number(log.id)).filter((id) => Number.isFinite(id)))
@@ -494,6 +546,18 @@ export default function AuditLog() {
       Summary: readableSummary(log) || '',
     })))
   }, [actionLabel])
+  const desktopColGroup = (
+    <colgroup>
+      <col className="w-10" />
+      <col className="w-24" />
+      <col className="w-28" />
+      <col className="w-28" />
+      <col className="w-24" />
+      <col className="w-44" />
+      <col className="w-[26%]" />
+      <col className="w-36" />
+    </colgroup>
+  )
 
   const exportItems = useMemo(() => ([
     { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
@@ -624,7 +688,7 @@ export default function AuditLog() {
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2 sm:flex-nowrap">
         <label htmlFor="audit-log-search" className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
@@ -663,22 +727,34 @@ export default function AuditLog() {
         </div>
       ) : null}
 
-      <p className="mb-3 text-xs text-gray-400">{t('audit_log_desc') || 'Click a row to see full details.'}</p>
+      <p className="mb-2 text-xs leading-5 text-gray-400">{t('audit_log_desc') || 'Click a row to see full details.'}</p>
 
-      <PaginationControls
-        className="mb-3"
-        page={page}
-        pageSize={pageSize}
-        totalItems={totalLogs}
-        label={copy('entries', 'entries', 'កំណត់ត្រា')}
-        t={t}
-        pageSizeOptions={[20, 50, 100, 200]}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPageSize(size)
-          setPage(1)
-        }}
-      />
+      <div className="mb-2 min-h-[3.25rem]">
+        {loading && !hasLoadedOnce ? (
+          <div className="flex h-14 animate-pulse items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="h-3 w-40 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
+              <div className="h-8 w-28 rounded-lg bg-slate-200 dark:bg-slate-700" />
+            </div>
+          </div>
+        ) : (
+          <PaginationControls
+            className="mb-0"
+            page={page}
+            pageSize={pageSize}
+            totalItems={totalLogs}
+            label={copy('entries', 'entries', 'កំណត់ត្រា')}
+            t={t}
+            pageSizeOptions={[20, 50, 100, 200]}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size)
+              setPage(1)
+            }}
+          />
+        )}
+      </div>
 
       {error ? (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
@@ -696,8 +772,9 @@ export default function AuditLog() {
       ) : null}
 
       <div className="card hidden flex-col overflow-hidden sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem]">
-        <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[860px] text-sm table-bordered">
+        <div className="relative min-h-0 flex-1 overflow-auto px-2 pt-2.5">
+          <table className="w-full min-w-[860px] table-fixed text-sm table-bordered">
+            {desktopColGroup}
             <thead className="sticky top-0 z-10">
               <tr>
                 <th className="w-10 px-3 py-3">
@@ -719,21 +796,8 @@ export default function AuditLog() {
                 <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('time') || 'Time'}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-              {loading && !hasLoadedOnce ? (
-                skeletonRows.map((row) => (
-                  <tr key={`audit-skeleton-${row}`} className="animate-pulse">
-                    <td className="px-3 py-3"><div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-40 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="px-3 py-3"><div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                  </tr>
-                ))
-              ) : !hasLoadedOnce ? (
+            <tbody className={`divide-y divide-gray-100 dark:divide-gray-700/50 ${showDesktopLoadingOverlay ? 'invisible' : ''}`}>
+              {!hasLoadedOnce ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
               ) : visibleLogs.length === 0 ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
@@ -741,10 +805,10 @@ export default function AuditLog() {
                 const isCollapsed = collapsedSections.has(section.id)
                 return (
                 <Fragment key={section.id}>
-                  <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                  <tr className="bg-transparent">
                     <td colSpan={8} className="px-4 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/90 bg-slate-50/95 px-3 py-2 text-xs shadow-sm dark:border-slate-700/80 dark:bg-slate-800/70">
+                        <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                           <input
                             type="checkbox"
                             className="h-4 w-4 rounded"
@@ -755,13 +819,12 @@ export default function AuditLog() {
                             onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
                             aria-label={`Select ${section.label}`}
                           />
-                          <span>{section.label}</span>
+                          <span className="truncate">{section.label}</span>
                         </label>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400">{section.ids.length}</span>
-                          <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm dark:bg-slate-900/80 dark:text-slate-300">{section.ids.length}</span>
+                          <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-white/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)} aria-label={isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}>
                             {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                            {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
                           </button>
                         </div>
                       </div>
@@ -770,9 +833,9 @@ export default function AuditLog() {
                   {!isCollapsed ? section.groups.map((group) => (
                     <Fragment key={group.id}>
                       {showActionGroups ? (
-                        <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                          <td colSpan={8} className="px-6 py-2">
-                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <tr className="bg-transparent">
+                          <td colSpan={8} className="px-6 py-1.5">
+                            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-xs dark:bg-slate-900/25">
                               <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
                                 <input
                                   type="checkbox"
@@ -786,7 +849,7 @@ export default function AuditLog() {
                                 />
                                 <span>{group.label}</span>
                               </label>
-                              <span className="text-slate-400">{group.items.length}</span>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">{group.items.length}</span>
                             </div>
                           </td>
                         </tr>
@@ -836,13 +899,50 @@ export default function AuditLog() {
               )})}
             </tbody>
           </table>
+          {showDesktopLoadingOverlay ? (
+            <div className="pointer-events-none absolute inset-x-0 top-[3.125rem] bottom-0 z-20 overflow-hidden border-t border-slate-200/80 bg-white/80 backdrop-blur-[1px] dark:border-slate-700/80 dark:bg-slate-950/78">
+              <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
+                <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+                    </div>
+                    <div className="h-7 w-20 rounded-lg bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                </div>
+                <div className="mt-4 space-y-4">
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <div key={`audit-shell-${index}`} className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-4 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+                            <div className="h-5 w-20 rounded-full bg-slate-100 dark:bg-slate-800" />
+                            <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800" />
+                          </div>
+                          <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800" />
+                          <div className="grid grid-cols-[1.2fr_0.9fr_1.3fr] gap-3">
+                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                          </div>
+                        </div>
+                        <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
           <span>{visibleLogs.length} / {totalLogs || visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
         </div>
       </div>
 
-      <div className="min-h-[32rem] space-y-2 sm:hidden">
+      <div className="relative min-h-[32rem] space-y-2 sm:hidden">
         {loading && !hasLoadedOnce ? (
           <div className="space-y-2">
             {skeletonRows.slice(0, 6).map((row) => (
@@ -862,7 +962,7 @@ export default function AuditLog() {
         ) : groupedSections.map((section) => {
           const isCollapsed = collapsedSections.has(section.id)
           return (
-          <div key={section.id} className="space-y-2">
+          <div key={section.id} className={`space-y-2 ${showMobileLoadingOverlay ? 'invisible' : ''}`}>
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
               <div className="flex items-center justify-between gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
@@ -942,6 +1042,21 @@ export default function AuditLog() {
             )) : null}
           </div>
         )})}
+        {showMobileLoadingOverlay ? (
+          <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-2xl bg-white/88 px-1 py-0.5 backdrop-blur-[1px] dark:bg-slate-950/80">
+            <div className="space-y-2">
+              {skeletonRows.slice(0, 4).map((row) => (
+                <div key={`audit-mobile-overlay-${row}`} className="card animate-pulse p-3">
+                  <div className="space-y-2">
+                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-2/3 rounded bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {detailLog ? (
