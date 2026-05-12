@@ -2754,14 +2754,6 @@ export default function Inventory() {
       </div>
       ) : null}
 
-      {search.trim() && showProductsSection && (
-        <p className="text-[10px] text-gray-400 mb-1">
-          {t('inventory_and_or_tip')||'Comma separates terms. AND requires all terms, OR requires any term.'} -{' '}
-          <span className="font-mono bg-gray-100 dark:bg-gray-700 px-1 rounded">cola, water</span>
-          {' '}{t('search_example_finds')||'Example: AND finds items matching both terms, OR finds either term.'}
-        </p>
-      )}
-
       {showInventorySections && !showProductsSection ? (
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'products'
