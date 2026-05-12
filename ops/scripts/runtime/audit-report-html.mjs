@@ -48,7 +48,12 @@ function inferHotPath(routeEntry) {
   const longTaskCount = Number(routeEntry.longTaskCount || 0)
   const interactionMs = Number(routeEntry.maxInteractionMs || 0)
   const jsBytes = Number(routeEntry.scriptBytes || 0)
+  const directHtmlMs = Number(routeEntry.directHtmlMs || 0)
+  const documentRequestMs = Number(routeEntry.documentRequestMs || 0)
   if (apiMaxMs >= Math.max(1200, readyMs * 0.45)) return 'server/API latency'
+  if (directHtmlMs > 0 && documentRequestMs > 0 && documentRequestMs >= directHtmlMs * 4 && lcpMs >= 1200) {
+    return 'auth/bootstrap or navigation churn'
+  }
   if (jsBytes >= 220 * 1024) return 'chunk/load cost'
   if (longTaskCount >= 2 || interactionMs >= 250) return 'render or interaction churn'
   if (Number(routeEntry.cls || 0) >= 0.08) return 'post-render layout churn'
@@ -117,6 +122,12 @@ export async function writeDeepAuditHtmlReport({
       path: entry.path,
       readyMs: entry.readyMs,
       domContentLoadedMs: entry.domContentLoadedMs,
+      directHtmlMs: entry.fullAuditRouteMs,
+      documentRequestMs: entry.documentRequestMs,
+      documentDeltaMs: entry.documentRequestMs && entry.fullAuditRouteMs
+        ? Math.max(0, Number(entry.documentRequestMs) - Number(entry.fullAuditRouteMs))
+        : 0,
+      documentCacheStatus: entry.documentCacheStatus,
       lcpMs: metrics.lcp,
       cls: metrics.layoutShift,
       inpMs: metrics.inp,
@@ -146,6 +157,10 @@ export async function writeDeepAuditHtmlReport({
       <td>${escapeHtml(row.route)}</td>
       <td>${escapeHtml(row.path)}</td>
       <td>${escapeHtml(formatMs(row.domContentLoadedMs))}</td>
+      <td>${escapeHtml(formatMs(row.directHtmlMs))}</td>
+      <td>${escapeHtml(formatMs(row.documentRequestMs))}</td>
+      <td>${escapeHtml(formatMs(row.documentDeltaMs))}</td>
+      <td>${escapeHtml(row.documentCacheStatus || '')}</td>
       <td>${escapeHtml(formatMs(row.readyMs))}</td>
       <td>${escapeHtml(formatMs(row.lcpMs))}</td>
       <td>${escapeHtml(formatCls(row.cls))}</td>
@@ -190,7 +205,7 @@ export async function writeDeepAuditHtmlReport({
   <table>
     <thead>
       <tr>
-        <th>Profile</th><th>Route</th><th>Path</th><th>DCL</th><th>Ready</th><th>Load LCP</th><th>Load CLS</th><th>Load INP</th>
+        <th>Profile</th><th>Route</th><th>Path</th><th>DCL</th><th>Direct HTML</th><th>Browser Doc</th><th>Doc Delta</th><th>Doc Cache</th><th>Ready</th><th>Load LCP</th><th>Load CLS</th><th>Load INP</th>
         <th>Post LCP</th><th>Post CLS</th><th>Post INP</th><th>Max API</th><th>Max Interaction</th><th>Long Tasks</th><th>Script Bytes</th><th>Load LCP Selector</th><th>Load Shift Selector</th><th>Post LCP Selector</th><th>Post Shift Selector</th><th>Hot Path</th><th>Artifact</th>
       </tr>
     </thead>

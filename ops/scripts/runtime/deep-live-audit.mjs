@@ -34,6 +34,7 @@ const RAW_JS_TO_GZIP_ESTIMATE_RATIO = 0.35
 const BUTTON_RESPONSE_WARN_MS = 300
 const BUTTON_RESPONSE_FAIL_MS = 1_500
 const LONG_RUNNING_API_RE = /\/api\/(?:backups|system\/drive-sync\/jobs|system\/jobs|import-jobs\/[^/]+\/(?:start|approve|preflight))/i
+const ROUTE_CONTEXT_COOLDOWN_MS = 500
 
 const PROFILES = getAuditProfiles(PROFILE)
 
@@ -60,6 +61,7 @@ const reportedAssetBudgetKeys = new Set()
 const networkReport = []
 const performanceReport = []
 const consoleReport = []
+const fullAuditRouteMap = new Map()
 const artifacts = {
   fullAuditReportDir: '',
   screenshots: [],
@@ -272,6 +274,12 @@ async function runFullApiAudit() {
     : 0
   summary.fullAudit.hardFindingCount = hardFullAuditFindingCount
   summary.fullAudit.health = fullSummary?.health || {}
+  summary.fullAudit.routes = Array.isArray(fullSummary?.routes) ? fullSummary.routes : []
+  fullAuditRouteMap.clear()
+  for (const route of summary.fullAudit.routes) {
+    if (!route?.name) continue
+    fullAuditRouteMap.set(String(route.name), route)
+  }
   if (Array.isArray(fullSummary?.findings)) {
     for (const finding of fullSummary.findings) {
       addFinding(Number(finding.priority ?? 1), finding.area || 'full-audit', finding.message || 'Full audit finding', {
@@ -290,6 +298,45 @@ async function runFullApiAudit() {
       hardFindingCount: hardFullAuditFindingCount,
       reportDir: fullAuditDir,
     })
+  }
+}
+
+async function primeDirectRouteProbeMap() {
+  fullAuditRouteMap.clear()
+  const session = await loginWithFetch({
+    baseUrl: BASE_URL,
+    username: USERNAME,
+    password: PASSWORD,
+    timeoutMs: 20_000,
+  })
+  const allRoutes = [...ADMIN_ROUTES, ...PUBLIC_ROUTES]
+  for (const route of allRoutes) {
+    const started = performance.now()
+    const headers = route.authRequired === false ? {} : { cookie: session.cookieHeader }
+    try {
+      const response = await fetch(`${BASE_URL}${route.path === '/' ? '/' : route.path}?__bos_route_probe=${Date.now()}`, {
+        headers,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20_000),
+      })
+      await response.text().catch(() => '')
+      fullAuditRouteMap.set(route.name, {
+        name: route.name,
+        path: route.path,
+        status: response.status,
+        ok: response.ok,
+        ms: Math.round(performance.now() - started),
+      })
+    } catch (error) {
+      fullAuditRouteMap.set(route.name, {
+        name: route.name,
+        path: route.path,
+        status: 0,
+        ok: false,
+        ms: Math.round(performance.now() - started),
+        error: error?.message || String(error),
+      })
+    }
   }
 }
 
@@ -455,7 +502,7 @@ async function createBrowserHarness(profile) {
   const browser = await chromium.launch({
     headless: process.env.BOS_DEEP_AUDIT_HEADED === '1' ? false : true,
   })
-  const context = await browser.newContext({
+  const createContext = async () => browser.newContext({
     viewport: profile.viewport,
     isMobile: profile.isMobile,
     hasTouch: profile.isMobile,
@@ -463,7 +510,7 @@ async function createBrowserHarness(profile) {
     ignoreHTTPSErrors: true,
     serviceWorkers: 'block',
   })
-  return { browser, context }
+  return { browser, createContext }
 }
 
 async function attachCollectors(page) {
@@ -812,6 +859,19 @@ function analyzeRoute(profileName, route, routeResult, networkEntries, perf, con
   } else if (routeResult.readyMs > ROUTE_READY_WARN_MS) {
     addFinding(2, 'browser-ready', `${profileName}/${route.name} exceeded route ready warning budget`, routeResult)
   }
+  if (
+    Number(routeResult.documentRequestMs || 0) > 0
+    && Number(routeResult.fullAuditRouteMs || 0) > 0
+    && Number(routeResult.documentRequestMs || 0) >= Number(routeResult.fullAuditRouteMs || 0) * 4
+  ) {
+    addFinding(2, 'navigation', `${profileName}/${route.name} browser document time is much higher than direct shell fetch`, {
+      route: route.name,
+      profile: profileName,
+      directHtmlMs: routeResult.fullAuditRouteMs,
+      documentRequestMs: routeResult.documentRequestMs,
+      documentCacheStatus: routeResult.documentCacheStatus || '',
+    })
+  }
 
   for (const entry of networkEntries) {
     if (!appOwnedUrl(entry.url)) continue
@@ -1025,6 +1085,15 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
       route: route.name,
       cacheStatus: entry.fromServiceWorker ? 'service-worker' : (entry.fromDiskCache ? 'disk-cache' : 'network'),
     }))
+  const routeUrlPrefix = `${BASE_URL}${route.path === '/' ? '/' : route.path}`
+  const documentEntry = networkEntries.find((entry) => {
+    const type = String(entry.type || '')
+    const mimeType = String(entry.mimeType || '')
+    return (
+      type.toLowerCase() === 'document'
+      || mimeType.toLowerCase().includes('text/html')
+    ) && String(entry.url || '').startsWith(routeUrlPrefix)
+  }) || null
   const consoleEntries = collectors.consoleEntries.map((entry) => ({
     ...entry,
     profile: profileName,
@@ -1047,6 +1116,10 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     url: await page.url(),
     domContentLoadedMs,
     readyMs,
+    fullAuditRouteMs: Number(fullAuditRouteMap.get(route.name)?.ms || 0),
+    documentRequestMs: Number(documentEntry?.durationMs || 0),
+    documentCacheStatus: documentEntry?.cacheStatus || '',
+    documentStatus: Number(documentEntry?.status || 0),
     screenshot,
     interactions,
     performance: loadPerf,
@@ -1060,6 +1133,9 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
     path: route.path,
     domContentLoadedMs,
     readyMs,
+    fullAuditRouteMs: Number(fullAuditRouteMap.get(route.name)?.ms || 0),
+    documentRequestMs: Number(documentEntry?.durationMs || 0),
+    documentCacheStatus: documentEntry?.cacheStatus || '',
     screenshot,
   }
   analyzeRoute(profileName, route, routeResult, networkEntries, loadPerf, consoleEntries, failedRequests, interactions)
@@ -1067,31 +1143,58 @@ async function auditRoute(page, collectors, profileName, route, authenticated = 
 }
 
 async function auditBrowserProfile(profile) {
-  const { browser, context } = await createBrowserHarness(profile)
-  let collectors = null
+  const { browser, createContext } = await createBrowserHarness(profile)
   const profileResult = {
     routes: [],
     profile: profile.name,
     viewport: profile.viewport,
   }
   try {
-    const page = await context.newPage()
-    const authState = await loginForAudit(context, page)
-    await installPerfObservers(page)
-    collectors = await attachCollectors(page)
-    await page.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await ensureAuditLogin(page, authState)
-    await waitForRouteReady(page, ADMIN_ROUTES[0])
-    await saveScreenshot(page, `${profile.name}-login-complete`)
+    const session = await loginWithFetch({
+      baseUrl: BASE_URL,
+      username: USERNAME,
+      password: PASSWORD,
+      timeoutMs: 20_000,
+    })
+    const bootstrapContext = await createContext()
+    const bootstrapAuthState = await applySessionToPlaywrightContext(bootstrapContext, session, BASE_URL)
+    const bootstrapPage = await bootstrapContext.newPage()
+    await hydratePlaywrightPage(bootstrapPage, { ...bootstrapAuthState, baseUrl: BASE_URL })
+    await bootstrapPage.goto(`${BASE_URL}/?__bos_deep_login=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    await ensureAuditLogin(bootstrapPage, bootstrapAuthState)
+    await waitForRouteReady(bootstrapPage, ADMIN_ROUTES[0])
+    await saveScreenshot(bootstrapPage, `${profile.name}-login-complete`)
+    await bootstrapPage.close().catch(() => {})
+    await bootstrapContext.close().catch(() => {})
 
+    const runIsolatedRoute = async (route, authenticated = true) => {
+      const routeContext = await createContext()
+      const authState = await applySessionToPlaywrightContext(routeContext, session, BASE_URL)
+      const page = await routeContext.newPage()
+      let collectors = null
+      try {
+        if (authenticated && authState?.userJson) {
+          await hydratePlaywrightPage(page, { ...authState, baseUrl: BASE_URL })
+        }
+        await installPerfObservers(page)
+        collectors = await attachCollectors(page)
+        return await auditRoute(page, collectors, profile.name, route, authenticated, authState)
+      } finally {
+        await collectors?.cdp?.detach().catch(() => {})
+        await page.close().catch(() => {})
+        await routeContext.close().catch(() => {})
+        if (ROUTE_CONTEXT_COOLDOWN_MS > 0) {
+          await new Promise((resolve) => setTimeout(resolve, ROUTE_CONTEXT_COOLDOWN_MS))
+        }
+      }
+    }
     for (const route of ADMIN_ROUTES) {
-      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, true, authState))
+      profileResult.routes.push(await runIsolatedRoute(route, true))
     }
     for (const route of PUBLIC_ROUTES) {
-      profileResult.routes.push(await auditRoute(page, collectors, profile.name, route, false))
+      profileResult.routes.push(await runIsolatedRoute(route, false))
     }
   } finally {
-    await collectors?.cdp?.detach().catch(() => {})
     await browser.close().catch(() => {})
   }
   summary.browser[profile.name] = profileResult
@@ -1233,11 +1336,12 @@ async function compareWithPreviousBaseline() {
 async function main() {
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   await captureHealth('before')
-  await runFullApiAudit()
+  await primeDirectRouteProbeMap()
   for (const profile of PROFILES) {
     await auditBrowserProfile(profile)
   }
   await auditRemoteReadOnly()
+  await runFullApiAudit()
   await captureDockerStateAndLogs()
   await captureHealth('after')
   await compareWithPreviousBaseline()

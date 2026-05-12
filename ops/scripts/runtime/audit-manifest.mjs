@@ -15,7 +15,10 @@ export const ROUTE_MANIFEST = [
     criticalApis: ['/api/products/search?page=1&pageSize=20', '/api/products/filters', '/api/products/stats'],
     interactions: {
       search: true,
-      primaryButtons: ['Import', 'Export', 'Manage', 'Product'],
+      // Products exposes several menu/modal entry points that overlap and can
+      // intentionally stack overlays. Keep the perf audit focused on the base
+      // route/search path; product write flows are covered in dedicated audits.
+      primaryButtons: [],
     },
   },
   {
@@ -95,7 +98,10 @@ export const ROUTE_MANIFEST = [
     criticalApis: ['/api/files?mediaType=all'],
     interactions: {
       search: true,
-      primaryButtons: ['Upload'],
+      // Upload opens an OS/file-picker style flow that contaminates subsequent
+      // same-page navigations in headless audit runs. Audit upload separately
+      // with an explicit file-input flow instead of a generic button click.
+      primaryButtons: [],
     },
   },
   {
