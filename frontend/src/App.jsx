@@ -1186,7 +1186,7 @@ export default function App() {
     return <PublicCatalogView />
   }
 
-  if (!authReady) {
+  if (!authReady && !user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center text-gray-500 dark:text-gray-400">

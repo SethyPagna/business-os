@@ -297,7 +297,14 @@ export function AppProvider({ children, publicMode = false }) {
   const writeBlockedNoticeAtRef = useRef(0)
   const lastNotificationRef = useRef({ message: '', type: '', at: 0 })
   const syncErrorLogAtRef = useRef({})
-  const [authReady, setAuthReady] = useState(() => publicMode || !getStoredUserPayload())
+  const [authReady, setAuthReady] = useState(() => {
+    if (publicMode) return true
+    const hasStoredSession = !!getStoredUserPayload()
+    const canProbeServerSession = typeof window !== 'undefined' && typeof window.api?.getAppBootstrap === 'function'
+    if (hasStoredSession) return true
+    if (canProbeServerSession) return false
+    return true
+  })
   // Initialize from actual WS state ??avoids yellow dot when WS connected before AppContext mounted
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
   const [syncChannel,         setSyncChannel]         = useState(null)
@@ -772,8 +779,9 @@ export function AppProvider({ children, publicMode = false }) {
       try {
         const storedUser = getStoredUserPayload()
         const hasStoredSession = !!storedUser
+        const canProbeServerSession = typeof window.api?.getAppBootstrap === 'function'
 
-        if (!hasStoredSession) {
+        if (!hasStoredSession && !canProbeServerSession) {
           setAuthReady(true)
           loadSettings()
         }
@@ -790,8 +798,10 @@ export function AppProvider({ children, publicMode = false }) {
         if (effectiveUrl) {
           window.api?.setSyncServerUrl?.(effectiveUrl)
 
-          if (hasStoredSession && typeof window.api?.getAppBootstrap === 'function') {
-            setAuthReady(false)
+          if (canProbeServerSession) {
+            if (!hasStoredSession) {
+              setAuthReady(false)
+            }
             let settled = false
             const authReadyWatchdog = window.setTimeout(() => {
               if (settled) return
@@ -841,7 +851,7 @@ export function AppProvider({ children, publicMode = false }) {
         } else {
           setAuthReady(true)
         }
-        if (!hasStoredSession) {
+        if (!hasStoredSession && !canProbeServerSession) {
           setAuthReady(true)
         }
         return
