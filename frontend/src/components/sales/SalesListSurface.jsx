@@ -27,6 +27,7 @@ export default function SalesListSurface({
   toggleSelectionScope,
 }) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
+  const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
 
   return (
     <>
@@ -186,7 +187,36 @@ export default function SalesListSurface({
 
       <div className="min-h-[32rem] space-y-2 sm:hidden">
         {loading ? (
-          <div className="py-10 text-center text-gray-400">{t('loading')}</div>
+          <div className="space-y-2" aria-hidden="true">
+            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="h-4 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+              </div>
+            </div>
+            {mobileSkeletonCards.map((card) => (
+              <div key={`sale-mobile-skeleton-${card}`} className="card p-3 animate-pulse">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-4 w-44 rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="h-6 w-16 rounded-full bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-6 w-28 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    </div>
+                    <div className="h-3 w-48 rounded bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                  <div className="space-y-3 text-right">
+                    <div className="ml-auto h-6 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="ml-auto h-5 w-16 rounded bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
         ) : salesSections.map((section) => {

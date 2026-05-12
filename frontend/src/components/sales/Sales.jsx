@@ -1,6 +1,6 @@
-﻿import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Search as SearchIcon, ShoppingBag, Upload } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
@@ -23,7 +23,7 @@ const Receipt = lazy(() => import('../receipt/Receipt'))
 const SaleDetailModal = lazy(() => import('./SaleDetailModal'))
 const ExportModal = lazy(() => import('./ExportModal'))
 const SalesImportModal = lazy(() => import('./SalesImportModal'))
-const SalesListSurface = lazy(() => import('./SalesListSurface'))
+import SalesListSurface from './SalesListSurface'
 
 function multiMatch(text, terms) {
   return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
@@ -85,16 +85,14 @@ export default function Sales() {
 
   const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
     const candidate = fallbackKm || fallbackEn
-    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
-      ? fallbackEn
-      : candidate
+    return isBrokenLocalizedString(String(candidate || '')) ? fallbackEn : candidate
   }, [])
   const translateOr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
-  const exportLabel = translateOr('export', 'Export', 'នាំចេញ')
+  const exportLabel = translateOr('export', 'Export')
   const salesDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
     const year = Number(yearFilter)
@@ -761,32 +759,30 @@ export default function Sales() {
         }}
       />
 
-      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{translateOr('loading_sales_surface', 'Loading sales...', 'Loading sales...')}</div>}>
-        <SalesListSurface
-          collapsedSalesSections={collapsedSalesSections}
-          filtered={filtered}
-          filteredIds={filteredIds}
-          fmtKHR={fmtKHR}
-          fmtTime={fmtTime}
-          fmtUSD={fmtUSD}
-          getSaleBranchLabel={getSaleBranchLabel}
-          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
-          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
-          loading={loading}
-          revenue={revenue}
-          salesSections={salesSections}
-          selectAllRef={selectAllRef}
-          selectedIds={selectedIds}
-          setDetailSale={setDetailSale}
-          setSelectedSale={setSelectedSale}
-          showSalesActionGroups={showSalesActionGroups}
-          t={t}
-          toggleSalesSection={toggleSalesSection}
-          toggleSelected={toggleSelected}
-          toggleSelectAll={toggleSelectAll}
-          toggleSelectionScope={toggleSelectionScope}
-        />
-      </Suspense>
+      <SalesListSurface
+        collapsedSalesSections={collapsedSalesSections}
+        filtered={filtered}
+        filteredIds={filteredIds}
+        fmtKHR={fmtKHR}
+        fmtTime={fmtTime}
+        fmtUSD={fmtUSD}
+        getSaleBranchLabel={getSaleBranchLabel}
+        isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+        isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+        loading={loading}
+        revenue={revenue}
+        salesSections={salesSections}
+        selectAllRef={selectAllRef}
+        selectedIds={selectedIds}
+        setDetailSale={setDetailSale}
+        setSelectedSale={setSelectedSale}
+        showSalesActionGroups={showSalesActionGroups}
+        t={t}
+        toggleSalesSection={toggleSalesSection}
+        toggleSelected={toggleSelected}
+        toggleSelectAll={toggleSelectAll}
+        toggleSelectionScope={toggleSelectionScope}
+      />
 
       {detailSale ? (
         <Suspense fallback={null}>
