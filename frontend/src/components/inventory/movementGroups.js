@@ -71,6 +71,12 @@ function movementSignedValue(movement, field) {
   return Math.abs(value) * movementSign(movement?.movement_type)
 }
 
+function movementAbsoluteValue(movement, field) {
+  const value = Number(movement?.[field] || 0)
+  if (!Number.isFinite(value)) return 0
+  return Math.abs(value)
+}
+
 function parseMovementTime(value) {
   const normalized = normalizeMovementTimeValue(value)
   if (!normalized) return null
@@ -114,18 +120,39 @@ export function buildMovementGroups(movements = []) {
         reason: normalizeText(normalizedMovement.reason),
         branch_name: normalizeText(normalizedMovement.branch_name),
         user_name: normalizeText(normalizedMovement.user_name),
-        totalQuantity: movementSignedValue(normalizedMovement, 'quantity'),
-        totalCostUsd: movementSignedValue(normalizedMovement, 'total_cost_usd'),
-        totalCostKhr: movementSignedValue(normalizedMovement, 'total_cost_khr'),
+        totalQuantity: movementAbsoluteValue(normalizedMovement, 'quantity'),
+        totalCostUsd: movementAbsoluteValue(normalizedMovement, 'total_cost_usd'),
+        totalCostKhr: movementAbsoluteValue(normalizedMovement, 'total_cost_khr'),
+        signedQuantity: movementSignedValue(normalizedMovement, 'quantity'),
+        signedCostUsd: movementSignedValue(normalizedMovement, 'total_cost_usd'),
+        signedCostKhr: movementSignedValue(normalizedMovement, 'total_cost_khr'),
+        totalQuantityIn: movementSign(normalizedMovement.movement_type) > 0 ? movementAbsoluteValue(normalizedMovement, 'quantity') : 0,
+        totalQuantityOut: movementSign(normalizedMovement.movement_type) < 0 ? movementAbsoluteValue(normalizedMovement, 'quantity') : 0,
+        totalCostUsdIn: movementSign(normalizedMovement.movement_type) > 0 ? movementAbsoluteValue(normalizedMovement, 'total_cost_usd') : 0,
+        totalCostUsdOut: movementSign(normalizedMovement.movement_type) < 0 ? movementAbsoluteValue(normalizedMovement, 'total_cost_usd') : 0,
+        totalCostKhrIn: movementSign(normalizedMovement.movement_type) > 0 ? movementAbsoluteValue(normalizedMovement, 'total_cost_khr') : 0,
+        totalCostKhrOut: movementSign(normalizedMovement.movement_type) < 0 ? movementAbsoluteValue(normalizedMovement, 'total_cost_khr') : 0,
         items: [normalizedMovement],
       })
       continue
     }
 
     existing.items.push(normalizedMovement)
-    existing.totalQuantity += movementSignedValue(normalizedMovement, 'quantity')
-    existing.totalCostUsd += movementSignedValue(normalizedMovement, 'total_cost_usd')
-    existing.totalCostKhr += movementSignedValue(normalizedMovement, 'total_cost_khr')
+    existing.totalQuantity += movementAbsoluteValue(normalizedMovement, 'quantity')
+    existing.totalCostUsd += movementAbsoluteValue(normalizedMovement, 'total_cost_usd')
+    existing.totalCostKhr += movementAbsoluteValue(normalizedMovement, 'total_cost_khr')
+    existing.signedQuantity += movementSignedValue(normalizedMovement, 'quantity')
+    existing.signedCostUsd += movementSignedValue(normalizedMovement, 'total_cost_usd')
+    existing.signedCostKhr += movementSignedValue(normalizedMovement, 'total_cost_khr')
+    if (movementSign(normalizedMovement.movement_type) > 0) {
+      existing.totalQuantityIn += movementAbsoluteValue(normalizedMovement, 'quantity')
+      existing.totalCostUsdIn += movementAbsoluteValue(normalizedMovement, 'total_cost_usd')
+      existing.totalCostKhrIn += movementAbsoluteValue(normalizedMovement, 'total_cost_khr')
+    } else {
+      existing.totalQuantityOut += movementAbsoluteValue(normalizedMovement, 'quantity')
+      existing.totalCostUsdOut += movementAbsoluteValue(normalizedMovement, 'total_cost_usd')
+      existing.totalCostKhrOut += movementAbsoluteValue(normalizedMovement, 'total_cost_khr')
+    }
 
     const created = parseMovementTime(normalizedMovement.created_at)
     const earliest = parseMovementTime(existing.created_at)
@@ -152,9 +179,21 @@ export function buildMovementGroups(movements = []) {
       const uniqueBranches = Array.from(new Set(group.items.map((item) => normalizeText(item.branch_name)).filter(Boolean)))
       const uniqueUsers = Array.from(new Set(group.items.map((item) => normalizeText(item.user_name)).filter(Boolean)))
       const allReasons = Array.from(new Set(group.items.map((item) => normalizeText(item.reason)).filter(Boolean)))
+      const displayQuantity = group.movement_type === 'transfer' && group.totalQuantityIn > 0 && group.totalQuantityOut > 0
+        ? Math.max(group.totalQuantityIn, group.totalQuantityOut)
+        : group.totalQuantity
+      const displayCostUsd = group.movement_type === 'transfer' && group.totalCostUsdIn > 0 && group.totalCostUsdOut > 0
+        ? Math.max(group.totalCostUsdIn, group.totalCostUsdOut)
+        : group.totalCostUsd
+      const displayCostKhr = group.movement_type === 'transfer' && group.totalCostKhrIn > 0 && group.totalCostKhrOut > 0
+        ? Math.max(group.totalCostKhrIn, group.totalCostKhrOut)
+        : group.totalCostKhr
 
       return {
         ...group,
+        totalQuantity: displayQuantity,
+        totalCostUsd: displayCostUsd,
+        totalCostKhr: displayCostKhr,
         recordCount: group.items.length,
         productCount: uniqueProducts.length,
         productNames: uniqueProducts,
