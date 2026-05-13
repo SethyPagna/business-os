@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import { useApp } from '../../AppContext'
+import { isBrokenLocalizedString, useApp } from '../../AppContext'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -25,8 +25,14 @@ export default function InventoryImportModal({ onClose, onDone }) {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = typeof t === 'function' ? t(key) : null
-    if (value && value !== key) return value
-    return isKhmer ? fallbackKm : fallbackEn
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
+    if (isKhmer && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+    return isBrokenLocalizedString(fallbackEn) ? key : fallbackEn
+  }
+  const signalDone = async (payload) => {
+    if (typeof onDone === 'function') {
+      await Promise.resolve(onDone(payload))
+    }
   }
 
   const previewRowCount = useMemo(() => countCsvDataRows(csvText), [csvText])
@@ -72,6 +78,7 @@ export default function InventoryImportModal({ onClose, onDone }) {
       const queuedResult = { imported: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
+      await signalDone(queuedResult)
       notify(tr('inventory_import_started', 'Inventory import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', rowCount), 'success')
       return
     } catch (error) {
