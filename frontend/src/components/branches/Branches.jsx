@@ -93,11 +93,14 @@ export default function Branches() {
       }
 
       try {
-        const result = await settleLoaderMap({
+        const tasks = {
           branches: () => window.api.getBranches(),
           branchSummary: () => window.api.getBranchSummary?.().catch(() => null),
-          transfers: () => window.api.getTransfers({}),
-        })
+        }
+        if (tab === 'transfers') {
+          tasks.transfers = () => window.api.getTransfers({})
+        }
+        const result = await settleLoaderMap(tasks)
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
         if (Array.isArray(result.values.branches)) setBranches(result.values.branches)
@@ -135,7 +138,7 @@ export default function Branches() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [notify, t])
+  }, [notify, t, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -145,8 +148,9 @@ export default function Branches() {
       setLoading(false)
       return
     }
-    void load(loadedOnceRef.current)
-  }, [isActive, load])
+    const shouldSilentLoad = loadedOnceRef.current && !(tab === 'transfers' && !transfers.length)
+    void load(shouldSilentLoad)
+  }, [isActive, load, tab, transfers.length])
 
   /**
    * 3.2 Sync refresh hooks.
