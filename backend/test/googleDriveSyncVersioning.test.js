@@ -100,6 +100,13 @@ runTest('drive sync uses resumable streaming uploads instead of whole-file buffe
   assert.doesNotMatch(source, /Buffer\.concat/)
 })
 
+runTest('drive sync revalidates cached folder ids before reuse', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  assert.match(source, /const existingById = await getDriveFileIfExists\(config, existing\.remote_file_id\)/)
+  assert.match(source, /if \(existingById\?\.id\) \{/)
+  assert.match(source, /upsertDriveSyncEntry\(\{\s*relativePath: relativeDir,\s*itemType: 'folder'/s)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
