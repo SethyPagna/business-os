@@ -640,7 +640,11 @@ export default function FilesPage() {
     setTestingProviderId(providerId)
     try {
       const result = await window.api.testAiProvider(providerId, { userId: user?.id, userName: user?.name })
-      notify(result?.message || 'Provider test passed', 'success')
+      if (result?.passed === false) {
+        notify(result?.message || 'Provider test failed', 'error')
+      } else {
+        notify(result?.message || 'Provider test passed', 'success')
+      }
       await loadProviders()
     } catch (error) {
       notify(error?.message || 'Provider test failed', 'error')
