@@ -1269,7 +1269,7 @@ export default function Backup() {
           icon={HardDriveDownload}
           tone="blue"
           title={copy('backup', 'Backup')}
-          subtitle={copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
+          subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', '?????? ????? ?????????? backup Business OS ???????')}
         />
         <SectionSwitcher
           label=""
