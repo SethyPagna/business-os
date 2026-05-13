@@ -1,9 +1,9 @@
-﻿// ?ï¿½?ï¿½ Products ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
-// Main Products page ??all sub-modals imported from sibling files.
+﻿// Products
+// Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
-import { useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../utils/pricing.js'
 import { ThreeDotPortal } from '../shared/PortalMenu'
@@ -11,6 +11,7 @@ import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls.jsx'
 import { ProductImg, ProductImagePlaceholder } from './primitives'
+import ProductsListSurface from './ProductsListSurface'
 import ProductsHeaderActions from './HeaderActions'
 import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -24,6 +25,7 @@ import { buildBatchPreview } from '../../utils/productBatches.mjs'
 import { runConcurrentTasks } from '../../utils/bulkOps.mjs'
 import { isApiVersionMismatchError } from '../../api/http.js'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.js'
+import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.js'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -41,7 +43,6 @@ const BulkAddStockModal = lazy(() => import('./BulkAddStockModal'))
 const VariantFormModal = lazy(() => import('./VariantFormModal'))
 const ProductForm = lazy(() => import('./ProductForm'))
 const ProductDetailModal = lazy(() => import('./ProductDetailModal'))
-const ProductsListSurface = lazy(() => import('./ProductsListSurface'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const CREATED_MONTH_OPTIONS = [
   ['01', 'Jan'],
@@ -84,6 +85,13 @@ function parseBrandColorMap(raw) {
 
 function normalizeBrandLookup(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function waitForNextFrame() {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
 function ProductDiscountBadge({ product, promotion, fmtUSD, label, overlay = false }) {
@@ -155,7 +163,7 @@ function ProductDetailsCell({ product, promotion, branchLabel, selectedBranchNam
   ].filter(Boolean)
 
   return (
-    <div className="max-w-[17rem]">
+    <div className="min-h-[4.25rem] max-w-[17rem]">
       <div className="flex flex-wrap items-center gap-1">
         {detailPills.map((item) => renderMetaPill(item))}
         <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
@@ -178,13 +186,13 @@ export default function Products() {
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn, fallbackKm) => {
     const candidate = fallbackKm || fallbackEn
-    return /(Ã|Â|â€|â€™|â€œ|â€|áž|áŸ|à¸|áº|Ð|Ñ|Ø|Ù|�|ï¿½)/.test(String(candidate || ''))
+    return isBrokenLocalizedString(candidate)
       ? fallbackEn
       : candidate
   }, [])
   const tr = useCallback((key, fallbackEn, fallbackKm = fallbackEn) => {
     const value = t(key)
-    if (value && value !== key) return value
+    if (value && value !== key && !isBrokenLocalizedString(value)) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
   const [products,     setProducts]     = useState([])
@@ -223,6 +231,7 @@ export default function Products() {
   const [variantModal, setVariantModal] = useState(null) // parent product for adding variant
   const [collapsedProductSections, setCollapsedProductSections] = useState(() => new Set())
   const [collapsedProductGroups, setCollapsedProductGroups] = useState(() => new Set())
+  const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -295,6 +304,10 @@ export default function Products() {
 
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
+        }
+        if (firstLoad) {
+          await waitForNextFrame()
+          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         }
         loadedOnceRef.current = true
         setLoadError(null)
@@ -723,7 +736,7 @@ export default function Products() {
       return (
         <span
           key={item.key}
-          className="max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+          {...getKhmerTextProps(item.label, 'max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold')}
           style={{ background: color, color: getContrastingTextColor(color) }}
           title={item.label}
         >
@@ -734,7 +747,7 @@ export default function Products() {
     return (
       <span
         key={item.key}
-        className={`max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`}
+        {...getKhmerTextProps(item.label, `max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`)}
         title={item.label}
       >
         {item.label}
@@ -744,10 +757,10 @@ export default function Products() {
   const renderUnitChip = (unitName) => {
     if (!unitName) return null
     const color = unitMap[unitName]?.color
-    if (!color) return <span className="ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400">{unitName}</span>
+    if (!color) return <span {...getKhmerTextProps(unitName, 'ml-1 shrink-0 whitespace-nowrap text-xs font-normal text-gray-400')}>{unitName}</span>
     return (
       <span
-        className="ml-1 inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold"
+        {...getKhmerTextProps(unitName, 'ml-1 inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold')}
         style={{ background: color, color: getContrastingTextColor(color) }}
       >
         {unitName}
@@ -787,7 +800,7 @@ export default function Products() {
     [search],
   )
   const filtered = useMemo(() => products.filter((p) => {
-    const hay = `${p.name} ${p.sku || ''} ${p.barcode || ''} ${p.category || ''} ${p.brand || ''} ${p.supplier || ''} ${p.description || ''}`.toLowerCase()
+    const hay = `${p.name} ${p.sku || ''} ${p.barcode || ''} ${p.category || ''} ${p.brand || ''} ${p.unit || ''} ${p.supplier || ''} ${p.description || ''}`.toLowerCase()
     const matchSearch = searchTerms.length === 0 || (
       searchMode === 'AND'
         ? searchTerms.every((term) => hay.includes(term))
@@ -934,14 +947,14 @@ export default function Products() {
     ? `${productStart.toLocaleString()}-${productEnd.toLocaleString()} / ${Number(productTotal || 0).toLocaleString()}`
     : '0 / 0'
   const productSelectAllLabel = `${t('select_all') || 'Select all'} (${visibleProducts.length})`
-  const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`, `${selectedVisibleCount} áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ`)
+  const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`)
   const productChipLabels = useMemo(() => ({
-    info: tr('basic_info_short', 'Info', 'áž‘áž¼áž‘áŸ…'),
-    pricing: tr('pricing_short', 'Price', 'ážáž˜áŸ’áž›áŸƒ'),
-    stock: tr('stock_short', 'Stock', 'ážŸáŸ’ážáž»áž€'),
-    branch: tr('branch_short', 'Branch', 'ážŸáž¶ážáž¶'),
-    out: tr('out_short', 'Out', 'áž¢ážŸáŸ‹'),
-    delete: tr('delete_short', 'Delete', 'áž›áž»áž”'),
+    info: tr('basic_info_short', 'Info'),
+    pricing: tr('pricing_short', 'Price'),
+    stock: tr('stock_short', 'Stock'),
+    branch: tr('branch_short', 'Branch'),
+    out: tr('out_short', 'Out'),
+    delete: tr('delete_short', 'Delete'),
   }), [tr])
   const selectedProducts = useMemo(
     () => visibleProducts.filter((product) => selectedVisibleIdsSet.has(Number(product.id))),
@@ -1011,6 +1024,26 @@ export default function Products() {
     setProductPageDraft(String(productSafePage))
   }, [productSafePage])
 
+  useEffect(() => {
+    if (initialDesktopRevealReady || loading) return
+    if (!visibleProducts.length || loadError) {
+      setInitialDesktopRevealReady(true)
+      return
+    }
+    let cancelled = false
+    let nestedFrame = null
+    const frame = window.requestAnimationFrame(() => {
+      nestedFrame = window.requestAnimationFrame(() => {
+        if (!cancelled) setInitialDesktopRevealReady(true)
+      })
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
+    }
+  }, [initialDesktopRevealReady, loadError, loading, visibleIdsSignature, visibleProducts.length])
+
   const toggleSelectionScope = useCallback((ids, checked) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
@@ -1048,16 +1081,16 @@ export default function Products() {
   )
 
   const productExportItems = useMemo(() => ([
-    { label: tr('export_visible_products', 'Export visible products', 'áž“áž¶áŸ†áž…áŸáž‰áž•áž›áž·ážáž•áž›ážŠáŸ‚áž›áž€áŸ†áž–áž»áž„áž”áž„áŸ’áž áž¶áž‰'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
-    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products', 'áž“áž¶áŸ†áž…áŸáž‰áž•áž›áž·ážáž•áž›ážŠáŸ‚áž›áž”áž¶áž“áž‡áŸ’ážšáž¾ážŸ'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
-    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáŸ’ážáž¶áž“áž—áž¶áž–ážŸáŸ’ážáž»áž€ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
-    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž”áŸ’ážšáž—áŸáž‘ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
-    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž˜áŸ‰áž¶áž€ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
-    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž¢áŸ’áž“áž€áž•áŸ’áž‚ážáŸ‹áž•áŸ’áž‚áž„áŸ‹ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
-    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜ážŸáž¶ážáž¶ážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
-    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range', 'áž“áž¶áŸ†áž…áŸáž‰ážáž¶áž˜áž–áŸáž›áž”áž„áŸ’áž€áž¾ážážŠáŸ‚áž›áž”áž¶áž“ážáž˜áŸ’ážšáž„'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
+    { label: tr('export_visible_products', 'Export visible products'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
+    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
+    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
+    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
+    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
+    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
+    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
+    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
     'divider',
-    { label: tr('export_full_product_list', 'Export full product list', 'áž“áž¶áŸ†áž…áŸáž‰áž”áž‰áŸ’áž‡áž¸áž•áž›áž·ážáž•áž›áž‘áž¶áŸ†áž„áž˜áž¼áž›'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
+    { label: tr('export_full_product_list', 'Export full product list'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
   ].filter(Boolean)), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, exportProductsCsv, filtered, products, selectedProducts, stockFilter, supplierFilter, tr])
 
   const suppliers = useMemo(
@@ -1090,6 +1123,27 @@ export default function Products() {
     setCreatedMonthFilter('all')
     setProductSortDirection('desc')
   }, [])
+
+  const handleLookupReviewSelection = useCallback((selection) => {
+    const type = String(selection?.type || '').toLowerCase()
+    const value = String(selection?.value || '').trim()
+    if (!value) return
+    clearAllFilters()
+    setSearch('')
+    setModal(null)
+    setProductPage(1)
+    if (type === 'brand') {
+      setBrandFilter(value)
+      return
+    }
+    if (type === 'category') {
+      setCatFilter(value)
+      return
+    }
+    if (type === 'unit') {
+      setSearch(value)
+    }
+  }, [clearAllFilters])
 
   const initialOptions = useMemo(
     () => aggregateInitialOptions(productFilterMeta.initials || []),
@@ -1641,12 +1695,12 @@ export default function Products() {
             </div>
           ) : null}
           <div className="flex items-center gap-1.5">
-            <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
+            <div {...getKhmerTextProps(p.name, 'font-medium text-gray-900 dark:text-white')}>{p.name}</div>
             {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
             {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">variant</span> : null}
           </div>
         </td>
-        <td className="hidden px-3 py-2 md:table-cell">
+        <td className="hidden px-3 py-2 align-top md:table-cell">
           <ProductDetailsCell
             product={p}
             promotion={promotion}
@@ -1673,7 +1727,7 @@ export default function Products() {
           ) : null}
           {promotion.active ? (
             <div className="mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300">
-              {p.discount_label || tr('discounts', 'Discounts', 'áž”áž‰áŸ’áž…áž»áŸ‡ážáž˜áŸ’áž›áŸƒ')} {fmtUSD(promotion.applied_price_usd)}
+              {p.discount_label || tr('discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
             </div>
           ) : null}
         </td>
@@ -1734,12 +1788,12 @@ export default function Products() {
             {getProductGallery(p).length
               ? <ProductImg src={getProductGallery(p)[0]} alt={p.name} className="w-14 h-14 rounded-xl object-cover cursor-zoom-in" onClick={(e) => { e.stopPropagation(); openLightbox(getProductGallery(p), 0, p.name) }} />
               : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
-            <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'áž”áž‰áŸ’áž…áž»áŸ‡ážáž˜áŸ’áž›áŸƒ')} overlay />
+            <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{p.name}</div>
+                <div {...getKhmerTextProps(p.name, 'truncate text-sm font-semibold text-gray-900 dark:text-white')}>{p.name}</div>
               </div>
               <div className="flex shrink-0 items-start gap-1.5">
                 <span className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${mobileStatusClass}`}>
@@ -1804,7 +1858,7 @@ export default function Products() {
                 </>
               ) : null}
               <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span className="inline-flex min-w-0 max-w-full items-center whitespace-nowrap text-gray-500">{qty}{renderUnitChip(p.unit)}</span>
+              <span className={withKhmerTextClass(p.unit, 'inline-flex min-w-0 max-w-full items-center whitespace-nowrap text-gray-500')}>{qty}{renderUnitChip(p.unit)}</span>
         </div>
       </div>
     )
@@ -1820,7 +1874,7 @@ export default function Products() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      {/* ?ï¿½?ï¿½ Single-row header ??compact on mobile, expanded on desktop ?ï¿½?ï¿½ */}
+      {/* Single-row header: compact on mobile, expanded on desktop. */}
       <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <h1 className="mr-1 flex min-w-0 flex-1 items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
           <PackageSearch className="h-5 w-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
@@ -1840,7 +1894,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* ?ï¿½?ï¿½ Search row + Filter toggle ?ï¿½?ï¿½ */}
+      {/* Search row + filter toggle */}
       <div className="mb-3 overflow-x-auto pb-1">
         <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
           <input
@@ -1874,7 +1928,7 @@ export default function Products() {
 
       {refreshingProducts && !loading ? (
         <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-          {tr('products_refreshing', 'Refreshing products...', 'áž€áŸ†áž–áž»áž„áž’áŸ’ážœáž¾áž”áž…áŸ’áž…áž»áž”áŸ’áž”áž“áŸ’áž“áž—áž¶áž–áž•áž›áž·ážáž•áž›...')}
+          {tr('products_refreshing', 'Refreshing products...')}
         </div>
       ) : null}
 
@@ -2125,32 +2179,31 @@ export default function Products() {
           ))}
         </div>
 
-      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_products_view', 'Loading product view...', 'Loading product view...')}</div>}>
-        <ProductsListSurface
-          allVisibleProducts={allVisibleProducts}
-          collapsedProductGroups={collapsedProductGroups}
-          collapsedProductSections={collapsedProductSections}
-          desktopSelectAllRef={desktopSelectAllRef}
-          getGroupSummaryParts={getGroupSummaryParts}
-          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
-          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
-          loading={loading}
-          productSections={productSections}
-          productTotal={productTotal}
-          refreshingProducts={refreshingProducts}
-          renderDesktopProductRow={renderDesktopProductRow}
-          renderMobileProductCard={renderMobileProductCard}
-          selectedVisibleCount={selectedVisibleCount}
-          t={t}
-          toggleProductGroup={toggleProductGroup}
-          toggleProductSection={toggleProductSection}
-          toggleSelectAll={toggleSelectAll}
-          toggleSelectionScope={toggleSelectionScope}
-          tr={tr}
-          visibleIds={visibleIds}
-          visibleProducts={visibleProducts}
-        />
-      </Suspense>
+      <ProductsListSurface
+        allVisibleProducts={allVisibleProducts}
+        collapsedProductGroups={collapsedProductGroups}
+        collapsedProductSections={collapsedProductSections}
+        desktopSelectAllRef={desktopSelectAllRef}
+        getGroupSummaryParts={getGroupSummaryParts}
+        initialDesktopRevealReady={initialDesktopRevealReady}
+        isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+        isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+        loading={loading}
+        productSections={productSections}
+        productTotal={productTotal}
+        refreshingProducts={refreshingProducts}
+        renderDesktopProductRow={renderDesktopProductRow}
+        renderMobileProductCard={renderMobileProductCard}
+        selectedVisibleCount={selectedVisibleCount}
+        t={t}
+        toggleProductGroup={toggleProductGroup}
+        toggleProductSection={toggleProductSection}
+        toggleSelectAll={toggleSelectAll}
+        toggleSelectionScope={toggleSelectionScope}
+        tr={tr}
+        visibleIds={visibleIds}
+        visibleProducts={visibleProducts}
+      />
 
       {/* Product detail modal */}
       {detailProduct && (
@@ -2276,17 +2329,17 @@ export default function Products() {
       )}
       {modal==='cats' && (
         <Suspense fallback={null}>
-          <ManageCategoriesModal onClose={()=>{setModal(null);load()}} t={t} />
+          <ManageCategoriesModal onClose={()=>{setModal(null);load()}} onReviewSelection={handleLookupReviewSelection} t={t} />
         </Suspense>
       )}
       {modal==='brands' && (
         <Suspense fallback={null}>
-          <ManageBrandsModal onClose={()=>setModal(null)} onDone={load} products={products} user={user} t={t} />
+          <ManageBrandsModal onClose={()=>setModal(null)} onDone={load} onReviewSelection={handleLookupReviewSelection} user={user} t={t} />
         </Suspense>
       )}
       {modal==='units' && (
         <Suspense fallback={null}>
-          <ManageUnitsModal onClose={()=>{setModal(null);load()}} t={t} />
+          <ManageUnitsModal onClose={()=>{setModal(null);load()}} onReviewSelection={handleLookupReviewSelection} t={t} />
         </Suspense>
       )}
       {modal==='bulk' && (
@@ -2297,7 +2350,4 @@ export default function Products() {
     </div>
   )
 }
-
-
-
 
