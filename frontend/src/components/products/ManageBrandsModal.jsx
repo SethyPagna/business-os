@@ -107,6 +107,9 @@ export default function ManageBrandsModal({
 }) {
   const { settings, notify } = useApp()
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands' })
+  const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
+    ? t('review_products')
+    : 'Review products'
   const [newBrand, setNewBrand] = useState('')
   const [newColor, setNewColor] = useState(DEFAULT_BRAND_COLOR)
   const [renamingBrand, setRenamingBrand] = useState('')
@@ -617,7 +620,7 @@ export default function ManageBrandsModal({
                         onClick={() => onReviewSelection?.({ type: 'brand', value: entry.name })}
                         disabled={busy}
                       >
-                        {t('review_products') || 'Review products'}
+                        {reviewProductsLabel}
                       </button>
                     ) : null}
                     {entry.reviewRule?.tone === 'safe' && entry.reviewRule?.suggestedName ? (
