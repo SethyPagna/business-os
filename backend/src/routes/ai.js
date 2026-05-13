@@ -178,12 +178,13 @@ router.post('/providers/:id/test', authToken, requirePermission('settings'), rou
     })
     broadcast('settings')
     ok(res, {
-      success: true,
       message: result.message || 'Provider test passed',
+      passed: true,
       item: serializeProviderRow(getProviderRow(row.id)),
     })
   } catch (error) {
     const row = getProviderRow(req.params.id)
+    let nextItem = null
     if (row) {
       db.prepare(`
         UPDATE ai_provider_configs
@@ -191,8 +192,13 @@ router.post('/providers/:id/test', authToken, requirePermission('settings'), rou
         WHERE id = ?
       `).run('error', String(error?.message || 'Provider test failed'), new Date().toISOString(), new Date().toISOString(), row.id)
       broadcast('settings')
+      nextItem = serializeProviderRow(getProviderRow(row.id))
     }
-    err(res, error?.message || 'Provider test failed')
+    return ok(res, {
+      passed: false,
+      message: error?.message || 'Provider test failed',
+      item: nextItem,
+    })
   }
 })
 
