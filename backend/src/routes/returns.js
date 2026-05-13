@@ -167,6 +167,7 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   const scope = normalizeScope(req.query.scope, CUSTOMER_SCOPE)
   const search = String(req.query.search || req.query.q || '').trim().toLowerCase()
   const type = String(req.query.type || req.query.returnType || '').trim().toLowerCase()
+  const includeItems = Boolean(saleId) || ['1', 'true', 'yes'].includes(String(req.query.includeItems || '').trim().toLowerCase())
   let q = `SELECT r.* FROM returns r WHERE 1=1`
   const params = []
   if (startDate) { q += ' AND date(r.created_at) >= ?'; params.push(startDate) }
@@ -203,6 +204,11 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   params.push(parseInt(limit))
 
   const returns = db.prepare(q).all(...params)
+  if (!includeItems) {
+    res.json(returns)
+    return
+  }
+
   const getItems = db.prepare('SELECT * FROM return_items WHERE return_id = ?')
   res.json(returns.map(r => ({ ...r, items: getItems.all(r.id) })))
 })
