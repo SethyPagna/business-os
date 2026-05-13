@@ -69,6 +69,9 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
   const [deletingId, setDeletingId] = useState(null)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const { notify } = useApp()
+  const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
+    ? t('review_products')
+    : 'Review products'
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-categories' })
@@ -466,7 +469,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t })
                       className="text-xs text-slate-600 hover:underline dark:text-slate-300"
                       disabled={saving || deletingId != null}
                     >
-                      {t('review_products') || 'Review products'}
+                      {reviewProductsLabel}
                     </button>
                   ) : null}
                   <button onClick={() => handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId || category.virtual}>
