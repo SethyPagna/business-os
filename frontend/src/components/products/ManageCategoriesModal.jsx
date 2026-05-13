@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
+import ActionHistoryBar from '../shared/ActionHistoryBar.jsx'
 import { useApp, useSync } from '../../AppContext'
+import { useActionHistory } from '../../utils/actionHistory.mjs'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -10,7 +12,53 @@ import {
 
 const DEFAULT_CATEGORY_COLOR = '#3b82f6'
 
-export default function ManageCategoriesModal({ onClose, t }) {
+function normalizeLookup(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function snapshotLookupProducts(products = [], field, names = []) {
+  const lookups = new Set((names || []).map((name) => normalizeLookup(name)).filter(Boolean))
+  if (!lookups.size) return []
+  return (Array.isArray(products) ? products : [])
+    .filter((product) => lookups.has(normalizeLookup(product?.[field])))
+    .map((product) => ({
+      id: Number(product?.id || 0),
+      name: String(product?.name || ''),
+      [field]: String(product?.[field] || ''),
+    }))
+    .filter((product) => Number.isFinite(product.id) && product.id > 0)
+}
+
+function mergeCategoryUsage(categories = [], usageEntries = []) {
+  const usageMap = new Map((usageEntries || []).map((entry) => [normalizeLookup(entry?.name), entry]))
+  const merged = new Map()
+  ;(categories || []).forEach((category) => {
+    const key = normalizeLookup(category?.name)
+    const usage = usageMap.get(key)
+    merged.set(key, {
+      ...category,
+      usage_count: Number(usage?.usage_count || 0),
+      unresolved_count: Number(usage?.unresolved_count || 0),
+      sample_products: Array.isArray(usage?.sample_products) ? usage.sample_products : [],
+    })
+  })
+  ;(usageEntries || []).forEach((entry) => {
+    const key = normalizeLookup(entry?.name)
+    if (!key || merged.has(key)) return
+    merged.set(key, {
+      id: `virtual:${key}`,
+      name: entry.name,
+      color: DEFAULT_CATEGORY_COLOR,
+      usage_count: Number(entry?.usage_count || 0),
+      unresolved_count: Number(entry?.unresolved_count || 0),
+      sample_products: Array.isArray(entry?.sample_products) ? entry.sample_products : [],
+      virtual: true,
+    })
+  })
+  return Array.from(merged.values()).sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || '')))
+}
+
+export default function ManageCategoriesModal({ onClose, onReviewSelection, t }) {
   const [cats, setCats] = useState([])
   const [newName, setNewName] = useState('')
   const [newColor, setNewColor] = useState(DEFAULT_CATEGORY_COLOR)
@@ -23,14 +71,62 @@ export default function ManageCategoriesModal({ onClose, t }) {
   const { notify } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
+  const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-categories' })
+
+  const fetchCategories = useCallback(async () => {
+    const rows = await window.api.getCategories()
+    return Array.isArray(rows) ? rows : []
+  }, [])
+
+  const findCategoryById = useCallback(async (id) => {
+    const rows = await fetchCategories()
+    return rows.find((entry) => Number(entry?.id || 0) === Number(id)) || null
+  }, [fetchCategories])
+
+  const findCategoryByName = useCallback(async (name) => {
+    const key = normalizeLookup(name)
+    if (!key) return null
+    const rows = await fetchCategories()
+    return rows.find((entry) => normalizeLookup(entry?.name) === key) || null
+  }, [fetchCategories])
+
+  const fetchCategoryProductSnapshots = useCallback(async (names = []) => {
+    const products = await window.api.getProducts()
+    return snapshotLookupProducts(products, 'category', names)
+  }, [])
+
+  const restoreCategoryProductSnapshots = useCallback(async (snapshots = []) => {
+    if (!snapshots.length) return
+    const latestProducts = await window.api.getProducts()
+    const latestMap = new Map(
+      (Array.isArray(latestProducts) ? latestProducts : [])
+        .map((product) => [Number(product?.id || 0), product])
+        .filter(([id]) => Number.isFinite(id) && id > 0),
+    )
+    for (const snapshot of snapshots) {
+      const productId = Number(snapshot?.id || 0)
+      const latest = latestMap.get(productId)
+      if (!latest) continue
+      const nextValue = String(snapshot?.category || '').trim()
+      const currentValue = String(latest?.category || '').trim()
+      if (currentValue === nextValue) continue
+      await window.api.updateProduct(productId, {
+        category: nextValue,
+        expectedUpdatedAt: latest?.updated_at || snapshot?.updated_at || undefined,
+      })
+    }
+  }, [])
 
   const load = useCallback(async () => {
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => window.api.getCategories(), 'Categories')
+      const [data, usage] = await withLoaderTimeout(() => Promise.all([
+        window.api.getCategories(),
+        window.api.getProductLookupUsage(),
+      ]), 'Categories')
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setCats(Array.isArray(data) ? data : [])
+      setCats(mergeCategoryUsage(Array.isArray(data) ? data : [], usage?.categories || []))
       setSelectedIds(new Set())
       setErr('')
     } catch (error) {
@@ -52,14 +148,28 @@ export default function ManageCategoriesModal({ onClose, t }) {
     setErr('')
     setSaving(true)
     try {
-      const res = await window.api.createCategory({ name: newName.trim(), color: newColor })
+      const payload = { name: newName.trim(), color: newColor }
+      const res = await window.api.createCategory(payload)
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
       }
       setNewName('')
       setNewColor(DEFAULT_CATEGORY_COLOR)
-      load()
+      await load()
+      actionHistory.pushAction({
+        label: `Add category ${payload.name}`.trim(),
+        undo: async () => {
+          const latest = await findCategoryByName(payload.name)
+          if (!latest) throw new Error('Category no longer exists.')
+          await window.api.deleteCategory(latest.id, { expectedUpdatedAt: latest.updated_at || undefined })
+          await load()
+        },
+        redo: async () => {
+          await window.api.createCategory(payload)
+          await load()
+        },
+      })
     } catch (error) {
       setErr(error?.message || 'Failed')
     } finally {
@@ -72,17 +182,47 @@ export default function ManageCategoriesModal({ onClose, t }) {
     setErr('')
     setSaving(true)
     try {
-      const res = await window.api.updateCategory(cat.id, {
+      const previousSnapshot = cats.find((entry) => Number(entry?.id || 0) === Number(cat?.id || 0))
+      const payload = {
         name: cat.name,
         color: cat.color,
         expectedUpdatedAt: cat.updated_at || undefined,
+      }
+      const res = await window.api.updateCategory(cat.id, {
+        ...payload,
       })
       if (res?.success === false) {
         setErr(res.error || 'Failed')
         return
       }
       setEditing(null)
-      load()
+      await load()
+      if (previousSnapshot && !res?.merged) {
+        const nextLabel = String(payload.name || previousSnapshot.name || '').trim()
+        actionHistory.pushAction({
+          label: `Edit category ${nextLabel}`.trim(),
+          undo: async () => {
+            const latest = await findCategoryById(previousSnapshot.id)
+            if (!latest) throw new Error('Category no longer exists.')
+            await window.api.updateCategory(previousSnapshot.id, {
+              name: previousSnapshot.name,
+              color: previousSnapshot.color || DEFAULT_CATEGORY_COLOR,
+              expectedUpdatedAt: latest.updated_at || undefined,
+            })
+            await load()
+          },
+          redo: async () => {
+            const latest = await findCategoryById(previousSnapshot.id)
+            if (!latest) throw new Error('Category no longer exists.')
+            await window.api.updateCategory(previousSnapshot.id, {
+              name: payload.name,
+              color: payload.color || DEFAULT_CATEGORY_COLOR,
+              expectedUpdatedAt: latest.updated_at || undefined,
+            })
+            await load()
+          },
+        })
+      }
     } catch (error) {
       setErr(error?.message || 'Failed')
     } finally {
@@ -96,13 +236,36 @@ export default function ManageCategoriesModal({ onClose, t }) {
     setDeletingId(id)
     try {
       const category = cats.find((item) => Number(item.id) === Number(id))
+      const deletedEntries = category ? [{ id: Number(category.id), name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR }] : []
+      const productSnapshots = await fetchCategoryProductSnapshots(deletedEntries.map((entry) => entry.name))
       await window.api.deleteCategory(id, { expectedUpdatedAt: category?.updated_at || undefined })
       setSelectedIds((current) => {
         const next = new Set(current)
         next.delete(Number(id))
         return next
       })
-      load()
+      await load()
+      if (deletedEntries.length) {
+        actionHistory.pushAction({
+          label: `Delete category ${deletedEntries[0].name}`.trim(),
+          undo: async () => {
+            for (const entry of deletedEntries) {
+              const existing = await findCategoryByName(entry.name)
+              if (!existing) await window.api.createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR })
+            }
+            await restoreCategoryProductSnapshots(productSnapshots)
+            await load()
+          },
+          redo: async () => {
+            for (const entry of deletedEntries) {
+              const existing = await findCategoryByName(entry.name)
+              if (!existing) continue
+              await window.api.deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined })
+            }
+            await load()
+          },
+        })
+      }
     } catch (error) {
       notify(error?.message || 'Failed', 'error')
     } finally {
@@ -139,6 +302,16 @@ export default function ManageCategoriesModal({ onClose, t }) {
     const ids = Array.from(selectedIds)
     setDeletingId('selected')
     try {
+      const deletedEntries = ids
+        .map((id) => cats.find((item) => Number(item.id) === Number(id)))
+        .filter(Boolean)
+        .map((category) => ({
+          id: Number(category.id),
+          name: category.name,
+          color: category.color || DEFAULT_CATEGORY_COLOR,
+          updated_at: category.updated_at || undefined,
+        }))
+      const productSnapshots = await fetchCategoryProductSnapshots(deletedEntries.map((entry) => entry.name))
       for (const id of ids) {
         const category = cats.find((item) => Number(item.id) === Number(id))
         if (!category) continue
@@ -146,7 +319,28 @@ export default function ManageCategoriesModal({ onClose, t }) {
       }
       notify(`Deleted ${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}`, 'success')
       setSelectedIds(new Set())
-      load()
+      await load()
+      if (deletedEntries.length) {
+        actionHistory.pushAction({
+          label: `Delete ${deletedEntries.length} categor${deletedEntries.length === 1 ? 'y' : 'ies'}`.trim(),
+          undo: async () => {
+            for (const entry of deletedEntries) {
+              const existing = await findCategoryByName(entry.name)
+              if (!existing) await window.api.createCategory({ name: entry.name, color: entry.color || DEFAULT_CATEGORY_COLOR })
+            }
+            await restoreCategoryProductSnapshots(productSnapshots)
+            await load()
+          },
+          redo: async () => {
+            for (const entry of deletedEntries) {
+              const existing = await findCategoryByName(entry.name)
+              if (!existing) continue
+              await window.api.deleteCategory(existing.id, { expectedUpdatedAt: existing.updated_at || undefined })
+            }
+            await load()
+          },
+        })
+      }
     } catch (error) {
       notify(error?.message || 'Failed to delete selected categories', 'error')
     } finally {
@@ -158,6 +352,7 @@ export default function ManageCategoriesModal({ onClose, t }) {
     <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
+        <ActionHistoryBar history={actionHistory} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -246,15 +441,35 @@ export default function ManageCategoriesModal({ onClose, t }) {
                     aria-label={`Select ${category.name}`}
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
-                  <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{category.name}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-gray-700 dark:text-gray-300">{category.name}</div>
+                    <div className="text-xs text-gray-400">
+                      {Number(category.usage_count || 0)} product(s)
+                      {category.unresolved_count ? ` - ${category.unresolved_count} need cleanup` : ''}
+                    </div>
+                    {Array.isArray(category.sample_products) && category.sample_products.length ? (
+                      <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                        {category.sample_products.map((product) => product?.name).filter(Boolean).join(', ')}
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     onClick={() => setEditing({ ...category, color: category.color || DEFAULT_CATEGORY_COLOR })}
                     className="text-xs text-blue-500 hover:underline"
-                    disabled={saving || deletingId != null}
+                    disabled={saving || deletingId != null || category.virtual}
                   >
                     {t('edit') || 'Edit'}
                   </button>
-                  <button onClick={() => handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId}>
+                  {(Number(category.usage_count || 0) > 0 || Number(category.unresolved_count || 0) > 0 || (Array.isArray(category.sample_products) && category.sample_products.length > 0)) ? (
+                    <button
+                      onClick={() => onReviewSelection?.({ type: 'category', value: category.name })}
+                      className="text-xs text-slate-600 hover:underline dark:text-slate-300"
+                      disabled={saving || deletingId != null}
+                    >
+                      {t('review_products') || 'Review products'}
+                    </button>
+                  ) : null}
+                  <button onClick={() => handleDelete(category.id)} className="text-xs text-red-500 hover:underline" disabled={!!deletingId || category.virtual}>
                     {deletingId === category.id ? (t('deleting') || 'Deleting...') : (t('delete') || 'Delete')}
                   </button>
                 </>
