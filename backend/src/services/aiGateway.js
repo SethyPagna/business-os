@@ -174,6 +174,22 @@ function resolveProviderEndpoint(providerConfig, provider, meta) {
   return assertSafeOutboundUrl(target, { allowedProtocols: ['https:'] })
 }
 
+function buildProviderHttpError(provider, endpoint, response, json, fallbackMessage) {
+  const providerLabel = getProviderMeta(provider)?.label || provider || 'AI provider'
+  const upstreamMessage = trim(json?.error?.message || json?.message || '')
+  const host = (() => {
+    try {
+      return new URL(endpoint).host
+    } catch (_) {
+      return endpoint
+    }
+  })()
+  if (response?.status === 403 && /access denied|network settings/i.test(upstreamMessage)) {
+    return new Error(`${providerLabel} blocked this runtime from reaching ${host}. Check firewall, region, or provider network restrictions.`)
+  }
+  return new Error(upstreamMessage || fallbackMessage || `AI request failed (${response?.status || 'unknown'})`)
+}
+
 async function callChatProvider(providerConfig, messages, options = {}) {
   const provider = trim(providerConfig?.provider).toLowerCase()
   const meta = getProviderMeta(provider)
@@ -227,7 +243,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
       body: JSON.stringify(body),
     })
     const json = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(json?.error?.message || json?.message || `AI request failed (${response.status})`)
+    if (!response.ok) throw buildProviderHttpError(provider, endpoint, response, json, `AI request failed (${response.status})`)
     return {
       text: trim(json?.choices?.[0]?.message?.content || ''),
       raw: json,
@@ -256,7 +272,7 @@ async function callChatProvider(providerConfig, messages, options = {}) {
       }),
     })
     const json = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(json?.error?.message || `Google AI request failed (${response.status})`)
+    if (!response.ok) throw buildProviderHttpError(provider, endpoint, response, json, `Google AI request failed (${response.status})`)
     return {
       text: trim(json?.candidates?.[0]?.content?.parts?.map((part) => trim(part?.text)).filter(Boolean).join('\n') || ''),
       raw: json,
@@ -291,7 +307,7 @@ async function testProviderConfig(providerConfig) {
         }),
       })
       const json = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(json?.message || `Cohere request failed (${response.status})`)
+      if (!response.ok) throw buildProviderHttpError(provider, endpoint, response, json, `Cohere request failed (${response.status})`)
       return { success: true, message: `Embedding provider responded at ${nowIso()}` }
     }
     throw new Error('This embedding provider test is not supported yet')
