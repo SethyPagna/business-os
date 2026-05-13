@@ -7,6 +7,7 @@ const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', '
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
 const DONE_STATUSES = new Set(['completed'])
 const CANCELLABLE_STATUSES = new Set(['queued', 'running', 'approved'])
+const DISMISSABLE_STATUSES = new Set(['awaiting_review', 'completed', 'completed_with_errors', 'failed', 'cancelled'])
 const REMOVABLE_STATUSES = new Set(['pending', 'queued', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'cancelling'])
 const IMPORT_TRACKER_ACTIVE_POLL_MS = 5000
 const IMPORT_TRACKER_IDLE_POLL_MS = 12000
@@ -232,6 +233,7 @@ export default function BackgroundImportTracker() {
   const status = normalizeJobStatus(primaryJob)
   const hasAttention = reviewJobs.length > 0
   const isActive = ACTIVE_STATUSES.has(status)
+  const isCompletedState = !hasAttention && !isActive
   const title = hasAttention
     ? (t('import_needs_review') || 'Import needs review')
     : isActive
@@ -245,6 +247,7 @@ export default function BackgroundImportTracker() {
   const retryLabel = t('retry') || 'Retry'
   const approveLabel = t('approve_import') || 'Approve import'
   const removeLabel = t('remove_import') || t('remove') || 'Remove'
+  const closeLabel = t('close') || 'Close'
   const progressLabels = {
     analyzed: t('analyzed') || 'Analyzed',
     rows: rowsLabel,
@@ -267,6 +270,7 @@ export default function BackgroundImportTracker() {
   }
   const primaryProgress = getJobProgressDetails(primaryJob, progressLabels)
   const progress = primaryProgress.value
+  const compactTracker = isCompletedState && !expanded
 
   const handleCancel = async (job) => {
     if (!job?.id || busyJobId) return
@@ -357,39 +361,55 @@ export default function BackgroundImportTracker() {
     }
   }
 
+  const handleDismiss = (job) => {
+    const dismissedId = String(job?.id || '').trim()
+    if (!dismissedId) return
+    const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== dismissedId)
+    jobsSignatureRef.current = buildJobsSignature(filteredJobs)
+    setHiddenJobIds((current) => new Set([...current, dismissedId]))
+    startTransition(() => setJobs(filteredJobs))
+    notify(t('import_hidden') || 'Import hidden from the tracker', 'success')
+  }
+
   return (
-    <div className={`sticky top-0 z-40 border-b px-3 py-2 text-sm shadow-sm backdrop-blur [content-visibility:auto] ${
-      hasAttention
-        ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100'
-        : 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-100'
+    <div className={`pointer-events-none fixed bottom-20 left-3 right-3 z-[1000] sm:bottom-4 sm:left-auto sm:right-4 ${
+      compactTracker ? 'sm:w-auto' : 'sm:w-[min(420px,calc(100vw-2rem))]'
     }`}>
-      <div className="mx-auto flex max-w-screen-2xl flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div className={`pointer-events-auto border text-sm shadow-lg backdrop-blur [content-visibility:auto] ${
+        hasAttention
+          ? 'border-amber-200 bg-amber-50/95 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100'
+          : 'border-blue-200 bg-blue-50/95 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/90 dark:text-blue-100'
+      } ${compactTracker ? 'rounded-full px-3 py-2' : 'rounded-2xl px-3 py-2'}`}>
+      <div className={`flex ${compactTracker ? 'items-center' : 'flex-col gap-2'}`}>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className={`flex min-w-0 items-center gap-2 text-left ${compactTracker ? '' : 'flex-1'}`}
           onClick={() => setExpanded((value) => !value)}
         >
           {hasAttention ? <AlertTriangle className="h-4 w-4 flex-shrink-0" /> : isActive ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" /> : <CheckCircle2 className="h-4 w-4 flex-shrink-0" />}
-          <span className="min-w-0 flex-1">
-            <span className="font-semibold">{title}</span>
-            <span className="ml-2 text-xs opacity-80">{getJobLabel(primaryJob)}</span>
-          </span>
-          <span className="text-xs font-semibold">{primaryProgress.label}</span>
+          <div className={`min-w-0 ${compactTracker ? '' : 'flex-1'}`}>
+            <div className="font-semibold">{title}</div>
+            {!compactTracker ? <div className="truncate text-xs opacity-80">{getJobLabel(primaryJob)}</div> : null}
+          </div>
+          {!compactTracker ? <span className="text-xs font-semibold">{primaryProgress.label}</span> : null}
         </button>
-        <div className="h-1.5 overflow-hidden rounded-full bg-black/10 md:w-48 dark:bg-white/10">
+        {!compactTracker ? (
+        <div className="h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
           <div
             className={`h-full rounded-full ${hasAttention ? 'bg-amber-500' : 'bg-blue-500'} ${primaryProgress.indeterminate ? 'animate-pulse' : ''}`}
             style={{ width: `${Math.max(primaryProgress.indeterminate ? 28 : 0, progress)}%` }}
           />
         </div>
+        ) : null}
       </div>
 
       {expanded ? (
-        <div className="mx-auto mt-2 grid max-w-screen-2xl gap-2">
+        <div className="mt-2 grid gap-2">
           {visibleJobs.map((job) => {
             const jobStatus = normalizeJobStatus(job)
             const jobProgress = getJobProgressDetails(job, progressLabels)
             const isJobCancellable = CANCELLABLE_STATUSES.has(jobStatus)
+            const isJobDismissable = DISMISSABLE_STATUSES.has(jobStatus)
             const isJobRemovable = REMOVABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
             const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
@@ -431,6 +451,11 @@ export default function BackgroundImportTracker() {
                         </button>
                       </>
                     ) : null}
+                    {isJobDismissable ? (
+                      <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${closeLabel} ${getJobLabel(job)}`} onClick={() => handleDismiss(job)}>
+                        <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> {closeLabel}
+                      </button>
+                    ) : null}
                     {isJobRemovable ? (
                       <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${removeLabel} ${getJobLabel(job)}`} onClick={() => handleRemove(job)}>
                         <Trash2 className="mr-1 inline h-3.5 w-3.5" /> {removeLabel}
@@ -443,6 +468,7 @@ export default function BackgroundImportTracker() {
           })}
         </div>
       ) : null}
+      </div>
     </div>
   )
 }
