@@ -743,8 +743,24 @@ async function ensureRemoteDirectories(config, mappings, rootFolderId, relativeD
   for (const relativeDir of relativeDirs) {
     const existing = mappings[relativeDir]
     if (existing?.remote_file_id) {
-      remoteDirs[relativeDir] = existing.remote_file_id
-      continue
+      const existingById = await getDriveFileIfExists(config, existing.remote_file_id)
+      if (existingById?.id) {
+        remoteDirs[relativeDir] = existingById.id
+        if (existingById.id !== existing.remote_file_id) {
+          upsertDriveSyncEntry({
+            relativePath: relativeDir,
+            itemType: 'folder',
+            remoteFileId: existingById.id,
+            mimeType: existingById.mimeType || 'application/vnd.google-apps.folder',
+            md5Checksum: '',
+            byteSize: 0,
+            localModifiedAt: null,
+            lastSyncedAt: nowIso(),
+          })
+          mappings[relativeDir] = { remote_file_id: existingById.id, item_type: 'folder' }
+        }
+        continue
+      }
     }
     const parentRelative = path.posix.dirname(relativeDir) === '.' ? '' : path.posix.dirname(relativeDir)
     const parentRemoteId = remoteDirs[parentRelative] || rootFolderId
