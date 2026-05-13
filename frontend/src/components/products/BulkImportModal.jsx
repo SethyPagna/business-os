@@ -474,12 +474,18 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const [fieldRules, setFieldRules] = useState({})
   const [result, setResult] = useState(null)
   const [currentJob, setCurrentJob] = useState(null)
+  const [serverPreflight, setServerPreflight] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const cancelRequestedRef = useRef(false)
   const editSessionRef = useRef(new Set())
 
   const T = (key, fallback) => (typeof t === 'function' ? t(key) : fallback)
+  const signalDone = async (payload) => {
+    if (typeof onDone === 'function') {
+      await Promise.resolve(onDone(payload))
+    }
+  }
 
   const throwIfImportCancelled = () => {
     if (!cancelRequestedRef.current) return
@@ -577,6 +583,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     setFieldRules({})
     setZipFile(null)
     setCurrentJob(null)
+    setServerPreflight(null)
     editSessionRef.current = new Set()
     cancelRequestedRef.current = false
     setStep(1)
@@ -668,6 +675,36 @@ export default function BulkImportModal({ onClose, onDone, t }) {
     ].join('\n')
   }
 
+  const ensureServerPreflightReady = async (jobId) => {
+    const preflight = await window.api.preflightImportJob(jobId)
+    const failures = Array.isArray(preflight?.failures) ? preflight.failures : []
+    const warnings = Array.isArray(preflight?.warnings) ? preflight.warnings : []
+    if (failures.length) {
+      const preflightError = new Error(failures[0]?.message || 'Import review still has blocking issues.')
+      preflightError.preflight = {
+        jobId,
+        checkedRows: Number(preflight?.checkedRows || 0),
+        failures,
+        warnings,
+      }
+      setServerPreflight({
+        jobId,
+        checkedRows: Number(preflight?.checkedRows || 0),
+        failures,
+        warnings,
+      })
+      setConflictFilter('errors')
+      throw preflightError
+    }
+    setServerPreflight({
+      jobId,
+      checkedRows: Number(preflight?.checkedRows || 0),
+      failures: [],
+      warnings,
+    })
+    return preflight
+  }
+
   const handleCancelCurrentJob = async () => {
     if (!currentJob?.id) return
     if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -734,6 +771,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const handleImageOnlyImport = async () => {
     if (!Object.keys(imageFiles).length && !zipFile) return
     cancelRequestedRef.current = false
+    setServerPreflight(null)
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
     let jobId = null
@@ -768,10 +806,12 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
         throwIfImportCancelled()
       }
+      setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
+      await ensureServerPreflightReady(jobId)
       throwIfImportCancelled()
       await window.api.startImportJob(jobId, { source: 'products_modal' })
       throwIfImportCancelled()
-      setResult({
+      const nextResult = {
         imported: 0,
         updated: 0,
         images_matched: 0,
@@ -779,12 +819,17 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         jobId,
         errors: [],
         message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
-      })
+      }
+      setResult(nextResult)
+      await signalDone(nextResult)
       setStep(3)
       return
     } catch (error) {
       if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
+      } else if (Array.isArray(error?.preflight?.failures) && error.preflight.failures.length) {
+        notify(error?.message || 'Server preflight found rows that still need review.', 'error')
+        setStep(2)
       } else {
         setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
         setStep(3)
@@ -847,6 +892,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
       setCollapsedFamilyKeys(new Set())
       setCollapsedDetailRows(new Set((analysis.rows || []).map((row, index) => Number(row?._import_row_index ?? index))))
       setReviewUndoStack([])
+      setServerPreflight(null)
       editSessionRef.current = new Set()
       setStep(2)
     } catch (error) {
@@ -860,6 +906,7 @@ export default function BulkImportModal({ onClose, onDone, t }) {
   const handleImport = async () => {
     if (!csvData?.content) return
     cancelRequestedRef.current = false
+    setServerPreflight(null)
     setLoading(true)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
     let jobId = null
@@ -897,22 +944,29 @@ export default function BulkImportModal({ onClose, onDone, t }) {
         })
         throwIfImportCancelled()
       }
+      setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
+      await ensureServerPreflightReady(jobId)
       throwIfImportCancelled()
       await window.api.startImportJob(jobId, { source: 'products_modal' })
       throwIfImportCancelled()
-      setResult({
+      const nextResult = {
         imported: 0,
         updated: 0,
         queued: totalCount,
         jobId,
         errors: [],
         message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
-      })
+      }
+      setResult(nextResult)
+      await signalDone(nextResult)
       setStep(3)
       return
     } catch (error) {
       if (error?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
+      } else if (Array.isArray(error?.preflight?.failures) && error.preflight.failures.length) {
+        notify(error?.message || 'Server preflight found rows that still need review.', 'error')
+        setStep(2)
       } else {
         setResult({ imported: 0, updated: 0, errors: [error?.message || 'Import failed'] })
         setStep(3)
@@ -1355,6 +1409,41 @@ export default function BulkImportModal({ onClose, onDone, t }) {
               <button type="button" className="btn-primary px-3 py-1 text-xs" onClick={handleRetryCurrentJob} disabled={loading}>Retry import</button>
               <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={handleDeleteCurrentJob} disabled={loading}>Delete import</button>
               <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={resetCsvState} disabled={loading}>Back to upload</button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {serverPreflight && step !== 1 ? (
+        <div className={`mb-4 rounded-xl border p-3 text-xs ${serverPreflight.failures?.length ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-semibold">
+              {serverPreflight.failures?.length
+                ? 'Server preflight found rows that still need review'
+                : 'Server preflight completed'}
+            </div>
+            <div>
+              {serverPreflight.checkedRows || 0} rows checked
+            </div>
+          </div>
+          {serverPreflight.failures?.length ? (
+            <div className="mt-2 space-y-1">
+              {serverPreflight.failures.slice(0, 6).map((failure, index) => (
+                <div key={`${failure.rowNumber || 'row'}-${index}`}>
+                  Row {failure.rowNumber || '?'}: {failure.message}
+                </div>
+              ))}
+              {serverPreflight.failures.length > 6 ? (
+                <div>+ {serverPreflight.failures.length - 6} more issue(s)</div>
+              ) : null}
+            </div>
+          ) : null}
+          {!serverPreflight.failures?.length && serverPreflight.warnings?.length ? (
+            <div className="mt-2 space-y-1 text-amber-700 dark:text-amber-200">
+              {serverPreflight.warnings.slice(0, 4).map((warning, index) => (
+                <div key={`${warning.rowNumber || 'warning'}-${index}`}>
+                  Row {warning.rowNumber || '?'}: {warning.message}
+                </div>
+              ))}
             </div>
           ) : null}
         </div>
