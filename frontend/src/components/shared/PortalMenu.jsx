@@ -16,6 +16,7 @@ export default function PortalMenu({
   menuClassName = '',
   closeOnContentClick = false,
   triggerWrapperClassName = '',
+  onOpenChange = null,
 }) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
@@ -57,6 +58,10 @@ export default function PortalMenu({
       return !isOpen
     })
   }, [reposition])
+
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [onOpenChange, open])
 
   useEffect(() => {
     if (!open) return undefined
