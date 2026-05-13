@@ -117,9 +117,11 @@ export default function PortalMenu({
 
   const closeMenu = useCallback(() => setOpen(false), [])
 
-  const resolvedContent = typeof content === 'function'
-    ? content({ closeMenu, open })
-    : content
+  const resolvedContent = open
+    ? (typeof content === 'function'
+        ? content({ closeMenu, open })
+        : content)
+    : null
 
   const triggerNode = isValidElement(trigger)
     ? cloneElement(trigger, {
