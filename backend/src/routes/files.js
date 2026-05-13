@@ -16,6 +16,8 @@ const {
 const router = express.Router()
 const ALLOWED_MEDIA_TYPES = new Set(['all', 'image', 'video', 'document', 'file'])
 const MAX_FILE_SEARCH_LENGTH = 120
+const DEFAULT_FILE_PAGE_SIZE = 24
+const MAX_FILE_PAGE_SIZE = 60
 
 function parseFileAssetId(value) {
   const id = Number.parseInt(String(value || ''), 10)
@@ -34,7 +36,18 @@ function getFileListFilters(req) {
   if (!ALLOWED_MEDIA_TYPES.has(mediaType)) {
     throw new Error('Invalid media type filter')
   }
-  return { search, mediaType }
+  const pageSize = Math.min(
+    MAX_FILE_PAGE_SIZE,
+    Math.max(1, Number.parseInt(String(req.query?.pageSize || req.query?.limit || DEFAULT_FILE_PAGE_SIZE), 10) || DEFAULT_FILE_PAGE_SIZE),
+  )
+  const page = Math.max(1, Number.parseInt(String(req.query?.page || 1), 10) || 1)
+  return {
+    search,
+    mediaType,
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize,
+  }
 }
 
 function getDeviceMeta(req) {
@@ -49,7 +62,7 @@ router.get('/', authToken, requirePermission('settings'), async (req, res) => {
   try {
     const filters = getFileListFilters(req)
     const files = await listFileAssets(filters)
-    ok(res, { items: files })
+    ok(res, files)
   } catch (error) {
     err(res, error.message || 'Failed to load files')
   }
