@@ -23,8 +23,10 @@ await runTest('transfer in and out rows with same reference become one net-zero 
   assert.equal(groups.length, 1)
   assert.equal(groups[0].recordCount, 2)
   assert.equal(groups[0].productCount, 1)
-  assert.equal(groups[0].totalQuantity, 0)
-  assert.equal(groups[0].totalCostUsd, 0)
+  assert.equal(groups[0].signedQuantity, 0)
+  assert.equal(groups[0].signedCostUsd, 0)
+  assert.equal(groups[0].totalQuantity, 4)
+  assert.equal(groups[0].totalCostUsd, 12)
   assert.equal(groups[0].branchSummary, 'A +1')
 })
 
