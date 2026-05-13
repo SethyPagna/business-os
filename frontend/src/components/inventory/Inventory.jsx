@@ -2368,36 +2368,72 @@ export default function Inventory() {
       branches.length > 1 ? {
         id: 'branch',
         label: t('branch') || 'Branch',
-        options: [
-          { id: 'all', label: t('all_branches') || 'All branches', active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
-          ...branches.map((branch) => ({
-            id: `branch-${branch.id}`,
-            label: branch.name,
-            active: branchFilter === String(branch.id),
-            onClick: () => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id)),
-          })),
-        ],
+        render: ({ closeMenu }) => (
+          <label className="block">
+            <span className="sr-only">{t('branch') || 'Branch'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={branchFilter}
+              onChange={(event) => {
+                setBranchFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('branch') || 'Branch'}
+            >
+              <option value="all">{t('all_branches') || 'All branches'}</option>
+              {branches.map((branch) => (
+                <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
+              ))}
+            </select>
+          </label>
+        ),
       } : null,
       {
         id: 'group',
         label: t('groups') || 'Groups',
-        options: [
-          { id: 'all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-          { id: 'parents-variants', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter('grouped') },
-          { id: 'parent-only', label: t('parents') || 'Parents', active: groupFilter === 'parent', onClick: () => setGroupFilter('parent') },
-          { id: 'variant-only', label: t('variants') || 'Variants', active: groupFilter === 'variant', onClick: () => setGroupFilter('variant') },
-          { id: 'standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter('standalone') },
-        ],
+        render: ({ closeMenu }) => (
+          <label className="block">
+            <span className="sr-only">{t('groups') || 'Groups'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={groupFilter}
+              onChange={(event) => {
+                setGroupFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('groups') || 'Groups'}
+            >
+              <option value="all">{t('all') || 'All'}</option>
+              <option value="grouped">{t('groups') || 'Groups'}</option>
+              <option value="parent">{t('parents') || 'Parents'}</option>
+              <option value="variant">{t('variants') || 'Variants'}</option>
+              <option value="standalone">{t('standalone') || 'Standalone'}</option>
+            </select>
+          </label>
+        ),
       },
       {
         id: 'stock',
         label: t('stock_status') || 'Stock',
-        options: [
-          { id: 'all', label: t('all') || 'All', active: stockFilter === 'all', onClick: () => setStockFilter('all') },
-          { id: 'in-stock', label: t('in_stock') || 'In stock', active: stockFilter === 'in_stock', onClick: () => setStockFilter(stockFilter === 'in_stock' ? 'all' : 'in_stock') },
-          { id: 'low', label: t('low_stock') || 'Low stock', active: stockFilter === 'low', onClick: () => setStockFilter(stockFilter === 'low' ? 'all' : 'low') },
-          { id: 'out', label: t('out_of_stock') || 'Out of stock', active: stockFilter === 'out', onClick: () => setStockFilter(stockFilter === 'out' ? 'all' : 'out') },
-        ],
+        render: ({ closeMenu }) => (
+          <label className="block">
+            <span className="sr-only">{t('stock_status') || 'Stock'}</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+              value={stockFilter}
+              onChange={(event) => {
+                setStockFilter(event.target.value || 'all')
+                closeMenu()
+              }}
+              aria-label={t('stock_status') || 'Stock'}
+            >
+              <option value="all">{t('all') || 'All'}</option>
+              <option value="in_stock">{t('in_stock') || 'In stock'}</option>
+              <option value="low">{t('low_stock') || 'Low stock'}</option>
+              <option value="out">{t('out_of_stock') || 'Out of stock'}</option>
+            </select>
+          </label>
+        ),
       },
       inventoryBrands.length ? {
         id: 'brand',
