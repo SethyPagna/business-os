@@ -14,6 +14,7 @@ export default function FilterMenu({
   onClear = null,
   compact = false,
   mobileIconOnly = false,
+  onOpenChange = null,
 }) {
   const hasActions = typeof onClear === 'function'
   const triggerLabel = activeCount > 0 ? `${label} (${activeCount})` : label
@@ -22,6 +23,7 @@ export default function FilterMenu({
     <PortalMenu
       align="right"
       menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0"
+      onOpenChange={onOpenChange}
       trigger={(
         <button
           type="button"
