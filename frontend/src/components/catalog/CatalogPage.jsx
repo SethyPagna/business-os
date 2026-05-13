@@ -88,10 +88,15 @@ import {
 } from '../../utils/mediaUpload.js'
 import { CatalogPageProvider } from './CatalogPageContext'
 
-const CatalogEditorSurface = lazy(() => import('./CatalogEditorSurface'))
-const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
-const CatalogProductsSection = lazy(() => import('./CatalogProductsSection'))
-const CatalogPreviewSurface = lazy(() => import('./CatalogPreviewSurface'))
+const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
+const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
+const loadCatalogProductsSection = () => import('./CatalogProductsSection')
+const loadCatalogPreviewSurface = () => import('./CatalogPreviewSurface')
+
+const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
+const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
+const CatalogProductsSection = lazy(loadCatalogProductsSection)
+const CatalogPreviewSurface = lazy(loadCatalogPreviewSurface)
 
 function getAboutBlockLabel(type) {
   if (type === 'image') return 'Image block'
@@ -1078,6 +1083,21 @@ export default function CatalogPage({ publicView = false }) {
   useEffect(() => {
     setActiveTab((current) => resolvePortalActiveTab(previewConfig, null, current))
   }, [previewConfig])
+  useEffect(() => {
+    if (!publicView || !portalConfigReady) return undefined
+    const warmPublicTabChunks = () => {
+      void loadCatalogProductsSection()
+      void loadCatalogSecondaryTabs()
+    }
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(() => {
+        warmPublicTabChunks()
+      }, { timeout: 1200 })
+      return () => window.cancelIdleCallback?.(idleId)
+    }
+    const timerId = window.setTimeout(warmPublicTabChunks, 180)
+    return () => window.clearTimeout(timerId)
+  }, [portalConfigReady, publicView])
   const recommendedProductIds = useMemo(
     () => normalizeRecommendedProductIds(
       editorDraft.customer_portal_recommended_product_ids
