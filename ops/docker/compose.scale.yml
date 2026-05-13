@@ -219,7 +219,7 @@ services:
       <<: *node-env
       WORKER_RUNTIME: docker
       NODE_OPTIONS: "--max-old-space-size=768"
-    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/pg/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
+    command: ["sh", "-lc", "set -e; cd /app/frontend; if [ ! -d node_modules/vite ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --include=dev --no-audit --prefer-offline --loglevel=warn; fi; if [ ! -f dist/index.html ]; then npm run build; fi; cd /app/backend; if [ ! -d node_modules/cors ] || [ ! -f node_modules/pg/package.json ] || [ ! -f node_modules/.package-lock.json ] || [ package.json -nt node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then npm ci --omit=dev --no-audit --prefer-offline --loglevel=warn; fi; npm run start"]
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${PORT:-4000}:4000"
     volumes:

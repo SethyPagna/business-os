@@ -19,6 +19,7 @@
     "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
+    "@fontsource/noto-sans-khmer": "^5.2.8",
     "@zxing/browser": "^0.2.0",
     "@zxing/library": "^0.22.0",
     "dexie": "^3.2.7",
