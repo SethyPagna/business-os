@@ -28,6 +28,11 @@ export default function SalesImportModal({ onClose, onDone }) {
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+  const signalDone = async (payload) => {
+    if (typeof onDone === 'function') {
+      await Promise.resolve(onDone(payload))
+    }
+  }
 
   const previewRowCount = useMemo(() => countCsvDataRows(csvText), [csvText])
 
@@ -72,6 +77,7 @@ export default function SalesImportModal({ onClose, onDone }) {
       const queuedResult = { imported: 0, duplicates: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
       setResult(queuedResult)
+      await signalDone(queuedResult)
       notify(tr('sales_import_started', 'Sales import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', rowCount), 'success')
       return
     } catch (error) {
