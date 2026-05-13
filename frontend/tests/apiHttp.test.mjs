@@ -278,6 +278,8 @@ await runTest('read-only 530 pollers use fallback data and backoff hooks', () =>
   assert.match(methodsSource, /transient:\s*true/)
   assert.match(trackerSource, /pollBackoffMs/)
   assert.match(trackerSource, /nextImportTrackerBackoff/)
+  assert.match(trackerSource, /DISMISSABLE_STATUSES/)
+  assert.match(trackerSource, /handleDismiss/)
   assert.match(appContextSource, /syncErrorLogAtRef/)
   assert.match(appContextSource, /console\.warn\('\[sync:transient\]'/)
   assert.match(appSource, /sync:transient-outage/)
@@ -376,8 +378,8 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
 
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.js', import.meta.url), 'utf8')
-  assert.match(source, /return route\(`products:search:\$\{q\}`,\s*\(\) => apiFetch\('GET', `\/api\/products\/search/)
-  assert.match(source, /return route\(`inventory:products:search:\$\{q\}`,\s*\(\) => apiFetch\('GET', `\/api\/inventory\/products\/search/)
+  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', `\/api\/products\/search/)
+  assert.match(source, /return routeMirrored\(\s*cacheKey,\s*\(\) => apiFetch\('GET', `\/api\/inventory\/products\/search/)
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
 })
