@@ -731,6 +731,9 @@ async function ensureFileAssetListingWarm({ force = false } = {}) {
 
 async function prewarmFileAssetListing() {
   await ensureFileAssetListingWarm()
+  if (isObjectStorageEnabled()) {
+    await requestUploadStorageReconcile()
+  }
   serializeAssetRows(listAssetRows('', 'all', { limit: 24, offset: 0 }))
   countAssetRows('', 'all')
 }
