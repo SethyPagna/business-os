@@ -40,6 +40,11 @@ export default function ContactImportModal({ type, onClose, onDone }) {
   const [rowCount, setRowCount] = useState(0)
   const aliveRef = useRef(true)
   const inFlightRef = useRef(false)
+  const signalDone = async (payload) => {
+    if (typeof onDone === 'function') {
+      await Promise.resolve(onDone(payload))
+    }
+  }
 
   const typeLabel = config?.label || 'Contacts'
   const fieldList = config?.fields || []
@@ -136,6 +141,7 @@ export default function ContactImportModal({ type, onClose, onDone }) {
       }
       if (!aliveRef.current) return
       setResult(response || null)
+      await signalDone(response)
       notify(`Import analysis started: ${rowCount} row(s) queued. Review and approve it from the top progress bar.`, 'success')
     } catch (error) {
       if (!aliveRef.current) return
