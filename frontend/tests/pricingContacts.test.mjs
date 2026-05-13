@@ -26,6 +26,7 @@ await runTest('normalizePriceValue always rounds up to two decimals', () => {
   assert.equal(normalizePriceValue(3), 3)
   assert.equal(normalizePriceValue(1.001), 1.01)
   assert.equal(normalizePriceValue(2.111), 2.12)
+  assert.equal(normalizePriceValue(-0), 0)
   assert.equal(formatPriceNumber(1), '1.00')
   assert.equal(formatPriceNumber(3), '3.00')
   assert.equal(formatPriceNumber(1.001), '1.01')
