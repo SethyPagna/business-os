@@ -528,6 +528,16 @@ function bootstrapServer() {
     console.warn(`[product-batches] background backfill skipped: ${error?.message || error}`)
   }
   try {
+    const { prewarmFileAssetListing } = require('./src/fileAssets')
+    setImmediate(() => {
+      prewarmFileAssetListing().catch((error) => {
+        console.warn(`[file-assets] prewarm skipped: ${error?.message || error}`)
+      })
+    })
+  } catch (error) {
+    console.warn(`[file-assets] prewarm skipped: ${error?.message || error}`)
+  }
+  try {
     const { initializeBullQueue, recoverImportJobs } = require('./src/services/importJobs')
     initializeBullQueue().catch((error) => {
       console.warn(`[import-jobs] Queue initialization skipped: ${error?.message || error}`)
