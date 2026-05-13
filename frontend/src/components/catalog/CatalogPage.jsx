@@ -1000,6 +1000,7 @@ export default function CatalogPage({ publicView = false }) {
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicProductsPanelPrimed, setPublicProductsPanelPrimed] = useState(false)
+  const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
   const [publicChromeVisible, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
@@ -1094,12 +1095,14 @@ export default function CatalogPage({ publicView = false }) {
       const idleId = window.requestIdleCallback(() => {
         warmPublicTabChunks()
         setPublicProductsPanelPrimed(true)
+        setPublicSecondaryTabsPrimed(true)
       }, { timeout: 1200 })
       return () => window.cancelIdleCallback?.(idleId)
     }
     const timerId = window.setTimeout(() => {
       warmPublicTabChunks()
       setPublicProductsPanelPrimed(true)
+      setPublicSecondaryTabsPrimed(true)
     }, 180)
     return () => window.clearTimeout(timerId)
   }, [portalConfigReady, publicView])
@@ -2909,14 +2912,33 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
     setAssistantExpandedProductId,
   }
 
+  function renderSecondaryTabPanel(tab, visible) {
+    return (
+      <div
+        key={tab}
+        aria-hidden={visible ? undefined : 'true'}
+        className={visible ? '' : 'pointer-events-none absolute left-0 top-0 h-0 w-full overflow-hidden opacity-0'}
+      >
+        <CatalogSecondaryTabs {...secondaryTabProps} tab={tab} />
+      </div>
+    )
+  }
+
   function renderSecondaryTabSection() {
-    const tabEnabled = (
+    const activeSecondaryTab = (
       (activeTab === 'membership' && displayConfig.showMembership)
       || (activeTab === 'about' && displayConfig.showAbout)
       || (activeTab === 'faq' && displayConfig.showFaq)
       || (activeTab === 'ai' && displayConfig.aiEnabled)
-    )
-    if (!tabEnabled) return null
+    ) ? activeTab : null
+    const secondaryTabsToPrime = publicView && publicSecondaryTabsPrimed
+      ? [
+          displayConfig.showAbout ? 'about' : null,
+          displayConfig.showMembership ? 'membership' : null,
+          displayConfig.showFaq ? 'faq' : null,
+        ].filter(Boolean)
+      : []
+    if (!activeSecondaryTab && !secondaryTabsToPrime.length) return null
 
     return (
       <Suspense fallback={(
@@ -2924,7 +2946,12 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
           <div className="text-sm text-slate-500">Loading...</div>
         </SectionShell>
       )}>
-        <CatalogSecondaryTabs {...secondaryTabProps} />
+        <div className="relative">
+          {activeSecondaryTab ? renderSecondaryTabPanel(activeSecondaryTab, true) : null}
+          {secondaryTabsToPrime
+            .filter((tab) => tab !== activeSecondaryTab)
+            .map((tab) => renderSecondaryTabPanel(tab, false))}
+        </div>
       </Suspense>
     )
   }
