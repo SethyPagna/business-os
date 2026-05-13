@@ -47,6 +47,8 @@ export default function Sales() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState([])
+  const [salesFiltersOpen, setSalesFiltersOpen] = useState(false)
+  const [userOptionsLoaded, setUserOptionsLoaded] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(() => new Set())
@@ -190,11 +192,22 @@ export default function Sales() {
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
   }, [isActive, loadSales, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => {
-    if (!isActive || !isAdmin) return
+    if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
+    let cancelled = false
     window.api.getUsers()
-      .then((rows) => setUserOptions(Array.isArray(rows) ? rows : []))
-      .catch(() => setUserOptions([]))
-  }, [isActive, isAdmin])
+      .then((rows) => {
+        if (cancelled) return
+        setUserOptions(Array.isArray(rows) ? rows : [])
+        setUserOptionsLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setUserOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, isAdmin, salesFiltersOpen, userOptionsLoaded])
   useEffect(() => () => {
     aliveRef.current = false
     window.clearTimeout(loadWatchdogRef.current)
@@ -705,6 +718,7 @@ export default function Sales() {
           label={t('filters') || 'Filters'}
           activeCount={activeSalesFilterCount}
           sections={salesFilterSections}
+          onOpenChange={setSalesFiltersOpen}
           onClear={() => {
             setStatusFilter('all')
             setUserFilter('all')
