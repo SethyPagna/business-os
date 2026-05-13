@@ -15,13 +15,23 @@ const DEFAULT_REFRESH_CHANNELS = [
   'users',
 ]
 
-export function refreshAppData(channels = DEFAULT_REFRESH_CHANNELS) {
+function normalizeRefreshChannels(channels) {
+  return [...new Set(
+    (Array.isArray(channels) ? channels : DEFAULT_REFRESH_CHANNELS)
+      .map((channel) => String(channel || '').trim())
+      .filter(Boolean),
+  )]
+}
+
+export function refreshAppData(channels = DEFAULT_REFRESH_CHANNELS, detail = {}) {
   if (typeof window === 'undefined') return
-  ;(Array.isArray(channels) ? channels : DEFAULT_REFRESH_CHANNELS).forEach((channel) => {
+  const normalizedChannels = normalizeRefreshChannels(channels)
+  const extraDetail = detail && typeof detail === 'object' ? { ...detail } : {}
+  normalizedChannels.forEach((channel) => {
     window.dispatchEvent(new CustomEvent('sync:update', {
-      detail: { channel, ts: Date.now() },
+      detail: { channel, ts: Date.now(), ...extraDetail },
     }))
   })
 }
 
-export { DEFAULT_REFRESH_CHANNELS }
+export { DEFAULT_REFRESH_CHANNELS, normalizeRefreshChannels }
