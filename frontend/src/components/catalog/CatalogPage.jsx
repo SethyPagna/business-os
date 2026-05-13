@@ -999,6 +999,7 @@ export default function CatalogPage({ publicView = false }) {
   const [portalProductInitials, setPortalProductInitials] = useState(() => Array.isArray(cachedPortal?.catalog?.initials) ? cachedPortal.catalog.initials : [])
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
+  const [publicProductsPanelPrimed, setPublicProductsPanelPrimed] = useState(false)
   const [publicChromeVisible, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
@@ -1092,10 +1093,14 @@ export default function CatalogPage({ publicView = false }) {
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
       const idleId = window.requestIdleCallback(() => {
         warmPublicTabChunks()
+        setPublicProductsPanelPrimed(true)
       }, { timeout: 1200 })
       return () => window.cancelIdleCallback?.(idleId)
     }
-    const timerId = window.setTimeout(warmPublicTabChunks, 180)
+    const timerId = window.setTimeout(() => {
+      warmPublicTabChunks()
+      setPublicProductsPanelPrimed(true)
+    }, 180)
     return () => window.clearTimeout(timerId)
   }, [portalConfigReady, publicView])
   const recommendedProductIds = useMemo(
@@ -2823,16 +2828,23 @@ const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayC
   }
 
   function renderCatalogSection() {
-    if (!(activeTab === 'products' && displayConfig.showCatalog)) return null
+    if (!displayConfig.showCatalog) return null
+    const visible = activeTab === 'products'
+    if (!visible && !(publicView && publicProductsPanelPrimed)) return null
 
     return (
-      <Suspense fallback={(
-        <SectionShell title={copy('loadingPortal', 'Loading customer portal...')}>
-          <div className="text-sm text-slate-500">Loading...</div>
-        </SectionShell>
-      )}>
-        <CatalogProductsSection {...catalogTabProps} />
-      </Suspense>
+      <div
+        aria-hidden={visible ? undefined : 'true'}
+        className={visible ? '' : 'pointer-events-none absolute left-0 top-0 h-0 w-full overflow-hidden opacity-0'}
+      >
+        <Suspense fallback={(
+          <SectionShell title={copy('loadingPortal', 'Loading customer portal...')}>
+            <div className="text-sm text-slate-500">Loading...</div>
+          </SectionShell>
+        )}>
+          <CatalogProductsSection {...catalogTabProps} />
+        </Suspense>
+      </div>
     )
   }
 
