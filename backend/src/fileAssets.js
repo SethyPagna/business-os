@@ -49,6 +49,9 @@ const MAX_SYNC_VIDEO_OPTIMIZATION_BYTES = 8 * 1024 * 1024
 let cachedFfmpegPath = undefined
 let uploadStorageReconcilePromise = null
 let lastUploadStorageReconcileAt = 0
+let fileAssetListingWarmPromise = null
+let lastFileAssetListingWarmAt = 0
+const FILE_ASSET_LISTING_WARM_TTL_MS = 60 * 1000
 
 function getDb() {
   return require('./database').db
@@ -448,10 +451,18 @@ function getFileAssetByPublicPath(publicPath) {
   `).get(publicPath)
 }
 
-function listAssetRows(search = '', mediaType = 'all') {
-  const params = {
+function buildFileAssetFilterParams(search = '', mediaType = 'all') {
+  return {
     search: `%${String(search || '').trim().toLowerCase()}%`,
     mediaType: String(mediaType || 'all').trim().toLowerCase(),
+  }
+}
+
+function listAssetRows(search = '', mediaType = 'all', { limit = 24, offset = 0 } = {}) {
+  const params = {
+    ...buildFileAssetFilterParams(search, mediaType),
+    limit: Math.max(1, Number(limit || 24) || 24),
+    offset: Math.max(0, Number(offset || 0) || 0),
   }
   return getDb().prepare(`
     SELECT *
@@ -468,7 +479,28 @@ function listAssetRows(search = '', mediaType = 'all') {
       OR media_type = @mediaType
     )
     ORDER BY created_at DESC, id DESC
+    LIMIT @limit OFFSET @offset
   `).all(params)
+}
+
+function countAssetRows(search = '', mediaType = 'all') {
+  const params = buildFileAssetFilterParams(search, mediaType)
+  const row = getDb().prepare(`
+    SELECT COUNT(*) AS total
+    FROM file_assets
+    WHERE public_path LIKE '/uploads/%'
+    AND (
+      @search = '%%'
+      OR lower(coalesce(original_name, '')) LIKE @search
+      OR lower(coalesce(stored_name, '')) LIKE @search
+      OR lower(coalesce(public_path, '')) LIKE @search
+    )
+    AND (
+      @mediaType = 'all'
+      OR media_type = @mediaType
+    )
+  `).get(params)
+  return Number(row?.total || 0)
 }
 
 async function writeObjectBodyToFile(body, filePath) {
@@ -679,6 +711,30 @@ function requestUploadStorageReconcile(options = {}) {
   return reconcileUploadStorage(options)
 }
 
+async function ensureFileAssetListingWarm({ force = false } = {}) {
+  const now = Date.now()
+  if (!force && fileAssetListingWarmPromise) return fileAssetListingWarmPromise
+  if (!force && lastFileAssetListingWarmAt && (now - lastFileAssetListingWarmAt) < FILE_ASSET_LISTING_WARM_TTL_MS) {
+    return
+  }
+  fileAssetListingWarmPromise = (async () => {
+    pruneInvalidReferenceBackfillAssets()
+    repairMissingUploadReferences(getDb())
+    ensureReferencedAssetsRegistered()
+    await backfillUploadAssets()
+    lastFileAssetListingWarmAt = Date.now()
+  })().finally(() => {
+    fileAssetListingWarmPromise = null
+  })
+  return fileAssetListingWarmPromise
+}
+
+async function prewarmFileAssetListing() {
+  await ensureFileAssetListingWarm()
+  serializeAssetRows(listAssetRows('', 'all', { limit: 24, offset: 0 }))
+  countAssetRows('', 'all')
+}
+
 async function deleteAllStoredUploads() {
   let deleted = 0
   if (isObjectStorageEnabled()) {
@@ -700,33 +756,82 @@ async function deleteAllStoredUploads() {
   return { deleted, storage: 'local' }
 }
 
-function collectUsage(publicPath) {
-  const usages = []
-  const settingsRows = getDb().prepare(`
-    SELECT key
+function buildInClausePlaceholders(values = []) {
+  return values.map(() => '?').join(', ')
+}
+
+function collectUsagesByPublicPath(publicPaths = []) {
+  const uniquePaths = [...new Set((Array.isArray(publicPaths) ? publicPaths : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+  const usageMap = new Map(uniquePaths.map((publicPath) => [publicPath, []]))
+  if (!uniquePaths.length) return usageMap
+
+  const addUsage = (publicPath, usage) => {
+    const key = String(publicPath || '').trim()
+    if (!key || !usageMap.has(key)) return
+    usageMap.get(key).push(usage)
+  }
+
+  const db = getDb()
+  const placeholders = buildInClausePlaceholders(uniquePaths)
+
+  db.prepare(`
+    SELECT key, value
     FROM settings
-    WHERE value = ? OR value LIKE '%' || ? || '%'
-  `).all(publicPath, publicPath)
-  settingsRows.forEach((row) => usages.push({ type: 'settings', label: row.key }))
+    WHERE value IS NOT NULL AND trim(value) != ''
+  `).all().forEach((row) => {
+    const value = String(row?.value || '')
+    uniquePaths.forEach((publicPath) => {
+      if (value === publicPath || value.includes(publicPath)) {
+        addUsage(publicPath, { type: 'settings', label: row.key })
+      }
+    })
+  })
 
-  const productRows = getDb().prepare(`SELECT id, name FROM products WHERE image_path = ?`).all(publicPath)
-  productRows.forEach((row) => usages.push({ type: 'product', label: row.name || `Product #${row.id}` }))
+  db.prepare(`
+    SELECT id, name, image_path
+    FROM products
+    WHERE image_path IN (${placeholders})
+  `).all(...uniquePaths).forEach((row) => {
+    addUsage(row.image_path, { type: 'product', label: row.name || `Product #${row.id}` })
+  })
 
-  const galleryRows = getDb().prepare(`
-    SELECT p.id, p.name
+  db.prepare(`
+    SELECT p.id, p.name, pi.image_path
     FROM product_images pi
     LEFT JOIN products p ON p.id = pi.product_id
-    WHERE pi.image_path = ?
-  `).all(publicPath)
-  galleryRows.forEach((row) => usages.push({ type: 'product_gallery', label: row.name || `Product #${row.id}` }))
+    WHERE pi.image_path IN (${placeholders})
+  `).all(...uniquePaths).forEach((row) => {
+    addUsage(row.image_path, { type: 'product_gallery', label: row.name || `Product #${row.id}` })
+  })
 
-  const userRows = getDb().prepare(`SELECT id, name, username FROM users WHERE avatar_path = ?`).all(publicPath)
-  userRows.forEach((row) => usages.push({ type: 'user_avatar', label: row.name || row.username || `User #${row.id}` }))
+  db.prepare(`
+    SELECT id, name, username, avatar_path
+    FROM users
+    WHERE avatar_path IN (${placeholders})
+  `).all(...uniquePaths).forEach((row) => {
+    addUsage(row.avatar_path, { type: 'user_avatar', label: row.name || row.username || `User #${row.id}` })
+  })
 
-  const submissionRows = getDb().prepare(`SELECT id FROM customer_share_submissions WHERE screenshots_json LIKE '%' || ? || '%'`).all(publicPath)
-  submissionRows.forEach((row) => usages.push({ type: 'submission', label: `Submission #${row.id}` }))
+  db.prepare(`
+    SELECT id, screenshots_json
+    FROM customer_share_submissions
+    WHERE screenshots_json IS NOT NULL AND trim(screenshots_json) != ''
+  `).all().forEach((row) => {
+    const screenshots = String(row?.screenshots_json || '')
+    uniquePaths.forEach((publicPath) => {
+      if (screenshots.includes(publicPath)) {
+        addUsage(publicPath, { type: 'submission', label: `Submission #${row.id}` })
+      }
+    })
+  })
 
-  return usages
+  return usageMap
+}
+
+function collectUsage(publicPath) {
+  return collectUsagesByPublicPath([publicPath]).get(String(publicPath || '').trim()) || []
 }
 
 function resolveBrowserPublicPath(publicPath = '') {
@@ -736,8 +841,10 @@ function resolveBrowserPublicPath(publicPath = '') {
   return base ? `${base}${normalized}` : normalized
 }
 
-function serializeAssetRow(row = {}) {
-  const usages = collectUsage(row.public_path)
+function serializeAssetRow(row = {}, usageMap = null) {
+  const usages = usageMap instanceof Map
+    ? (usageMap.get(String(row.public_path || '').trim()) || [])
+    : collectUsage(row.public_path)
   return {
     ...row,
     browser_public_path: resolveBrowserPublicPath(row.public_path),
@@ -745,6 +852,12 @@ function serializeAssetRow(row = {}) {
     usages,
     canDelete: usages.length === 0,
   }
+}
+
+function serializeAssetRows(rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : []
+  const usageMap = collectUsagesByPublicPath(safeRows.map((row) => row?.public_path))
+  return safeRows.map((row) => serializeAssetRow(row, usageMap))
 }
 
 async function registerStoredAsset({
@@ -915,17 +1028,24 @@ async function backfillUploadAssets() {
   }
 }
 
-async function listFileAssets({ search = '', mediaType = 'all' } = {}) {
-  pruneInvalidReferenceBackfillAssets()
-  repairMissingUploadReferences(getDb())
-  ensureReferencedAssetsRegistered()
-  await backfillUploadAssets()
+async function listFileAssets({ search = '', mediaType = 'all', page = 1, pageSize = 24, offset = 0 } = {}) {
+  setImmediate(() => {
+    ensureFileAssetListingWarm().catch(() => {})
+  })
   if (isObjectStorageEnabled()) {
     setImmediate(() => {
       requestUploadStorageReconcile().catch(() => {})
     })
   }
-  return listAssetRows(search, mediaType).map(serializeAssetRow)
+  const items = serializeAssetRows(listAssetRows(search, mediaType, { limit: pageSize, offset }))
+  const total = countAssetRows(search, mediaType)
+  return {
+    items,
+    total,
+    page: Math.max(1, Number(page || 1) || 1),
+    pageSize: Math.max(1, Number(pageSize || 24) || 24),
+    hasMore: offset + items.length < total,
+  }
 }
 
 function getFileAssetById(id) {
@@ -956,6 +1076,7 @@ module.exports = {
   getMimeTypeFromName,
   getMediaType,
   listFileAssets,
+  prewarmFileAssetListing,
   findUploadStorageOrphans,
   optimizeStoredAssetFromQueue,
   requestUploadStorageReconcile,
