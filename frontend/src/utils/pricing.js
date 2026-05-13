@@ -8,8 +8,11 @@ export function roundUpToDecimals(value, decimals = 2) {
   const factor = 10 ** decimals
   const scaled = num * factor
   const epsilon = 1e-9
-  if (num >= 0) return Math.ceil(scaled - epsilon) / factor
-  return Math.floor(scaled + epsilon) / factor
+  const rounded = num >= 0
+    ? Math.ceil(scaled - epsilon) / factor
+    : Math.floor(scaled + epsilon) / factor
+  if (Object.is(rounded, -0)) return 0
+  return rounded
 }
 
 export function normalizePriceValue(value, fallback = 0) {
