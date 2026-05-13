@@ -16,6 +16,12 @@ const { normalizeProductDiscount } = require('../productDiscounts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials')
 const { getStockMetrics } = require('../businessMetrics')
 const {
+  assertCatalogTextIntegrity,
+  hasSuspiciousCatalogText,
+  normalizeCatalogText,
+  normalizeOptionList,
+} = require('../catalogTextIntegrity')
+const {
   hasImportValue,
   normalizeFieldRule,
   normalizeImageConflictMode,
@@ -202,7 +208,11 @@ function markParentProductAsGroup(parentId) {
 }
 
 function normalizeImportLookup(value) {
-  return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
+  return normalizeCatalogText(value).toLowerCase()
+}
+
+function normalizeLookup(value) {
+  return normalizeCatalogText(value).toLowerCase()
 }
 
 function normalizeImportFlagValue(value, fallback = 0) {
@@ -341,12 +351,132 @@ function parseInclude(value = '') {
 }
 
 function splitSearchTerms(value = '') {
-  return String(value || '')
-    .normalize('NFC')
+  return normalizeCatalogText(value)
     .split(',')
     .map((term) => term.trim().toLowerCase())
     .filter(Boolean)
     .slice(0, 8)
+}
+
+function getProductCatalogSnapshotVersion() {
+  const row = db.prepare(`
+    SELECT GREATEST(
+      COALESCE(MAX(updated_at)::text, ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM categories), ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM units), ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM settings WHERE key IN ('product_brand_options', 'product_brand_color_map')), '')
+    ) AS snapshot_version
+    FROM products
+  `).get()
+  return String(row?.snapshot_version || '').trim() || new Date().toISOString()
+}
+
+function parseBrandOptionsSetting(rawValue) {
+  const parsed = tryParse(rawValue, [])
+  if (!Array.isArray(parsed)) return []
+  return normalizeOptionList(parsed.filter((value) => !hasSuspiciousCatalogText(value)))
+}
+
+function sanitizeProductLookupPayload(source = {}, fallback = {}) {
+  const next = {
+    name: normalizeCatalogText(source?.name, { defaultValue: normalizeCatalogText(fallback?.name) }),
+    brand: normalizeCatalogText(source?.brand, { preserveNull: true }),
+    category: normalizeCatalogText(source?.category, { preserveNull: true }),
+    unit: normalizeCatalogText(source?.unit, { defaultValue: normalizeCatalogText(fallback?.unit, { defaultValue: 'pcs' }) || 'pcs' }),
+    description: normalizeCatalogText(source?.description, { preserveNull: true }),
+    supplier: normalizeCatalogText(source?.supplier, { preserveNull: true }),
+  }
+  assertCatalogTextIntegrity(next, ['name', 'brand', 'category', 'unit', 'description', 'supplier'], 'Product text')
+  return next
+}
+
+function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'lookup' } = {}) {
+  const libraryMap = new Map()
+  ;(Array.isArray(libraryRows) ? libraryRows : []).forEach((row) => {
+    const sourceName = typeof row === 'string' ? row : row?.name
+    const name = normalizeCatalogText(sourceName)
+    if (!name || hasSuspiciousCatalogText(name)) return
+    const key = normalizeLookup(name)
+    if (!libraryMap.has(key)) {
+      libraryMap.set(key, {
+        key,
+        name,
+        color: row && typeof row === 'object' ? row.color || null : null,
+        usage_count: 0,
+        unresolved_count: 0,
+        sample_products: [],
+      })
+    }
+  })
+
+  const usageMap = new Map(libraryMap)
+  ;(Array.isArray(productRows) ? productRows : []).forEach((row) => {
+    const rawValue = String(row?.value || '')
+    const normalizedValue = normalizeCatalogText(rawValue)
+    const isSuspicious = hasSuspiciousCatalogText(rawValue)
+    const key = normalizeLookup(normalizedValue)
+    const fallbackKey = normalizeLookup(rawValue)
+    const resolvedKey = key || fallbackKey
+    if (!resolvedKey) return
+    if (!usageMap.has(resolvedKey)) {
+      usageMap.set(resolvedKey, {
+        key: resolvedKey,
+        name: normalizedValue || rawValue.trim(),
+        color: null,
+        usage_count: 0,
+        unresolved_count: 0,
+        sample_products: [],
+      })
+    }
+    const entry = usageMap.get(resolvedKey)
+    entry.usage_count += 1
+    if (isSuspicious) entry.unresolved_count += 1
+    if (entry.sample_products.length < 3) {
+      entry.sample_products.push({
+        id: Number(row?.id || 0) || null,
+        name: normalizeCatalogText(row?.product_name),
+      })
+    }
+  })
+
+  return Array.from(usageMap.values())
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => ({
+      type,
+      key: entry.key,
+      name: entry.name,
+      color: entry.color,
+      usage_count: entry.usage_count,
+      unresolved_count: entry.unresolved_count,
+      sample_products: entry.sample_products,
+    }))
+}
+
+function buildLookupUsageSummary() {
+  const productRows = db.prepare(`
+    SELECT id, name AS product_name, brand, category, unit
+    FROM products
+    WHERE is_active = 1
+  `).all()
+  const brandRows = productRows
+    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.brand }))
+  const categoryRows = productRows
+    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.category }))
+  const unitRows = productRows
+    .map((row) => ({ id: row.id, product_name: row.product_name, value: row.unit }))
+
+  const categoryLibrary = db.prepare('SELECT id, name, color FROM categories ORDER BY name COLLATE NOCASE ASC').all()
+  const unitLibrary = db.prepare('SELECT id, name, color FROM units ORDER BY name COLLATE NOCASE ASC').all()
+  const brandLibrary = parseBrandOptionsSetting(
+    db.prepare("SELECT value FROM settings WHERE key = 'product_brand_options'").get()?.value,
+  )
+
+  return {
+    snapshotVersion: getProductCatalogSnapshotVersion(),
+    brands: buildLookupUsageEntries({ libraryRows: brandLibrary, productRows: brandRows, type: 'brand' }),
+    categories: buildLookupUsageEntries({ libraryRows: categoryLibrary, productRows: categoryRows, type: 'category' }),
+    units: buildLookupUsageEntries({ libraryRows: unitLibrary, productRows: unitRows, type: 'unit' }),
+  }
 }
 
 function appendProductSearchFilters(query = {}) {
@@ -592,6 +722,7 @@ router.get('/search', authToken, (req, res) => {
       page,
       pageSize,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      snapshotVersion: getProductCatalogSnapshotVersion(),
       filters,
       initials: filters.initials,
       summary: {
@@ -611,13 +742,72 @@ router.get('/filters', authToken, (req, res) => {
   try {
     const { brands, categories, suppliers, initials } = getProductSearchMetadata(req.query)
     const total = db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get()?.count || 0
-    ok(res, { brands, categories, suppliers, initials, total })
+    ok(res, { brands, categories, suppliers, initials, total, snapshotVersion: getProductCatalogSnapshotVersion() })
   } catch (error) {
     err(res, error?.message || 'Failed to load product filters')
   }
 })
 
-// ?? GET /api/products ?????????????????????????????????????????????????????????
+router.get('/lookups/usage', authToken, requirePermission('products'), (_req, res) => {
+  try {
+    ok(res, buildLookupUsageSummary())
+  } catch (error) {
+    err(res, error?.message || 'Failed to load lookup usage')
+  }
+})
+
+router.post('/lookups/replace', authToken, requirePermission('products'), (req, res) => {
+  const actor = getAuditActor(req, req.body || {})
+  const type = String(req.body?.type || '').trim().toLowerCase()
+  const field = ({ brand: 'brand', category: 'category', unit: 'unit' })[type]
+  if (!field) return err(res, 'Invalid lookup type')
+
+  const rawFrom = Array.isArray(req.body?.from) ? req.body.from : [req.body?.from]
+  const sourceEntries = rawFrom
+    .map((value) => normalizeCatalogText(value))
+    .filter(Boolean)
+  const fromLookups = Array.from(new Set(sourceEntries.map((value) => normalizeLookup(value)).filter(Boolean)))
+  if (!fromLookups.length) return err(res, 'At least one source value is required')
+
+  const normalizedTarget = normalizeCatalogText(req.body?.to, { preserveNull: true })
+  if (normalizedTarget) {
+    assertCatalogTextIntegrity({ value: normalizedTarget }, ['value'], `${type} replacement`)
+  }
+
+  try {
+    const placeholders = fromLookups.map(() => '?').join(',')
+    const params = normalizedTarget ? [normalizedTarget, ...fromLookups] : [...fromLookups]
+    const targetPlaceholder = normalizedTarget ? '?' : 'NULL'
+    const result = db.prepare(`
+      UPDATE products
+      SET ${field} = ${targetPlaceholder}, updated_at = CURRENT_TIMESTAMP
+      WHERE lower(trim(COALESCE(${field}, ''))) IN (${placeholders})
+        AND is_active = 1
+    `).run(...params)
+
+    audit(actor.userId, actor.userName, 'lookup_replace', 'product', null, {
+      type,
+      from: sourceEntries,
+      to: normalizedTarget || null,
+      updated_count: Number(result.rowCount || result.changes || 0),
+    }, {
+      tableName: 'products',
+      recordId: null,
+      deviceName: actor.deviceName || null,
+      deviceTz: actor.deviceTz || null,
+      clientTime: actor.clientTime || null,
+    })
+    broadcast('products')
+    ok(res, {
+      updatedCount: Number(result.rowCount || result.changes || 0),
+      snapshotVersion: getProductCatalogSnapshotVersion(),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to replace lookup values')
+  }
+})
+
+// ?€?€ GET /api/products ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.get('/', authToken, (req, res) => {
   // Fetch all products with branch stock in a single optimized query (avoids O(n簡) filtering)
   const products = db.prepare(`
@@ -649,20 +839,21 @@ router.get('/', authToken, (req, res) => {
   })))
 })
 
-// ?? POST /api/products/variant ?????????????????????????????????????????????????
+// ?€?€ POST /api/products/variant ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/variant', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req, d)
   if (!d.parent_id) return err(res, 'parent_id required for variant')
-  if (!d.name?.trim()) return err(res, 'Variant name required')
+  const sanitizedText = sanitizeProductLookupPayload(d, { unit: 'pcs' })
+  if (!sanitizedText.name) return err(res, 'Variant name required')
   try {
     const activeBranches = getActiveBranches()
     const defaultBranch = getDefaultBranch(activeBranches)
     const openingStock = Math.max(0, parseFloat(d.stock_quantity) || 0)
     const openingBranchId = d.branch_id ? parseInt(d.branch_id, 10) : defaultBranch?.id || null
     if (!openingBranchId) return err(res, 'A branch is required for new products')
-    assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
+    assertUniqueProductFields({ name: sanitizedText.name, sku: d.sku, barcode: d.barcode })
 
     const parent = ensureParentProductExists(d.parent_id)
     if (!parent) return err(res, 'Parent product not found')
@@ -688,10 +879,10 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
          supplier, custom_fields, is_group, parent_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      d.name.trim(), d.sku || null, d.barcode || null,
-      d.category || parent.category || null,
-      d.brand || parent.brand || null,
-      d.unit || parent.unit || 'pcs', d.description || null,
+      sanitizedText.name, d.sku || null, d.barcode || null,
+      sanitizedText.category || parent.category || null,
+      sanitizedText.brand || parent.brand || null,
+      sanitizedText.unit || parent.unit || 'pcs', sanitizedText.description,
       normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
       normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
       ...productDiscountValues,
@@ -702,7 +893,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       d.out_of_stock_threshold ?? 0,
       expiry.expiry_date, expiry.expiry_alert_days,
       primaryImage, d.is_active ?? 1,
-      d.supplier || null, JSON.stringify(d.custom_fields || {}), 0, d.parent_id,
+      sanitizedText.supplier, JSON.stringify(d.custom_fields || {}), 0, d.parent_id,
     )
     const pid = r.lastInsertRowid
     syncProductImageGallery(pid, imageGallery)
@@ -711,16 +902,16 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       ...batchFields,
       notes: 'Opening stock for variant',
     })
-    audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name, parent_id: d.parent_id }, {
+    audit(actor.userId, actor.userName, 'create', 'product', pid, { name: sanitizedText.name, parent_id: d.parent_id }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
     })
     recordActionHistory({
       entity: 'product',
       entityId: pid,
-      label: `Create product ${String(d.name || '').trim()}`,
+      label: `Create product ${sanitizedText.name}`,
       createdById: actor.userId,
       createdByName: actor.userName,
-      redoPayload: { action: 'product.create', productId: pid, productName: String(d.name || '').trim() },
+      redoPayload: { action: 'product.create', productId: pid, productName: sanitizedText.name },
     })
     logOp('products:create', Date.now() - t0)
     broadcast('products')
@@ -728,13 +919,14 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
   } catch (e) { err(res, e.message) }
 })
 
-// ?? POST /api/products ????????????????????????????????????????????????????????
+// ?€?€ POST /api/products ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
   const actor = getAuditActor(req, d)
   const clientRequestId = normalizeClientRequestId(d.client_request_id)
-  if (!d.name?.trim()) return err(res, 'Product name required')
+  const sanitizedText = sanitizeProductLookupPayload(d, { unit: 'pcs' })
+  if (!sanitizedText.name) return err(res, 'Product name required')
 
   const existingProduct = findProductByClientRequestId(clientRequestId)
   if (existingProduct) return ok(res, { id: existingProduct.id, duplicate: true })
@@ -749,7 +941,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
     const parentRecord = ensureParentProductExists(d.parent_id)
     const normalizedParentId = parentRecord?.id || null
     if (!openingBranchId) return err(res, 'A branch is required for new products')
-    assertUniqueProductFields({ name: d.name, sku: d.sku, barcode: d.barcode })
+    assertUniqueProductFields({ name: sanitizedText.name, sku: d.sku, barcode: d.barcode })
     const productDiscountValues = discountValues(d, {})
     const expiry = normalizeExpiryFields(d, {})
     const batchFields = normalizeBatchFields(d, {})
@@ -762,7 +954,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
          stock_quantity, low_stock_threshold, out_of_stock_threshold, expiry_date, expiry_alert_days, image_path, is_active, supplier, custom_fields, is_group, parent_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      d.name.trim(), clientRequestId, d.sku || null, d.barcode || null, d.category || null, d.brand || null, d.unit || 'pcs', d.description || null,
+      sanitizedText.name, clientRequestId, d.sku || null, d.barcode || null, sanitizedText.category, sanitizedText.brand, sanitizedText.unit || 'pcs', sanitizedText.description,
       normalizePriceValue(d.selling_price_usd || 0), normalizePriceValue(d.selling_price_khr || 0),
       normalizePriceValue(d.special_price_usd ?? d.selling_price_usd ?? 0), normalizePriceValue(d.special_price_khr ?? d.selling_price_khr ?? 0),
       ...productDiscountValues,
@@ -772,7 +964,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
       openingStock, d.low_stock_threshold ?? 10, d.out_of_stock_threshold ?? 0,
       expiry.expiry_date, expiry.expiry_alert_days,
       primaryImage, d.is_active ?? 1,
-      d.supplier || null,
+      sanitizedText.supplier,
       JSON.stringify(d.custom_fields || {}),
       normalizedParentId ? 0 : (Number(d.is_group) ? 1 : 0),
       normalizedParentId,
@@ -787,16 +979,16 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
       ...batchFields,
       notes: 'Opening stock for product',
     })
-    audit(actor.userId, actor.userName, 'create', 'product', pid, { name: d.name }, {
+    audit(actor.userId, actor.userName, 'create', 'product', pid, { name: sanitizedText.name }, {
       deviceName: d.deviceName || null, deviceTz: d.deviceTz || null, clientTime: d.clientTime || null,
     })
     recordActionHistory({
       entity: 'product',
       entityId: pid,
-      label: `Create product ${String(d.name || '').trim()}`,
+      label: `Create product ${sanitizedText.name}`,
       createdById: actor.userId,
       createdByName: actor.userName,
-      redoPayload: { action: 'product.create', productId: pid, productName: String(d.name || '').trim() },
+      redoPayload: { action: 'product.create', productId: pid, productName: sanitizedText.name },
     })
     logOp('products:create', Date.now() - t0)
     broadcast('products')
@@ -810,7 +1002,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?? PUT /api/products/:id ?????????????????????????????????????????????????????
+// ?€?€ PUT /api/products/:id ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   const t0 = Date.now()
   const d  = req.body || {}
@@ -821,15 +1013,23 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
       const prev = db.prepare('SELECT * FROM products WHERE id=?').get(productId)
       if (!prev) throw new Error('Product not found')
       assertUpdatedAtMatch('product', prev, getExpectedUpdatedAt(d))
-
-      const merged = {
+      const sanitizedText = sanitizeProductLookupPayload({
         name: pickField(d, 'name', prev.name),
-        sku: pickField(d, 'sku', prev.sku),
-        barcode: pickField(d, 'barcode', prev.barcode),
-        category: pickField(d, 'category', prev.category),
         brand: pickField(d, 'brand', prev.brand),
+        category: pickField(d, 'category', prev.category),
         unit: pickField(d, 'unit', prev.unit),
         description: pickField(d, 'description', prev.description),
+        supplier: pickField(d, 'supplier', prev.supplier),
+      }, prev)
+
+      const merged = {
+        name: sanitizedText.name,
+        sku: pickField(d, 'sku', prev.sku),
+        barcode: pickField(d, 'barcode', prev.barcode),
+        category: sanitizedText.category,
+        brand: sanitizedText.brand,
+        unit: sanitizedText.unit,
+        description: sanitizedText.description,
         selling_price_usd: pickField(d, 'selling_price_usd', prev.selling_price_usd),
         selling_price_khr: pickField(d, 'selling_price_khr', prev.selling_price_khr),
         special_price_usd: pickField(d, 'special_price_usd', prev.special_price_usd),
@@ -845,7 +1045,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
         ...normalizeExpiryFields(d, prev),
         image_path: pickField(d, 'image_path', prev.image_path),
         is_active: pickField(d, 'is_active', prev.is_active),
-        supplier: pickField(d, 'supplier', prev.supplier),
+        supplier: sanitizedText.supplier,
         custom_fields: pickField(d, 'custom_fields', tryParse(prev.custom_fields, {})),
         is_group: pickField(d, 'is_group', prev.is_group),
         parent_id: pickField(d, 'parent_id', prev.parent_id),
@@ -969,7 +1169,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
               LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
               WHERE pb.variant_product_id = ? AND bbs.branch_id = ?
             `).get(productId, requestedBranchId)?.quantity || 0
-            if (remaining > available) throw new Error(`Cannot remove ${remaining} ??only ${available} available in this branch`)
+            if (remaining > available) throw new Error(`Cannot remove ${remaining} - only ${available} available in this branch`)
             allocateProductBatches(productId, requestedBranchId, remaining).forEach((allocation) => {
               movementEntries.push({
                 movement_type: 'remove',
@@ -988,7 +1188,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
               LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
               WHERE pb.variant_product_id = ?
             `).get(productId)?.quantity || 0
-            if (remaining > totalAvailable) throw new Error(`Cannot remove ${remaining} ??only ${totalAvailable} available`)
+            if (remaining > totalAvailable) throw new Error(`Cannot remove ${remaining} - only ${totalAvailable} available`)
             allocateProductBatches(productId, null, remaining).forEach((allocation) => {
               movementEntries.push({
                 movement_type: 'remove',
@@ -1056,7 +1256,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?? DELETE /api/products/:id ??????????????????????????????????????????????????
+// ?€?€ DELETE /api/products/:id ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   const { deviceName, deviceTz, clientTime } = req.body || req.query || {}
   const actor = getAuditActor(req, req.body || req.query || {})
@@ -1092,7 +1292,7 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
   }
 })
 
-// ?? POST /api/products/upload-image ??????????????????????????????????????????
+// ?€?€ POST /api/products/upload-image ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/upload-image', authToken, requirePermission('products'), routeRateLimit({ name: 'products:upload_image', max: 30, windowMs: 5 * 60 * 1000, message: 'Too many product image uploads.' }), upload.single('image'), validateUploadedFile, compressUpload, async (req, res) => {
   if (!req.file) return err(res, 'No image uploaded')
   try {
@@ -1110,7 +1310,7 @@ router.post('/upload-image', authToken, requirePermission('products'), routeRate
   }
 })
 
-// ?? POST /api/products/bulk-import ???????????????????????????????????????????
+// ?€?€ POST /api/products/bulk-import ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 router.post('/bulk-import', authToken, requirePermission('products'), routeRateLimit({ name: 'products:bulk_import', max: 10, windowMs: 15 * 60 * 1000, message: 'Too many bulk imports.' }), async (req, res) => {
   const { products, imageFiles, imageOnly, deviceName, deviceTz, clientTime } = req.body || {}
   const actor = getAuditActor(req, req.body || {})
@@ -1248,8 +1448,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   }
 
   const ensureCategory = (value) => {
-    const trimmed = String(value || '').trim()
+    const trimmed = normalizeCatalogText(value)
     if (!trimmed) return null
+    assertCatalogTextIntegrity({ category: trimmed }, ['category'], 'Imported category')
     const lookup = normalizeLookup(trimmed)
     const existing = categoryMap.get(lookup)
     if (existing?.name) return existing.name
@@ -1262,8 +1463,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   }
 
   const ensureUnit = (value) => {
-    const trimmed = String(value || '').trim()
+    const trimmed = normalizeCatalogText(value)
     if (!trimmed) return null
+    assertCatalogTextIntegrity({ unit: trimmed }, ['unit'], 'Imported unit')
     const lookup = normalizeLookup(trimmed)
     const existing = unitMap.get(lookup)
     if (existing?.name) return existing.name
@@ -1276,8 +1478,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   }
 
   const ensureBrand = (value) => {
-    const trimmed = String(value || '').trim()
+    const trimmed = normalizeCatalogText(value)
     if (!trimmed) return null
+    assertCatalogTextIntegrity({ brand: trimmed }, ['brand'], 'Imported brand')
     const lookup = normalizeLookup(trimmed)
     const existing = brandMap.get(lookup)
     if (existing) return existing
@@ -1288,8 +1491,9 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   }
 
   const ensureSupplier = (value) => {
-    const trimmed = String(value || '').trim()
+    const trimmed = normalizeCatalogText(value)
     if (!trimmed) return null
+    assertCatalogTextIntegrity({ supplier: trimmed }, ['supplier'], 'Imported supplier')
     const existing = db.prepare('SELECT id, name FROM suppliers WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1').get(trimmed)
     if (!existing) {
       db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)').run(trimmed)
@@ -1819,6 +2023,3 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
 })
 
 module.exports = router
-
-
-
