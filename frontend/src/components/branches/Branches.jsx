@@ -483,8 +483,20 @@ export default function Branches() {
       {tab === 'branches' ? (
         <div className="space-y-3">
           {loading && !branches.length ? (
-            <div className="py-12 text-center text-gray-400">
-              <p>{t('loading') || 'Loading...'}</p>
+            <div className="space-y-3" aria-hidden="true">
+              {[0, 1].map((index) => (
+                <div key={`branch-loading-${index}`} className="card p-3 sm:p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="h-5 w-40 max-w-[70%] rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-3 w-52 max-w-[85%] rounded bg-slate-100 dark:bg-slate-800" />
+                      <div className="h-3 w-36 max-w-[60%] rounded bg-slate-100 dark:bg-slate-800" />
+                    </div>
+                    <div className="h-7 w-20 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : null}
 
