@@ -52,6 +52,32 @@ function AssetPreview({ asset }) {
   )
 }
 
+function AssetCardSkeleton() {
+  return (
+    <div className="card min-w-0 overflow-hidden p-3 sm:p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="h-6 w-24 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+        <div className="h-5 w-20 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+      </div>
+      <div className="aspect-[4/3] w-full animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+      <div className="mt-3 space-y-2">
+        <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-7 w-full animate-pulse rounded-xl bg-slate-100 dark:bg-slate-900/70" />
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2">
+          <div className="h-3 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3 w-14 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="h-10 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+        <div className="h-10 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+      </div>
+    </div>
+  )
+}
+
 function formatDateTime(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -750,7 +776,13 @@ export default function FilesPage() {
             ) : null}
           </div>
 
-          {loadingFiles ? <div className="card px-4 py-10 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : null}
+          {loadingFiles && !files.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-hidden="true">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <AssetCardSkeleton key={`files-skeleton-${index}`} />
+              ))}
+            </div>
+          ) : null}
           {!loadingFiles && !files.length ? <div className="card px-4 py-10 text-center text-sm text-slate-500">{tr('no_files_yet', 'No files yet.')}</div> : null}
 
           {files.length ? (
