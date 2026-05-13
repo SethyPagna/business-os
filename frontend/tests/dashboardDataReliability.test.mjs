@@ -14,5 +14,9 @@ assert.match(dashboard, /const \[summaryError, setSummaryError\]/, 'dashboard sh
 assert.match(dashboard, /const \[analyticsError, setAnalyticsError\]/, 'dashboard should track analytics load errors separately')
 assert.match(dashboard, /Showing saved dashboard totals/, 'dashboard should explain when it is showing saved/stale totals')
 assert.match(dashboard, /Analytics unavailable/, 'dashboard should distinguish analytics failures from genuine no-data states')
+assert.doesNotMatch(dashboard, /PortalMenu/, 'dashboard detail rows should open directly without an extra menu step')
+assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'low_stock' \}\)/, 'dashboard low-stock rows should open direct item details')
+assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'out_of_stock' \}\)/, 'dashboard out-of-stock rows should open direct item details')
+assert.match(dashboard, /openHourDetail\(h, i \+ 1\)/, 'dashboard best-hour rows should open a detail view')
 
 console.log('PASS dashboard data reliability guards')
