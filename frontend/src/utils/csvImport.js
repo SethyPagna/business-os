@@ -8,6 +8,67 @@ function stripBom(value) {
   return String(value || '').replace(/^\uFEFF/, '')
 }
 
+function toUint8Array(value) {
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  return new Uint8Array()
+}
+
+function detectUtf16Encoding(bytes) {
+  if (bytes.length >= 2) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { encoding: 'utf-16le', offset: 2 }
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { encoding: 'utf-16be', offset: 2 }
+  }
+
+  const sampleLength = Math.min(bytes.length, 256)
+  let evenNulls = 0
+  let oddNulls = 0
+  for (let index = 0; index < sampleLength; index += 1) {
+    if (bytes[index] !== 0x00) continue
+    if (index % 2 === 0) evenNulls += 1
+    else oddNulls += 1
+  }
+
+  const threshold = Math.max(4, Math.floor(sampleLength / 10))
+  if (oddNulls >= threshold && oddNulls >= evenNulls * 2) return { encoding: 'utf-16le', offset: 0 }
+  if (evenNulls >= threshold && evenNulls >= oddNulls * 2) return { encoding: 'utf-16be', offset: 0 }
+  return { encoding: '', offset: 0 }
+}
+
+function decodeUtf16Be(bytes) {
+  const safeLength = bytes.length - (bytes.length % 2)
+  const swapped = new Uint8Array(safeLength)
+  for (let index = 0; index < safeLength; index += 2) {
+    swapped[index] = bytes[index + 1]
+    swapped[index + 1] = bytes[index]
+  }
+  return new TextDecoder('utf-16le').decode(swapped)
+}
+
+export function decodeTextBuffer(value) {
+  const bytes = toUint8Array(value)
+  if (!bytes.length) return ''
+
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return stripBom(new TextDecoder('utf-8').decode(bytes)).normalize('NFC')
+  }
+
+  const { encoding, offset } = detectUtf16Encoding(bytes)
+  if (encoding === 'utf-16le') {
+    return stripBom(new TextDecoder('utf-16le').decode(bytes.subarray(offset))).normalize('NFC')
+  }
+  if (encoding === 'utf-16be') {
+    return stripBom(decodeUtf16Be(bytes.subarray(offset))).normalize('NFC')
+  }
+
+  try {
+    return stripBom(new TextDecoder('utf-8', { fatal: true }).decode(bytes)).normalize('NFC')
+  } catch (_) {
+    return stripBom(new TextDecoder('utf-8').decode(bytes)).normalize('NFC')
+  }
+}
+
 function normalizeDigit(char) {
   const code = char.charCodeAt(0)
   if (code >= KHMER_ZERO && code <= KHMER_ZERO + 9) return String(code - KHMER_ZERO)
