@@ -386,9 +386,9 @@ export default function Products() {
     if (!isActive || !syncChannelTs) return
     if (syncChannelReason === 'cache-refresh') {
       const sourceTable = syncChannelSource.split(':')[0]
-      if (['products', 'categories', 'units', 'branches'].includes(sourceTable)) return
+      if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(sourceTable)) return
     }
-    if (['products', 'categories', 'units', 'branches'].includes(syncChannelName)) load(true)
+    if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(syncChannelName)) load(true)
   }, [isActive, load, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
