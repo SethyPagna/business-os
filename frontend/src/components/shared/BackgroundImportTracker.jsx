@@ -2,6 +2,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { AlertTriangle, CheckCircle2, FileDown, Loader2, PlayCircle, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { useApp } from '../../AppContext'
 import { isTransientGatewayError } from '../../api/http.js'
+import { dispatchImportCompletionRefresh, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.js'
 
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'running', 'cancelling', 'approved'])
 const REVIEW_STATUSES = new Set(['awaiting_review', 'completed_with_errors', 'failed', 'cancelled'])
@@ -173,6 +174,7 @@ export default function BackgroundImportTracker() {
   const aliveRef = useRef(true)
   const timerRef = useRef(null)
   const jobsSignatureRef = useRef('')
+  const jobsRef = useRef([])
 
   const visibleJobs = useMemo(() => (
     dedupeJobsById(jobs).filter((job) => {
@@ -199,6 +201,20 @@ export default function BackgroundImportTracker() {
       const nextJobs = dedupeJobsById(Array.isArray(result?.jobs) ? result.jobs : (Array.isArray(result) ? result : []))
       const nextSignature = buildJobsSignature(nextJobs)
       if (nextSignature === jobsSignatureRef.current) return
+      const previousJobsById = new Map(
+        dedupeJobsById(jobsRef.current).map((job) => [String(job?.id || '').trim(), job]),
+      )
+      nextJobs.forEach((job) => {
+        const jobId = String(job?.id || '').trim()
+        if (!jobId) return
+        const previousJob = previousJobsById.get(jobId) || null
+        if (!shouldDispatchImportCompletionRefresh(previousJob, job)) return
+        dispatchImportCompletionRefresh(job, {
+          reason: 'import-completed',
+          source: 'import-tracker',
+        })
+      })
+      jobsRef.current = nextJobs
       jobsSignatureRef.current = nextSignature
       startTransition(() => setJobs(nextJobs))
     } catch (error) {
@@ -209,6 +225,7 @@ export default function BackgroundImportTracker() {
       }
       if (!jobsSignatureRef.current) return
       jobsSignatureRef.current = ''
+      jobsRef.current = []
       startTransition(() => setJobs([]))
     }
   }, [])
@@ -345,6 +362,7 @@ export default function BackgroundImportTracker() {
       await window.api.deleteImportJob(removedId, { force })
       const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== removedId)
       jobsSignatureRef.current = buildJobsSignature(filteredJobs)
+      jobsRef.current = filteredJobs
       setHiddenJobIds((current) => new Set([...current, removedId]))
       startTransition(() => setJobs(filteredJobs))
       await loadJobs()
@@ -366,6 +384,7 @@ export default function BackgroundImportTracker() {
     if (!dismissedId) return
     const filteredJobs = dedupeJobsById(jobs).filter((item) => String(item?.id || '') !== dismissedId)
     jobsSignatureRef.current = buildJobsSignature(filteredJobs)
+    jobsRef.current = filteredJobs
     setHiddenJobIds((current) => new Set([...current, dismissedId]))
     startTransition(() => setJobs(filteredJobs))
     notify(t('import_hidden') || 'Import hidden from the tracker', 'success')
