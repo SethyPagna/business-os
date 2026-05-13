@@ -32,6 +32,7 @@ import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS, SYNC } from '../constants'
 import { decodeTextBuffer } from '../utils/csvImport.js'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
+import { refreshAppData } from '../utils/appRefresh.js'
 import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
   NOTIFICATION_SUMMARY_MISSING_UNTIL_KEY,
@@ -737,6 +738,10 @@ export async function saveSettings(updates) {
         await localSaveSettingsMeta(result.updatedAt).catch(() => {})
       }
       await localSaveSettings(updates).catch(() => {})
+      refreshAppData(['settings'], {
+        reason: 'settings-saved',
+        source: 'settings:save',
+      })
       return result
     } catch (error) {
       const attemptedSettings = error?.attempted || attempted
@@ -757,6 +762,10 @@ export async function saveSettings(updates) {
             await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
           }
           await localSaveSettings(attemptedSettings).catch(() => {})
+          refreshAppData(['settings'], {
+            reason: 'settings-saved',
+            source: 'settings:save',
+          })
           return retryResult
         } catch (retryError) {
           error = retryError
@@ -780,15 +789,39 @@ export async function saveSettings(updates) {
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 export const getCategories  = ()       => routeMirrored('categories:get',    () => apiFetch('GET', '/api/categories'),              () => dexieDb.categories.orderBy('name').toArray(), mirrorTable('categories'))
-export const createCategory = d        => route('categories:create', () => apiFetch('POST', '/api/categories', d),           null, true)
-export const updateCategory = (id, d)  => route('categories:update', async () => apiFetch('PUT', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, d)),      null, true)
-export const deleteCategory = (id, payload) => route('categories:delete', async () => apiFetch('DELETE', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, payload)),      null, true)
+export const createCategory = async (d) => {
+  const result = await route('categories:create', () => apiFetch('POST', '/api/categories', d), null, true)
+  refreshAppData(['categories'], { reason: 'category-saved', source: 'categories:create' })
+  return result
+}
+export const updateCategory = async (id, d) => {
+  const result = await route('categories:update', async () => apiFetch('PUT', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, d)), null, true)
+  refreshAppData(['categories'], { reason: 'category-saved', source: 'categories:update' })
+  return result
+}
+export const deleteCategory = async (id, payload) => {
+  const result = await route('categories:delete', async () => apiFetch('DELETE', `/api/categories/${id}`, await withExpectedUpdatedAt('categories', id, payload)), null, true)
+  refreshAppData(['categories'], { reason: 'category-deleted', source: 'categories:delete' })
+  return result
+}
 
 // ─── Units ────────────────────────────────────────────────────────────────────
 export const getUnits   = ()  => routeMirrored('units:get',    () => apiFetch('GET', '/api/units'),          () => dexieDb.units.orderBy('name').toArray(), mirrorTable('units'))
-export const createUnit = d   => route('units:create', () => apiFetch('POST', '/api/units', d),       null, true)
-export const updateUnit = (id, d) => route('units:update', async () => apiFetch('PATCH', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, d)), null, true)
-export const deleteUnit = (id, payload)  => route('units:delete', async () => apiFetch('DELETE', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, payload)),  null, true)
+export const createUnit = async (d) => {
+  const result = await route('units:create', () => apiFetch('POST', '/api/units', d), null, true)
+  refreshAppData(['units'], { reason: 'unit-saved', source: 'units:create' })
+  return result
+}
+export const updateUnit = async (id, d) => {
+  const result = await route('units:update', async () => apiFetch('PATCH', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, d)), null, true)
+  refreshAppData(['units'], { reason: 'unit-saved', source: 'units:update' })
+  return result
+}
+export const deleteUnit = async (id, payload) => {
+  const result = await route('units:delete', async () => apiFetch('DELETE', `/api/units/${id}`, await withExpectedUpdatedAt('units', id, payload)), null, true)
+  refreshAppData(['units'], { reason: 'unit-deleted', source: 'units:delete' })
+  return result
+}
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 export const getBranches    = ()       => routeMirrored('branches:get',    () => apiFetch('GET', '/api/branches'),              () => dexieDb.branches.toArray(), mirrorTable('branches'))
