@@ -1071,7 +1071,17 @@ export async function uploadImportJobImages({ jobId, files = [], onProgress, bat
 export async function getFiles(params = {}) {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   const result = await route(`files:get:${q}`, () => apiFetch('GET', `/api/files${q ? `?${q}` : ''}`), () => [])
-  return Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : [])
+  const items = Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : [])
+  if (params?.includeMeta) {
+    return {
+      items,
+      total: Number(result?.total || items.length || 0),
+      page: Number(result?.page || params?.page || 1),
+      pageSize: Number(result?.pageSize || result?.page_size || params?.pageSize || params?.limit || items.length || 0),
+      hasMore: Boolean(result?.hasMore || result?.has_more),
+    }
+  }
+  return items
 }
 
 export async function uploadFileAsset({ file, userId, userName, signal, onProgress } = {}) {
