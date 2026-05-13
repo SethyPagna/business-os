@@ -115,6 +115,9 @@ export default function Users() {
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
+  const rolesLoadedOnceRef = useRef(false)
+  const rolesRequestRef = useRef(0)
+  const rolesPromiseRef = useRef(null)
   const tr = useCallback((key, fallback) => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -137,6 +140,7 @@ export default function Users() {
   const [saving, setSaving] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [rolesLoading, setRolesLoading] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const actionHistory = useActionHistory({ limit: 3, notify })
 
@@ -154,6 +158,48 @@ export default function Users() {
 
   const syncChannelName = String(syncChannel?.channel || '')
   const syncTimestamp = Number(syncChannel?.ts || 0)
+
+  const loadRoles = useCallback(async ({ silent = rolesLoadedOnceRef.current } = {}) => {
+    if (rolesPromiseRef.current) return rolesPromiseRef.current
+    const requestId = beginTrackedRequest(rolesRequestRef)
+    const promise = (async () => {
+      if (!canManage) {
+        if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
+        setRoles([])
+        setRolesLoading(false)
+        rolesLoadedOnceRef.current = true
+        return
+      }
+      if (!silent || !rolesLoadedOnceRef.current) {
+        setRolesLoading(true)
+      }
+      try {
+        const nextRoles = await withLoaderTimeout(() => window.api.getRoles(), 'Roles list', 8000)
+        if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
+        setRoles(Array.isArray(nextRoles) ? nextRoles : [])
+        rolesLoadedOnceRef.current = true
+      } catch (error) {
+        if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
+        if (!rolesLoadedOnceRef.current) {
+          setRoles([])
+          rolesLoadedOnceRef.current = true
+        }
+        if (tab === 'roles') {
+          notify(error?.message || tr('roles_load_failed', 'Failed to load roles'), 'warning')
+        }
+      } finally {
+        if (!isTrackedRequestCurrent(rolesRequestRef, requestId)) return
+        setRolesLoading(false)
+      }
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (rolesPromiseRef.current === wrappedPromise) {
+        rolesPromiseRef.current = null
+      }
+    })
+    rolesPromiseRef.current = wrappedPromise
+    return wrappedPromise
+  }, [canManage, notify, tab, tr])
 
   const load = useCallback(async ({ silent = loadedOnceRef.current } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
@@ -179,39 +225,25 @@ export default function Users() {
         }, 10000)
       }
       try {
-        const [usersResult, rolesResult] = await Promise.allSettled([
+        const usersResult = await Promise.allSettled([
           withLoaderTimeout(() => window.api.getUsers(), 'Users list', 8000),
-          withLoaderTimeout(() => window.api.getRoles(), 'Roles list', 8000),
         ])
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
-        const nextUsers = usersResult.status === 'fulfilled' && Array.isArray(usersResult.value)
-          ? usersResult.value
-          : null
-        const nextRoles = rolesResult.status === 'fulfilled' && Array.isArray(rolesResult.value)
-          ? rolesResult.value
+        const nextUsers = usersResult[0]?.status === 'fulfilled' && Array.isArray(usersResult[0]?.value)
+          ? usersResult[0].value
           : null
 
         if (nextUsers) setUsers(nextUsers)
         else if (!loadedOnceRef.current) setUsers([])
-
-        if (nextRoles) setRoles(nextRoles)
-        else if (!loadedOnceRef.current) setRoles([])
-
-        if (nextUsers === null && nextRoles === null) {
-          const firstError = usersResult.reason || rolesResult.reason
+        if (nextUsers === null) {
+          const firstError = usersResult[0]?.reason
           throw new Error(firstError?.message || tr('users_load_failed', 'Failed to load users'))
         }
 
         loadedOnceRef.current = true
         setLoadError(null)
-
-        if (usersResult.status === 'rejected') {
-          notify(usersResult.reason?.message || tr('users_partial_load_failed', 'User list is still catching up. Roles loaded first.'), 'warning')
-        } else if (rolesResult.status === 'rejected') {
-          notify(rolesResult.reason?.message || tr('roles_partial_load_failed', 'Roles are still catching up. Users loaded first.'), 'warning')
-        }
       } catch (error) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const nextMessage = error?.message || tr('users_load_failed', 'Failed to load users')
@@ -242,25 +274,38 @@ export default function Users() {
   }, [canManage, notify, tr])
 
   useEffect(() => {
-    if (!isActive) {
+      if (!isActive) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(rolesRequestRef)
       loadPromiseRef.current = null
+      rolesPromiseRef.current = null
       setLoading(false)
+      setRolesLoading(false)
       return
     }
     load({ silent: loadedOnceRef.current })
-  }, [canManage, isActive, load])
+    loadRoles({ silent: rolesLoadedOnceRef.current })
+  }, [canManage, isActive, load, loadRoles])
   useEffect(() => {
     if (!isActive || !syncChannelName) return
-    if (syncChannelName === 'users' || syncChannelName === 'roles') {
+    if (syncChannelName === 'users') {
       load({ silent: true })
     }
-  }, [isActive, load, syncChannelName, syncTimestamp])
+    if (syncChannelName === 'roles') {
+      loadRoles({ silent: true })
+    }
+  }, [isActive, load, loadRoles, syncChannelName, syncTimestamp])
+  useEffect(() => {
+    if (!isActive || tab !== 'roles') return
+    loadRoles({ silent: rolesLoadedOnceRef.current })
+  }, [isActive, loadRoles, tab])
   useEffect(() => () => {
     window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
+    invalidateTrackedRequest(rolesRequestRef)
     loadPromiseRef.current = null
+    rolesPromiseRef.current = null
   }, [])
 
   const filteredUsers = useMemo(() => {
@@ -274,16 +319,22 @@ export default function Users() {
    * 3.1 Create/Edit user records.
    * 3.2 Create/Edit role records.
    */
-  const openCreateUser = () => {
+  const openCreateUser = async () => {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
+    if (!rolesLoadedOnceRef.current && !roles.length) {
+      await loadRoles({ silent: false })
+    }
     setSelectedUser(null)
     setUserForm({ ...INITIAL_USER_FORM, role_id: roles[0]?.id || '' })
     setModal('editUser')
   }
 
-  const openEditUser = (user) => {
+  const openEditUser = async (user) => {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
     if (!canManageTargetUser(user)) return notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
+    if (!rolesLoadedOnceRef.current && !roles.length) {
+      await loadRoles({ silent: false })
+    }
     setSelectedUser(user)
     setUserForm({
       name: user.name || '',
@@ -608,7 +659,7 @@ export default function Users() {
             <CircleUserRound className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t('users') || 'Users'}
           </h1>
-          {loading ? (
+          {tab === 'roles' && rolesLoading && !roles.length ? (
             <div className="mt-1 text-xs text-blue-600 dark:text-blue-300">{tr('loading', 'Loading...')}</div>
           ) : null}
         </div>
@@ -763,6 +814,9 @@ export default function Users() {
         </>
       ) : (
         <div className="space-y-3">
+          {rolesLoading && !roles.length ? (
+            <div className="card p-4 text-sm text-gray-500 dark:text-gray-400">{tr('loading', 'Loading...')}</div>
+          ) : null}
           {roles.map((role) => {
             const assignedCount = users.filter((user) => Number(user.role_id) === Number(role.id)).length
             const permissionKeys = getRolePermissions(role)
