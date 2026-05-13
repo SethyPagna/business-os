@@ -18,7 +18,6 @@ const DEFAULT_COLLAPSED = {
   expiry: false,
 }
 
-const NOTIFICATION_SEEN_KEY = 'business_os_notifications_seen_at'
 const NOTIFICATION_FILTER_OPTIONS = ['all', 'danger', 'warning', 'info', 'success']
 const NOTIFICATION_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
@@ -146,12 +145,6 @@ function matchesVisibilityMode(mode) {
   return true
 }
 
-function getRealertMs(settings = {}, fallbackMinutes = 10) {
-  const minutes = Number(settings?.notifications_realert_minutes || fallbackMinutes)
-  const safeMinutes = Number.isFinite(minutes) ? Math.max(5, Math.min(1440, minutes)) : fallbackMinutes
-  return safeMinutes * 60 * 1000
-}
-
 function NotificationSeverityIcon({ tone = 'info', label }) {
   const safeTone = TONE_ICON_COMPONENT[tone] ? tone : 'info'
   const ToneIcon = TONE_ICON_COMPONENT[safeTone]
@@ -192,9 +185,6 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
   const [notificationSearch, setNotificationSearch] = useState('')
   const [itemLimit, setItemLimit] = useState(20)
   const [sectionPages, setSectionPages] = useState({})
-  const [seenAt, setSeenAt] = useState(() => {
-    try { return Number(window.localStorage.getItem(NOTIFICATION_SEEN_KEY) || 0) || 0 } catch (_) { return 0 }
-  })
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
   const containerRef = useRef(null)
   const panelRef = useRef(null)
@@ -389,10 +379,8 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
     }
   }, [loadSummary, notify, saveSettings, savingKey, settings, tr])
 
-  const realertMs = getRealertMs(settings, summary.preferences?.realertMinutes || 10)
-  const badgeSuppressed = seenAt > 0 && Date.now() - seenAt < realertMs
   const activeAlertCount = Number(summary.unreadCount || 0)
-  const badgeCount = badgeSuppressed ? 0 : activeAlertCount
+  const badgeCount = open ? 0 : activeAlertCount
 
   if (!visibilityActive) return null
 
@@ -403,9 +391,6 @@ export default function NotificationCenter({ compact = false, visibility = 'alwa
         onClick={() => {
           setOpen((current) => !current)
           if (!open) {
-            const now = Date.now()
-            setSeenAt(now)
-            try { window.localStorage.setItem(NOTIFICATION_SEEN_KEY, String(now)) } catch (_) {}
             void loadSummary(true)
           }
         }}
