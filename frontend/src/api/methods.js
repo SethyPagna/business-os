@@ -30,6 +30,7 @@ import {
 import { dexieDb, localGetSettings, localSaveSettings, localGetSettingsMeta, localSaveSettingsMeta, buildCSVTemplate, replaceTableContents, clearLocalMirrorTables } from './localDb.js'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.js'
 import { STORAGE_KEYS, SYNC } from '../constants'
+import { decodeTextBuffer } from '../utils/csvImport.js'
 import { getClientDeviceInfo } from '../utils/deviceInfo.js'
 import {
   LIVE_SERVER_SENSITIVE_MIRROR_TABLES,
@@ -382,8 +383,66 @@ function mirrorTable(tableName) {
   }
 }
 
+const QUERY_CACHE_PREFIX = 'read_cache:'
+const QUERY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000
+
+function buildQueryCacheStorageKey(key) {
+  return `${QUERY_CACHE_PREFIX}${String(key || '').trim()}`
+}
+
+async function readCachedQueryResult(key) {
+  const storageKey = buildQueryCacheStorageKey(key)
+  try {
+    const row = await dexieDb.settings.get(storageKey)
+    if (!row?.value) return null
+    const parsed = JSON.parse(row.value)
+    const savedAtMs = Date.parse(parsed?.savedAt || '')
+    if (Number.isFinite(savedAtMs) && Date.now() - savedAtMs > QUERY_CACHE_MAX_AGE_MS) return null
+    return parsed?.data ?? null
+  } catch (_) {
+    return null
+  }
+}
+
+async function writeCachedQueryResult(key, data) {
+  const storageKey = buildQueryCacheStorageKey(key)
+  try {
+    await dexieDb.settings.put({
+      key: storageKey,
+      value: JSON.stringify({
+        savedAt: new Date().toISOString(),
+        data,
+      }),
+    })
+  } catch (_) {}
+  return data
+}
+
+async function clearCachedQueryResults(prefixes = []) {
+  const keys = (Array.isArray(prefixes) ? prefixes : []).map((value) => String(value || '').trim()).filter(Boolean)
+  if (!keys.length) return
+  try {
+    const rows = await dexieDb.settings.toArray()
+    const matchingKeys = rows
+      .map((row) => String(row?.key || ''))
+      .filter((rowKey) => rowKey.startsWith(QUERY_CACHE_PREFIX))
+      .filter((rowKey) => keys.some((prefix) => rowKey.includes(prefix)))
+    if (matchingKeys.length) await dexieDb.settings.bulkDelete(matchingKeys)
+  } catch (_) {}
+}
+
 if (typeof window !== 'undefined') {
   Promise.resolve().then(() => purgeSensitiveLiveServerMirrors()).catch(() => {})
+  window.addEventListener('sync:update', (event) => {
+    const channel = String(event?.detail?.channel || '').trim().toLowerCase()
+    if (!channel) return
+    if (['products', 'categories', 'units', 'settings'].includes(channel)) {
+      void clearCachedQueryResults(['products:search:', 'products:filters:', 'products:lookups:usage'])
+    }
+    if (['inventory', 'products', 'branches', 'sales', 'returns'].includes(channel)) {
+      void clearCachedQueryResults(['inventory:products:search:'])
+    }
+  })
 }
 
 let notificationSummaryMissingUntilMemory = 0
@@ -485,7 +544,16 @@ function clearStorageNumber(key) {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function login({ username, password, organization, sessionDuration, clientTime, deviceTz, deviceName }) {
-  return apiFetch('POST', '/api/auth/login', { username, password, organization, sessionDuration, clientTime, deviceTz, deviceName })
+  const device = getDeviceInfo()
+  return apiFetch('POST', '/api/auth/login', {
+    username,
+    password,
+    organization,
+    sessionDuration,
+    clientTime: clientTime || device.clientTime || '',
+    deviceTz: deviceTz || device.deviceTz || '',
+    deviceName: deviceName || device.deviceName || '',
+  })
 }
 export async function logout() {
   return apiFetch('POST', '/api/auth/logout', {})
@@ -500,7 +568,7 @@ export async function completePasswordReset(payload) {
   return apiFetch('POST', '/api/auth/password-reset/complete', payload || {})
 }
 export async function updateSessionDuration(payload) {
-  return apiFetch('POST', '/api/auth/session-duration', payload || {})
+  return apiFetch('POST', '/api/auth/session-duration', { ...getDeviceInfo(), ...(payload || {}) })
 }
 export async function getVerificationCapabilities() {
   return apiFetch('GET', '/api/auth/verification-capabilities')
@@ -585,7 +653,7 @@ export async function getAppBootstrap() {
   }
 
   const hasServer = !!getSyncServerUrl()
-  const hasSession = hasStoredUserSession()
+  const hasStoredSession = hasStoredUserSession()
 
   if (!hasServer) {
     sensitiveMirrorPurgePromise = null
@@ -594,22 +662,18 @@ export async function getAppBootstrap() {
 
   await purgeSensitiveLiveServerMirrors().catch(() => {})
 
-  if (!hasSession) {
-    const localBootstrap = await buildLocalBootstrap()
-    return {
-      ...localBootstrap,
-      user: null,
-    }
-  }
-
   try {
     return await apiFetch('GET', '/api/auth/bootstrap')
   } catch (error) {
     if (isInvalidSessionError(error)) {
       const localBootstrap = await buildLocalBootstrap()
-      return {
+      const fallback = {
         ...localBootstrap,
         user: null,
+      }
+      if (!hasStoredSession) return fallback
+      return {
+        ...fallback,
         unauthorized: true,
         authError: error?.message || 'Please sign in again to continue.',
       }
@@ -743,7 +807,7 @@ export const getBranchStock = (id, params = {}) => {
   return route(`branches:stock:${id}:${q}`,  () => apiFetch('GET', `/api/branches/${id}/stock${q ? `?${q}` : ''}`),   () => [])
 }
 export const getTransfers   = ()       => route('transfers:get',   () => apiFetch('GET', '/api/transfers'),              () => dexieDb.stock_transfers.orderBy('created_at').reverse().toArray())
-export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', d), null, true)
+export const transferStock  = d        => route('branches:transfer', () => apiFetch('POST', '/api/branches/transfer', { ...getDeviceInfo(), ...d }), null, true)
 export const getBranchStockIntegrity = () => route('branches:stockIntegrity', () => apiFetch('GET', '/api/branches/stock-integrity'), () => ({ issues: [], summary: {} }))
 export const repairBranchStockIntegrity = payload => route('branches:stockIntegrity:repair', () => apiFetch('POST', '/api/branches/stock-integrity/repair', payload), null, true)
 
@@ -751,7 +815,13 @@ export const repairBranchStockIntegrity = payload => route('branches:stockIntegr
 export const getProducts        = ()       => routeMirrored('products:get',        () => apiFetch('GET', '/api/products'),                    () => dexieDb.products.orderBy('name').toArray(), mirrorTable('products'))
 export const searchProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`products:search:${q}`, () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`))
+  const cacheKey = `products:search:${q}`
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', `/api/products/search${q ? `?${q}` : ''}`),
+    () => readCachedQueryResult(cacheKey),
+    (result) => writeCachedQueryResult(cacheKey, result),
+  )
 }
 export const getProductsByIds = (ids = [], params = {}) => {
   const uniqueIds = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))).slice(0, 100)
@@ -766,7 +836,34 @@ export const getProductsByIds = (ids = [], params = {}) => {
 }
 export const getProductFilters = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`products:filters:${q}`, () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`))
+  const cacheKey = `products:filters:${q}`
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', `/api/products/filters${q ? `?${q}` : ''}`),
+    () => readCachedQueryResult(cacheKey),
+    (result) => writeCachedQueryResult(cacheKey, result),
+  )
+}
+export const getProductLookupUsage = () =>
+  routeMirrored(
+    'products:lookups:usage',
+    () => apiFetch('GET', '/api/products/lookups/usage'),
+    () => readCachedQueryResult('products:lookups:usage'),
+    (result) => writeCachedQueryResult('products:lookups:usage', result),
+  )
+
+export const replaceProductLookupValues = async ({ type, from = [], to = null, userId = null, userName = '' } = {}) => {
+  const payload = {
+    type: String(type || '').trim(),
+    from: Array.isArray(from) ? from : [from],
+    to,
+    userId,
+    userName,
+  }
+  return requireLiveServerWrite(
+    'products:lookup:replace',
+    apiFetch('POST', '/api/products/lookups/replace', payload)
+  )
 }
 export async function getCatalogMeta() {
   const base = getPortalBaseUrl()
@@ -964,7 +1061,9 @@ async function apiFormPost(path, form, channel = 'importJobs:upload') {
   return json?.data || json
 }
 
-export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', d), null, true)
+const withImportDeviceInfo = (payload = {}) => ({ ...(payload || {}), ...getDeviceInfo() })
+
+export const createImportJob = d => route('importJobs:create', () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(d)), null, true)
 export const listImportJobs = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
   return route(`importJobs:list:${q}`, async () => {
@@ -979,27 +1078,27 @@ export const getImportJobReview = (id, params = {}) => {
   return route(`importJobs:review:${id}:${q}`, () => apiFetch('GET', `/api/import-jobs/${encodeURIComponent(id)}/review${q ? `?${q}` : ''}`), null)
 }
 export const updateImportJobDecisions = (id, decisions = {}) =>
-  route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, { decisions }), null, true)
-export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, {}), null, true)
+  route(`importJobs:decisions:${id}`, () => apiFetch('PATCH', `/api/import-jobs/${encodeURIComponent(id)}/decisions`, withImportDeviceInfo({ decisions })), null, true)
+export const preflightImportJob = id => route(`importJobs:preflight:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/preflight`, withImportDeviceInfo({})), null, true)
 export const startImportJob = (id, options = {}) =>
-  route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/start`, { source: options.source || 'ui' }), null, true)
+  route(`importJobs:start:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/start`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
 export const approveImportJob = (id, options = {}) =>
-  route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/approve`, { source: options.source || 'ui' }), null, true)
+  route(`importJobs:approve:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/approve`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
 export const cancelImportJob = (id, options = {}) =>
-  route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/cancel`, { source: options.source || 'ui' }), null, true)
+  route(`importJobs:cancel:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/cancel`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
 export const retryImportJob = (id, options = {}) =>
-  route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/retry`, { source: options.source || 'ui' }), null, true)
+  route(`importJobs:retry:${id}`, () => apiFetch('POST', `/api/import-jobs/${encodeURIComponent(id)}/retry`, withImportDeviceInfo({ source: options.source || 'ui' })), null, true)
 export const deleteImportJob = (id, options = {}) => route(`importJobs:delete:${id}`, async () => {
   const encodedId = encodeURIComponent(id)
   const force = options.force ? '?force=1' : ''
   let firstError = null
   try {
-    return await apiFetch('DELETE', `/api/import-jobs/${encodedId}${force}`, {})
+    return await apiFetch('DELETE', `/api/import-jobs/${encodedId}${force}`, withImportDeviceInfo({ source: options.source || 'ui' }))
   } catch (error) {
     firstError = error
   }
   try {
-    return await apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, { force: !!options.force })
+    return await apiFetch('POST', `/api/import-jobs/${encodedId}/delete`, withImportDeviceInfo({ force: !!options.force, source: options.source || 'ui' }))
   } catch (error) {
     const message = String(error?.message || firstError?.message || '')
     if (Number(error?.status) === 404 || /Cannot DELETE|Cannot POST|<!DOCTYPE html/i.test(message)) {
@@ -1031,20 +1130,29 @@ export async function downloadImportJobErrors(jobId) {
 }
 
 export async function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }) {
+  const device = getDeviceInfo()
   const form = new FormData()
   const source = String(text || '')
   form.append('file', new Blob([source.startsWith('\uFEFF') ? '' : '\uFEFF', source], { type: 'text/csv;charset=utf-8' }), fileName)
+  if (device.deviceName) form.append('deviceName', String(device.deviceName))
+  if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
+  if (device.clientTime) form.append('clientTime', String(device.clientTime))
   return apiFormPost(`/api/import-jobs/${jobId}/csv`, form, 'importJobs:csv')
 }
 
 export async function uploadImportJobZip({ jobId, file }) {
   if (!(file instanceof File)) throw new Error('Choose a ZIP file first')
+  const device = getDeviceInfo()
   const form = new FormData()
   form.append('file', file, file.name || 'images.zip')
+  if (device.deviceName) form.append('deviceName', String(device.deviceName))
+  if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
+  if (device.clientTime) form.append('clientTime', String(device.clientTime))
   return apiFormPost(`/api/import-jobs/${jobId}/zip`, form, 'importJobs:zip')
 }
 
 export async function uploadImportJobImages({ jobId, files = [], onProgress, batchSize = 100 }) {
+  const device = getDeviceInfo()
   const browserFiles = (Array.isArray(files) ? files : [])
     .filter((entry) => entry?.file instanceof File)
   const uploaded = []
@@ -1057,6 +1165,9 @@ export async function uploadImportJobImages({ jobId, files = [], onProgress, bat
       relativePaths.push(entry.relativePath || entry.file.webkitRelativePath || entry.file.name)
     })
     form.append('relative_paths', JSON.stringify(relativePaths))
+    if (device.deviceName) form.append('deviceName', String(device.deviceName))
+    if (device.deviceTz) form.append('deviceTz', String(device.deviceTz))
+    if (device.clientTime) form.append('clientTime', String(device.clientTime))
     const result = await apiFormPost(`/api/import-jobs/${jobId}/images`, form, 'importJobs:images')
     uploaded.push(...(result?.files || []))
     onProgress?.({
@@ -1258,7 +1369,7 @@ export function openCSVDialog() {
     input.onchange = async (e) => {
       const file = e.target.files?.[0]
       if (!file) { resolve(null); return }
-      const content = await file.text()
+      const content = decodeTextBuffer(await file.arrayBuffer())
       resolve({ content, name: file.name })
     }
     input.oncancel = () => resolve(null)
@@ -1309,7 +1420,13 @@ export const getInventoryStats = (params = {}) => {
 }
 export const searchInventoryProducts = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  return route(`inventory:products:search:${q}`, () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`))
+  const cacheKey = `inventory:products:search:v2:${q}`
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', `/api/inventory/products/search${q ? `?${q}` : ''}`),
+    () => readCachedQueryResult(cacheKey),
+    (result) => writeCachedQueryResult(cacheKey, result),
+  )
 }
 export const getInventoryMovements = ({ branchId, userId, search, searchMode, startDate, endDate, page = 1, pageSize = 10000 } = {}) => {
   const safePage = Math.max(1, Number(page || 1) || 1)
@@ -1614,8 +1731,28 @@ export const getAnalytics = (params) => {
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
-  const mirror = q ? null : mirrorTable('customers')
-  return routeMirrored(`customers:get:${q}`, () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`), () => dexieDb.customers.orderBy('name').toArray(), mirror)
+  const hasPagination = Object.prototype.hasOwnProperty.call(params || {}, 'page')
+    || Object.prototype.hasOwnProperty.call(params || {}, 'pageSize')
+  const cacheKey = `customers:get:${q}`
+  const mirror = !q ? mirrorTable('customers') : null
+  if (!hasPagination) {
+    return routeMirrored(
+      cacheKey,
+      () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`),
+      () => dexieDb.customers.orderBy('name').toArray(),
+      mirror,
+    )
+  }
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', `/api/customers${q ? `?${q}` : ''}`),
+    () => readCachedQueryResult(cacheKey),
+    (result) => writeCachedQueryResult(cacheKey, result),
+  )
+}
+export const getCustomerPointSummaries = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value != null && value !== '')).toString()
+  return route(`customers:points:${q}`, () => apiFetch('GET', `/api/customers/points-summary${q ? `?${q}` : ''}`), () => [])
 }
 export async function createCustomer(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'customer')
@@ -1979,7 +2116,7 @@ export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', 
 
 // ─── Sale status update ───────────────────────────────────────────────────────
 export const updateSaleStatus = async (id, sale_status, notes) => {
-  const payload = await withExpectedUpdatedAt('sales', id, { sale_status, notes })
+  const payload = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), sale_status, notes })
   try {
     const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
     await dexieDb.sales.update(id, {
@@ -1995,7 +2132,7 @@ export const updateSaleStatus = async (id, sale_status, notes) => {
 
 // ─── Sales export ─────────────────────────────────────────────────────────────
 export const attachSaleCustomer = async (id, payload) => {
-  const body = await withExpectedUpdatedAt('sales', id, payload)
+  const body = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), ...(payload || {}) })
   try {
     const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
     await dexieDb.sales.update(id, {
@@ -2023,7 +2160,7 @@ export const getSalesExport = (params) => {
   return route('sales:export', () => apiFetch('GET', `/api/sales/export${q ? '?' + q : ''}`), () => ({}))
 }
 export const updateReturn = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('returns', id, d)
+  const payload = await withExpectedUpdatedAt('returns', id, { ...getDeviceInfo(), ...(d || {}) })
   try {
     const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
     await dexieDb.returns.update(id, {
