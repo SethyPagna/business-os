@@ -232,10 +232,10 @@ export default function Contacts() {
               className="btn-secondary flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-1.5 text-xs sm:text-sm"
               onClick={openImportPicker}
               title={t('import_all_contacts_title') || 'Import contacts'}
-              aria-label={t('import_contacts') || 'Import'}
+              aria-label={t('imports') || 'Imports'}
             >
               <Upload className="h-4 w-4" />
-              <span>{t('import_contacts') || 'Import'}</span>
+              <span>{t('imports') || 'Imports'}</span>
             </button>
             <button
               className="btn-secondary flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-1.5 text-xs sm:text-sm"
