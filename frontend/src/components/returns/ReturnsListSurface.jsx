@@ -1,6 +1,43 @@
 import { Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
+function ReturnsDesktopSkeletonRows() {
+  return Array.from({ length: 4 }).map((_, index) => (
+    <tr key={`returns-desktop-skeleton-${index}`} className="animate-pulse">
+      <td className="px-3 py-3">
+        <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+      </td>
+      <td className="px-4 py-3"><div className="h-4 w-24 rounded bg-orange-100 dark:bg-orange-900/40" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
+    </tr>
+  ))
+}
+
+function ReturnsMobileSkeletonCards() {
+  return Array.from({ length: 3 }).map((_, index) => (
+    <div key={`returns-mobile-skeleton-${index}`} className="card animate-pulse p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+        <div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+      </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="h-4 w-24 rounded bg-orange-100 dark:bg-orange-900/40" />
+          <div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="h-3 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-700" />
+        </div>
+        <div className="h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" />
+      </div>
+    </div>
+  ))
+}
+
 export default function ReturnsListSurface({
   collapsedReturnSections,
   CUSTOMER_SCOPE,
@@ -54,7 +91,7 @@ export default function ReturnsListSurface({
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</td></tr>
+                <ReturnsDesktopSkeletonRows />
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
               ) : returnSections.map((section) => {
@@ -155,7 +192,7 @@ export default function ReturnsListSurface({
 
       <div className="space-y-2 sm:hidden">
         {loading ? (
-          <div className="py-10 text-center text-gray-400">{tr('loading', 'Loading')}...</div>
+          <ReturnsMobileSkeletonCards />
         ) : filtered.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</div>
         ) : returnSections.map((section) => {
