@@ -40,6 +40,21 @@ assert.match(
 )
 assert.match(
   productsPage,
+  /p\.unit \|\| ''/,
+  'Products search should include unit names so unit review can jump into matching products',
+)
+assert.match(
+  productsPage,
+  /const handleLookupReviewSelection = useCallback/,
+  'Products page should expose a lookup-review handoff for manage brand/category/unit flows',
+)
+assert.match(
+  productsPage,
+  /onReviewSelection=\{handleLookupReviewSelection\}/,
+  'Products page should wire lookup-review handoff into the manage brand/category/unit modals',
+)
+assert.match(
+  productsPage,
   /product_brand_color_map/,
   'Products page should read brand color settings for product rows and details',
 )
