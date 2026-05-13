@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckSquare,
   Brain,
@@ -134,6 +134,10 @@ export default function FilesPage() {
   const [files, setFiles] = useState([])
   const [search, setSearch] = useState('')
   const [mediaType, setMediaType] = useState('all')
+  const deferredSearch = useDeferredValue(search)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(24)
+  const [totalFiles, setTotalFiles] = useState(0)
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState(null)
@@ -186,6 +190,12 @@ export default function FilesPage() {
 
   const providerOptions = useMemo(() => Object.entries(providerMeta || {}), [providerMeta])
   const selectedProviderMeta = providerMeta?.[providerForm.provider] || null
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(Math.max(0, totalFiles) / Math.max(1, pageSize))),
+    [pageSize, totalFiles],
+  )
+  const pageStart = files.length ? ((page - 1) * pageSize) + 1 : 0
+  const pageEnd = files.length ? pageStart + files.length - 1 : 0
   const selectableFileIds = useMemo(
     () => files.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0),
     [files],
@@ -234,10 +244,17 @@ export default function FilesPage() {
     const requestId = beginTrackedRequest(fileLoadRequestRef)
     setLoadingFiles(true)
     try {
-      const result = await withLoaderTimeout(() => window.api.getFiles({ search, mediaType }), 'Files library')
+      const result = await withLoaderTimeout(() => window.api.getFiles({
+        search: deferredSearch,
+        mediaType,
+        page,
+        pageSize,
+        includeMeta: true,
+      }), 'Files library')
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
-      const nextFiles = Array.isArray(result) ? result : []
+      const nextFiles = Array.isArray(result?.items) ? result.items : []
       setFiles(nextFiles)
+      setTotalFiles(Number(result?.total || nextFiles.length || 0))
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0))
         return new Set([...current].filter((id) => validIds.has(id)))
@@ -248,7 +265,15 @@ export default function FilesPage() {
     } finally {
       if (isTrackedRequestCurrent(fileLoadRequestRef, requestId)) setLoadingFiles(false)
     }
-  }, [mediaType, notify, search])
+  }, [deferredSearch, mediaType, notify, page, pageSize])
+
+  useEffect(() => {
+    setPage(1)
+  }, [deferredSearch, mediaType, pageSize])
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   useEffect(() => {
     if (!selectedProviderMeta) return
@@ -661,12 +686,26 @@ export default function FilesPage() {
                   </select>
                 </div>
               </div>
-              <label htmlFor="library-upload-file" className="btn-primary cursor-pointer text-sm">
-                {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} />
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
+                <select
+                  id="library-page-size"
+                  name="library_page_size"
+                  className="input min-w-[7.5rem]"
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value || 24))}
+                >
+                  {[12, 24, 48].map((value) => (
+                    <option key={value} value={value}>{value} / {tr('page', 'page')}</option>
+                  ))}
+                </select>
+                <label htmlFor="library-upload-file" className="btn-primary cursor-pointer text-sm">
+                  {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
+                  <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} />
+                </label>
+              </div>
             </div>
-            {files.length ? (
+            {files.length || totalFiles ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700">
                 <div className="flex items-center gap-2">
                   <button type="button" className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={toggleSelectAllAssets}>
@@ -675,7 +714,7 @@ export default function FilesPage() {
                   </button>
                   <span>{selectedAssetIds.size} {tr('selected', 'selected')}</span>
                 </div>
-                <div>{files.length} {tr('files', 'files')}</div>
+                <div>{pageStart && pageEnd ? `${pageStart}-${pageEnd}` : '0'} / {totalFiles} {tr('files', 'files')}</div>
               </div>
             ) : null}
             {selectedAssets.length ? (
@@ -766,6 +805,24 @@ export default function FilesPage() {
                   </div>
                 )
               })}
+            </div>
+          ) : null}
+          {!loadingFiles && totalPages > 1 ? (
+            <div className="card flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-500">
+                {pageStart && pageEnd ? `${pageStart}-${pageEnd}` : '0'} / {totalFiles} {tr('files', 'files')}
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+                  {tr('previous', 'Previous')}
+                </button>
+                <div className="min-w-[6rem] text-center text-sm font-medium text-slate-600 dark:text-slate-300">
+                  {tr('page', 'Page')} {page} / {totalPages}
+                </div>
+                <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+                  {tr('next', 'Next')}
+                </button>
+              </div>
             </div>
           ) : null}
         </>
