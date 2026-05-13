@@ -69,6 +69,44 @@ function formatContactValue(value) {
   return text || 'N/A'
 }
 
+function UsersDesktopSkeletonRows() {
+  return Array.from({ length: 5 }).map((_, index) => (
+    <tr key={`users-desktop-skeleton-${index}`} className="animate-pulse">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-blue-100 dark:bg-blue-900/40" />
+          <div className="space-y-2">
+            <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800" />
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="mx-auto h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="mx-auto h-5 w-14 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-2 py-3"><div className="ml-auto h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" /></td>
+    </tr>
+  ))
+}
+
+function UsersMobileSkeletonCards() {
+  return Array.from({ length: 4 }).map((_, index) => (
+    <div key={`users-mobile-skeleton-${index}`} className="card animate-pulse flex items-center gap-3 p-3">
+      <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/40" />
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+        <div className="h-3 w-24 rounded bg-slate-100 dark:bg-slate-800" />
+        <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800" />
+      </div>
+      <div className="h-8 w-8 rounded-lg bg-slate-100 dark:bg-slate-800" />
+    </div>
+  ))
+}
+
 export default function Users() {
   const { t, notify, hasPermission, user: currentUser } = useApp()
   const { syncChannel } = useSync()
@@ -647,7 +685,9 @@ export default function Users() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.length === 0 ? (
+                  {loading && !users.length ? (
+                    <UsersDesktopSkeletonRows />
+                  ) : filteredUsers.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="py-8 text-center text-gray-400">{t('no_data') || 'No data'}</td>
                     </tr>
@@ -691,7 +731,8 @@ export default function Users() {
           </div>
 
           <div className="space-y-3 sm:hidden">
-            {filteredUsers.map((user) => (
+            {loading && !users.length ? <UsersMobileSkeletonCards /> : null}
+            {(!loading || users.length) ? filteredUsers.map((user) => (
               <div key={user.id} className="card flex items-center gap-3 p-3" onClick={() => { setSelectedUser(user); setModal('userDetail') }}>
                 <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
                   {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
@@ -717,7 +758,7 @@ export default function Users() {
                   />
                 </div>
               </div>
-            ))}
+            )) : null}
           </div>
         </>
       ) : (
