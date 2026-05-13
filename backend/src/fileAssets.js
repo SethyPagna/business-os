@@ -51,7 +51,7 @@ let uploadStorageReconcilePromise = null
 let lastUploadStorageReconcileAt = 0
 let fileAssetListingWarmPromise = null
 let lastFileAssetListingWarmAt = 0
-const FILE_ASSET_LISTING_WARM_TTL_MS = 60 * 1000
+const FILE_ASSET_LISTING_WARM_TTL_MS = 15 * 60 * 1000
 
 function getDb() {
   return require('./database').db
