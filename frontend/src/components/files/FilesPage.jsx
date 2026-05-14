@@ -125,6 +125,11 @@ function compactTabLabel(label) {
   return label
 }
 
+function getDefaultFilesPageSize() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 24
+  return window.matchMedia('(max-width: 767px)').matches ? 12 : 24
+}
+
 function downloadAssetFile(asset) {
   const downloadUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (!downloadUrl || typeof document === 'undefined') return
@@ -148,7 +153,7 @@ export default function FilesPage() {
   const [mediaType, setMediaType] = useState('all')
   const deferredSearch = useDeferredValue(search)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(24)
+  const [pageSize, setPageSize] = useState(() => getDefaultFilesPageSize())
   const [totalFiles, setTotalFiles] = useState(0)
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
