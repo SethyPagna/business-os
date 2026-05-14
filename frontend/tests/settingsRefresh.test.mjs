@@ -18,14 +18,42 @@ assert.deepEqual(
   getSettingsRefreshChannels({
     receipt_template: '{"show_logo":true}',
   }),
-  ['settings', 'sales', 'pos'],
+  ['settings', 'sales', 'pos', 'dashboard'],
+)
+
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    receipt_print_settings: '{"paperSize":"58mm"}',
+  }),
+  ['settings', 'sales', 'pos', 'dashboard'],
 )
 
 assert.deepEqual(
   getSettingsRefreshChannels({
     pos_payment_methods: '["Cash"]',
   }),
-  ['settings', 'sales', 'pos'],
+  ['settings', 'sales', 'pos', 'dashboard'],
+)
+
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    business_name: 'Leang Cosmetics',
+  }),
+  ['settings', 'sales', 'pos', 'dashboard', 'catalog'],
+)
+
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    notifications_inventory_enabled: 'true',
+  }),
+  ['settings', 'dashboard', 'users'],
+)
+
+assert.deepEqual(
+  getSettingsRefreshChannels({
+    login_session_duration: '30d',
+  }),
+  ['settings', 'users'],
 )
 
 assert.deepEqual(
