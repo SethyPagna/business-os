@@ -46,7 +46,6 @@ function CustomersTab({ t, notify, active = true }) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
-  const pointsRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef(null)
   const loadPromiseRef = useRef(null)
@@ -231,42 +230,6 @@ function CustomersTab({ t, notify, active = true }) {
     userName: user?.name,
   }), [user?.id, user?.name])
 
-  const mergePointSummaries = useCallback((summaries = []) => {
-    const pointMap = new Map(
-      (Array.isArray(summaries) ? summaries : [])
-        .map((row) => [Number(row?.customer_id || 0), row])
-        .filter(([customerId]) => customerId > 0),
-    )
-    if (!pointMap.size) return
-    const applyPoints = (customer = {}) => {
-      const summary = pointMap.get(Number(customer?.id || 0))
-      if (!summary) return customer
-      return {
-        ...customer,
-        points_earned: Number(summary.points_earned || 0),
-        points_deducted: Number(summary.points_deducted || 0),
-        points_redeemed: Number(summary.points_redeemed || 0),
-        points_rewarded: Number(summary.points_rewarded || 0),
-        points_balance: Number(summary.points_balance || 0),
-      }
-    }
-    setCustomers((current) => current.map(applyPoints))
-    setSelected((current) => (current ? applyPoints(current) : current))
-  }, [])
-
-  const refreshPointSummaries = useCallback(async (customerIds, label = 'Customer point summaries') => {
-    const ids = [...new Set((Array.isArray(customerIds) ? customerIds : []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))]
-    if (!ids.length) return
-    const requestId = beginTrackedRequest(pointsRequestRef)
-    try {
-      const summaries = await withLoaderTimeout(() => window.api.getCustomerPointSummaries({ ids: ids.join(',') }), label, 15000)
-      if (!isTrackedRequestCurrent(pointsRequestRef, requestId)) return
-      mergePointSummaries(summaries)
-    } catch (_) {
-      if (!isTrackedRequestCurrent(pointsRequestRef, requestId)) return
-    }
-  }, [mergePointSummaries])
-
   const load = useCallback(async ({ silent = false, label = 'Customers' } = {}) => {
     if (loadPromiseRef.current) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -282,7 +245,7 @@ function CustomersTab({ t, notify, active = true }) {
         }, 15000)
       }
       try {
-        const baseQuery = { ...customerQuery, includePoints: '0' }
+        const baseQuery = { ...customerQuery, includePoints: '1' }
         const data = await withLoaderTimeout(() => window.api.getCustomers(baseQuery), label, 12000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
@@ -294,7 +257,6 @@ function CustomersTab({ t, notify, active = true }) {
         }
         loadedOnceRef.current = true
         setLoadError('')
-        void refreshPointSummaries(items.map((customer) => customer?.id), `${label} points`)
       } catch (error) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = error?.message || 'Failed to load customers'
@@ -319,7 +281,7 @@ function CustomersTab({ t, notify, active = true }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [customerPage, customerPageSize, customerQuery, notify, refreshPointSummaries, t])
+  }, [customerPage, customerPageSize, customerQuery, notify, t])
 
   useEffect(() => {
     setCustomerPage(1)
@@ -341,7 +303,6 @@ function CustomersTab({ t, notify, active = true }) {
     if (!active) {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
-      invalidateTrackedRequest(pointsRequestRef)
       loadPromiseRef.current = null
       setLoading(false)
       return undefined
@@ -350,7 +311,6 @@ function CustomersTab({ t, notify, active = true }) {
     return () => {
       window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
-      invalidateTrackedRequest(pointsRequestRef)
       loadPromiseRef.current = null
     }
   }, [active, load])
