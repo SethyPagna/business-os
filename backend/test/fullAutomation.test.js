@@ -79,3 +79,10 @@ runTest('cloudflare automation is explicit about account-level permissions', () 
   assert.match(readme, /ops\/runtime\/secrets\/cloudflare-api-token\.txt/)
   assert.match(readme, /ops\/runtime\/automation\/access-emails\.txt/)
 })
+
+runTest('scaled runtime profile includes the cloudflare connector', () => {
+  const compose = read('ops/docker/compose.scale.yml')
+  assert.match(compose, /cloudflared:\s+image:\s+cloudflare\/cloudflared:latest/s)
+  assert.match(compose, /profiles:\s*\["runtime",\s*"cloudflare-runtime"\]/)
+  assert.match(compose, /--token-file",\s*"\/run\/secrets\/cloudflare\.token"/)
+})
