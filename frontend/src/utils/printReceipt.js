@@ -1,13 +1,10 @@
-export const PRINT_DEFAULTS = {
-  paperSize: '80mm',
-  marginTop: '4',
-  marginRight: '4',
-  marginBottom: '4',
-  marginLeft: '4',
-  scale: '100',
-  customWidth: '80',
-  customHeight: '297',
-}
+import {
+  DEFAULT_RECEIPT_PRINT_SETTINGS,
+  normalizeReceiptPrintSettings,
+  RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
+} from './receiptAppliedConfig.ts'
+
+export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 
 function parsePrintNumber(value, fallback) {
   const parsed = Number.parseFloat(String(value ?? ''))
@@ -777,18 +774,25 @@ function downloadBlob(blob, fileName) {
   return url
 }
 
-export function getPrintSettings() {
+export function getPrintSettings(sourceSettings = null) {
   try {
-    return { ...PRINT_DEFAULTS, ...JSON.parse(localStorage.getItem('bos_print_settings') || '{}') }
+    if (sourceSettings && typeof sourceSettings === 'object' && sourceSettings.receipt_print_settings) {
+      return normalizeReceiptPrintSettings(sourceSettings.receipt_print_settings)
+    }
+  } catch (_) {}
+  try {
+    return normalizeReceiptPrintSettings(JSON.parse(localStorage.getItem(RECEIPT_PRINT_SETTINGS_STORAGE_KEY) || '{}'))
   } catch {
     return { ...PRINT_DEFAULTS }
   }
 }
 
 export function savePrintSettings(settings) {
+  const normalized = normalizeReceiptPrintSettings(settings)
   try {
-    localStorage.setItem('bos_print_settings', JSON.stringify(settings))
+    localStorage.setItem(RECEIPT_PRINT_SETTINGS_STORAGE_KEY, JSON.stringify(normalized))
   } catch (_) {}
+  return normalized
 }
 
 export function getPaperWidthMm(settings = getPrintSettings()) {
