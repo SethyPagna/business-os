@@ -9,6 +9,7 @@ import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse,
 import { normalizeRuntimeDescriptor, readStoredRuntimeDescriptor, resetClientRuntimeState, sanitizeSyncServerUrl, shouldResetForRuntimeChange, writeStoredRuntimeDescriptor } from './platform/runtime/clientRuntime.js'
 import { isWSConnected, reconnectWS } from './api/websocket.js'
 import { getClientDeviceInfo } from './utils/deviceInfo.js'
+import { parsePermissionMap } from './utils/permissions.js'
 import { normalizePriceValue } from './utils/pricing.js'
 import { withLoaderTimeout } from './utils/loaders.mjs'
 import { refreshAppData } from './utils/appRefresh.js'
@@ -1330,10 +1331,10 @@ export function AppProvider({ children, publicMode = false }) {
   const getPermissions = useCallback(() => {
     if (!user) return {}
     try {
-      return typeof user.permissions === 'string'
-        ? JSON.parse(user.permissions || '{}')
-        : (user.permissions || {})
-    } catch { return {} }
+      return parsePermissionMap(user.permissions)
+    } catch {
+      return {}
+    }
   }, [user])
 
   const hasPermission = useCallback((key) => {
