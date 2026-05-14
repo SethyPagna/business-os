@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { useRef } from 'react'
 import { ArrowDown, ArrowUp, BadgeDollarSign, BookUser, Boxes, Building2, ChevronDown, ClipboardList, DatabaseBackup, FolderOpen, GripVertical, ImagePlus, LayoutDashboard, MonitorSmartphone, Package, Pin, PinOff, Receipt, RotateCcw, Save, Server, Settings as SettingsIcon, ShoppingBag, ShoppingCart, Ticket, Trash2, Users } from 'lucide-react'
@@ -632,7 +632,15 @@ export default function Settings() {
 
   const savePaymentMethods = (updated) => {
     setPmList(updated)
-    saveSettings({ pos_payment_methods: JSON.stringify(updated) })
+    void saveSettings(
+      { pos_payment_methods: JSON.stringify(updated) },
+      {
+        silentToast: true,
+        refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+        reason: 'pos-payment-methods-saved',
+        source: 'settings:payment-methods',
+      },
+    )
   }
 
   const cancelImageUpload = useCallback((key) => {
@@ -710,7 +718,10 @@ export default function Settings() {
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, settings.ui_app_favicon_image || ''),
     }
-    const result = await saveSettings(sanitizedForm)
+    const result = await saveSettings(sanitizedForm, {
+      reason: 'settings-saved',
+      source: 'settings:form-save',
+    })
     if (result?.conflict) {
       setSettingsConflict(buildSettingsConflictState({
         attempted: result?.attempted || sanitizedForm,
@@ -760,7 +771,10 @@ export default function Settings() {
       ...form,
     }
     setForm(mergedDraft)
-    const result = await saveSettings(mergedDraft)
+    const result = await saveSettings(mergedDraft, {
+      reason: 'settings-merged',
+      source: 'settings:conflict-merge',
+    })
     if (result?.conflict) {
       setSettingsConflict(buildSettingsConflictState({
         attempted: result?.attempted || mergedDraft,
