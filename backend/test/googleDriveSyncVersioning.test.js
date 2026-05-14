@@ -107,6 +107,14 @@ runTest('drive sync revalidates cached folder ids before reuse', () => {
   assert.match(source, /upsertDriveSyncEntry\(\{\s*relativePath: relativeDir,\s*itemType: 'folder'/s)
 })
 
+runTest('drive sync recovers from drive write-scope mapping failures', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/googleDriveSync/index.js'), 'utf8')
+  assert.match(source, /function isDriveWriteAccessError\(error\)/)
+  assert.match(source, /may not have granted the app .* write access to all of the children of file/i)
+  assert.match(source, /if \(!canRecoverDriveItemWrite\(error\)\) throw error/)
+  assert.match(source, /remote = await uploadDriveFile\(config, parentRemoteId, file, \{ existing, progress, signal: options\.signal, throwIfCancelled: options\.throwIfCancelled \}\)/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
